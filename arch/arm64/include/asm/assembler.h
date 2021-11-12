@@ -33,6 +33,11 @@
 	wx\n	.req	w\n
 	.endr
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - 원래 있던 daif에 대한 flag를 읽어온후 disable 시킨다.
+ * - restore_daif와 한쌍이 된다.
+ */
 	.macro save_and_disable_daif, flags
 	mrs	\flags, daif
 	msr	daifset, #0xf
@@ -46,6 +51,11 @@
 	msr	daifclr, #0xf
 	.endm
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - 저장해놓은 flag를 다시 복귀 시킨다.
+ * - save_and_disable_daif와 한쌍이 된다.
+ */
 	.macro	restore_daif, flags:req
 	msr	daif, \flags
 	.endm
@@ -133,6 +143,11 @@ alternative_endif
  * Create an exception table entry for `insn`, which will branch to `fixup`
  * when an unhandled fault is taken.
  */
+/*
+ * IAMROOT, 2021.11.12:
+ * insn 주소에서 예외가 발생하면 fixup주소로 이동하게 하기 위해
+ * from과 to 주소를 저장하는것.
+ */
 	.macro		_asm_extable, insn, fixup
 	.pushsection	__ex_table, "a"
 	.align		3
@@ -143,6 +158,11 @@ alternative_endif
 /*
  * Create an exception table entry for `insn` if `fixup` is provided. Otherwise
  * do nothing.
+ */
+/*
+ * IAMROOT, 2021.11.12:
+ * .ifnc A, B : A, B 문자열이 같지 않으면 code를 생성한다.
+ * 아래에선 fixup과 공백을 비교하므로 결국 공백이 아니면 code를 생성한다는것.
  */
 	.macro		_cond_extable, insn, fixup
 	.ifnc		\fixup,
@@ -235,6 +255,16 @@ lr	.req	x30		// link register
 	 * @tmp: mandatory 64-bit scratch register to calculate the address
 	 *       while <src> needs to be preserved.
 	 */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - *sym <- src의 주소
+ *
+ * - 예) str_l   x4, idmap_ptrs_per_pgd, x5
+ *         adrp x5, idmap_ptrs_per_pgd
+ *         str  x4, [x5, :lo12:idmap_ptrs_per_pgd]
+ *
+ *         idmpa_ptrs_per_pgd <- x4 값을 저장
+ */
 	.macro	str_l, src, sym, tmp
 	adrp	\tmp, \sym
 	str	\src, [\tmp, :lo12:\sym]
@@ -300,11 +330,23 @@ alternative_endif
  * provide the system wide safe value from arm64_ftr_reg_ctrel0.sys_val
  */
 	.macro	read_ctr, reg
+/* IAMROOT, 2021.11.12:
+ * - 5.10 -> 5.15 변경점
+ * __KVM_NVHE_HYPERVISOR__ 이 ifndef 없었고 주석이 달린 부분만 있었는데
+ * __KVM_VHE_HYPERVISOR__이 추가 되면서 else도 생김
+ */
 #ifndef __KVM_NVHE_HYPERVISOR__
 alternative_if_not ARM64_MISMATCHED_CACHE_TYPE
+/* IAMROOT, 2021.07.17:
+ * ctr_el0: Cache Type Register
+ */
 	mrs	\reg, ctr_el0			// read CTR
+/* IAMROOT, 2021.07.17: 1 cycle 휴식 */
 	nop
 alternative_else
+/* IAMROOT, 2021.07.17:
+ * Cache Type mismatched 라면?
+ */
 	ldr_l	\reg, arm64_ftr_reg_ctrel0 + ARM64_FTR_SYSVAL
 alternative_endif
 #else
@@ -334,6 +376,11 @@ alternative_cb_end
 
 /*
  * dcache_line_size - get the safe D-cache line size across all CPUs
+ */
+/* IAMROOT, 2021.07.17:
+ * - Cache Type Register에서 최소 데이터 캐시 라인을 바이트로 알아오기.
+ *   reg = 4 * 2^(CTR_EL0.DminLine)
+ *   예) reg = 4 * 2^4 = 64 bytes
  */
 	.macro	dcache_line_size, reg, tmp
 	read_ctr	\tmp
@@ -385,6 +432,13 @@ alternative_cb_end
  *	pos:		IPS or PS bitfield position
  *	tmp{0,1}:	temporary registers
  */
+/*
+ * IAMROOT, 2021.08.28:
+ * tmp0: feature 레지스터에서 읽어온 PARange 값.
+ * tmp1: 커널이 설정한 MAX PARange 값.
+ * tmp0와 tmp1을 unsigned로 비교해서
+ * tmp0가 tmp1보다 크면 tmp0 = tmp1을 해준다.
+ */
 	.macro	tcr_compute_pa_size, tcr, pos, tmp0, tmp1
 	mrs	\tmp0, ID_AA64MMFR0_EL1
 	// Narrow PARange to fit the PS field in TCR_ELx
@@ -413,6 +467,28 @@ alternative_endif
  * 	end:            end virtual address of the region
  * 	fixup:		optional label to branch to on user fault
  * 	Corrupts:       start, end, tmp1, tmp2
+ */
+
+/*
+ * IAMROOT, 2021.09.07:
+ * .ifc:
+ *  - 참고 https://developer.arm.com/documentation/100067/0612/armclang-Integrated-Assembler/Conditional-assembly-directives
+ *  - .ifc에 맞는 조건에 따라서 assembly code가 생성된다.
+ *  예를들어 
+ *  dcache_by_line_op civac, sy, x0, x1, x2, x3
+ *
+ *  위와 같은 code가 있다면 .ifc 자리에는
+ *  dc civac, \kaddr 
+ *  명령어가 매크로 자리로 들어갈것이다.
+ *
+ * -----
+ * (5.10 old)
+ * - kaddr(start address)부터 size만큼 dc 명령어를 수행후 dsb sy까지 수행한다.
+ * -----
+ *
+ * - start 부터 end까지 dc 명령어를 수행후 dsb \domain을 수행한다.
+ *   fixup이 있는경우 Ldcache_op에서 exception이 발생하면 fixup으로
+ *   분기 되게 한다.
  */
 	.macro dcache_by_line_op op, domain, start, end, tmp1, tmp2, fixup
 	dcache_line_size \tmp1, \tmp2
@@ -468,6 +544,16 @@ alternative_endif
 	.endm
 
 /*
+ * IAMROOT, 2021.08.21:
+ * - id_aa64dfr0_el1.PMUVer:
+ *     PMUVer가 0이면 즉, PME (Performance Monitor Extension) 가 not implemented 이면 아무것도 안함.
+ *     PMUVer가 0이 아니면 즉, PMUv3가 implemented 되있으면 pmuserenr_el0를 0으로 초기화한다.
+ *     pmuserenr_el0를 0으로 초기화 한다는 말은 EL0가 PM 관련 레지스터 접근시 trap 하겠다는 뜻이다. (Disable PMU).
+ */
+/*
+ * reset_pmuserenr_el0 - reset PMUSERENR_EL0 if PMUv3 present
+ */
+/*
  * reset_pmuserenr_el0 - reset PMUSERENR_EL0 if PMUv3 present
  */
 	.macro	reset_pmuserenr_el0, tmpreg
@@ -479,6 +565,13 @@ alternative_endif
 9000:
 	.endm
 
+/*
+ * IAMROOT, 2021.08.28:
+ * - id_aa64dfr0_el1.AMU:
+ *     AMU가 0이면 즉, AME (Activity Monitors Extension) 가 not implemented 이면 아무것도 안함.
+ *     AMU가 0이 아니면 즉, AMU가 implemented 되있으면 amuserenr_el0를 0으로 초기화한다
+ *     amuserenr_el0를 0으로 초기화 한다는 말은 EL0가 AM 관련 레지스터 접근시 trap 하겠다는 뜻이다. (Disable AMU).
+ */
 /*
  * reset_amuserenr_el0 - reset AMUSERENR_EL0 if AMUv1 present
  */
@@ -546,9 +639,21 @@ alternative_endif
 	 *         between 2 and 4 movz/movk instructions (depending on the
 	 *         magnitude and sign of the operand)
 	 */
+	/*
+	 * IAMROOT, 2021.07.24: 
+	 * reg 에 val 값을 대입한다. 단, 64 비트 레지스터이며,
+	 * val 의 값은 상수여야 한다.
+	 */
 	.macro	mov_q, reg, val
 	.if (((\val) >> 31) == 0 || ((\val) >> 31) == 0x1ffffffff)
 	movz	\reg, :abs_g1_s:\val
+		/*
+		 *  IAMROOT, 2021.07.24:
+		 *  movz reg, shift, val
+		 *  
+		 *  abs_g1_s: Absolute, signed, [31:16] range
+		 *  https://www.keil.com/support/man/docs/armclang_ref/armclang_ref_zvb1510926525383.htm
+		 */
 	.else
 	.if (((\val) >> 47) == 0 || ((\val) >> 47) == 0x1ffff)
 	movz	\reg, :abs_g2_s:\val
@@ -568,6 +673,40 @@ alternative_endif
 	mrs	\rd, sp_el0
 	.endm
 
+/*
+ * IAMROOT, 2021.08.28:
+ * ARM Ref : D5.3.1 VMSAv8-64 translation table level -1, level 0, level 1, and level 2 descriptor formats
+ * - kernel이 VA 52bit인 상태에서 Arch가 48bit만을 지원하는 경우
+ *   pgd table 위치를 offset(0x1e00)만큼 더한다.
+ *
+ * ---
+ *
+ * kernel, arch 둘다 VA bit가 48이거나 52인 경우 문제가 없는데,
+ * kernel만 52일 경우 다음과 같은 문제가 발생한다.
+ *
+ * 주소 0x0000_0000_0000을 접근한다고 가정햇을때
+ * pgd_index를 구해보면 (42bit(PGDIR_SHIFT) shift시키면)
+ *
+ * kernel : pgd_index(0xffff_0000_0000_0000) = 0x3c0
+ * user   : pgd_index(0x0000_0000_0000_0000) = 0
+ *
+ * user 영역은 변화가 없지만 kernel영역은 변화가 생긴다.
+ * (user, kernel 둘다 같은 VA bit를 사용한다면 전부 0으로 나온다.)
+ *
+ * kernel에서는 user 영역이든 kenrel 영역이든 pgd_index를 사용하여
+ * pgd를 접근하는데 해당 환경일때만 다른 pgd_index가 발생한다.
+ *
+ * 그래서 el1에서만 offset값인 0x3c0에 entry크기인 8만큼을
+ * 곱한 0x1e00를 보정해주는것이다.
+ *
+ * runtime시 arch에 따라, user냐 kernel에 따라 보정해줄수도 있지만
+ * kernel은 가능한한 compile time에 이런 연산을 끝내고 runtime시에의
+ * 연산을 최소화하는 정책을 사용하므로 이러한 용법이 들어간거라고 볼수있다.
+ *
+ * ---
+ *  ARM Ref에는 해당 bit들이 RES0로 써야된다고 나와있긴하지만 Ref에 잘못
+ *  써져있다고 생각이 된다고 일단 의견을 모은 상태.
+ */
 /*
  * Offset ttbr1 to allow for 48-bit kernel VAs set with 52-bit PTRS_PER_PGD.
  * orr is used as it can cover the immediate value (and is idempotent).
@@ -611,6 +750,36 @@ alternative_endif
 #endif
 	.endm
 
+/*
+ * IAMROOT, 2021.08.21:
+ *
+ * ARM Ref p2448 Page, 64KB granule 참고.
+ * ---
+ * - CONFIG_ARM64_PA_BITS_52인 경우에는
+ * pte = phys | (phys >> 36)
+ * pte &= PTE_ADDR_MASK;
+ *
+ * ---
+ *
+ * (phys | phys >> 36) & PTE_ADDR_MASK
+ * 
+ * ---
+ *
+ * 52 bit system 은 PA 중 [51:16] 이 유용한 주소공간이고,
+ * 이를 48bit system 처럼 [47:12] 로 사용하기 위해
+ * [51:48]을 >> 36 한 뒤 [15:12] 으로 만들어 [47:12] 만큼 Masking하여 사용
+ *
+ * ---
+ *
+ * 52bit 인경우 page는 64k aligned 되있으므로
+ * [51:16] 까지만 사용중이고 Ref menual에 보면
+ *
+ * If ARMv8.2-LPA is implemented, bits[15:12] are bits[51:48] and bits[47:16] are
+ * bits[47:16] of the output address for a page of memory.
+ * 
+ * 이라는 내용이 있다. 즉 [51:16]을 사용하고 있는데 mapping은 [47:12]를 써야되므로
+ * 47의 뒤인 [51:48]을 [16:12]로 이동시키기 위함이다.
+ */
 	.macro	phys_to_pte, pte, phys
 #ifdef CONFIG_ARM64_PA_BITS_52
 	/*
@@ -636,6 +805,10 @@ alternative_endif
 
 /*
  * tcr_clear_errata_bits - Clear TCR bits that trigger an errata on this CPU.
+ */
+/*
+ * IAMROOT, 2021.08.25:
+ * - ID register에서 Fujitsu 라는게 맞다면 TCR_NFD1, TCR_NFD0 bit 를 clear한다.
  */
 	.macro	tcr_clear_errata_bits, tcr, tmp1, tmp2
 #ifdef CONFIG_FUJITSU_ERRATUM_010001
