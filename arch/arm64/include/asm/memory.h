@@ -75,15 +75,15 @@
  *       +-----------------------+                       |
  *       | 0xffff_fbff_fe80_0000 | PCI_IO_START          |
  *       +-----------------------+-----------------------+------------------
- *       |                        SZ_32M(0x200_0000)
+ *       |                        SZ_8M(0x80_0000)
  *       +-----------------------+-----------------------+------------------
- *       | 0xffff_fbff_fc80_0000 | FIXADDR_TOP           |
+ *       | 0xffff_fbff_fe00_0000 | FIXADDR_TOP           |
  *       +-----------------------+                       |
  *       |                       | FIXADDR_SIZE          | 4MB(0x40_000)~약6MB
  *       +-----------------------+                       | CONFIG에 따라달라짐
- *       | 0xffff_fbff_fc40_0000 | FIXADDR_START         | fixed_addresses참고
+ *       | 0xffff_fbff_fdc0_0000 | FIXADDR_START         | fixed_addresses참고
  *       |         ~             |                       |
- *       | 0xffff_fbff_fc20_0000 |                       |
+ *       | 0xffff_fbff_fda0_0000 |                       |
  *       +-----------------------+-----------------------+--------+---------
  *       |      ~~~~~            |                       |      vmlloc      
  *       +-----------------------+-----------------------+--------+ 
@@ -146,8 +146,8 @@
  *   4) PCI_IO_END가 VMEMMAP_START에서 SZ_2M을 빼는 거에서 SZ_8M을 빼는것으로
  *   변경
  *
- *   5) FIXADDR_TOP이 PCI_IO_START에서 SZ_2M을 빼는 거에서 SZ_32M을 빼는것으로
- *   변경
+ *   5) FIXADDR_TOP이 PCI_IO_START에서 SZ_2M을 빼는 거에서 
+ *   VMEMMAP_START에서 SZ_32M을 빼는것으로 변경
  */  
 /*
  * PAGE_OFFSET - the virtual address of the start of the linear map, at the
@@ -482,7 +482,7 @@ static inline const void *__tag_set(const void *addr, u8 tag)
  *   물리주소가 구해진다.
  * ------
  * - __is_lm_address : PAGE_OFFSET을 뺀게 PAGE_END와 PAGE_OFFSET 사이에 있으면
- *   리니어매핑이 됬다고 판단한다. top bit만 검사했던거에서 강화한듯하다
+ *   리니어매핑이 됬다고 판단한다.
  *
  * - __lm_to_phys
  *   리니어매핑 가상주소를 물리주소로 변환한다.
