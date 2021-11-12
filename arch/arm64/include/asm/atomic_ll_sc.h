@@ -12,6 +12,11 @@
 
 #include <linux/stringify.h>
 
+/*
+ * IAMROOT, 2021.11.05:
+ * Put the LL/SC fallback atomics in their own subsection
+ * to improve icache performance.
+ */
 #ifdef CONFIG_ARM64_LSE_ATOMICS
 #define __LL_SC_FALLBACK(asm_ops)					\
 "	b	3f\n"							\
@@ -35,6 +40,53 @@ asm_ops "\n"								\
  * to ensure that the update happens.
  */
 
+/*
+ * IAMROOT, 2021.09.18:
+ *   ------------
+ *   인자들에 대한 설명.
+ *
+ * - op가 add인것을 예로들면, __ll_sc_atomic_add 로 만들어지며,
+ *   ll_sc 방식의 atomic add의 기능을 수행한다.
+ * - asm_op : asm 이 만들어질때 실제 op에 해당하는 instruction
+ * - constraint : I, J, K.. 등이 위치하며 인자의 범위를 나타냄.
+ * - RMW(Read, Modify, Write) foramt의 관점에서 봤을때,
+ *   Modify부분의 Op만 바꿔지면서 명령어가 만들어지는게 보인다.
+ * - ex. ATOMIC_OPS(add, add, I)
+ *   pst / l1 / strm : store를 위해 l1 cache에 해당 데이터를 미리 fetch한다.
+ *   R : ldxr
+ *   M : add
+ *   W : stxr
+ *
+ *   ------------
+ *   asm 보충설명
+ *
+ * - r : 일반 register 사용
+ * - = : write only
+ * - & : output register를 먼저 할당(가능하면 가장 앞번호로 할당)
+ * - + : read, write
+ * - Q : 해당 memory가 변경될수있음을 알림.
+ *
+ *   ------------
+ *   __ll_sc_atomic_##op 함수 코드 설명
+ *
+ * - asm volatile: 괄호() 안의 instruction들이 괄호 바깥 쪽의 코드로
+ *   move되지 않도록, as-is 실행되도록 한다.
+ * - prfm: 캐시 채우는 역할.
+ * - ldxr: load-exclusive (load-link) (global monitor, 이 캐시라인은 나만 사용)
+ * - asm_op: 예를 들어 add, sub, bic, orr, eor... 등이 있다.
+ * - stxr: store-conditional -> 실패시 %w1(=tmp)에 1, 성공시 0를 저장.
+ *
+ * - 1. prefetch.
+ *   2. read (R).
+ *   3. modify (M).
+ *   4. write (W).
+ *   5. retry if fails.
+ */
+/*
+ * AArch64 UP and SMP safe atomic ops.  We use load exclusive and
+ * store exclusive to ensure that these are atomic.  We may loop
+ * to ensure that the update happens.
+ */
 #define ATOMIC_OP(op, asm_op, constraint)				\
 static inline void							\
 __ll_sc_atomic_##op(int i, atomic_t *v)					\
@@ -53,6 +105,41 @@ __ll_sc_atomic_##op(int i, atomic_t *v)					\
 	: __stringify(constraint) "r" (i));				\
 }
 
+/*
+ * IAMROOT, 2021.09.18:
+ * ----------
+ *  fetch vs return
+ *
+ * - {func}_fetch : 계산 수행전 결과값을 return함
+ * - {func}_return : 계산 수행후 결과값을 return함
+ *
+ * ----------
+ *  인자 설명. (ex. ATOMIC_OP_RETURN(    , dmb ish,  , l, "memory", __VA_ARGS__)
+ *
+ * - name : barrier의 이름이 된다.
+ * - mb : full barrier사용시 들어가는 memory barrier instruction
+ * - acq : acquire 사용시 acquire에 대한 단방향 barrier.
+ *   ldxr/ldaxr %w0, %w3 이런식으로 된다.
+ * - rel : release 사용시 release에 대한 단방향 barrier
+ *   stxr / stlxr
+ * - cl : clobber 명령어가 위치한다(memory, cc, register)
+ *
+ * - ldaxr 은 a (단방향 acquire barrier) + x(atomic) 을 동시에 수행하는 명령
+ * - stlxr 은 l (단방향 release barrier) + x(atomic) 을 동시에 수행하는 명령
+ *
+ * ----------
+ *  lse 명령어와 full memory barrier의 차이
+ *
+ *  ll_sc는 full memory barrier로 dmb명령어를 쓰면 전체 memory에 대해서
+ *  동작을 하는 반면, lse는 해당 instruction + acquire/release를 통해
+ *  해당 메모리에 대해서만 full memory barrier로 동작해 훨신 이점이 있다.
+ *
+ * ----------
+ *  연산에 따른 function return 지원여부
+ *
+ *  - add, sub에 대해서는 void, return, fetch가 다 제공되지만
+ *  비트 연산에 대해서는 void, fetch만 제공된다. lse도 동일하다.
+ */
 #define ATOMIC_OP_RETURN(name, mb, acq, rel, cl, op, asm_op, constraint)\
 static inline int							\
 __ll_sc_atomic_##op##_return##name(int i, atomic_t *v)			\

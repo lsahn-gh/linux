@@ -43,6 +43,22 @@ static inline void arch_local_irq_enable(void)
 	pmr_sync();
 }
 
+/*
+ * IAMROOT, 2021.09.11:
+ * ---- (old 5.10)
+ * - daifset : pstate register 에서 daif만 따서 만든 register.
+ *             해당 register에서는 [9:6]을 사용하는데 #2는 7bit를 set한다는것
+ *             즉 irq만을 disable한다.
+ * ----
+ * - daifset : pstate register 에서 daif만 따서 만든 register.
+ *             해당 register에서는 [9:6]을 사용하는데 #3는 6,7bit를 set한다.
+ *             즉 irq, fiq를 disable한다.
+ * - daifset[9] : D. debug
+ * - daifset[8] : A. SError
+ * - daifset[7] : I. IRQ
+ * - daifset[6] : F. FIQ
+ *             
+ */
 static inline void arch_local_irq_disable(void)
 {
 	if (system_has_prio_mask_debugging()) {
@@ -62,6 +78,10 @@ static inline void arch_local_irq_disable(void)
 
 /*
  * Save the current interrupt enable state.
+ */
+/*
+ * IAMROOT, 2021.10.16:
+ * daif 상태를 가져온다.
  */
 static inline unsigned long arch_local_save_flags(void)
 {

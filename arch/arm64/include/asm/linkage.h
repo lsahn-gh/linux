@@ -1,6 +1,7 @@
 #ifndef __ASM_LINKAGE_H
 #define __ASM_LINKAGE_H
 
+/* IAMROOT, 2021.07.10: align 다음값이 order를 의미 2^2 =4*/
 #define __ALIGN		.align 2
 #define __ALIGN_STR	".align 2"
 
@@ -10,6 +11,10 @@
  * Since current versions of gas reject the BTI instruction unless we
  * set the architecture version to v8.5 we use the hint instruction
  * instead.
+ */
+/* IAMROOT, 2021.07.17: 
+ * BTI 관련 링크:
+ *  - https://www.phoronix.com/scan.php?page=news_item&px=ARM64-Linux-5.8-BTI-SCS
  */
 #define BTI_C hint 34 ;
 

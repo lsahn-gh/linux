@@ -33,6 +33,24 @@
  * VA range, so pages required to map highest possible PA are reserved in all
  * cases.
  */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - SWAPPER_PGTABLE_LEVELS: 정규 커널 페이지 테이블이 사용할 레벨 수
+ *                           default arm64 커널은 CONFIG_PGTABLE_LEVELS=4
+ *                           4K 페이지 테이블을 사용하는 경우 섹션 매핑을 
+ *                           사용할 수 있으므로 1 단계 내릴 수 있다.
+ *                           (4K, 섹션 매핑 사용하므로 디폴트=3)
+ * - IDMAP_PGTABLE_LEVLES:   va=pa 1:1 id 매핑용 페이지 테이블이 사용할 단계 수
+ *                           (4K, 섹션 매핑 사용하므로 디폴트=3)
+ * 
+ * - 위의 두 테이블 레벨 산출의 기준은 
+ *    SWAPPER -> VA 기준으로
+ *    IDMAP   -> PA 기준으로 
+ *
+ * - 5.10 -> 5.15 변경점
+ *   원래는 ARM64_SWAPPER_USES_SECTION_MAP로 사용했는데
+ *   ARM64_KERNEL_USES_PMD_MAPS로 변경되었다.
+ */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS - 1)
 #define IDMAP_PGTABLE_LEVELS	(ARM64_HW_PGTABLE_LEVELS(PHYS_MASK_SHIFT) - 1)
@@ -65,11 +83,31 @@
 #define EARLY_KASLR	(0)
 #endif
 
+/*
+ * IAMROOT, 2021.08.14: 
+ * - EARLY_ENTRIES: vstart ~ vend 범위를 early 매핑하기 위해 shift 단위로 
+ *  필요한 엔트리 수 (0인 경우 최소 1, EARLY_KASLR이 있는 경우 1 추가)
+ *
+ * - 4K 기준일때 약 30M 커널 이미지 가정 시 EARLY 매핑에 필요한 엔트리 수
+ * - 실제 PGD용:  1개
+ * - EARLY_PGDS:  1개
+ * - EARLY_PUDS:  0개
+ * - EARLY_PMDS:  1개 (1G 정렬에 걸친 이미지는 2)
+ * - EARLY_PAGES: 1+1+0+1=3개(or 4개)
+ *
+ *   - 5.10 -> 5.15 변경점
+ *   vend 에서 -1을 빼는게 추가 됬다. vend가 포함이 안되는 주소인데 -1이
+ *   없으면 포함되는것처럼 되버리기 때문인듯 싶다.
+ */
 #define EARLY_ENTRIES(vstart, vend, shift) \
 	((((vend) - 1) >> (shift)) - ((vstart) >> (shift)) + 1 + EARLY_KASLR)
 
 #define EARLY_PGDS(vstart, vend) (EARLY_ENTRIES(vstart, vend, PGDIR_SHIFT))
 
+/*
+ * IAMROOT, 2021.08.14: 
+ * - 4K, 섹션 매핑을 허용하므로 SWAPER_PGTABLE_LEVES=3 (디폴트)
+ */
 #if SWAPPER_PGTABLE_LEVELS > 3
 #define EARLY_PUDS(vstart, vend) (EARLY_ENTRIES(vstart, vend, PUD_SHIFT))
 #else
@@ -86,10 +124,23 @@
 			+ EARLY_PGDS((vstart), (vend)) 	/* each PGDIR needs a next level page table */	\
 			+ EARLY_PUDS((vstart), (vend))	/* each PUD needs a next level page table */	\
 			+ EARLY_PMDS((vstart), (vend)))	/* each PMD needs a next level page table */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - 초기 커널 페이지 테이블 init_pg_dir과 idmap_pg_dir용 사이즈를 산출한다.
+ *   early 페이지로 계산한다.
+ *
+ * - 4K, 약 30M 단위인 경우
+ * - INIT_DIR_SIZE:  3 * 4K = 12K (커널의 가상주소 범위가 1G 이내 정렬된 경우)
+ * - IDMAP_DIR_SIZE: 3 * 4K = 12K (커널의 물리주소 범위가 1G 이내 정렬된 경우)
+ */
 #define INIT_DIR_SIZE (PAGE_SIZE * EARLY_PAGES(KIMAGE_VADDR, _end))
 #define IDMAP_DIR_SIZE		(IDMAP_PGTABLE_LEVELS * PAGE_SIZE)
 
 /* Initial memory map size */
+/*
+ * IAMROOT, 2021.10.14:
+ * option에 따라 SWAPPER를 PAGE_SIZE(4k)로 쓸지, SECTION_SIZE(2MB)로 쓸지
+ */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_BLOCK_SHIFT	PMD_SHIFT
 #define SWAPPER_BLOCK_SIZE	PMD_SIZE
@@ -103,9 +154,27 @@
 /*
  * Initial memory map attributes.
  */
+/*
+ * IAMROOT, 2021.08.21:
+ *
+ * - SWAPPER_PMD_FLAGS
+ *   - PMD_TYPE_SECT: 현재 table entry는 section임을 나타냄.
+ *   - PMD_SECT_AF: Access Flag (Region accessed)
+ *   - PMD_SECT_S: Inner Share
+ */
 #define SWAPPER_PTE_FLAGS	(PTE_TYPE_PAGE | PTE_AF | PTE_SHARED)
 #define SWAPPER_PMD_FLAGS	(PMD_TYPE_SECT | PMD_SECT_AF | PMD_SECT_S)
 
+/*
+ * IAMROOT, 2021.08.21:
+ *
+ * - SWAPPER_MM_MMUFLAGS
+ *   - PMD_ATTRINDX, PTE_ATTRINDX:
+ *       page table entry(== A block or page descriptor)의 필드 중
+ *       Lower Attributes에 속하는 indx[4:2]에 MAIR_EL1의 index를 설정한다.
+ *       indx[4:2]는 memory type을 결정하기 위해 사용된다. 자세한 내용은
+ *       arch/arm64/include/asm/memory.h 에 있는 MT_NORMAL참조.
+ */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_MM_MMUFLAGS	(PMD_ATTRINDX(MT_NORMAL) | SWAPPER_PMD_FLAGS)
 #else
@@ -132,6 +201,15 @@
  * memstart_addr, due to the fact that the base of the vmemmap region
  * has a direct correspondence, and needs to appear sufficiently aligned
  * in the virtual address space.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64 : 1GB로 고정되있음.
+ * - arm32 : kernel을 만들때 변경 가능.
+ *
+ * - 5.10 -> 5.15 변경점
+ *   5.10에서는 CONFIG_SPARSEMEM_VMEMMAP 까지 설정되있엇어야됬는데
+ *   그 조건이 삭제 됬다.
  */
 #if ARM64_MEMSTART_SHIFT < SECTION_SIZE_BITS
 #define ARM64_MEMSTART_ALIGN	(1UL << SECTION_SIZE_BITS)
