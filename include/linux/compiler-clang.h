@@ -65,6 +65,11 @@
 #if __has_feature(shadow_call_stack)
 # define __noscs	__attribute__((__no_sanitize__("shadow-call-stack")))
 #endif
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - cfi : control flow intergrity
+ *   (https://die4taoam.tistory.com/67)
+ *   cfi 사용금지.
+ */
 #define __nocfi		__attribute__((__no_sanitize__("cfi")))
 #define __cficanonical	__attribute__((__cfi_canonical_jump_table__))

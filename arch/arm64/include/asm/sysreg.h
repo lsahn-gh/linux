@@ -52,6 +52,10 @@
 #ifdef __ASSEMBLY__
 // The space separator is omitted so that __emit_inst(x) can be parsed as
 // either an assembler directive or an assembler macro argument.
+/*
+ * IAMROOT, 2021.07.31:
+ * - 상수를 instruction으로 치환하는 directive.
+ */
 #define __emit_inst(x)			.inst(x)
 #else
 #define __emit_inst(x)			".inst " __stringify((x)) "\n\t"
@@ -688,10 +692,42 @@
 
 #ifdef CONFIG_CPU_BIG_ENDIAN
 #define ENDIAN_SET_EL1		(SCTLR_EL1_E0E | SCTLR_ELx_EE)
+/*
+ * IAMROOT, 2021.07.24:
+ * SCTLR = System Control Register
+ * E0E, EE 를 통해 Endian 을 설정한다.
+ */
 #else
 #define ENDIAN_SET_EL1		0
 #endif
 
+/*
+ * IAMROOT, 2021.08.29:
+ * sctlr_el1.x
+ * - m    : EL1/EL0 stage 1 MMU 사용.
+ * - c    : Data caches 사용
+ * - sa   : Stack Alignment check 사용.
+ * - sa0  : EL0 Stack Alignment check 사용.
+ * - sed  : SETEND instruction 사용 제한 (EL0가 AArch32 capable시)
+ *          'setend'는 EL0에서 A32/T32의 pstate.e에 big/little endian을 설정.
+ *          EL0에서 해당 명령어 사용시 EL1으로 exception 하여 trap 처리.
+ * - i    : Instruction caches 사용.
+ * - dze  : EL0에서 'dc zva' 명령어 허용 (zva: data cache zero by VA)
+ * - uct  : EL0에서 'CTR_EL0' 레지스터 접근 허용.
+ *          ctr_el0: cache type register, el0: 캐시 정보 제공.
+ * - ntwe : EL0에서 WFE 사용시 trap 여부, 1 설정시 trap 하지 않음
+ * - iesb : Implicit Error Synchronization event 허용
+ * - span : Set Privileged Access Never 기능
+ * - itfsb: Tag Check Faults 관련 (MTE2 구현시)
+ *          1로 설정되는 것은 Tag Check Faults를 EL1 sync exception에서
+ *          핸들링함을 의미.
+ * - uci  : EL0에서 cache maintenance instructions 실행 허용.
+ * -------(old 5.10)
+ * - ata  : (5.15 삭제)
+ * - ata0 : (5.15 삭제)
+ * -------
+ * - epan : (5.15 추가) Enhanced Privileged Access Never 기능
+ */
 #define INIT_SCTLR_EL1_MMU_OFF \
 	(ENDIAN_SET_EL1 | SCTLR_EL1_RES1)
 
@@ -702,6 +738,46 @@
 	 ENDIAN_SET_EL1 | SCTLR_EL1_UCI  | SCTLR_EL1_EPAN | SCTLR_EL1_RES1)
 
 /* MAIR_ELx memory attributes (used by Linux) */
+/*
+ * IAMROOT, 2021.08.24:
+ *   0b0000_dd00. 즉 2,3번째 bit dd를 제외한 나머지 bit가 0이면 device memory
+ *   dd에 따라서 세분화된다.
+ *
+ * - MAIR_ATTR_DEVICE_nGnRnE		UL(0x00) == 0b0000_0000
+ *   0b0000_dd00 = Device Memory
+ *   0bXXXX_00XX = Device-nGnRnE memory
+ *
+ * - MAIR_ATTR_DEVICE_nGnRE		UL(0x04) == 0b0000_0100
+ *   0b0000_dd00 = Device Memory
+ *   0bXXXX_01XX = Device-nGnRE memory
+ *
+ * -----(old 5.10)
+ * - MAIR_ATTR_DEVICE_GRE		UL(0x0c) == 0b0000_1100
+ *   0b0000_dd00 = Device Memory
+ *   0bXXXX_11XX = Device-nGnRE memory
+ * -----
+ *
+ * 0booooiiii, (oooo != 0000 and iiii != 0000)는 normal memory라는것을 고려
+ *
+ * - MAIR_ATTR_NORMAL_NC		UL(0x44) = 0b0100_0100
+ *   oooo = 0100, iiii = 0100
+ *   Normal Memory, Outer/Inner Non-cacheable
+ *
+ * - MAIR_ATTR_NORMAL_TAGGED		UL(0xf0) = 0b1111_0000
+ *   oooo = 1111, iiii = 0000
+ *   FEAT_MTE2가 구현되있으면 Normal Memory.
+ *   Outer/Inner Write-Through, R/W-Allocate Non-transient
+ *
+ * - MAIR_ATTR_NORMAL		UL(0xff) = 0b1111_1111
+ *   oooo = 1111, iiii = 1111,
+ *   Normal Memory, Write-Back, R/W-Allocate Non-transient
+ *
+ * -----(old 5.10)
+ * - MAIR_ATTR_NORMAL_WT		UL(0xbb) = 0b1011_1011
+ *   oooo = 1011, iiii = 1011
+ *   Normal Memory, Outer/Inner Write-Through, R/W-Allocate Non-transient
+ * -----
+ */
 #define MAIR_ATTR_DEVICE_nGnRnE		UL(0x00)
 #define MAIR_ATTR_DEVICE_nGnRE		UL(0x04)
 #define MAIR_ATTR_NORMAL_NC		UL(0x44)
@@ -1197,10 +1273,12 @@
 	.endr
 	.equ	.L__reg_num_xzr, 31
 
+/* IAMROOT, 2021.08.07: MRS를 hex로 표현 */
 	.macro	mrs_s, rt, sreg
 	 __emit_inst(0xd5200000|(\sreg)|(.L__reg_num_\rt))
 	.endm
 
+/* IAMROOT, 2021.08.07: MSR를 hex로 표현 */
 	.macro	msr_s, sreg, rt
 	__emit_inst(0xd5000000|(\sreg)|(.L__reg_num_\rt))
 	.endm
@@ -1265,6 +1343,10 @@
 		     : : "rZ" (__val));				\
 } while (0)
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - gcc가 지원하지 않은 경우에 대비하여 아에 명령어를 만든다
+ */
 /*
  * For registers without architectural names, or simply unsupported by
  * GAS.

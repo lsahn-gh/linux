@@ -38,12 +38,41 @@
  * Rearranging it a bit we get :
  *   (4 - n) * (PAGE_SHIFT - 3) + 3
  */
+/*
+ * IAMROOT, 2021.08.14: 
+ * 4단계 일때 정리
+ *
+ *  PAGE_SIZE | PAGE_SHIFT | n | ARM64_HW_PGTABLE_LEVEL_SHIFT(n)
+ * -----------+------------+---+--------------------------------------------
+ *  4kb       | 12         | 0 | 39 (PGDIR_SHIFT)
+ *            |            | 1 | 30 (PUD_SHIFT)
+ *            |            | 2 | 21 (PMD_SHIFT)
+ *            |            | 3 | 12 (PTE 테이블의 SHIFT)
+ * -----------+------------+---+--------------------------------------------
+ *  16Kb      | 14         | 0 | 47 (PGDIR_SHIFT)
+ *            |            | 1 | 36 (PUD_SHIFT)
+ *            |            | 2 | 25 (PMD_SHIFT)
+ *            |            | 3 | 14 (PTE 테이블의 SHIFT)
+ */
 #define ARM64_HW_PGTABLE_LEVEL_SHIFT(n)	((PAGE_SHIFT - 3) * (4 - (n)) + 3)
 
+/*
+ * IAMROOT, 2021.08.14: 
+ * 가장 하위 페이지 PTE 테이블에 들어가는 엔트리 수
+ * - 4K -> 2^9 = 512
+ */
 #define PTRS_PER_PTE		(1 << (PAGE_SHIFT - 3))
 
 /*
  * PMD_SHIFT determines the size a level 2 page table entry can map.
+ */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - 아래 모두 4K 기준
+ * - PMD_SHIFT:  PMD에 사용할 SHIFT는 21
+ * - PMD_SIZE:   2M (2^21)
+ * - PMD_MASK:   0b1111 ....   0000000000000 (0 개수가 21개)
+ * - PTRS_PER_PUD: 512개
  */
 #if CONFIG_PGTABLE_LEVELS > 2
 #define PMD_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(2)
@@ -54,6 +83,14 @@
 
 /*
  * PUD_SHIFT determines the size a level 1 page table entry can map.
+ */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - 아래 모두 4K 기준
+ * - PUD_SHIFT:  PUD에 사용할 SHIFT는 30
+ * - PUD_SIZE:   1G (2^30)
+ * - PUD_MASK:   0b1111 ....   0000000000000 (0 개수가 30개)
+ * - PTRS_PER_PUD: 512개
  */
 #if CONFIG_PGTABLE_LEVELS > 3
 #define PUD_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(1)
@@ -66,6 +103,36 @@
  * PGDIR_SHIFT determines the size a top-level page table entry can map
  * (depending on the configuration, this level can be 0, 1 or 2).
  */
+/*
+ * IAMROOT, 2021.08.14: 
+ * - VA_BITS 48, page size 4K 기준
+ *   CONFIG_PGTABLE_LEVELS : 4단계
+ *
+ * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 39
+ * - PGDIR_SIZE:   512G (2^39)
+ * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 39개)
+ * - PTRS_PER_PGD: 512개
+ *
+ * ------
+ *
+ * - VA_BITS 52, page size 64K 기준
+ *   CONFIG_PGTABLE_LEVELS : 3단계
+ *
+ * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 42
+ * - PGDIR_SIZE:   4T (2^42)
+ * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 42개)
+ * - PTRS_PER_PGD: 1024
+ *
+ * ------
+ *
+ * - VA_BITS 48, page size 16K 기준
+ *   CONFIG_PGTABLE_LEVELS : 4단계
+ *
+ * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 47
+ * - PGDIR_SIZE:   128T (2^47)
+ * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 47개)
+ * - PTRS_PER_PGD: 2
+ */
 #define PGDIR_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(4 - CONFIG_PGTABLE_LEVELS)
 #define PGDIR_SIZE		(_AC(1, UL) << PGDIR_SHIFT)
 #define PGDIR_MASK		(~(PGDIR_SIZE-1))
@@ -73,6 +140,19 @@
 
 /*
  * Contiguous page definitions.
+ */
+/*
+ * IAMROOT, 2021.10.09: 
+ * 4K, 4레벨 기준)
+ * CONT_PTE_SHIFT=16
+ * CONT_PTES=16
+ * CONT_PTE_SIZE=64K
+ * CONT_PTE_MASK=0xffff_ffff_ffff_0000
+ *
+ * CONT_PMD_SHIFT=24
+ * CONT_PMDS=16
+ * CONT_PMD_SIZE=32M
+ * CONT_PMD_MASK=0xffff_ffff_fe00_0000
  */
 #define CONT_PTE_SHIFT		(CONFIG_ARM64_CONT_PTE_SHIFT + PAGE_SHIFT)
 #define CONT_PTES		(1 << (CONT_PTE_SHIFT - PAGE_SHIFT))
@@ -155,6 +235,23 @@
 #define PTE_PXN			(_AT(pteval_t, 1) << 53)	/* Privileged XN */
 #define PTE_UXN			(_AT(pteval_t, 1) << 54)	/* User XN */
 
+/*
+ * IAMROOT, 2021.08.21:
+ * - PTE_ADDR_LOW
+ *   1 << (48 - PAGE_SHIFT) 를 하고 1을 빼고 , PAGE_SHIFT만큼 shift를 한다.
+ *   즉 하위 SECTION_SHIFT만큼을 제외한 나머지 bit를 1로 하겠다는 뜻
+ *   ex) PAGE_SHIFT == 12 일때
+ *   1 << (48 - 12) = 1 << 36
+ *   (1 << 36) - 1 = 0x10_0000_0000 - 1 = 0x0f_ffff_ffff
+ *   0x0f_ffff_ffff << PAGE_SHIFT(12) > 0xf_fff_ffff_000
+ *
+ * - PTE_ADDR_HIGH
+ *   이건 그냥 0xf000
+ *
+ * ---
+ *
+ *   즉 두개를 OR하면 0xff....ffff_f000
+ */
 #define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
 #ifdef CONFIG_ARM64_PA_BITS_52
 #define PTE_ADDR_HIGH		(_AT(pteval_t, 0xf) << 12)
@@ -189,6 +286,11 @@
 #define TCR_T1SZ_OFFSET		16
 #define TCR_T0SZ(x)		((UL(64) - (x)) << TCR_T0SZ_OFFSET)
 #define TCR_T1SZ(x)		((UL(64) - (x)) << TCR_T1SZ_OFFSET)
+
+/*
+ * IAMROOT, 2021.08.21:
+ * - TCR_T0SZ와 TCR_T1SZ두개의 사이즈 전부 OR로해서 가져오는 역할
+ */
 #define TCR_TxSZ(x)		(TCR_T0SZ(x) | TCR_T1SZ(x))
 #define TCR_TxSZ_WIDTH		6
 #define TCR_T0SZ_MASK		(((UL(1) << TCR_TxSZ_WIDTH) - 1) << TCR_T0SZ_OFFSET)
@@ -282,9 +384,26 @@
  * This should be GENMASK_ULL(47, 2).
  * TTBR_ELx[1] is RES0 in this configuration.
  */
+/*
+ * IAMROOT, 2021.09.02:
+ * TTBR_BADDR_MASK_52 == (47 ~ 2)번째 비트가 전부 1인 숫자.
+ */
 #define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
 #endif
 
+/*
+ * IAMROOT, 2021.08.28:
+ * pgd entry를 확장할려고 계산하기 위한것.
+ *
+ * - VA_BITS 가 52bit이면 PAGE_SIZE가 64kb임을 고려한다.
+ *
+ * - 52 - 42 = 10  --> 2 ^10 = 1024
+ * - 48 - 42 = 6   --> 2 ^ 6 = 64
+ *   VA_BITS가 48일 때는 64개만을 원래 썻었는데
+ *   VA_BITS가 52일 때는 1024개까지 확장을 한다는 뜻.
+ *
+ * (1024 - 64) * 8 = 7680 (0x1e00)
+ */
 #ifdef CONFIG_ARM64_VA_BITS_52
 /* Must be at least 64-byte aligned to prevent corruption of the TTBR */
 #define TTBR1_BADDR_4852_OFFSET	(((UL(1) << (52 - PGDIR_SHIFT)) - \

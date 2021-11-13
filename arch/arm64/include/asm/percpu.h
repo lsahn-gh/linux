@@ -11,6 +11,19 @@
 #include <asm/cmpxchg.h>
 #include <asm/stack_pointer.h>
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - tpidr_el1 : 자유롭게 쓸수있는 register. cpu마다 있다.
+ *               커널에서는 per cpu offset을 담고 있다.
+ *               자신의 offset을 저장하는 개념.
+ *
+ * - tpidr: Thread ID Information Register
+ *   여기서 Thread는 H/W Thread를 의미한다 (Hyper-Threading)
+ *
+ * - CONFIG_ARM64_VHE가 define되어 있으면 tpidr_el2에 off값을,
+ *   그렇지 않으면 tpidr_el1에 off값을 쓴다.
+ *   참고: arch/arm64/kernel/cpufeature.c 에서 arm64_features.
+ */
 static inline void set_my_cpu_offset(unsigned long off)
 {
 	asm volatile(ALTERNATIVE("msr tpidr_el1, %0",
