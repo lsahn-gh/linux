@@ -759,6 +759,10 @@ static inline bool zalloc_cpumask_var_node(cpumask_var_t *mask, gfp_t flags,
 	return true;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - cpumask를 static하게 사용하면 alloc할 필요없다.
+ */
 static inline void alloc_bootmem_cpumask_var(cpumask_var_t *mask)
 {
 }

@@ -128,6 +128,10 @@ static inline __maybe_unused phys_addr_t cma_early_percent_memory(void)
 #endif
 
 #ifdef CONFIG_DMA_PERNUMA_CMA
+/*
+ * IAMROOT, 2021.11.13:
+ * - TODO
+ */
 void __init dma_pernuma_cma_reserve(void)
 {
 	int nid;

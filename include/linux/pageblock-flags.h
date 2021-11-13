@@ -28,22 +28,37 @@ enum pageblock_bits {
 	NR_PAGEBLOCK_BITS
 };
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - default set
+ */
 #ifdef CONFIG_HUGETLB_PAGE
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - variable로 사용한다.
+ */
 /* Huge page sizes are variable */
 extern unsigned int pageblock_order;
 
 #else /* CONFIG_HUGETLB_PAGE_SIZE_VARIABLE */
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - 고정된 order로 사용한다. 9.
+ *  (2^9 * 4k = 2MB 라는뜻)
+ */
 /* Huge pages are a constant size */
 #define pageblock_order		HUGETLB_PAGE_ORDER
 
 #endif /* CONFIG_HUGETLB_PAGE_SIZE_VARIABLE */
 
 #else /* CONFIG_HUGETLB_PAGE */
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - buddy system에서 사용하는 것 그대로 그냥쓴다.
+ *   2^0 ~ 2^9 로 사용.
+ */
 /* If huge pages are not used, group by MAX_ORDER_NR_PAGES */
 #define pageblock_order		(MAX_ORDER-1)
 

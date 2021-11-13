@@ -16,6 +16,10 @@
 static struct memblock_region *hyp_memory = kvm_nvhe_sym(hyp_memory);
 static unsigned int *hyp_memblock_nr_ptr = &kvm_nvhe_sym(hyp_memblock_nr);
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - kvm_hyp_reserve 에서 초기화된다.
+ */
 phys_addr_t hyp_mem_base;
 phys_addr_t hyp_mem_size;
 
@@ -36,6 +40,10 @@ static void __init sort_memblock_regions(void)
 	     NULL);
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - memory region들을 전부 hyp_memblock으로 복사한다.
+ */
 static int __init register_memblock_regions(void)
 {
 	struct memblock_region *reg;
@@ -52,14 +60,25 @@ static int __init register_memblock_regions(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - hyp_memory에 대해서 stage 1, stage 2에 필요한 page 개수를 구하고
+ *   memory를 할당한다.
+ */
 void __init kvm_hyp_reserve(void)
 {
 	u64 nr_pages, prev, hyp_mem_pages = 0;
 	int ret;
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - EL2로 부팅했는지 확인.
+ */
 	if (!is_hyp_mode_available() || is_kernel_in_hyp_mode())
 		return;
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - early param으로 mode가 설정됬는지 확인
+ */
 	if (kvm_get_mode() != KVM_MODE_PROTECTED)
 		return;
 
@@ -69,7 +88,10 @@ void __init kvm_hyp_reserve(void)
 		kvm_err("Failed to register hyp memblocks: %d\n", ret);
 		return;
 	}
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - stage1, stage2에서 필요한 page table 개수를 구해온다.
+ */
 	hyp_mem_pages += hyp_s1_pgtable_pages();
 	hyp_mem_pages += host_s2_pgtable_pages();
 
@@ -79,6 +101,11 @@ void __init kvm_hyp_reserve(void)
 	 * of pages needed by looking for a fixed point.
 	 */
 	nr_pages = 0;
+/*
+ * IAMROOT, 2021.11.13:
+ * - page마다 struct hyp_page이 필요해보이고 해당 자료구조도 또 page가
+ *   필요하므로 관련해서 더 page 개수를 늘린다.
+ */
 	do {
 		prev = nr_pages;
 		nr_pages = hyp_mem_pages + prev;
@@ -91,6 +118,10 @@ void __init kvm_hyp_reserve(void)
 	 * Try to allocate a PMD-aligned region to reduce TLB pressure once
 	 * this is unmapped from the host stage-2, and fallback to PAGE_SIZE.
 	 */
+/*
+ * IAMROOT, 2021.11.13:
+ * - 일단 PMD_SIZE로 align해서 할당을 해보고 안되면 그냥 할당을 시도한다.
+ */
 	hyp_mem_size = hyp_mem_pages << PAGE_SHIFT;
 	hyp_mem_base = memblock_phys_alloc(ALIGN(hyp_mem_size, PMD_SIZE),
 					   PMD_SIZE);

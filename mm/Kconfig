@@ -17,6 +17,9 @@ choice
 	  only have one option here selected by the architecture
 	  configuration. This is normal.
 
+#
+#   IAMROOT, 2021.11.13:
+#   - 메모리 전체가 연결되있는 단순한 구조.
 config FLATMEM_MANUAL
 	bool "Flat Memory"
 	depends on !ARCH_SPARSEMEM_ENABLE || ARCH_FLATMEM_ENABLE
@@ -32,6 +35,9 @@ config FLATMEM_MANUAL
 
 	  If unsure, choose this option (Flat Memory) over any other.
 
+#
+#   IAMROOT, 2021.11.13:
+#   - 메모리 전체가 연속되있지 않고 띄엄띄엄 떨어져있음
 config SPARSEMEM_MANUAL
 	bool "Sparse Memory"
 	depends on ARCH_SPARSEMEM_ENABLE
@@ -252,6 +258,10 @@ config ARCH_ENABLE_HUGEPAGE_MIGRATION
 config ARCH_ENABLE_THP_MIGRATION
 	bool
 
+#
+# IAMROOT, 2021.11.13:
+# - 특정 기능들을 좀 크게하여 tlb 성능을 끌어 올리는 방법. 2MB가 기본
+#
 config HUGETLB_PAGE_SIZE_VARIABLE
 	def_bool n
 	help

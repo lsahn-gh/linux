@@ -97,6 +97,10 @@ void numa_clear_node(unsigned int cpu)
  * Note: cpumask_of_node() is not valid until after this is done.
  * (Use CONFIG_DEBUG_PER_CPU_MAPS to check this.)
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - node에 대응하는 cpumask_map을 초기화한다.
+ */
 static void __init setup_node_to_cpumask_map(void)
 {
 	int node;
@@ -218,8 +222,19 @@ int __init numa_add_memblk(int nid, u64 start, u64 end)
 /*
  * Initialize NODE_DATA for a node on the local memory
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - 해당 nid의 node_data를 초기화한다.
+ *   node_data의 memory를 할당하고 node_data에 nid, start pfn, pfn size를
+ *   설정한다.
+ */
 static void __init setup_node_data(int nid, u64 start_pfn, u64 end_pfn)
 {
+/*
+ * IAMROOT, 2021.11.13:
+ * - node_data가 pg_data_t이므로 거기에 필요한 size.
+ *   64byte(SMPP_CACHE_BYTES)단위로 라운드업한다.
+ */
 	const size_t nd_size = roundup(sizeof(pg_data_t), SMP_CACHE_BYTES);
 	u64 nd_pa;
 	void *nd;
@@ -238,6 +253,11 @@ static void __init setup_node_data(int nid, u64 start_pfn, u64 end_pfn)
 	/* report and initialize */
 	pr_info("NODE_DATA [mem %#010Lx-%#010Lx]\n",
 		nd_pa, nd_pa + nd_size - 1);
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid의 node_data가 할당된 memory가 할당될 node_data의 nid와 같지 않으면
+ *   한번 print를 출력한다.
+ */
 	tnid = early_pfn_to_nid(nd_pa >> PAGE_SHIFT);
 	if (tnid != nid)
 		pr_info("NODE_DATA(%d) on node %d\n", nid, tnid);
@@ -309,6 +329,10 @@ static int __init numa_alloc_distance(void)
  * If @from or @to is higher than the highest known node or lower than zero
  * or @distance doesn't make sense, the call is ignored.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - from, to 값으로 배열 인덱스를 만들고 해당 위치에 distacne값을 넣는다.
+ */
 void __init numa_set_distance(int from, int to, int distance)
 {
 	if (!numa_distance) {
@@ -344,11 +368,18 @@ int __node_distance(int from, int to)
 }
 EXPORT_SYMBOL(__node_distance);
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - node_data를 초기화하고 node를 online 한다.
+ */
 static int __init numa_register_nodes(void)
 {
 	int nid;
 	struct memblock_region *mblk;
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - memblock의 node id가 정상으로 있는지 한번 검사.
+ */
 	/* Check that valid nid is set to memblks */
 	for_each_mem_region(mblk) {
 		int mblk_nid = memblock_get_region_node(mblk);
@@ -362,6 +393,10 @@ static int __init numa_register_nodes(void)
 		}
 	}
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid에 대해서 node_data를 만들고 해당 nid를 online한다.
+ */
 	/* Finally register nodes. */
 	for_each_node_mask(nid, numa_nodes_parsed) {
 		unsigned long start_pfn, end_pfn;
@@ -377,6 +412,11 @@ static int __init numa_register_nodes(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - dt에서 node에 대한 정보를 가져오고, node_data를 초기화 하고,
+ *   node들을 online시키고 해당 node의 cpumask_map을 초기화한다.
+ */
 static int __init numa_init(int (*init_func)(void))
 {
 	int ret;
@@ -467,6 +507,10 @@ static int __init arch_acpi_numa_init(void)
  *
  * Try each configured NUMA initialization method until one succeeds. The
  * last fallback is dummy single node config encompassing whole memory.
+ */
+/*
+ * IAMROOT, 2021.11.13:
+ * - numa 관련 초기화 수행.
  */
 void __init arch_numa_init(void)
 {

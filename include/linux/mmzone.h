@@ -24,6 +24,11 @@
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - buddy system에서 사용하는 메모리 승수
+ *   2^0 ~ 2^10까지 관리한다는것.
+ */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
 #define MAX_ORDER 11
 #else
@@ -1235,11 +1240,31 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  * PFN_SECTION_SHIFT		pfn to/from section number
  */
 #define PA_SECTION_SHIFT	(SECTION_SIZE_BITS)
+/*
+ * IAMROOT, 2021.11.13:
+ * - 1개의 section당 들어가는 pfn 수
+ *   27 - 12 = 15
+ */
 #define PFN_SECTION_SHIFT	(SECTION_SIZE_BITS - PAGE_SHIFT)
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 2^21 = 2MB 개
+ */
 #define NR_MEM_SECTIONS		(1UL << SECTIONS_SHIFT)
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 2^15 = 32k
+ * - 결국 section이 128MB(48bit, 4kb page 기준)이므로 거기에 들어가는
+ *   page 개수가 32k개라는것
+ */
 #define PAGES_PER_SECTION       (1UL << PFN_SECTION_SHIFT)
+/*
+ * IAMROOT, 2021.11.13:
+ * - 0x8000 - 1 = 0x7fff
+ *   ~0x7fff = 0xffff_ffff_ffff_8000
+ */
 #define PAGE_SECTION_MASK	(~(PAGES_PER_SECTION-1))
 
 #define SECTION_BLOCKFLAGS_BITS \
@@ -1249,6 +1274,10 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 #error Allocator MAX_ORDER exceeds SECTION_SIZE
 #endif
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - pfn과 section의 shift 차이만큼만 고려해 번호를 알아낸다.
+ */
 static inline unsigned long pfn_to_section_nr(unsigned long pfn)
 {
 	return pfn >> PFN_SECTION_SHIFT;
@@ -1289,6 +1318,15 @@ void subsection_map_init(unsigned long pfn, unsigned long nr_pages);
 
 struct page;
 struct page_ext;
+/*
+ * IAMROOT, 2021.11.13:
+ * - 해당 범위에 memory가 연결되있는지 안되있는지를 관리하기 위한
+ *   자료구조.
+ * - mem_section 하나가 1GB 범위를 담당한다.
+ * - 48bit의 경우 256TB이므로 mem section은 256 * 1024개가 될것이다.
+ * - CONFIG_PAGE_EXTENSION이 unset인 경우에
+ *   sizeof(struct mem_section) = 16byte
+ */
 struct mem_section {
 	/*
 	 * This is, logically, a pointer to an array of struct
@@ -1319,6 +1357,13 @@ struct mem_section {
 	 */
 };
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 한개의 root가 관리하는 section 숫자.
+ * - extream인 경우
+ *   PAGE_SIZE / sizeof(struct mem_sections)  = 4096 / 16 = 256 개
+ * - static인 경우 root를 사용하지 않아서 그냥 1이됨.
+ */
 #ifdef CONFIG_SPARSEMEM_EXTREME
 #define SECTIONS_PER_ROOT       (PAGE_SIZE / sizeof (struct mem_section))
 #else
@@ -1326,6 +1371,15 @@ struct mem_section {
 #endif
 
 #define SECTION_NR_TO_ROOT(sec)	((sec) / SECTIONS_PER_ROOT)
+/*
+ * IAMROOT, 2021.11.13:
+ * - NR_SECTION_ROOTS. root 개수
+ *
+ * ex) 48PA bits, 4k page, static인 경우
+ *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 1 =  2MB
+ * ex) 48PA bits, 4k page, extreme인 경우
+ *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 256 =  8192 
+ */
 #define NR_SECTION_ROOTS	DIV_ROUND_UP(NR_MEM_SECTIONS, SECTIONS_PER_ROOT)
 #define SECTION_ROOT_MASK	(SECTIONS_PER_ROOT - 1)
 
@@ -1340,6 +1394,10 @@ static inline unsigned long *section_to_usemap(struct mem_section *ms)
 	return ms->usage->pageblock_flags;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - section 번호(nr)에 해당하는 mem_section을 구해온다.
+ */
 static inline struct mem_section *__nr_to_section(unsigned long nr)
 {
 #ifdef CONFIG_SPARSEMEM_EXTREME
@@ -1365,6 +1423,11 @@ extern size_t mem_section_usage_size(void);
  *      which results in PFN_SECTION_SHIFT equal 6.
  * To sum it up, at least 6 bits are available.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - 0~5번 bit까지 macro로 대로 사용하고 6bit부터 nid를
+ *   저장할려는 용도로 사용한다.
+ */
 #define SECTION_MARKED_PRESENT		(1UL<<0)
 #define SECTION_HAS_MEM_MAP		(1UL<<1)
 #define SECTION_IS_ONLINE		(1UL<<2)
@@ -1381,11 +1444,19 @@ static inline struct page *__section_mem_map_addr(struct mem_section *section)
 	return (struct page *)map;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 해당 section에 memory가 존재하는지 확인
+ */
 static inline int present_section(struct mem_section *section)
 {
 	return (section && (section->section_mem_map & SECTION_MARKED_PRESENT));
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 해당 section에 memory가 존재하는지 확인
+ */
 static inline int present_section_nr(unsigned long nr)
 {
 	return present_section(__nr_to_section(nr));
@@ -1499,6 +1570,11 @@ static inline int pfn_in_present_section(unsigned long pfn)
 	return present_section(__nr_to_section(pfn_to_section_nr(pfn)));
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - section_nr다음 부터 제일 처음 present가 set되있는것을 찾아
+ *   return 한다.
+ */
 static inline unsigned long next_present_section_nr(unsigned long section_nr)
 {
 	while (++section_nr <= __highest_present_section_nr) {

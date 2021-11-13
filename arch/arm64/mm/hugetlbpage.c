@@ -36,6 +36,10 @@
  * huge pages could still be served from those areas.
  */
 #ifdef CONFIG_CMA
+/*
+ * IAMROOT, 2021.11.13:
+ * - TODO
+ */
 void __init arm64_hugetlb_cma_reserve(void)
 {
 	int order;

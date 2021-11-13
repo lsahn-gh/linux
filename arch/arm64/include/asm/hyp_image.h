@@ -10,6 +10,12 @@
 #define __HYP_CONCAT(a, b)	a ## b
 #define HYP_CONCAT(a, b)	__HYP_CONCAT(a, b)
 
+/*
+ * IAMROOT, 2021.11.13:
+ * symbol이 kvm_nvhe_sym에 대한것인데 현재 system이 nvhe가 아니면
+ * symbol에 kvm_nvhe_sym을 명시해주소, 현재 system이 nvhe이면 결국
+ * symbol도 nvhe이니 명시를안한다.
+ */
 #ifndef __KVM_NVHE_HYPERVISOR__
 /*
  * KVM nVHE code has its own symbol namespace prefixed with __kvm_nvhe_,

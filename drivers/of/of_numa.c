@@ -73,7 +73,12 @@ static int __init of_numa_parse_memory_nodes(void)
 
 	return 0;
 }
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - distance-map의 distance-matrix의 크기를 읽고
+ *   from, to, distance값을 각각 읽어 에러검사를 수행하여
+ *   numa_distance 배열을 초기화한다.
+ */
 static int __init of_numa_parse_distance_map_v1(struct device_node *map)
 {
 	const __be32 *matrix;
@@ -121,6 +126,59 @@ static int __init of_numa_parse_distance_map_v1(struct device_node *map)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - distance-map node에서 compatible이
+ *   numa-distance-map-v1인것을 찾아 numa_distance 를 초기화한다.
+ * ex)
+ * distance-map {
+ *	compatible = "numa-distance-map-v1";
+ *	distance-matrix = <0 0 10>,
+ *			  <0 1 15>,
+ *			  <0 2 20>,
+ *			  <0 3 25>,
+ *			  <1 0 15>
+ *			  <1 1 10>,
+ *			  <1 2 25>,
+ *			  <1 3 30>,
+ *			  <2 0 20>,
+ *			  <2 1 25>,
+ *			  <2 2 10>,
+ *			  <2 3 15>,
+ *			  <3 0 25>,
+ *			  <3 1 30>,
+ *			  <3 2 15>,
+ *			  <3 3 10>;
+ * };
+ *
+ * | from | to  | distance |
+ * | 0    | 0   | 10       |
+ * | 0    | 1   | 15       |
+ * | 0    | 2   | 20       |
+ * | 0    | 3   | 25       |
+ * | 1    | 0   | 15       |
+ * | 1    | 1   | 10       |
+ * | 1    | 2   | 25       |
+ * | 1    | 3   | 30       |
+ * | 2    | 0   | 20       |
+ * | 2    | 1   | 25       |
+ * | 2    | 2   | 10       |
+ * | 2    | 3   | 15       |
+ * | 3    | 0   | 25       |
+ * | 3    | 1   | 30       |
+ * | 3    | 2   | 15       |
+ * | 3    | 3   | 10       |
+ *
+ * +-----+   15   +-----+
+ * |  0  | ------ |  1  |
+ * +-----+        +-----+
+ *   |     \   / 25   |
+ *   |20     X        |30
+ *   |     /    \25   |
+ * +-----+        +-----+
+ * |  2  | ------ |  3  |
+ * +-----+  15    +-----+
+ */
 static int __init of_numa_parse_distance_map(void)
 {
 	int ret = 0;

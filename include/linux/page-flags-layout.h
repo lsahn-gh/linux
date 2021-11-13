@@ -28,6 +28,11 @@
 
 #ifdef CONFIG_SPARSEMEM
 #include <asm/sparsemem.h>
+/*
+ * IAMROOT, 2021.11.13:
+ * - 48 - 27 = 21
+ * 즉 2^21개의 section 개수라는 의미.
+ */
 #define SECTIONS_SHIFT	(MAX_PHYSMEM_BITS - SECTION_SIZE_BITS)
 #else
 #define SECTIONS_SHIFT	0
@@ -66,6 +71,14 @@
 /*
  * Note that this #define MUST have a value so that it can be tested with
  * the IS_ENABLED() macro.
+ */
+/*
+ * IAMROOT, 2021.11.13:
+ * - 64bit에서는 flag를 다 저장할수 있지만 32bit의 경우 아닌 경우가 있어
+ *   다른곳에 flag를 놔야될 경우가 있다. 그것에 대한것
+ * - single node의 경우 NODES_SHIFT는 0일것이다. 
+ * - NODES_WIDTH 가 0이면 node에 공간을 안줫다는거고 결국 flag를 저장할수
+ *   없는 상황.
  */
 #if NODES_SHIFT != 0 && NODES_WIDTH == 0
 #define NODE_NOT_IN_PAGE_FLAGS	1

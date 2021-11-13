@@ -49,6 +49,12 @@ int page_to_nid(const struct page *page)
 }
 EXPORT_SYMBOL(page_to_nid);
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 64bit system에서는 NODE_NOT_IN_PAGE_FLAGS가 0인 경우가
+ *   대부분이겠지만 만약 들어온다면 table을 하나 더 만들어
+ *   nid값을 저장한다.
+ */
 static void set_section_nid(unsigned long section_nr, int nid)
 {
 	section_to_node_table[section_nr] = nid;
@@ -60,6 +66,11 @@ static inline void set_section_nid(unsigned long section_nr, int nid)
 #endif
 
 #ifdef CONFIG_SPARSEMEM_EXTREME
+/*
+ * IAMROOT, 2021.11.13:
+ * - extreme에서는 array_size 는 PAGE_SIZE(4k)가 될것이다.
+ * - slab이 아직 비활성일 경우 memblock으로 할당을 한다.
+ */
 static noinline struct mem_section __ref *sparse_index_alloc(int nid)
 {
 	struct mem_section *section = NULL;
@@ -79,6 +90,12 @@ static noinline struct mem_section __ref *sparse_index_alloc(int nid)
 	return section;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 이제 여기서 2차원배열(mem_section)을 memory 할당하고 연결한다.
+ * - 만약 해당 mem_section root index에 이미 있는경우 할당이 되어있으므로
+ *   pass한다.
+ */
 static int __meminit sparse_index_init(unsigned long section_nr, int nid)
 {
 	unsigned long root = SECTION_NR_TO_ROOT(section_nr);
@@ -115,6 +132,10 @@ static inline int sparse_index_init(unsigned long section_nr, int nid)
  * node.  This keeps us from having to use another data structure.  The
  * node information is cleared just before we store the real mem_map.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid는 bit6부터 저장한다.
+ */
 static inline unsigned long sparse_encode_early_nid(int nid)
 {
 	return ((unsigned long)nid << SECTION_NID_SHIFT);
@@ -126,9 +147,17 @@ static inline int sparse_early_nid(struct mem_section *section)
 }
 
 /* Validate the physical addressing limitations of the model */
+/*
+ * IAMROOT, 2021.11.13:
+ * - range 관련 예외 처리
+ */
 void __meminit mminit_validate_memmodel_limits(unsigned long *start_pfn,
 						unsigned long *end_pfn)
 {
+/*
+ * IAMROOT, 2021.11.13:
+ * - 1 << (48 - 12) = 1 << (36) = 2^36
+ */
 	unsigned long max_sparsemem_pfn = 1UL << (MAX_PHYSMEM_BITS-PAGE_SHIFT);
 
 	/*
@@ -161,6 +190,12 @@ void __meminit mminit_validate_memmodel_limits(unsigned long *start_pfn,
  * those loops early.
  */
 unsigned long __highest_present_section_nr;
+/*
+ * IAMROOT, 2021.11.13:
+ * - 가장높은 section_nr를 갱신해주고 section_mem_map에
+ *   SECTION_MARKED_PRESENT를 set한다. memory가 존재하는
+ *   section이라는 의미.
+ */
 static void __section_mark_present(struct mem_section *ms,
 		unsigned long section_nr)
 {
@@ -175,7 +210,10 @@ static void __section_mark_present(struct mem_section *ms,
 	     ((section_nr != -1) &&				\
 	      (section_nr <= __highest_present_section_nr));	\
 	     section_nr = next_present_section_nr(section_nr))
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - 제일 처음 present인 section_nr을 return한다.
+ */
 static inline unsigned long first_present_section_nr(void)
 {
 	return next_present_section_nr(-1);
@@ -223,10 +261,27 @@ void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 #endif
 
 /* Record a memory area against a node. */
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid, start, end에 해당하는 mem_section을 초기화하고 정보를 설정한다.
+ *   mem_section의 section_mem_map에는 nid, online, present가 set될것이다.
+ */
 static void __init memory_present(int nid, unsigned long start, unsigned long end)
 {
 	unsigned long pfn;
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - sparse memory는 extreme, static방식이 있다. static방식이 아니면
+ *   extream 이다. default로 extreme을 사용한다.
+ *
+ * - extream방식에서는 mem_section memory를 할당해줘야하므로 관련작업을
+ *   수행한다.
+ *
+ * - 일단 1차원 배열을 먼저 만들고 실제 memory가 들어오면 2차원 배열측을
+ *   할당하는 방식을 수행하여 memory가 절약된다.
+ *
+ * - size = 8 * 8192 = 64kb
+ */
 #ifdef CONFIG_SPARSEMEM_EXTREME
 	if (unlikely(!mem_section)) {
 		unsigned long size, align;
@@ -251,6 +306,10 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
 
 		ms = __nr_to_section(section);
 		if (!ms->section_mem_map) {
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid와 online, present 정보를 section_mem_map에 함께 기록한다.
+ */
 			ms->section_mem_map = sparse_encode_early_nid(nid) |
 							SECTION_IS_ONLINE;
 			__section_mark_present(ms, section);
@@ -262,6 +321,10 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
  * Mark all memblocks as present using memory_present().
  * This is a convenience function that is useful to mark all of the systems
  * memory as present during initialization.
+ */
+/*
+ * IAMROOT, 2021.11.13:
+ * - 사용하는 memory에 대해서 mem_section을 초기화한다.
  */
 static void __init memblocks_present(void)
 {
@@ -555,13 +618,22 @@ failed:
  * Allocate the accumulated non-linear sections, allocate a mem_map
  * for each and record the physical to section mapping.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - memory model에는 크게 flat memory, sparse memory가 있는데
+ *   arm64는 sparse memory만을 사용한다.
+ */
 void __init sparse_init(void)
 {
 	unsigned long pnum_end, pnum_begin, map_count = 1;
 	int nid_begin;
 
 	memblocks_present();
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - pnum_begin : 최초의 pregent section num begin.
+ * - nid_begin : pnum_begin의 nid
+ */
 	pnum_begin = first_present_section_nr();
 	nid_begin = sparse_early_nid(__nr_to_section(pnum_begin));
 

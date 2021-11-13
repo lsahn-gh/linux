@@ -39,6 +39,25 @@ static inline void hyp_vmemmap_range(phys_addr_t phys, unsigned long size,
 	*end = ALIGN(*end, PAGE_SIZE);
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - KVM_PGTABLE_MAX_LEVELS 단계에 필요한 page table 개수를 구한다.
+ * ex) 1GB
+ * nr_pages = 0x4_0000
+ *
+ * i = 0 : 0x4_0000 / 0x200 = 0x200 = 512 (PTE Table 수)
+ * i = 1 : 0x200 / 0x200 = 0x1 (PMD Table 수)
+ * i = 2 : (0x1 + 0x1ff) / 0x200 = 0x1 (PUD Table 수)
+ * i = 3 : (0x1 + 0x1ff) / 0x200 = 0x1 (PGD Table 수)
+ *
+ * ex) 4GB
+ * nr_pages = 0x10_0000
+ *
+ * i = 0 : 0x10_0000 / 0x200 = 0x800 = 2048 (PTE Table 수)
+ * i = 1 : 0x800 / 0x200 = 0x4 (PMD Table 수)
+ * i = 2 : (0x4 + 0x1ff) / 0x200 = 0x1 (PUD Table 수)
+ * i = 3 : (0x1 + 0x1ff) / 0x200 = 0x1 (PGD Table 수)
+ */
 static inline unsigned long __hyp_pgtable_max_pages(unsigned long nr_pages)
 {
 	unsigned long total = 0, i;
@@ -52,6 +71,10 @@ static inline unsigned long __hyp_pgtable_max_pages(unsigned long nr_pages)
 	return total;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - 직전에 설정했던 hyp_memory에 필요한 모든 page table을 구한다.
+ */
 static inline unsigned long __hyp_pgtable_total_pages(void)
 {
 	unsigned long res = 0, i;
@@ -65,6 +88,10 @@ static inline unsigned long __hyp_pgtable_total_pages(void)
 	return res;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - hyp_memory에 필요한 page table + 1GB에 필요한 page table
+ */
 static inline unsigned long hyp_s1_pgtable_pages(void)
 {
 	unsigned long res;
@@ -77,6 +104,10 @@ static inline unsigned long hyp_s1_pgtable_pages(void)
 	return res;
 }
 
+/*
+ * IAMROOT, 2021.11.13:
+ * - pgd를 연결해서 쓸수있도록 arm64에서 지원하는거때문에 16개를 더 추가함.
+ */
 static inline unsigned long host_s2_pgtable_pages(void)
 {
 	unsigned long res;

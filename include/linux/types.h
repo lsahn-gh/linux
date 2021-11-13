@@ -6,7 +6,10 @@
 #include <uapi/linux/types.h>
 
 #ifndef __ASSEMBLY__
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - 최소 long byte
+ */
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]
 

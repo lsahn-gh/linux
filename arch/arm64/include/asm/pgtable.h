@@ -374,9 +374,18 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
  * Hugetlb definitions.
  */
 #define HUGE_MAX_HSTATE		4
+
+/*
+ * IAMROOT, 2021.11.13:
+ * 2MB(4kb page size)
+ */
 #define HPAGE_SHIFT		PMD_SHIFT
 #define HPAGE_SIZE		(_AC(1, UL) << HPAGE_SHIFT)
 #define HPAGE_MASK		(~(HPAGE_SIZE - 1))
+/*
+ * IAMROOT, 2021.11.13:
+ * - 21 - 12 = 9 (4kb page size)
+ */
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 
 /*

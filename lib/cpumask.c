@@ -162,6 +162,10 @@ EXPORT_SYMBOL(zalloc_cpumask_var);
  * Either returns an allocated (zero-filled) cpumask, or causes the
  * system to panic.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - cpu mask를 static하게 안했으면 매번 alloc을 해야된다.
+ */
 void __init alloc_bootmem_cpumask_var(cpumask_var_t *mask)
 {
 	*mask = memblock_alloc(cpumask_size(), SMP_CACHE_BYTES);

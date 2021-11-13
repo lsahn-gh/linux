@@ -1703,6 +1703,11 @@ static struct mminit_pfnnid_cache early_pfnnid_cache __meminitdata;
 /*
  * Required by SPARSEMEM. Given a PFN, return what node the PFN is on.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid는 원래 page 구조체에서 찾는데 page 구조체가 초기화 되지 않은
+ *   상태에서는 memblock에서 해당 nid를 찾아 사용한다.
+ */
 static int __meminit __early_pfn_to_nid(unsigned long pfn,
 					struct mminit_pfnnid_cache *state)
 {
@@ -1721,7 +1726,12 @@ static int __meminit __early_pfn_to_nid(unsigned long pfn,
 
 	return nid;
 }
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - 아직 page 구조체를 초기화하지 못한 상태라 pfn에 따른
+ *   nid를 빠르게 구하지 못하는 상태라 이 방법으로 pfn의
+ *   nid를 구한다.
+ */
 int __meminit early_pfn_to_nid(unsigned long pfn)
 {
 	static DEFINE_SPINLOCK(early_pfn_lock);
@@ -7035,6 +7045,10 @@ void __meminit init_currently_empty_zone(struct zone *zone,
  * with no available memory, a warning is printed and the start and end
  * PFNs will be 0.
  */
+/*
+ * IAMROOT, 2021.11.13:
+ * - nid에 대응하는 memblock을 찾다 start pfn(min), end pfn(max)을 찾는다.
+ */
 void __init get_pfn_range_for_nid(unsigned int nid,
 			unsigned long *start_pfn, unsigned long *end_pfn)
 {
@@ -7315,12 +7329,22 @@ static inline void setup_usemap(struct zone *zone) {}
 #endif /* CONFIG_SPARSEMEM */
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - page 구조체를 모아놓는것을 memory map이라고 부른다.
+ *   나중에 page를 free할때 일일히 순회를 하면 시간이 많이 걸려
+ *   page block같은 개념을 만들어 해당 단위로 관리를 한다.
+ *
+ * - kernel parameter로 설정이 가능하다.
+ */
 /* Initialise the number of pages represented by NR_PAGEBLOCK_BITS */
 void __init set_pageblock_order(void)
 {
 	unsigned int order;
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - variable일땐 초기값은 0
+ */
 	/* Check that pageblock_nr_pages has not already been setup */
 	if (pageblock_order)
 		return;
@@ -7601,6 +7625,11 @@ void __init free_area_init_memoryless_node(int nid)
 #if MAX_NUMNODES > 1
 /*
  * Figure out the number of possible node ids.
+ */
+/*
+ * IAMROOT, 2021.11.13:
+ * - nr_node_ids를 구하기 위한것.
+ *   possible의 마지막 bit + 1을 하면 개수가 나온다.
  */
 void __init setup_nr_node_ids(void)
 {

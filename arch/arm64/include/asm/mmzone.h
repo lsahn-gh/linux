@@ -5,7 +5,10 @@
 #ifdef CONFIG_NUMA
 
 #include <asm/numa.h>
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - setup_node_data 에서 초기화된다.
+ */
 extern struct pglist_data *node_data[];
 #define NODE_DATA(nid)		(node_data[(nid)])
 

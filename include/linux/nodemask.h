@@ -221,7 +221,10 @@ static inline int __nodes_subset(const nodemask_t *src1p,
 {
 	return bitmap_subset(src1p->bits, src2p->bits, nbits);
 }
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - node가 비었는지 검사.
+ */
 #define nodes_empty(src) __nodes_empty(&(src), MAX_NUMNODES)
 static inline int __nodes_empty(const nodemask_t *srcp, unsigned int nbits)
 {
@@ -433,7 +436,10 @@ static inline int num_node_state(enum node_states state)
 
 #define for_each_node_state(__node, __state) \
 	for_each_node_mask((__node), node_states[__state])
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - online node에서 처음에 있는 bit를 찾아서 반환다.
+ */
 #define first_online_node	first_node(node_states[N_ONLINE])
 #define first_memory_node	first_node(node_states[N_MEMORY])
 static inline int next_online_node(int nid)
@@ -488,7 +494,10 @@ static inline int num_node_state(enum node_states state)
 #define next_online_node(nid)	(MAX_NUMNODES)
 #define nr_node_ids		1U
 #define nr_online_nodes		1U
-
+/*
+ * IAMROOT, 2021.11.13:
+ * - 해당 node에 대해서 online bit를 set한다.
+ */
 #define node_set_online(node)	   node_set_state((node), N_ONLINE)
 #define node_set_offline(node)	   node_clear_state((node), N_ONLINE)
 
