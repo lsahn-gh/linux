@@ -14,6 +14,10 @@ menu "General architecture-dependent options"
 config CRASH_CORE
 	bool
 
+#
+# IAMROOT, 2021.10.30:
+# - creah kernel config
+#
 config KEXEC_CORE
 	select CRASH_CORE
 	bool

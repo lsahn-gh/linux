@@ -32,6 +32,19 @@ static enum kaslr_status __initdata kaslr_status;
 u64 __ro_after_init module_alloc_base;
 u16 __initdata memstart_offset_seed;
 
+/*
+ * IAMROOT, 2021.09.04:
+ * - devicetree/bindings/chosen.txt
+ *
+ * {
+ *	chosen {
+ *		kaslr-seed = <0xfeedbeef 0xc0def00d>;
+ *	};
+ * };
+ *
+ * dtb에 위와 비슷하게 정의되있는 값이 존재하고, 해당 값을 추출하여
+ * random값을 정의 하는데 사용한다. 없으면 0로 return 시킨다.
+ */
 static __init u64 get_kaslr_seed(void *fdt)
 {
 	int node, len;
@@ -96,6 +109,13 @@ u64 __init kaslr_early_init(void)
 	 * Check if 'nokaslr' appears on the command line, and
 	 * return 0 if that is the case.
 	 */
+/*
+ * IAMROOT, 2021.11.15:
+ * init_feature_override 함수가 미리 불러와져 해당 함수에서
+ * dtb에서 /choosen/boot_args를 가져와 parsing 했을것이고
+ * 그 과정에서 kaslr_feature_override 이 설정됬을것이다. 
+ * 해당 arg는 nokaslr이 들어오면 val에 값이 set될것이다.
+ */
 	if (kaslr_feature_override.val & kaslr_feature_override.mask & 0xf) {
 		kaslr_status = KASLR_DISABLED_CMDLINE;
 		return 0;
@@ -114,6 +134,22 @@ u64 __init kaslr_early_init(void)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2021.09.04:
+ * - mask (VA 48bit)
+ *   (1 << (48 - 2)) - 1 -> kernel 공간의 반에 반절. 64TB를 범위로 하겠다는것.
+ *
+ *   mask = (64TB 범위) & (2MB algin) = 0x0000_3fff_ffe0_0000
+ *        => max 값은 64TB - 2MB. 
+ *   offset = 0x0000_2000_0000_0000(32TB) + (seed & 0x0000_3fff_ffe0_0000)
+ *   min offset(seed & 0x0000_3fff_ffe0_0000 = 0)
+ *              = 32TB + 1
+ *   max offset(seed & 0x0000_3fff_ffe0_0000 = 0x0000_3fff_ffe0_0000)
+ *              = 32TB + 64TB - 2MB
+ *
+ *   32TB부터 96TB - 2MB까지의 범위 안에서  2MB 단위의 random offset을
+ *   구하겠다는 의미이다.
+ */
 	/*
 	 * OK, so we are proceeding with KASLR enabled. Calculate a suitable
 	 * kernel image offset from the seed. Let's place the kernel in the
@@ -144,6 +180,12 @@ u64 __init kaslr_early_init(void)
 		 */
 		return offset % SZ_2G;
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - CONFIG_RANDOMIZE_MODULE_REGION_FULL 이 on이면 2G 범위에서 module의 랜덤
+ *   위치를 정하고, off라면 MODULES_VSIZE(128MB) 내에서 module의 랜덤위치를
+ *   정한다.
+ *  */
 	if (IS_ENABLED(CONFIG_RANDOMIZE_MODULE_REGION_FULL)) {
 		/*
 		 * Randomize the module region over a 2 GB window covering the
@@ -170,6 +212,11 @@ u64 __init kaslr_early_init(void)
 		module_alloc_base = (u64)_etext + offset - MODULES_VSIZE;
 	}
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - seed값의 2MB이하 값 추출하여 module_range을 곱해서 2MB align을 한 값을
+ *   2MB로 나눈다. 그 후 module_alloc_base에 적용하고 PAGE_MASK 시킨다.
+ */
 	/* use the lower 21 bits to randomize the base of the module region */
 	module_alloc_base += (module_range * (seed & ((1 << 21) - 1))) >> 21;
 	module_alloc_base &= PAGE_MASK;

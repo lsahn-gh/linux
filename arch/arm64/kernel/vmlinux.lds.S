@@ -223,6 +223,10 @@ SECTIONS
 
 	.init.data : {
 		INIT_DATA
+/*
+ * IAMROOT, 2021.10.16:
+ * - .init.section에 사용하는 구조체 struct obs_kernel_param 가 16byte를 가지고있다.
+ */
 		INIT_SETUP(16)
 		INIT_CALLS
 		CON_INITCALL
@@ -242,9 +246,21 @@ SECTIONS
 		*(.rela .rela*)
 	}
 
+/*
+ * IAMROOT, 2021.08.28:
+ * - KIMAGE_VADDR으로부터 .rela.dyn까지의 offset
+ *   ADDR : linker scriptor 명령어. 절대주소를 return한다.
+ *   ABSOLUTE : linker scriptor 명령어. None relocate address
+ *   SIZEOF : linker scriptor 명령어. 해당 section의 사이즈를
+ *	byte단위로 가져온다.
+ */
 	__rela_offset	= ABSOLUTE(ADDR(.rela.dyn) - KIMAGE_VADDR);
 	__rela_size	= SIZEOF(.rela.dyn);
 
+/*
+ * IAMROOT, 2021.08.28:
+ * - section이름만 틀리고 바로위와 비슷한다는것을 짚고넘어가자.
+ */
 #ifdef CONFIG_RELR
 	.relr.dyn : ALIGN(8) {
 		*(.relr.dyn)

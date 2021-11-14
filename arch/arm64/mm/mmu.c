@@ -48,9 +48,24 @@ u64 idmap_ptrs_per_pgd = PTRS_PER_PGD;
 u64 __section(".mmuoff.data.write") vabits_actual;
 EXPORT_SYMBOL(vabits_actual);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - randomize 결과로 나온 offset을 저장하는 변수
+ */
 u64 kimage_voffset __ro_after_init;
 EXPORT_SYMBOL(kimage_voffset);
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - 처음에 user memory를 할당할때 이 page를 가리키게 한다.
+ *   한개 페이지가 0만이 존재한다.
+ *
+ * - read fault가 들어오면 이 페이지를 할당한다.
+ *
+ * - write fault가 들어오면 이 페이지가 아닌 실제 페이지를 할당해 준다.
+ *
+ * - ttbr0를 비울때 빈 page table 용도로도 사용한다.
+ */
 /*
  * Empty_zero_page is a special page that is used for zero-initialized data
  * and COW.
@@ -91,6 +106,12 @@ pgprot_t phys_mem_access_prot(struct file *file, unsigned long pfn,
 }
 EXPORT_SYMBOL(phys_mem_access_prot);
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * 1개의 페이지 테이블을 생성한다. 반환되는 주소는 물리 주소이다.
+ *   생성한 페이지는 FIX_PTE에 잠시 매핑한 후 memset()으로 
+ *   클리어한다.
+ */
 static phys_addr_t __init early_pgtable_alloc(int shift)
 {
 	phys_addr_t phys;
@@ -157,6 +178,11 @@ static void init_pte(pmd_t *pmdp, unsigned long addr, unsigned long end,
 {
 	pte_t *ptep;
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * pte 테이블에 매핑하는 동안 FIX_PTE에 pte 테이블을 매핑한다.
+ *   (pte 테이블의 물리주소는 pmdp와 addr로 알아온다)
+ */
 	ptep = pte_set_fixmap_offset(pmdp, addr);
 	do {
 		pte_t old_pte = READ_ONCE(*ptep);
@@ -185,6 +211,11 @@ static void alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
 	unsigned long next;
 	pmd_t pmd = READ_ONCE(*pmdp);
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - 전 단계의 pmd 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
+ *   이러한 경우 새로운 pte 테이블을 할당한다. 
+ */
 	BUG_ON(pmd_sect(pmd));
 	if (pmd_none(pmd)) {
 		pmdval_t pmdval = PMD_TYPE_TABLE | PMD_TABLE_UXN;
@@ -202,8 +233,13 @@ static void alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
 	do {
 		pgprot_t __prot = prot;
 
+/* IAMROOT, 2021.10.09: PAGE_SIZE * 16의 다음 주소 */
 		next = pte_cont_addr_end(addr, end);
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * 16 X PAGE_SIZE의 cont pte 매핑이 가능한 경우 PTE_CONT 비트를 설정한다.
+ */
 		/* use a contiguous mapping if the range is suitably aligned */
 		if ((((addr | next | phys) & ~CONT_PTE_MASK) == 0) &&
 		    (flags & NO_CONT_MAPPINGS) == 0)
@@ -222,12 +258,22 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 	unsigned long next;
 	pmd_t *pmdp;
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * pmd 테이블에 매핑하는 동안 FIX_PMD에 pmd 테이블을 매핑한다.
+ *   (pmd 테이블의 물리주소는 pudp와 addr로 알아온다)
+ */
 	pmdp = pmd_set_fixmap_offset(pudp, addr);
 	do {
 		pmd_t old_pmd = READ_ONCE(*pmdp);
 
+/* IAMROOT, 2021.10.09: PMD_SIZE의 다음 주소 */
 		next = pmd_addr_end(addr, end);
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * PMD_SIZE 단위로 정렬이 가능한 경우 pmd 블럭 매핑을 한다.
+ */
 		/* try section mapping first */
 		if (((addr | next | phys) & ~PMD_MASK) == 0 &&
 		    (flags & NO_BLOCK_MAPPINGS) == 0) {
@@ -252,6 +298,12 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 	pmd_clear_fixmap();
 }
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * cont pmd 매핑을 한다. (4K 기준 2M * 16 = 32M)
+ *   pmd 단위가 16개 연속 가능한 경우 이렇게 처리하고, 
+ *   그렇지 않은 경우 single pmd 매핑을 한다.
+ */
 static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 				unsigned long end, phys_addr_t phys,
 				pgprot_t prot,
@@ -263,6 +315,11 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	/*
 	 * Check for initial section mappings in the pgd/pud.
 	 */
+/*
+ * IAMROOT, 2021.10.09: 
+ * - 전 단계의 pud 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
+ *   이러한 경우 새로운 pmd 테이블을 할당한다. 
+ */
 	BUG_ON(pud_sect(pud));
 	if (pud_none(pud)) {
 		pudval_t pudval = PUD_TYPE_TABLE | PUD_TABLE_UXN;
@@ -280,9 +337,14 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	do {
 		pgprot_t __prot = prot;
 
+/* IAMROOT, 2021.10.09: 16 x PMD_SIZE의 다음 주소 */
 		next = pmd_cont_addr_end(addr, end);
 
 		/* use a contiguous mapping if the range is suitably aligned */
+/*
+ * IAMROOT, 2021.10.09: 
+ * 16 X PMD_SIZE의 cont pmd 매핑이 가능한 경우 PTE_CONT 비트를 설정한다.
+ */
 		if ((((addr | next | phys) & ~CONT_PMD_MASK) == 0) &&
 		    (flags & NO_CONT_MAPPINGS) == 0)
 			__prot = __pgprot(pgprot_val(prot) | PTE_CONT);
@@ -293,12 +355,23 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	} while (addr = next, addr != end);
 }
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * 4K 페이지 테이블을 사용하는 경우 @addr, @next 및 @phys가 모두 
+ * PUD 사이즈 단위로 정렬된 경우 1G 블럭 매핑을 허용한다.
+ * (PUD_MASK: 0xffff_ffff_c000_0000)
+ *
+ *   예) addr=0x4000_0000, next=8000_0000, phys=0xc000_0000 -> true
+ *       addr=0x4000_0000, next=4100_0000, phys=0xc000_0000 -> false
+ *       addr=0x4000_0000, next=8000_0000, phys=0xc200_0000 -> false
+ */
 static inline bool use_1G_block(unsigned long addr, unsigned long next,
 			unsigned long phys)
 {
 	if (PAGE_SHIFT != 12)
 		return false;
 
+/* IAMROOT, 2021.10.09: 하위 30 비트 중 하나라도 1이 있는 경우 false 반환 */
 	if (((addr | next | phys) & ~PUD_MASK) != 0)
 		return false;
 
@@ -315,6 +388,23 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 	p4d_t *p4dp = p4d_offset(pgdp, addr);
 	p4d_t p4d = READ_ONCE(*p4dp);
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - 전 단계의 p4d 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
+ *   이러한 경우 새로운 pud 테이블을 할당한다. 
+ *
+ * (*pgtable_alloc):
+ *   1) NULL
+ *      할당을 할 수 없는 상황에서 사용한다.
+ *      호출 경로: fixmap_remap_fdt() -> create_mapping_noalloc()
+ *   
+ *   2) early_pgtable_alloc()
+ *      정규 메모리 할당자는 사용하지 못하지만 memblock을 사용하여 할당한다.
+ *      호출 경로: map_kernel_segment()
+ *
+ *   3) pgd_pgtable_alloc()
+ *   4) __pgd_pgtable_alloc()
+ */
 	if (p4d_none(p4d)) {
 		p4dval_t p4dval = P4D_TYPE_TABLE | P4D_TABLE_UXN;
 		phys_addr_t pud_phys;
@@ -328,6 +418,11 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 	}
 	BUG_ON(p4d_bad(p4d));
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * pud 테이블에 매핑하는 동안 FIX_PUD에 pud 테이블을 매핑한다.
+ *   (pud 테이블의 물리주소는 p4dp와 addr로 알아온다)
+ */
 	pudp = pud_set_fixmap_offset(p4dp, addr);
 	do {
 		pud_t old_pud = READ_ONCE(*pudp);
@@ -376,10 +471,30 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
 	if (WARN_ON((phys ^ virt) & ~PAGE_MASK))
 		return;
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - virt 주소와 size를 사용하여 매핑 시작 주소와 끝 주소를 산출한다.
+ *   매핑 시작 주소(addr)는 virt를 페이지 단위로 round down하여 사용하고,
+ *   매핑 끝 주소(end)는 virt+size를 페이지 단위로 round up하여 사용한다.
+ *
+ * 예) 4K, 4 레벨의 경우 PGDIR_SIZE=512G이다.
+ *    따라서 512G 단위로 alloc_init_pud() 함수를 호출한다.
+ */
 	phys &= PAGE_MASK;
 	addr = virt & PAGE_MASK;
 	end = PAGE_ALIGN(virt + size);
 
+/*
+ * IAMROOT, 2021.10.14:
+ * addr ~ next or end 영역을 pgd 단위로 alloc_init_pud를 수행한다.
+ * addr = 1GB, end = 1025라고 하고 pgd 단위가 512GB라고 한다면
+ *
+ * 1 : 1GB ~ 512 GB
+ * 2 : 512GB ~ 1024 GB
+ * 3 : 1024GB ~ 1025 GB
+ * 
+ * 이렇게 3번이 수행될것이다.
+ */
 	do {
 		next = pgd_addr_end(addr, end);
 		alloc_init_pud(pgdp, addr, next, phys, prot, pgtable_alloc,
@@ -422,6 +537,14 @@ static phys_addr_t pgd_pgtable_alloc(int shift)
  * This function can only be used to modify existing table entries,
  * without allocating new levels of table. Note that this permits the
  * creation of new section or page entries.
+ */
+/*
+ * IAMROOT, 2021.10.09: 
+ * NO_CONT_MAPPINGS 옵션을 사용하고, 할당 함수 없이 매핑만을 요청한다. 
+ *
+ * fixmap_remap_fdt() 함수에서 fdt를 매핑할 때 이 함수를 통해 매핑한다.
+ * early_fixmap_init() 함수를 통해 bm_pud[] -> bm_pmd[] -> bm_pte[] 테이블을
+ * 사용하므로 페이지 테이블 할당이 필요없어 페이지 할당 함수에 NULL을 사용한다.
  */
 static void __init create_mapping_noalloc(phys_addr_t phys, unsigned long virt,
 				  phys_addr_t size, pgprot_t prot)
@@ -498,8 +621,17 @@ static int __init enable_crash_mem_map(char *arg)
 }
 early_param("crashkernel", enable_crash_mem_map);
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - kernel memory / 그외의  memory에 대한 mapping을 한다.
+ */
 static void __init map_mem(pgd_t *pgdp)
 {
+/*
+ * IAMROOT, 2021.10.30:
+ * - kernel img + got + rodata + pgtable(idmap + tramp + swapper) 의 영역이된다.
+ *   (init.text 전까지)
+ */
 	static const u64 direct_map_end = _PAGE_END(VA_BITS_MIN);
 	phys_addr_t kernel_start = __pa_symbol(_stext);
 	phys_addr_t kernel_end = __pa_symbol(__init_begin);
@@ -519,6 +651,10 @@ static void __init map_mem(pgd_t *pgdp)
 	if (can_set_direct_map() || crash_mem_map || IS_ENABLED(CONFIG_KFENCE))
 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - kernel 영역에대한 memory region을 일단 nomap으로 설정한다.
+ */
 	/*
 	 * Take care not to create a writable alias for the
 	 * read-only text and rodata sections of the kernel image.
@@ -527,6 +663,15 @@ static void __init map_mem(pgd_t *pgdp)
 	 */
 	memblock_mark_nomap(kernel_start, kernel_end - kernel_start);
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - 그전 루틴에서 초기화했던 mm/memblock.c의 memory region를 순회를 하면서
+ *   각 memory region에서 MEMBLOCK_NONE인 block들만을 위에 설정된 flags로
+ *   설정하면서 page 속성을 PAGE_KERNEL_TAGGED로 mapping한다.
+ *
+ * - 바로 위에서 kernel 영역을 nomap으로 설정했으므로 kernel영역은 무조건 제외된다는게
+ *   확인된다.
+ */
 	/* map all the memory banks */
 	for_each_mem_range(i, &start, &end) {
 		if (start >= end)
@@ -550,8 +695,20 @@ static void __init map_mem(pgd_t *pgdp)
 	 * Note that contiguous mappings cannot be remapped in this way,
 	 * so we should avoid them here.
 	 */
+/*
+ * IAMROOT, 2021.10.30:
+ * - 이제 kernel 영역을 page를 PAGE_KERNEL로(rw), memory flag를 NO_CONT_MAPPINGS을
+ *   한다.
+ *
+ * - NO_CONT_MAPPINGS을 하는 이유
+ *   후에 영역별로 r / rw등으로 나눠야되기때문이다.
+ */
 	__map_memblock(pgdp, kernel_start, kernel_end,
 		       PAGE_KERNEL, NO_CONT_MAPPINGS);
+/*
+ * IAMROOT, 2021.10.30:
+ * - 초반에 해놨던 kernel 영역 nomap 설정을 여기서 다시 풀어준다.
+ */
 	memblock_clear_nomap(kernel_start, kernel_end - kernel_start);
 }
 
@@ -583,6 +740,10 @@ static void __init map_kernel_segment(pgd_t *pgdp, void *va_start, void *va_end,
 	__create_pgd_mapping(pgdp, pa_start, (unsigned long)va_start, size, prot,
 			     early_pgtable_alloc, flags);
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * VM 공간과 VM 사이에 가드 페이지를 추가한다. (VM_NO_GUARD 제외)
+ */
 	if (!(vm_flags & VM_NO_GUARD))
 		size += PAGE_SIZE;
 
@@ -595,6 +756,26 @@ static void __init map_kernel_segment(pgd_t *pgdp, void *va_start, void *va_end,
 	vm_area_add_early(vma);
 }
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * 1) "rodata=off"
+ *     rodata_enabled=false
+ *     rodata_full=false
+ *     -> 커널 및 rodata 영역을 모두 RW로 매핑하여 사용한다.
+ * 2) "rodata=on"
+ *     rodata_enabled=true
+ *     rodata_full=false
+ *     -> 커널만 Read only로 매핑하여 사용한다.
+ * 3) "rodata=full"
+ *     rodata_enabled=true
+ *     rodata_full=true
+ *     -> 커널 및 rodata 영역을 모두 Read only로 매핑하여 사용한다.
+ *
+ * - rodata_enabled=true(default)인 경우 커널 코드를 read only로 매핑한다.
+ * - rodata_full=true(default)인 경우 커널 및 rodata 영역을 read only로 매핑한다.
+ *
+ * 주의: early param이 아닌 정규 param은 set_debug_rodata() 함수에도 존재한다.
+ */
 static int __init parse_rodata(char *arg)
 {
 	int ret = strtobool(arg, &rodata_enabled);
@@ -671,8 +852,40 @@ static void __init map_kernel(pgd_t *pgdp)
 	 * mapping to install SW breakpoints. Allow this (only) when
 	 * explicitly requested with rodata=off.
 	 */
+/*
+ * IAMROOT, 2021.10.30: 
+ * PAGE_KERNEL_ROX:   Kernel Read Only + Exec     (default)
+ * PAGE_KERNEL_EXEC:  Kernel Read + Write + Exec
+ */
 	pgprot_t text_prot = rodata_enabled ? PAGE_KERNEL_ROX : PAGE_KERNEL_EXEC;
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * cpu가 BTI(Branch Target Identification) 기능을 지원하는 경우 이 페이지의
+ * 매핑 속성에 PTE_GP를 추가한다.
+ * 이 기능은 JOP(Jump Oriented Program) & ROP(Return Oriented Program) Attack을 
+ * 회피하기 위해 ARMv8.5 & GCC 9.1에서 PAC(Pointer Authentication Code)를 
+ * 만들어 방어한다. 만일 위조된 주소를 사용하면 Branch Target Exception이 
+ * 발생한다.
+ *
+ * - BTI: 만약 br/blr insts가 가리키는 주소의 insts가 bti가 아니라면
+ *   Branch Target Exception을 발생시킨다.[1]
+ *
+ *      성공          |       예외
+ * -------------------+-------------------
+ *    app code        |     app code
+ *                    |
+ *   br x9 ------.    |    br x9 ------.
+ *               |    |                |
+ *               |    |                |
+ *  -------------+--  |   -------------+--
+ *     library   |    |      library   |
+ *               |    |                |
+ *               |    |                |
+ *   bti <-------'    |    add <-------'
+ *
+ * [1]: https://developer.arm.com/documentation/102433/0100/Jump-oriented-programming
+ */
 	/*
 	 * If we have a CPU that supports BTI and a kernel built for
 	 * BTI then mark the kernel executable text as guarded pages
@@ -681,6 +894,15 @@ static void __init map_kernel(pgd_t *pgdp)
 	if (arm64_early_this_cpu_has_bti())
 		text_prot = __pgprot_modify(text_prot, PTE_GP, PTE_GP);
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * 커널 영역을 매핑하는데 다음과 같이 5개의 영역의 속성을 달리하여 매핑한다.
+ * 1) .text 섹션 영역
+ * 2) .rodata 섹션 영역 <- 일단 RW (NO_CONT_MAPPINGS)
+ * 3) .init.text 섹션 영역
+ * 4) .init.data 섹션 영역
+ * 5) .data 섹션 영역
+ */
 	/*
 	 * Only rodata will be remapped with different permissions later on,
 	 * all other segments are allowed to use contiguous mappings.
@@ -695,6 +917,15 @@ static void __init map_kernel(pgd_t *pgdp)
 			   &vmlinux_initdata, 0, VM_NO_GUARD);
 	map_kernel_segment(pgdp, _data, _end, PAGE_KERNEL, &vmlinux_data, 0, 0);
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * 기존에 init_pg_dir에 fixmap을 매핑하였었다. 이 코드에서는 swapper_pg_dir에서
+ * fixmap(FIXADDR_START) 주소 공간이 이미 매핑된 상태인지 확인하여 매핑하지
+ * 않은 경우 fixmap을 매핑하도록 한다.
+ *
+ * 단 16K, 4레벨 페이지 테이블을 사용하는 경우는 else if 조건을 사용한다.
+ * 예) 0x11111111_11111111 pgd(1) pud(11) pmd(11) pte(11) offset(14)
+ */
 	if (!READ_ONCE(pgd_val(*pgd_offset_pgd(pgdp, FIXADDR_START)))) {
 		/*
 		 * The fixmap falls in a separate pgd to the kernel, and doesn't
@@ -723,21 +954,46 @@ static void __init map_kernel(pgd_t *pgdp)
 		BUG();
 	}
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * KASAN 용도로 페이지 테이블 사본을 만든다.
+ */
 	kasan_copy_shadow(pgdp);
 }
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - memory 전체에 대한 mapping을 swapper_pg_dir에 완료 및 교체후
+ *   init_pg_dir을 삭제한다.
+ */
 void __init paging_init(void)
 {
+/*
+ * IAMROOT, 2021.10.30:
+ * - mapping을 위해 잠시 FIX_PGD를 사용한다.
+ */
 	pgd_t *pgdp = pgd_set_fixmap(__pa_symbol(swapper_pg_dir));
 
 	map_kernel(pgdp);
 	map_mem(pgdp);
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - mapping이 끝낫으므로 FIX_PGD를 해제한다.
+ */
 	pgd_clear_fixmap();
 
 	cpu_replace_ttbr1(lm_alias(swapper_pg_dir));
+/*
+ * IAMROOT, 2021.10.30:
+ * - 이제부터 정석으로 kernel page table인 swapper_pg_dir을 사용하기 시작한다.
+ */
 	init_mm.pgd = swapper_pg_dir;
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - 이제 더이상 사용안하는 init_pg_dir은 삭제한다.
+ */
 	memblock_free(__pa_symbol(init_pg_dir),
 		      __pa_symbol(init_pg_end) - __pa_symbol(init_pg_dir));
 
@@ -1179,6 +1435,11 @@ void vmemmap_free(unsigned long start, unsigned long end,
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 가상주소인 addr에 해당하는 pud entry주소를 반환한다.
+ *   fixmap은 kernel image안의 symbol 정의이므로 xxx_offset_kimg를 사용한다.
+ */
 static inline pud_t *fixmap_pud(unsigned long addr)
 {
 	pgd_t *pgdp = pgd_offset_k(addr);
@@ -1190,6 +1451,11 @@ static inline pud_t *fixmap_pud(unsigned long addr)
 	return pud_offset_kimg(p4dp, addr);
 }
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 가상주소인 addr에 해당하는 pmd entry주소를 반환한다.
+ *   fixmap은 kernel image안의 symbol 정의이므로 xxx_offset_kimg를 사용한다.
+ */
 static inline pmd_t *fixmap_pmd(unsigned long addr)
 {
 	pud_t *pudp = fixmap_pud(addr);
@@ -1200,11 +1466,23 @@ static inline pmd_t *fixmap_pmd(unsigned long addr)
 	return pmd_offset_kimg(pudp, addr);
 }
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - 가상 주소 @addr에 대해 fixmap이 사용하는 bm_pte 테이블의 엔트리 주소를
+ *   반환한다.
+ */
 static inline pte_t *fixmap_pte(unsigned long addr)
 {
 	return &bm_pte[pte_index(addr)];
 }
 
+/*
+ * IAMROOT, 2021.10.09: 
+ *                      pgd=p4d  ->    pud  ->      pmd   ->     pte
+ *                   ------------------------------------------------
+ * - normal case:    init_pg_dir -> bm_pud  ->   bm_pmd   ->  bm_pte
+ * - 16K, 4lvl case: init_pg_dir -> 기존pud ->   bm_pmd   ->  bm_pte
+ */
 /*
  * The p*d_populate functions call virt_to_phys implicitly so they can't be used
  * directly on kernel symbols (bm_p*d). This function is called too early to use
@@ -1222,6 +1500,36 @@ void __init early_fixmap_init(void)
 	pgdp = pgd_offset_k(addr);
 	p4dp = p4d_offset(pgdp, addr);
 	p4d = READ_ONCE(*p4dp);
+/*
+ * IAMROOT, 2021.10.02:
+ * - CONFIG_PGTABLE_LEVELS이 4레벨 이상이고,
+ *   p4d가 매핑이 되있고 p4d가 bm_pud와 주소가 같지 않다면 이
+ *   if문에 진입한다.
+ *   p4d가 할당이 안되있으면 무조건 할당을 하거나
+ *   p4d가 할당이 되있어도 bm_pud와 p4d가 일치한다면 굳이 p4d를 다시 세팅
+ *   할필요 없다는것이다.
+ *   하지만 p4d가 할당도 안되잇고 bm_pud가 일치도 안한다면 p4d를 세팅한다.
+ *
+ * - 각 table별 bits.
+ *   (계산은 ARM64_HW_PGTABLE_LEVEL_SHIFT, PTRS_PER_PGD 주석 참고)
+ *
+ *   | k/u | PGDIR bits | PUD bits | PMD bits | PTE bits | offset bits |
+ *   | 16  | 1          | 11       | 11       | 11       | 14          |
+ *
+ * - fixmap의 특정 주소를 예로 했을때 산출되는 각 table별 masking 값.
+ *   1 : ---
+ *   111_1101_1111 : 0x7df
+ *   111_1111_1111 : 0x7ff
+ *   001_0111_1110 : 0x17e
+ *   
+ * - 16k / 4 level일 경우 pgd는 2개 entry밖에 존재 하지 않는다.
+ *   (VA가 48bit이므로 PTRS_PER_PGD 계산법에서 2가 나오게 된다.)
+ *
+ * - p4d가 이미 kernel에 의해 mapping이 되있으므로 있는걸 사용하겠다는
+ *   의미로 else에서 p4d를 pm_pud와 매핑하는것과는 다르게 이 if문에서는
+ *   mapping을 하지 않는다. else 처럼 pudp만을 구한다.
+ *   이때 image 가상주소로 사용한다.
+ */
 	if (CONFIG_PGTABLE_LEVELS > 3 &&
 	    !(p4d_none(p4d) || p4d_page_paddr(p4d) == __pa_symbol(bm_pud))) {
 		/*
@@ -1232,15 +1540,59 @@ void __init early_fixmap_init(void)
 		BUG_ON(!IS_ENABLED(CONFIG_ARM64_16K_PAGES));
 		pudp = pud_offset_kimg(p4dp, addr);
 	} else {
+/*
+ * IAMROOT, 2021.10.02:
+ * 일반적으로 이 else문으로 진입한다.
+ *
+ * p4d가 매핑이 안되있으면 bm_pud로 매핑을 한다.
+ * 그리고 fixmap_pud를 통해 pud entry 주소를 구한다.
+ *
+ * - as c code
+ *   if (p4d == 0)
+ *      *p4dp = __pa(bm_pud);
+ *   pudp = __va(*p4dp + pud_index(addr) * 8);
+ *
+ *   va(bm_pud[index])를 구해온다.
+ */
 		if (p4d_none(p4d))
 			__p4d_populate(p4dp, __pa_symbol(bm_pud), P4D_TYPE_TABLE);
 		pudp = fixmap_pud(addr);
 	}
+/*
+ * IAMROOT, 2021.10.02:
+ * - pud가 매핑이 안되있다면 위 bm_pud처럼 bm_pmd도 매핑을 해준다.
+ *
+ * - as c code
+ *   if (*pudp == 0)
+ *      *pudp = __pa(bm_pmd);
+ *
+ *   위에서 구해온 va(bm_pud[index])에 bm_pmd의 물리주소를 매핑한다.
+ */
 	if (pud_none(READ_ONCE(*pudp)))
 		__pud_populate(pudp, __pa_symbol(bm_pmd), PUD_TYPE_TABLE);
+/*
+ * IAMROOT, 2021.10.02:
+ * - pmd entry를 구해와서 무조건 bm_pte로 매핑을 해준다.
+ *
+ * - as c code
+ *   pmdp = __va(*pudp + pmd_index(addr) * 8);
+ *   *pmdp = __pa(bm_pte);
+ *
+ *   @addr를 이용해 pa(bm_pmd) -> va(bm_pmd[index])로 변환하고
+ *   bm_pmd[index]에 pa(bm_pte)를 저장한다.
+ *
+ *   pte는 최종 4k entries 가리키므로 fixmap에서 사용할 table을
+ *   더이상 매핑하지 않는다.
+ */
 	pmdp = fixmap_pmd(addr);
 	__pmd_populate(pmdp, __pa_symbol(bm_pte), PMD_TYPE_TABLE);
 
+/*
+ * IAMROOT, 2021.10.18:
+ * - @normal_case에서는 다음과 같은 메모리 공간을 커버한다.
+ *   pg_dir -> bm_pud (1 bucket) -> bm_pmd (1 bucket) -> bm_pte (512 buckets)
+ *   512 * 4k = 2MB
+ */
 	/*
 	 * The boot-ioremap range spans multiple pmds, for which
 	 * we are not prepared:
@@ -1248,6 +1600,12 @@ void __init early_fixmap_init(void)
 	BUILD_BUG_ON((__fix_to_virt(FIX_BTMAP_BEGIN) >> PMD_SHIFT)
 		     != (__fix_to_virt(FIX_BTMAP_END) >> PMD_SHIFT));
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - fixmap의 중간 부분인 FIXADDR_START 가상 주소로 페이지 테이블을 구성한다.
+ *   그리고 이 공간이 early_ioremap() API에서 사용하는 BTMAP을 커버할 수 
+ *   있는지 체크한다.
+ */
 	if ((pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_BEGIN)))
 	     || pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_END))) {
 		WARN_ON(1);
@@ -1268,6 +1626,10 @@ void __init early_fixmap_init(void)
  * Unusually, this is also called in IRQ context (ghes_iounmap_irq) so if we
  * ever need to use IPIs for TLB broadcasting, then we're in trouble here.
  */
+/*
+ * IAMROOT, 2021.10.09: 
+ * 물리주소 @phys를 fixmap이 사용하는 bm_pte[]의 엔트리에 매핑/언매핑 한다.
+ */
 void __set_fixmap(enum fixed_addresses idx,
 			       phys_addr_t phys, pgprot_t flags)
 {
@@ -1286,6 +1648,12 @@ void __set_fixmap(enum fixed_addresses idx,
 	}
 }
 
+/*
+ * IAMROOT, 2021.10.14:
+ * 부트로더가 전달해준 fdt의 물리주소(dt_phys)를
+ * fixmap 영역 4MB(실제론 2MB, 나머지 2MB는 align. FIX_FDT_END 위 주석 참고.)
+ * 에 매핑하여 가상주소를 얻어오는 기능을 수행한다.
+ */
 void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 {
 	const u64 dt_virt_base = __fix_to_virt(FIX_FDT);
@@ -1299,6 +1667,10 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	 * fields of the FDT header after mapping the first chunk, double check
 	 * here if that is indeed the case.
 	 */
+/*
+ * IAMROOT, 2021.10.14:
+ * 전달받은 주소가 없거나 MIN_FDT_ALIGN(8) byte align이 되있는질 검사.
+ */
 	BUILD_BUG_ON(MIN_FDT_ALIGN < 8);
 	if (!dt_phys || dt_phys % MIN_FDT_ALIGN)
 		return NULL;
@@ -1321,13 +1693,26 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	offset = dt_phys % SWAPPER_BLOCK_SIZE;
 	dt_virt = (void *)dt_virt_base + offset;
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * 처음에 fdt header를 읽어오기 위해 한 조각의 매핑을 시도한다. 
+ * (커널 옵션에 따라 섹션 매핑 또는 페이지 매핑)
+ */
 	/* map the first chunk so we can read the size from the header */
 	create_mapping_noalloc(round_down(dt_phys, SWAPPER_BLOCK_SIZE),
 			dt_virt_base, SWAPPER_BLOCK_SIZE, prot);
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * 매직 넘버를 통해서 fdt 테이블인지 확인한다.
+ */
 	if (fdt_magic(dt_virt) != FDT_MAGIC)
 		return NULL;
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * size를 알아온 후 나머지 매핑되지 않은 부분이 있는 경우 다시 매핑한다.
+ */
 	*size = fdt_totalsize(dt_virt);
 	if (*size > MAX_FDT_SIZE)
 		return NULL;

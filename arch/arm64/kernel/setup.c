@@ -55,6 +55,13 @@
 static int num_standard_resources;
 static struct resource *standard_resources;
 
+/*
+ * IAMROOT, 2021.09.04:
+ * - __initdata : include/linux/init.h
+ *
+ * - fdt : flattened device tree
+ * - 부트로더에서 가져온 값이 head.S __primary_switched에서 저장된다.
+ */
 phys_addr_t __fdt_pointer __initdata;
 
 /*
@@ -85,6 +92,12 @@ u64 __cacheline_aligned boot_args[4];
 
 void __init smp_setup_processor_id(void)
 {
+/*
+ * IAMROOT, 2021.09.11:
+ * - cpu 0번이면 mpidr 0인경우가 많지만 아닌 경우도 있다.
+ * - MPIDR_HWID_BITMASK: MPIDR_EL1에서 {Aff3, Aff2, Aff1, Aff0}만 빼온다.
+ * - 각 PE의 {Aff3, Aff2, Aff1, Aff0} 값은 unique하다.
+ */
 	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
 	set_cpu_logical_map(0, mpidr);
 
@@ -178,6 +191,10 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 	early_fdt_ptr = fixmap_remap_fdt(dt_phys, &fdt_size, PAGE_KERNEL);
 }
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * FDT를 fixmap에 매핑한 후 스캔하여 몇 개의 주요 정보를 알아온다.
+ */
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
 	int size;
@@ -186,6 +203,10 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
+/*
+ * IAMROOT, 2021.10.14:
+ * dt_virt를 검색을 해서 이용을 하겠다는것.
+ */
 
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
@@ -197,6 +218,10 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 		while (true)
 			cpu_relax();
 	}
+/*
+ * IAMROOT, 2021.10.16:
+ * - 속성만 바꾸고(Read Only) remap
+ */
 
 	/* Early fixups are done, map the FDT as read-only now */
 	fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
@@ -284,6 +309,11 @@ static int __init reserve_memblock_reserved_regions(void)
 }
 arch_initcall(reserve_memblock_reserved_regions);
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - logical cpu to mpdir mapping.
+ *   kernel code는 전부 logical cpu를 쓴다.
+ */
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 
 u64 cpu_logical_map(unsigned int cpu)
@@ -304,11 +334,28 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	arm64_use_ng_mappings = kaslr_requires_kpti();
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - early : memory mapping등도 안된 상황.
+ * - late : 나중에 해도 되는 작업들
+ */
 	early_fixmap_init();
 	early_ioremap_init();
 
 	setup_machine_fdt(__fdt_pointer);
-
+/*
+ * IAMROOT, 2021.10.16:
+ * - static key
+ *   if의 조건에 사용되는 변수가 변경될일이 거의 없으면서 read를 많이 해야되는경우
+ *   매번 읽는것이 아니라 해당 조건문 자체를 nop나 branch로 교체해서 if문 자체를
+ *   없애는 방법. 또한 likely와 unlikely를 사용해 branch되는 code의 주변 배치여부도
+ *   정해 tlb cache나 data cache hit도 잘되도록 하여 효율을 높인다.
+ *
+ *   enable / disable의 비용이 매우크다. 해당 변수가 존재하는 모든 code를
+ *   교체하는식으로 진행하며 tlb cache등도 비워줘야 되기 때문이다.
+ *
+ *   관련 api : static_branch_likely, static_branch_unlikely
+ */
 	/*
 	 * Initialise the static keys early as they may be enabled by the
 	 * cpufeature code and early parameters.
@@ -316,6 +363,12 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	jump_label_init();
 	parse_early_param();
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - IRQ를 제외한 나머지를 Enable하겠다는것.
+ *   원래 local_daif_restore는 local_daif_save와 같이사용하지만 여기서는 강제로
+ *   restore시킴이 보인다.
+ */
 	/*
 	 * Unmask asynchronous aborts and fiq after bringing up possible
 	 * earlycon. (Report possible System Errors once we can report this
@@ -323,6 +376,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	local_daif_restore(DAIF_PROCCTX_NOIRQ);
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - head.S에서 idmap을 ttbr0에 썻었는데 그것을 해제하기 위함.
+ */
 	/*
 	 * TTBR0 is only used for the identity mapping at this stage. Make it
 	 * point to zero page to avoid speculatively fetching new entries.
@@ -337,7 +394,19 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	arm64_memblock_init();
 
+/*
+ * IAMROOT, 2021.10.31:
+ * - 현재 mmu config 상태
+ *   1) ttbr1_el1 -> init_pg_dir
+ *   2) ttbr0_el1 -> empty_zero_page
+ */
 	paging_init();
+/*
+ * IAMROOT, 2021.10.31:
+ * - 현재 mmu config 상태
+ *   1) ttbr1_el1 -> swapper_pg_dir
+ *   2) ttbr0_el1 -> empty_zero_page
+ */
 
 	acpi_table_upgrade();
 

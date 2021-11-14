@@ -47,6 +47,54 @@
 #include <asm/xen/swiotlb-xen.h>
 
 /*
+ * IAMROOT, 2021.10.23:
+ * - arm64_memblock_init에서 초기화된다. 이 값이 초기화 되기전엔
+ *   리니어 매핑이 완료되지 않은 상태이므로
+ *   phys_to_virt등의 변환 매크로를 사용할수 없다.
+ *
+ *   해당값이 초기화할때 VA_BITS, vabits_actual에 따라서 보정을 해주는데
+ *   다음과 같은 예제 사유를 따른다.
+ *   
+ * ex) VA_BITS = 48, vabits_actual = 48, 
+ *     PAGE_SIZE = 4k, memstart = 0x8000_0000
+ *
+ *	PAGE_OFFSET = 0xffff_0000_0000_0000
+ *
+ *	phys_addr = 0x9000_0000
+ *	
+ *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - 0x8000_0000 |
+ *				      0xffff_0000_0000_0000
+ *				    = 0xffff_0000_1000_0000
+ *
+ * ex) VA_BITS = 52,  vabits_actual = 48,
+ *     PAGE_SIZE = 16, memstart = 0x8000_0000 (틀린사례)
+ *				    
+ *	PAGE_OFFSET = 0xfff0_0000_0000_0000
+ *
+ *	phys_addr = 0x9000_0000
+ *	
+ *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - 0x8000_0000 |
+ *				      0xfff0_0000_0000_0000
+ *				    = 0xfff0_0000_1000_0000
+ *
+ * ex) VA_BITS = 52,  vabits_actual = 48,
+ *     PAGE_SIZE = 16, memstart = -0xe_ffff_8000_0000 (memstart가 보정된 사례)
+ *				    
+ *	PAGE_OFFSET = 0xfff0_0000_0000_0000
+ *
+ *	phys_addr = 0x9000_0000
+ *	
+ *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - (-0xe_ffff_8000_0000) |
+ *				      0xfff0_0000_0000_0000
+ *				    = 0xffff_0000_1000_0000
+ *
+ * 즉 실제 vabits와 compile 타임에 계산된 VA_BITS의 차이를 보정해줘야
+ * 제대로된 물리, 가상주소 변환값이 계산된다.
+ */
+/*
  * We need to be able to catch inadvertent references to memstart_addr
  * that occur (potentially in generic code) before arm64_memblock_init()
  * executes, which assigns it its actual value. So use a default value
@@ -62,6 +110,11 @@ EXPORT_SYMBOL(memstart_addr);
  * In such case, ZONE_DMA32 covers the rest of the 32-bit addressable memory,
  * otherwise it is empty.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64_memblock_init에서 ARM64_ZONE_DMA_BITS 와 ram 크기를
+ *   비교해 작은 값으로 초기화 된다.
+ */
 phys_addr_t arm64_dma_phys_limit __ro_after_init;
 
 #ifdef CONFIG_KEXEC_CORE
@@ -71,6 +124,10 @@ phys_addr_t arm64_dma_phys_limit __ro_after_init;
  * This function reserves memory area given in "crashkernel=" kernel command
  * line parameter. The memory reserved is used by dump capture kernel when
  * primary kernel is crashing.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - crash dump 용으로 작은 kernel을 올릴 영역을 reserve 한다.
  */
 static void __init reserve_crashkernel(void)
 {
@@ -120,6 +177,10 @@ static void __init reserve_crashkernel(void)
  * Return the maximum physical address for a zone accessible by the given bits
  * limit. If DRAM starts above 32-bit, expand the zone to the maximum
  * available memory, otherwise cap it at 32-bit.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - ram 크기 or zone_bits 이내로 범위를 조정한다.
  */
 static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 {
@@ -209,6 +270,10 @@ int pfn_is_map_memory(unsigned long pfn)
 }
 EXPORT_SYMBOL(pfn_is_map_memory);
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - command line이나 dt에서 해당값을 초기화 할수 있다.
+ */
 static phys_addr_t memory_limit = PHYS_ADDR_MAX;
 
 /*
@@ -228,6 +293,16 @@ early_param("mem", early_mem);
 
 void __init arm64_memblock_init(void)
 {
+/*
+ * IAMROOT, 2021.10.23:
+ * ----- (old 5.10)
+ * - 절반만 리니어 매핑영역이므로 vabits 에서 -1 한것을 size로함 (128TB)
+ * -----
+ * - VA_BITS 48
+ *  PAGE_END     = 0xffffff8000000000
+ *  _PAGE_OFFSET = 0xffff000000000000
+ *  255TB를 좀 넘는 범위
+ */
 	s64 linear_region_size = PAGE_END - _PAGE_OFFSET(vabits_actual);
 
 	/*
@@ -244,6 +319,16 @@ void __init arm64_memblock_init(void)
 		linear_region_size = min_t(u64, linear_region_size, BIT(51));
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 물리주소 범위를 벗어나는 영역을 지운다
+ *
+ * 표는 적당히 다음과 같은 순서대로 address가 설정되있다고 했을때
+ * memblock 상태를 표시한다.
+ * ----- (old 5.10)
+ * (fdt_enforce_memory_region 이후만 고려)
+ * -----
+ */
 	/* Remove memory above our supported physical address size */
 	memblock_remove(1ULL << PHYS_MASK_SHIFT, ULLONG_MAX);
 
@@ -261,6 +346,61 @@ void __init arm64_memblock_init(void)
 	 * linear mapping. Take care not to clip the kernel which may be
 	 * high in memory.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 리니어 매핑 영역보다 큰 물리메모리 영역을 제거한다.
+ * 
+ * 최초에 dt에서 memstart ~ memblock_end_of_DRAM() 까지 memory add를 한
+ * 상태였을것이다.
+ *
+ * 그런데 만약 memstart_addr + linear_region_size 가 memblock_end_of_DRAM 작다면,
+ * 즉 128TB 이상이라면 memblock_addr의 주소를 올려 128 TB의 크기로 맞춰버린다.
+ *
+ * 그렇게되면 old_memblock_addr ~ memblock_addr 부분이 아직 memblock add 로
+ * 남았을것이므로 그 부분을 지우기 위해 0 ~ memblock_addr까지 지운다.
+ *
+ * memstart_addr 수정전)
+ * address                  | memblock
+ * -------------------------+--------
+ * ..                       | remove
+ * memblock_end_of_DRAM()   | remove
+ * ..                       | add
+ * (linear_region_size      | add
+ * 보다 큰 간격)            | add
+ * ...                      | add
+ * memstart_addr            | add
+ * ...                      | remove
+ * -------------------------+--------
+ *
+ * memstart_addr 수정후)
+ * address                  | memblock
+ * -------------------------+--------
+ * ..                       | remove
+ * memblock_end_of_DRAM()   | remove
+ * ..                       | add
+ * linear_region_size       | add
+ * ...                      | add
+ * memstart_addr      <.    | add 
+ * ...                 |    | add <-- memstart_addr이 위로 올라갔으므로
+ * (old_memstart_addr) /    | add <-- 이 부분들이 remove되야된다.
+ * ...                      | remove
+ * -------------------------+--------
+ *
+ * memblock_remove(0, memstart_addr) 후)
+ *
+ * address                  | memblock
+ * -------------------------+--------
+ * ..                       | remove
+ * memblock_end_of_DRAM()   | remove
+ * ..                       | add
+ * linear_region_size       | add
+ * ...                      | add
+ * memstart_addr            | add 
+ * ...                      | *remove
+ * old_memstart_addr        | *remove
+ * ...                      | remove
+ * -------------------------+--------
+ */
 	memblock_remove(max_t(u64, memstart_addr + linear_region_size,
 			__pa_symbol(_end)), ULLONG_MAX);
 	if (memstart_addr + linear_region_size < memblock_end_of_DRAM()) {
@@ -277,6 +417,21 @@ void __init arm64_memblock_init(void)
 	 * we have to move it upward. Since memstart_addr represents the
 	 * physical address of PAGE_OFFSET, we have to *subtract* from it.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * memstart_addr의 주석에 있는 내용과 같은 상황(config의 VA_BITS와
+ * vabits_actual이 다른 상황)에서 와 같이 그냥 memstart_addr을 사용하면
+ * 오차가 발생해버린다. 이 오차를 이 시점에서 보정을 해준다.
+ *
+ * memstart_addr = 0x8000_0000
+ * _PAGE_OFFSET(48) = 0xffff_0000_0000_0000
+ * _PAGE_OFFSET(52) = 0xfff0_0000_0000_0000
+ *
+ * memstart_addr = 0x8000_0000 - 0xf_0000_0000_0000
+ *               = -0xe_ffff_8000_0000
+ *
+ * 해당 주석의 마지막 예제로가면 보정된 결과가 있다.
+ */
 	if (IS_ENABLED(CONFIG_ARM64_VA_BITS_52) && (vabits_actual != 52))
 		memstart_addr -= _PAGE_OFFSET(48) - _PAGE_OFFSET(52);
 
@@ -285,11 +440,24 @@ void __init arm64_memblock_init(void)
 	 * high up in memory, add back the kernel region that must be accessible
 	 * via the linear mapping.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 외부에서 memory_limis값이 지정이되면 해당값을 기준으로 초기화가 이루어진다.
+ *   memory_limit ~ PHYS_ADDR_MAX를 전부 remove 한다.
+ *
+ * - kernel이 dram의 위쪽에 load가 될수있는데 이 때 kernel 영역이
+ *   memory_limit 을 걸치고있거나 위에 있을 수 있어 kernel image 영역이
+ *   제거될수있으므로 다시 add를 해준다.
+ */
 	if (memory_limit != PHYS_ADDR_MAX) {
 		memblock_mem_limit_remove_map(memory_limit);
 		memblock_add(__pa_symbol(_text), (u64)(_end - _text));
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - initrd 영역을 reserved한다.
+ */
 	if (IS_ENABLED(CONFIG_BLK_DEV_INITRD) && phys_initrd_size) {
 		/*
 		 * Add back the memory we just removed if it results in the
@@ -313,12 +481,20 @@ void __init arm64_memblock_init(void)
 			"initrd not fully accessible via the linear mapping -- please check your bootloader ...\n")) {
 			phys_initrd_size = 0;
 		} else {
+/*
+ * IAMROOT, 2021.10.23:
+ * - 해당영역이 flag가 존재할수있으므로 그냥 remove를 한다.
+ */
 			memblock_remove(base, size); /* clear MEMBLOCK_ flags */
 			memblock_add(base, size);
 			memblock_reserve(base, size);
 		}
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - CONFIG_RANDOMIZE_BASE가 적용되있으면 다시한번 memstart_addr를 고쳐준다.
+ */
 	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE)) {
 		extern u16 memstart_offset_seed;
 		u64 mmfr0 = read_cpuid(ID_AA64MMFR0_EL1);
@@ -334,6 +510,13 @@ void __init arm64_memblock_init(void)
 		 */
 		if (memstart_offset_seed > 0 && range >= (s64)ARM64_MEMSTART_ALIGN) {
 			range /= ARM64_MEMSTART_ALIGN;
+/*
+ * IAMROOT, 2021.10.27:
+ * - memstart_offset_seed는 seed 상위 16bit를 사용했었다.
+ *   즉 memstart_offset_seed는 16bit 이하의 값인데 여기에 range를 곱해서
+ *   memstart_offset_seed의 범위인 16 bit를 넘는 값만을 사용해서 마진을 구할려고
+ *   다음과 같은 식들을 사용한거 같다.
+ */
 			memstart_addr -= ARM64_MEMSTART_ALIGN *
 					 ((range * memstart_offset_seed) >> 16);
 		}
@@ -343,18 +526,38 @@ void __init arm64_memblock_init(void)
 	 * Register the kernel text, kernel data, initrd, and initial
 	 * pagetables with memblock.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - kernel 영역을 reserve
+ */
 	memblock_reserve(__pa_symbol(_stext), _end - _stext);
 	if (IS_ENABLED(CONFIG_BLK_DEV_INITRD) && phys_initrd_size) {
 		/* the generic initrd code expects virtual addresses */
 		initrd_start = __phys_to_virt(phys_initrd_start);
 		initrd_end = initrd_start + phys_initrd_size;
 	}
+/*
+ * IAMROOT, 2021.10.23:
+ * - dt에서 지정한 reserved 영역 등록
+ */
 
 	early_init_fdt_scan_reserved_mem();
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - va를 사용시 범위를 벗어나면 안되서 -1을 해줬다가 결과 가상주소에 + 1을 한다.
+ */
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
 
+/*
+ * IAMROOT, 2021.11.06:
+ * - ex) 0x8000_0000 ~ 0xffff_ffff(2GB)
+ *   memblock_start_of_DRAM = 0x8000_0000
+ *   memblock_end_of_DRAM = 0x1_0000_0000
+ *   min =  0x8_0000
+ *   max = 0x10_0000
+ */
 void __init bootmem_init(void)
 {
 	unsigned long min, max;
