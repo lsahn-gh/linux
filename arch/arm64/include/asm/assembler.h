@@ -905,12 +905,32 @@ alternative_endif
  */
 .macro set_sctlr, sreg, reg
 	msr	\sreg, \reg
+/*
+ * IAMROOT, 2021.09.02:
+ * - mmu enable. ARMv8-A-Programmer-Guide에 보면 해당 예제가 나와있다.
+ *
+ * - sctlr_el1 설정후에는 MMU on과 동시에 CPU가 처리하는
+ *   모든 주소는 MMU를 통해 translation 된다.
+ *   현재 실행중인 instructions 또한 fetch시 MMU를 통하게 되는데
+ *   page fault를 방지하기 위해 현재 실행중인 instructions은 .idmap.text
+ *   섹션에 저장하며, MMU가 on 이어도 idmap을 통해 동일 주소로 접근하게
+ *   되므로 fault는 발생하지 않는다.
+ *   .idmap.text은 상위 16 bits (VA 48bits 기준)가 0이고 TTBR0 값을 통해
+ *   table base addr를 참조하므로 위처럼 ttbr0_el1에 idmap_pg_dir을 저장해야한다.
+ *
+ * - 현재 trap vector table 초기화 X, swapper page table 초기화 X 이므로
+ *   idmap을 통한 page fault 방어는 mandatory이다.
+ */
 	isb
 	/*
 	 * Invalidate the local I-cache so that any instructions fetched
 	 * speculatively from the PoC are discarded, since they may have
 	 * been dynamically patched at the PoU.
 	 */
+/*
+ * IAMROOT, 2021.08.28:
+ * - I-cache를 PoU까지 모두 invalidate 한다.
+ */
 	ic	iallu
 	dsb	nsh
 	isb

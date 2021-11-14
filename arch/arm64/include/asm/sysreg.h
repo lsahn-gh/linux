@@ -702,6 +702,15 @@
 #endif
 
 /*
+ * IAMROOT, 2021.07.24:
+ * - SCTLR_EL1_RES1: SCTLR 예약 비트(RES1) 5개
+ * - ENDIAN_SET_EL1: Endian 설정
+ *   -> CONFIG_CPU_BIG_ENDIAN가 true이면 big endian, 아니면 little endian이다.
+ */
+#define INIT_SCTLR_EL1_MMU_OFF \
+	(ENDIAN_SET_EL1 | SCTLR_EL1_RES1)
+
+/*
  * IAMROOT, 2021.08.29:
  * sctlr_el1.x
  * - m    : EL1/EL0 stage 1 MMU 사용.
@@ -728,9 +737,6 @@
  * -------
  * - epan : (5.15 추가) Enhanced Privileged Access Never 기능
  */
-#define INIT_SCTLR_EL1_MMU_OFF \
-	(ENDIAN_SET_EL1 | SCTLR_EL1_RES1)
-
 #define INIT_SCTLR_EL1_MMU_ON \
 	(SCTLR_ELx_M    | SCTLR_ELx_C    | SCTLR_ELx_SA   | SCTLR_EL1_SA0   | \
 	 SCTLR_EL1_SED  | SCTLR_ELx_I    | SCTLR_EL1_DZE  | SCTLR_EL1_UCT   | \

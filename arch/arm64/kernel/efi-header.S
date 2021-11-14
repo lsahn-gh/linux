@@ -7,6 +7,26 @@
 #include <linux/pe.h>
 #include <linux/sizes.h>
 
+/*
+ * IAMROOT, 2021.07.10:
+ * -----(old 5.10)
+ * - add 는 커널입장에서는 의미없이 동작하는 코드지만,
+ *   외부에서 이커널을 볼때, UEFI를 지원한다는 것을 의미하는
+ *   MZ라는 MAGIC NUMBER를 확인 할 수 있다.
+ * -----
+ *  - arm64 quck ref :
+ *  https://courses.cs.washington.edu/courses/cse469/19wi/arm64.pdf
+ *  - condition code :
+ *  https://developer.arm.com/documentation/dui0802/a/A32-and-T32-Instructions/Condition-codes?lang=en*
+ *  - CCMP  Xn, #imm, #nzcv, cond
+ *  nzcv : 3 2 1 0 bit 순으로 nzcv. 0xd이므로 0b1101 -> N, Z, V 가 set
+ *  pl : positive or zero
+ * - ccmp 는 커널입장에서는 의미없이 동작하는 코드지만,
+ *   외부에서 이커널을 볼때, UEFI를 지원한다는 것을 의미하는
+ *   MZ라는 MAGIC NUMBER를 확인 할 수 있다.
+ *
+ * - CONFIG_EFI가 설정되지 않은경우에는 대체코드로 nop가 대신들어간다.
+ */
 	.macro	efi_signature_nop
 #ifdef CONFIG_EFI
 .L_head:
@@ -16,6 +36,10 @@
 	 */
 	ccmp	x18, #0, #0xd, pl
 #else
+/*
+ * IAMROOT, 2021.07.10:
+ * CONFIG_EFI=n로 동작하기 위해선 DT를 수동으로 작성 해줘야한다.
+ */
 	/*
 	 * Bootloaders may inspect the opcode at the start of the kernel
 	 * image to decide if the kernel is capable of booting via UEFI.
