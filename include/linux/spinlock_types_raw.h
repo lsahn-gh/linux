@@ -11,6 +11,10 @@
 
 #include <linux/lockdep_types.h>
 
+/*
+ * IAMROOT, 2021.09.25: 
+ * raw_spinlock 구조체
+ */
 typedef struct raw_spinlock {
 	arch_spinlock_t raw_lock;
 #ifdef CONFIG_DEBUG_SPINLOCK

@@ -87,6 +87,11 @@ int __init efi_memmap_alloc(unsigned int num_entries,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - uefi가 준 정보로 FIXMAP의 BTMAP에 early memory mapping을 한다.
+ */
+
 /**
  * __efi_memmap_init - Common code for mapping the EFI memory map
  * @data: EFI memory map data
@@ -140,6 +145,10 @@ static int __init __efi_memmap_init(struct efi_memory_map_data *data)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - FIXMAP의 BTMAP에 memory mapping을 하고 efi 변수를 초기화한다.
+ */
 /**
  * efi_memmap_init_early - Map the EFI memory map data structure
  * @data: EFI memory map data

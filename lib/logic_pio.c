@@ -16,6 +16,10 @@
 #include <linux/sizes.h>
 #include <linux/slab.h>
 
+/*
+ * IAMROOT, 2021.11.06:
+ * - pci io resource가 등록된다.
+ */
 /* The unique hardware address list */
 static LIST_HEAD(io_range_list);
 static DEFINE_MUTEX(io_range_mutex);

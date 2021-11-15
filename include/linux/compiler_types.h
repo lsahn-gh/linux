@@ -271,6 +271,10 @@ struct ftrace_likely_data {
  * Prefer C11 _Generic for better compile-times and simpler code. Note: 'char'
  * is not type-compatible with 'signed char', and we define a separate case.
  */
+/*
+ * IAMROOT, 2021.09.18:
+ * - _Generic : type별 override x가 어떤 type인지를 확인
+ */
 #define __scalar_type_to_expr_cases(type)				\
 		unsigned type:	(unsigned type)0,			\
 		signed type:	(signed type)0

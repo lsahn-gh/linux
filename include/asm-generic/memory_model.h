@@ -44,6 +44,16 @@
 #endif /* CONFIG_FLATMEM/SPARSEMEM */
 
 /*
+ * IAMROOT, 2021.10.09: 
+ * __phys_to_pfn():
+ *   물리 주소를 pfn으로 변환한다.
+ *   4K 페이지 예) 0x1234_5678 -> 0x12345
+ *
+ * __pfn_to_phys():
+ *   pfn을 물리 주소로 변환한다.
+ *   4K 페이지 예) 0x12345 -> 0x1234_5000
+ */
+/*
  * Convert a physical address to a Page Frame Number and back
  */
 #define	__phys_to_pfn(paddr)	PHYS_PFN(paddr)

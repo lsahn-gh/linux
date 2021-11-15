@@ -11,6 +11,13 @@
 
 #include <linux/types.h>
 
+/*
+ * IAMROOT, 2021.09.25: 
+ * arch_spinlock_t: qspinlock 구조체를 타입 정의하여 사용한다.
+ * u32 val - u16 locked_pending - u8 locked
+ *                                u8 pending
+ *           u16 tail
+ */
 typedef struct qspinlock {
 	union {
 		atomic_t val;
@@ -63,6 +70,23 @@ typedef struct qspinlock {
  *     8: pending
  *  9-10: tail index
  * 11-31: tail cpu (+1)
+ */
+/*
+ * IAMROOT, 2021.10.02:
+ * - _Q_LOCKED_MASK : 0xff
+ *   arch_spinlock_t 에서 locked 값을 masking하기 위한것.
+ * - _Q_PENDING_MASK : 0xff00
+ *   arch_spinlock_t 에서 pending 값을 masking하기 위한것.
+ * - _Q_TAIL_IDX_MASK : 0x3_0000
+ * - _Q_TAIL_CPU_MASK : 0xfffc_0000
+ * - _Q_TAIL_MASK : 0xffff_0000
+ *
+ * - _Q_PENDING_OFFSET : 8 
+ * - _Q_TAIL_IDX_OFFSET : 16
+ * - _Q_TAIL_CPU_OFFSET : 18
+ *
+ * - _Q_LOCKED_VAL = 1
+ * - _Q_PENDING_VAL = 0x100
  */
 #define	_Q_SET_MASK(type)	(((1U << _Q_ ## type ## _BITS) - 1)\
 				      << _Q_ ## type ## _OFFSET)

@@ -3,6 +3,10 @@
 #define __LINUX_COMPILER_ATTRIBUTES_H
 
 /*
+ * IAMROOT, 2021.09.04:
+ * - __attribute__XX.. : GCC 컴파일러의 속성 요청
+ */
+/*
  * The attributes in this file are unconditionally defined and they directly
  * map to compiler attribute(s), unless one of the compilers does not support
  * the attribute. In that case, __has_attribute is used to check for support
@@ -68,6 +72,10 @@
 /*
  *   gcc: https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#index-cold-function-attribute
  *   gcc: https://gcc.gnu.org/onlinedocs/gcc/Label-Attributes.html#index-cold-label-attribute
+ */
+/* IAMROOT, 2021.09.16:
+ * 함수의 cold 속성은 함수가 실행될 가능성이 낮다는 것을 컴파일러에 알리는 데
+ * 사용됩니다.  이 함수는 속도보다는 크기에 최적화되어 있습니다.
  */
 #define __cold                          __attribute__((__cold__))
 

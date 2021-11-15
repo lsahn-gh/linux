@@ -232,6 +232,13 @@ extern void warn_bogus_irq_restore(void);
 
 #else /* !CONFIG_TRACE_IRQFLAGS */
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - local_irq : local은 현재 cpu를 의미한다. 즉 현재 cpu의 interrupt
+ *   remote    : 현재 cpu를 제외한 나머지 cpu
+ *
+ * - local_irq_disable : 현재 cpu에 interrupt가 진입하지 못하도록 막는것.
+ */
 #define local_irq_enable()	do { raw_local_irq_enable(); } while (0)
 #define local_irq_disable()	do { raw_local_irq_disable(); } while (0)
 #define local_irq_save(flags)	do { raw_local_irq_save(flags); } while (0)

@@ -65,11 +65,27 @@ static __always_inline int queued_spin_trylock(struct qspinlock *lock)
 	if (unlikely(val))
 		return 0;
 
+/*
+ * IAMROOT, 2021.09.25: 
+ * - val 값이 0인 경우에만 이 곳으로 온다. 즉 unlock 상태. 
+ *
+ * - 아래 코드에서는 다른 smp core가 먼저 lock을 획득한 경우 lock->val이 0이 아닌 
+ *   값이 저장되며, 이 때 lock 획득이 실패한다.
+ *   여전히 lock->val이 0인 상태인 경우에만 1로 교체 시도하여 성공하면 
+ *   lock을 획득하게 된다.
+ */
 	return likely(atomic_try_cmpxchg_acquire(&lock->val, &val, _Q_LOCKED_VAL));
 }
 
 extern void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val);
 
+/*
+ * IAMROOT, 2021.09.25: 
+ * - 무조건 lock을 획득하는데 누군가 먼저 lock을 획득한 상태라면,
+ *   내 차례가 와서 lock을 획득할 때 까지 무한 spin 한다.
+ *
+ * - 무조건 성공이므로 void 반환을 사용한다.
+ */
 #ifndef queued_spin_lock
 /**
  * queued_spin_lock - acquire a queued spinlock
@@ -79,14 +95,38 @@ static __always_inline void queued_spin_lock(struct qspinlock *lock)
 {
 	int val = 0;
 
+/* IAMROOT, 2021.09.25: fast-path
+ * - val = 0 으로 비교하는 이유
+ *   spin_lock_init에서 val을 0으로 초기화 시킨다. 그러므로 old값이
+ *   spin_lock_init에서 초기화한 0일 것이고, 해당 old값인 0으로 비교하는것이다.
+ *
+ * - lock 획득 성공시 1,
+ *   lock 획득 실패시 0을 리턴한다.
+ */
 	if (likely(atomic_try_cmpxchg_acquire(&lock->val, &val, _Q_LOCKED_VAL)))
 		return;
 
+/* IAMROOT, 2021.09.25: slow-path
+ * - lock은 풀렸으나 pending/tail bits가 set되어도 fast-path 실패로 간주하는데
+ *   pending cpu가 다음 lock-owner가 되어야 하기 때문이다.
+ *
+ * - fast-path 성공/실패 케이스
+ *   성공 (반환 1): val == (0,0,0)
+ *   실패 (반환 0): val != (0,0,0) 따라서 (*,*,1) / (*,1,*) / (n,*,*) 이다.
+ *
+ *   예) (*,1,0) 라면 lock-owner는 없으나 spinning cpus >= 1인 경우이다.
+ */
 	queued_spin_lock_slowpath(lock, val);
 }
 #endif
 
 #ifndef queued_spin_unlock
+/*
+ * IAMROOT, 2021.10.02:
+ * - release를 사용해 lock할때 걸었던 acquire를 풀어준다.
+ *
+ * - smp_store_release를 사용할때 wfe도 같이 풀린다.
+ */
 /**
  * queued_spin_unlock - release a queued spinlock
  * @lock : Pointer to queued spinlock structure

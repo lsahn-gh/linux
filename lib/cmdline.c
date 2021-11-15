@@ -79,6 +79,14 @@ int get_option(char **str, int *pint)
 }
 EXPORT_SYMBOL(get_option);
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - cmd string의 경우 param=value 인것이 존재하고 그냥 param만 인것이 있다.
+ *   또한 argument들이 space들로 분리되어있다. (param1 parm2 ...)
+ *   param="abc def" 이렇게 value가 있는 경우도 있어 "를 해석해 value를 가져오는것도
+ *   보인다.
+ *   -- option들도 존재한다.
+ */
 /**
  *	get_options - Parse a string into a list of integers
  *	@str: String to be parsed

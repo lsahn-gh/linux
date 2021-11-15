@@ -142,6 +142,10 @@ static inline void __nodes_setall(nodemask_t *dstp, unsigned int nbits)
 	bitmap_fill(dstp->bits, nbits);
 }
 
+/*
+ * IAMROOT, 2021.11.06:
+ * - node bitmap clear
+ */
 #define nodes_clear(dst) __nodes_clear(&(dst), MAX_NUMNODES)
 static inline void __nodes_clear(nodemask_t *dstp, unsigned int nbits)
 {

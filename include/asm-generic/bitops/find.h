@@ -19,6 +19,19 @@ extern unsigned long _find_last_bit(const unsigned long *addr, unsigned long siz
  * Returns the bit number for the next set bit
  * If no bits are set, returns @size.
  */
+/* IAMROOT, 2021.09.30.
+ * * addr은 bitmap의 처음 번지, size는 bitmap의 bit 길이, offset은 시작할
+ * bit offset이 된다. return값은 offset이상의 bit에서 set된 bit index가 된다.
+ *
+ * ex)
+ * unsigned long addr[2] = {3, 3}; 
+ *
+ * find_next_bit(addr, sizeof(addr) * 8, 0); // 0
+ * find_next_bit(addr, sizeof(addr) * 8, 1); // 1
+ * find_next_bit(addr, sizeof(addr) * 8, 2); // 64
+ * find_next_bit(addr, sizeof(addr) * 8, 65); // 65
+ * find_next_bit(addr, sizeof(addr) * 8, 66); // 128
+ */
 static inline
 unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
 			    unsigned long offset)
@@ -47,6 +60,10 @@ unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
  *
  * Returns the bit number for the next set bit
  * If no bits are set, returns @size.
+ */
+/* IAMROOT, 2021.09.30:
+ * addr2로 and를 한후 찾겠다는 함수. find_next_bit에서 addr2만 추가되고
+ * _find_next_bit에서 addr2을 and하여 구하는것이 보인다.
  */
 static inline
 unsigned long find_next_and_bit(const unsigned long *addr1,
@@ -77,6 +94,10 @@ unsigned long find_next_and_bit(const unsigned long *addr1,
  * Returns the bit number of the next zero bit
  * If no bits are zero, returns @size.
  */
+/* IAMROOT, 2021.09.30:
+ * _find_next_bit가 set bit만을 찾는구조로 되있으므로 ~0UL로 bit들을 invert해서
+ * set bit를 찾는식이된다.
+ */
 static inline
 unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,
 				 unsigned long offset)
@@ -104,6 +125,9 @@ unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,
  *
  * Returns the bit number of the first set bit.
  * If no bits are set, returns @size.
+ */
+/* IAMROOT, 2021.09.30:
+ * addr bitmap에서 제일 처음 set되 있는 bit index를 구한다.
  */
 static inline
 unsigned long find_first_bit(const unsigned long *addr, unsigned long size)
@@ -154,6 +178,9 @@ unsigned long find_first_zero_bit(const unsigned long *addr, unsigned long size)
  * @size: The number of bits to search
  *
  * Returns the bit number of the last set bit, or size.
+ */
+/* IAMROOT, 2021.09.30:
+ * addr bitmap에서 제일 마지막에 set되 있는 bit index를 구한다.
  */
 static inline
 unsigned long find_last_bit(const unsigned long *addr, unsigned long size)

@@ -12,6 +12,11 @@
 
 #include "do_mounts.h"
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64_memblock_init에서 memstart_addr가 초기화가 되고 kernel 영역이
+ *   reserve 된후 초기화가 된다.
+ */
 unsigned long initrd_start, initrd_end;
 int initrd_below_start_ok;
 unsigned int real_root_dev;	/* do_proc_dointvec cannot handle kdev_t */
@@ -28,6 +33,14 @@ static int __init no_initrd(char *str)
 
 __setup("noinitrd", no_initrd);
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - ex) initrd=0x41000000,8M
+ *   즉 ,를 기준으로 start와 size가 구별된 구조라 이것을 parse를 하는상황.
+ *
+ *   dt에서 initrd가 있었다면 phys_initrd 들이 초기화 됫겟지만 cmd line에 존재하면
+ *   이 값들로 덮어씌어진다. 즉 cmd line이 우선순위가 높게 된다.
+ */
 static int __init early_initrdmem(char *p)
 {
 	phys_addr_t start;

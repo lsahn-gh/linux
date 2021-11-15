@@ -120,6 +120,10 @@ extern int mmap_rnd_compat_bits __read_mostly;
 #define page_to_virt(x)	__va(PFN_PHYS(page_to_pfn(x)))
 #endif
 
+/*
+ * IAMROOT, 2021.10.30:
+ * - __pa kernel symbol에 대해서 lm va로 변환한다.
+ */
 #ifndef lm_alias
 #define lm_alias(x)	__va(__pa_symbol(x))
 #endif
@@ -231,6 +235,12 @@ int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 #endif
 
 /* to align the pointer to the (next) page boundary */
+/*
+ * IAMROOT, 2021.10.09: 
+ * 페이지 단위로 round up한 주소를 반환한다.
+ * 예) 0x1234 -> 0x2000
+ *     0x1000 -> 0x1000
+ */
 #define PAGE_ALIGN(addr) ALIGN(addr, PAGE_SIZE)
 
 /* test whether an address (unsigned long or pointer) is aligned to PAGE_SIZE */

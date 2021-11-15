@@ -13,6 +13,10 @@
 
 #ifndef CONFIG_PREEMPT_RT
 
+/*
+ * IAMROOT, 2021.09.25: 
+ * spinlock 구조체
+ */
 /* Non PREEMPT_RT kernels map spinlock to raw_spinlock */
 typedef struct spinlock {
 	union {

@@ -357,6 +357,11 @@ struct earlycon_id {
 	int	(*setup)(struct earlycon_device *, const char *options);
 };
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - .init.rodata section에 위치한다
+ *   (EARLYCON_TABLE(__earlycon_table) 에 vmlinux.lds 에서 위치하도록 정의)
+ */
 extern const struct earlycon_id __earlycon_table[];
 extern const struct earlycon_id __earlycon_table_end[];
 
@@ -366,6 +371,10 @@ extern const struct earlycon_id __earlycon_table_end[];
 #define EARLYCON_USED_OR_UNUSED	__maybe_unused
 #endif
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - __earlycon_table 의 값들을 정의 하는 macro. 옛날부터 사용했던 것.
+ */
 #define OF_EARLYCON_DECLARE(_name, compat, fn)				\
 	static const struct earlycon_id __UNIQUE_ID(__earlycon_##_name) \
 		EARLYCON_USED_OR_UNUSED  __section("__earlycon_table")  \
@@ -374,6 +383,10 @@ extern const struct earlycon_id __earlycon_table_end[];
 		    .compatible = compat,				\
 		    .setup = fn }
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - __earlycon_table 의 값들을 정의 하는 macro
+ */
 #define EARLYCON_DECLARE(_name, fn)	OF_EARLYCON_DECLARE(_name, "", fn)
 
 extern int of_setup_earlycon(const struct earlycon_id *match,

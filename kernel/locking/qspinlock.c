@@ -66,6 +66,9 @@
  */
 
 #include "mcs_spinlock.h"
+/*
+ * IAMROOT, 2021.09.25: cpu당 최대 nest 가능한 수
+ */
 #define MAX_NODES	4
 
 /*
@@ -105,8 +108,25 @@ struct qnode {
  *
  * PV doubles the storage and uses the second cacheline for PV state.
  */
+/*
+ * IAMROOT, 2021.09.25: 
+ * - mcs queue node는 cpu별로 최대 4개씩 구성된다.
+ *
+ * static __attribute__(section(".data..percpu" "..shared_aligned")))
+ *        __typeof__(struct qnode) qnodes[4]
+ *        __attribute__((__aligned__((1 << (6)))));
+ */
 static DEFINE_PER_CPU_ALIGNED(struct qnode, qnodes[MAX_NODES]);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - tail에 set되는 cpu는 1씩 증가한 상태로 쓴다(0은 no tail의 의미로
+ *   쓰기때문)
+ *
+ * - tail에는 cpu필드와 idx필드가 각각 존재한다.
+ *   cpu = 현재 cpu 번호 + 1.
+ *   idx = nest count (qnodes에서 MCS node의 인덱스로 사용).
+ */
 /*
  * We must be able to distinguish between no-tail and the tail at 0:0,
  * therefore increment the cpu number by one.
@@ -122,6 +142,11 @@ static inline __pure u32 encode_tail(int cpu, int idx)
 	return tail;
 }
 
+/*
+ * IAMROOT, 2021.10.09:
+ * - 32비트 tail값에 들어있는 cpu와 idx 값을 기반으로
+ *   percpu qnodes상에서 알맞는 MCS node를 찾아내서 주소를 리턴한다.
+ */
 static inline __pure struct mcs_spinlock *decode_tail(u32 tail)
 {
 	int cpu = (tail >> _Q_TAIL_CPU_OFFSET) - 1;
@@ -130,6 +155,10 @@ static inline __pure struct mcs_spinlock *decode_tail(u32 tail)
 	return per_cpu_ptr(&qnodes[idx].mcs, cpu);
 }
 
+/*
+ * IAMROOT, 2021.10.09:
+ * qnode base를 기준으로 idx만큼 떨어진 MCS node의 위치를 리턴한다.
+ */
 static inline __pure
 struct mcs_spinlock *grab_mcs_node(struct mcs_spinlock *base, int idx)
 {
@@ -139,6 +168,12 @@ struct mcs_spinlock *grab_mcs_node(struct mcs_spinlock *base, int idx)
 #define _Q_LOCKED_PENDING_MASK (_Q_LOCKED_MASK | _Q_PENDING_MASK)
 
 #if _Q_PENDING_BITS == 8
+/*
+ * IAMROOT, 2021.10.02:
+ * - pending을 clear하면서 lock을 변경한다.
+ *   두 변수를 동시에 set하기위해 union으로 만들어 놨던
+ *   locked_pending을 사용한것이 보인다.
+ */
 /**
  * clear_pending - clear the pending bit.
  * @lock: Pointer to queued spinlock structure
@@ -312,6 +347,30 @@ static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
  * contended             :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
  *   queue               :         ^--'                             :
  */
+/*
+ * IAMROOT, 2021.09.25: 
+ * - u8 locked: 
+ *	1 비트만 사용한다. (0=no-lock, 1=lock)
+ * - u8 pending: 
+ *	1 비트만 사용한다. (0=no-pending, 1=pending)
+ * - u16: tail(cpu+idx):
+ *	14 비트는 cpu, idx에 2비트를 사용.
+ *	cpu: 실제 cpu 번호에 +1한 값을 저장한다. (0=no-cpu)
+ *	idx: task, bh, irq, nmi 각각으로 변경될 때마다 1씩 증가한다. (defaul: 0)
+ *           대부분의 경우 그냥 0을 사용하며, cpu에서 4가지 상태로 관리한다.
+ *		예) task(0) -> irq(1)
+ *		    task(0) -> irq(1) -> nmi(2)
+ *
+ * uncontended:
+ *	lock 경합없이 lock을 획득할 수 있는 상태. (처음 진입한 cpu)
+ * pending:
+ *	먼저 진입한 cpu가 lock owner이고, 두 번째로 진입한 cpu인 경우 가볍게 대기.
+ * uncontended queue:
+ *	세 번째로 진입한 cpu가 queue의 head에서 대기하는 상태로,
+ *      큐 내에서 간섭없이 대기중
+ * contended queue:
+ *      큐 내에서 차순위 이상 대기중인 cpu들이다.
+ */
 void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 {
 	struct mcs_spinlock *prev, *next, *node;
@@ -320,9 +379,17 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 
 	BUILD_BUG_ON(CONFIG_NR_CPUS >= (1U << _Q_TAIL_CPU_BITS));
 
+/*
+ * IAMROOT, 2021.10.09:
+ * pv_enabled: 항상 false 리턴.
+ */
 	if (pv_enabled())
 		goto pv_queue;
 
+/*
+ * IAMROOT, 2021.10.09:
+ * virt_spin_lock: 항상 false 리턴.
+ */
 	if (virt_spin_lock(lock))
 		return;
 
@@ -333,17 +400,42 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	 * 0,1,0 -> 0,0,1
 	 */
 	if (val == _Q_PENDING_VAL) {
+/*
+ * IAMROOT, 2021.10.02:
+ * - fast-path일때는 LOCKED이 되어있었지만 막상 여기까지 와보니
+ *   그때의 lock은 풀려있고, 2번째 cpu가 pending중인 상태때 진입하는 if문.
+ *   2번째 cpu의 pending이 풀리거나 한번만 cpu_relax를 기다린다.
+ *
+ * - VAL
+ *   atomic_cond_read_relaxed 내부에서 쓰는 지역변수. 직접 읽은 값을
+ *   비교하기 위한것
+ */
+/*
+ * IAMROOT, 2021.10.04:
+ * fast-path 당시 unlock 상태이나 pending cpu가 존재 (0,1,0).
+ * (0,1,0)라면 pending cpu가 lock을 획득해야 하니 (0,0,1) 될때까지 대기
+ * 하거나 1회 loop하여 기다린다.
+ */
 		int cnt = _Q_PENDING_LOOPS;
 		val = atomic_cond_read_relaxed(&lock->val,
 					       (VAL != _Q_PENDING_VAL) || !cnt--);
 	}
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - pending이나 tail에 값이 있다면, 즉 3번째 cpu이상경쟁이 들어 왓을때
+ *   queue로 바로 직행한다.
+ */
 	/*
 	 * If we observe any contention; queue.
 	 */
 	if (val & ~_Q_LOCKED_MASK)
 		goto queue;
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - previous lock (old) 값이 val에 위치하고 pending을 set 한다.
+ */
 	/*
 	 * trylock || pending
 	 *
@@ -351,6 +443,17 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	 */
 	val = queued_fetch_set_pending_acquire(lock);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 만약에 old의 pending이나 tail에 값이 있다면, 다른 cpu들이 현재 cpu보다
+ *   pending이나 queue로 기다리고 있게 되므로 바로 queue로 직행한다.
+ *
+ * - fetch_set_pending_acquire 이후 상태
+ *   lock->val: (*,1,*)
+ *         val: (0,0,*) - 경합이 없는 경우
+ *              (n,*,*) - 이미 N cpus 경합한 경우.
+ *                        바로 queue로 보낸다.
+ */
 	/*
 	 * If we observe contention, there is a concurrent locker.
 	 *
@@ -360,6 +463,7 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	 */
 	if (unlikely(val & ~_Q_LOCKED_MASK)) {
 
+/* IAMROOT, 2021.10.10: old의 pending이 0이었다면 */
 		/* Undo PENDING if we set it. */
 		if (!(val & _Q_PENDING_MASK))
 			clear_pending(lock);
@@ -367,6 +471,11 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 		goto queue;
 	}
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 현재 cpu(2번째 cpu)는 pending얻은 상태고, 첫번째 cpu가 unlock
+ *   될때까지 기다린다.
+ */
 	/*
 	 * We're pending, wait for the owner to go away.
 	 *
@@ -381,6 +490,10 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	if (val & _Q_LOCKED_MASK)
 		atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_MASK));
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 이때부터 현재 cpu가 lock owner가 된것이다.
+ */
 	/*
 	 * take ownership and clear the pending bit.
 	 *
@@ -398,9 +511,18 @@ queue:
 	lockevent_inc(lock_slowpath);
 pv_queue:
 	node = this_cpu_ptr(&qnodes[0].mcs);
+/*
+ * IAMROOT, 2021.10.02:
+ * - 현재 cpu 번호와 nest count를 가져와 tail을 set한다.
+ */
 	idx = node->count++;
 	tail = encode_tail(smp_processor_id(), idx);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - idx가 MAX_NODES의 값을 넘는것은 거의 bug라 봐도 무방하지만
+ *   예외 처리 차원에서 이렇게 처리해놓은 것으로 보인다.
+ */
 	/*
 	 * 4 nodes are allocated based on the assumption that there will
 	 * not be nested NMIs taking spinlocks. That may not be true in
@@ -417,6 +539,11 @@ pv_queue:
 		goto release;
 	}
 
+/*
+ * IAMROOT, 2021.10.09:
+ * tail이 qnodes상에 어디에 들어갈지
+ * idx를 바탕으로 주소를 받아온다.
+ */
 	node = grab_mcs_node(node, idx);
 
 	/*
@@ -431,10 +558,20 @@ pv_queue:
 	 */
 	barrier();
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - queue의 마지막에 들어갈 node를 초기화 하는 과정.
+ * - tail이므로 locked는 0, next는 NULL로 세팅.
+ */
 	node->locked = 0;
 	node->next = NULL;
 	pv_init_node(node);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - spin lock의 critical 구간은 굉장히 짧게 쓰기 때문에 lock을 얻을려고
+ *   하는 도중에도 풀리는 경우가 다반사이다. 이 경우를 고려한것.
+ */
 	/*
 	 * We touched a (possibly) cold cacheline in the per-cpu queue node;
 	 * attempt the trylock once more in the hope someone let go while we
@@ -450,6 +587,11 @@ pv_queue:
 	 */
 	smp_wmb();
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - lock->tail의 값을 새로운 tail로 set하고
+ *   previous tail값을 old로 받아온다.
+ */
 	/*
 	 * Publish the updated tail.
 	 * We have already touched the queueing cacheline; don't bother with
@@ -460,17 +602,35 @@ pv_queue:
 	old = xchg_tail(lock, tail);
 	next = NULL;
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - old값에 tail이 존재한다는것은 결국 기존에 queue에 대기했던 node가
+ *   존재한단 것이고, 해당 node의 next가 현재 node를 가리키게 해야한다.
+ */
 	/*
 	 * if there was a previous node; link it and wait until reaching the
 	 * head of the waitqueue.
 	 */
 	if (old & _Q_TAIL_MASK) {
+/*
+ * IAMROOT, 2021.10.09:
+ * qnodes에 있는 old의 주소를 prev로 가져온다.
+ * prev->next가 새롭게 설정한 tail의 주소로 세팅된다.
+ */
 		prev = decode_tail(old);
 
 		/* Link @node into the waitqueue. */
 		WRITE_ONCE(prev->next, node);
 
 		pv_wait_node(node, prev);
+/*
+ * IAMROOT, 2021.10.02:
+ * - 여기에 진입하면 이제 4번째 cpu이상이 라는것이고, 여기서 unlock이
+ *   될때까지 기다린다.
+ *   또한 여기서 unlock이 됬다는것은 현재 node가 mcs의 선두가 됬다는것이
+ *   의미된 상태에서, 현재 cpu 뒤로 또 다른 cpu가 존재하는 경우를
+ *   확인해 cache prefetch한다.
+ */
 		arch_mcs_spin_lock_contended(&node->locked);
 
 		/*
@@ -508,6 +668,11 @@ pv_queue:
 	if ((val = pv_wait_head_or_lock(lock, node)))
 		goto locked;
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 여기까지 왔으면 현재 cpu는 mcs의 첫번째가 되는것이고, 이 앞에 있는
+ *   cpu들(lock, peding 중인 cpu들)이 unlock될 때까지 기다리면 된다.
+ */
 	val = atomic_cond_read_acquire(&lock->val, !(VAL & _Q_LOCKED_PENDING_MASK));
 
 locked:
@@ -522,6 +687,12 @@ locked:
 	 * Otherwise, we only need to grab the lock.
 	 */
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 여기까지 왔으면 lock owner가 되야되는것.
+ *   mcs에서 혼자 기다리고 있었던 즉, head이면서 tail인 경우를
+ *   확인 한다.
+ */
 	/*
 	 * In the PV case we might already have _Q_LOCKED_VAL set, because
 	 * of lock stealing; therefore we must also allow:
@@ -533,10 +704,20 @@ locked:
 	 *       PENDING will make the uncontended transition fail.
 	 */
 	if ((val & _Q_TAIL_MASK) == tail) {
+/*
+ * IAMROOT, 2021.10.02:
+ * - no contention : mcs에서 혼자 존재하다가 lock을 잡으므로 mcs가
+ *   비게 되는 상황. 경쟁자 없이 lock 을 잡고 끝.
+ */
 		if (atomic_try_cmpxchg_relaxed(&lock->val, &val, _Q_LOCKED_VAL))
 			goto release; /* No contention */
 	}
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - contention상태. 즉 현재 cpu말고 다른 cpu가 뒤에 더 있는 상태.
+ *   (n, 0, 1)로 변경한다.
+ */
 	/*
 	 * Either somebody is queued behind us or _Q_PENDING_VAL got set
 	 * which will then detect the remaining tail and queue behind us
@@ -544,12 +725,25 @@ locked:
 	 */
 	set_locked(lock);
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 현재는 contention상태인데, 먼저 읽은 next값이 없으면 다시
+ *   next를 읽어온다.
+ *   어쨋든 이 구간에 왓으면 next가 있어야되는데 cpu 경합 과정에서
+ *   next가 잠시 비어있을수도 있는 상황이 있는것처럼 보이며
+ *   그 경우 next를 읽을떄까지 기다린다. 이 상황은 매우 짧을것이다.
+ */
 	/*
 	 * contended path; wait for next if not observed yet, release.
 	 */
 	if (!next)
 		next = smp_cond_load_relaxed(&node->next, (VAL));
 
+/*
+ * IAMROOT, 2021.10.02:
+ * - 자신은 lock owner가 되서 release가 되므로 자신의 다음 cpu를 unlock
+ *   해주는것.
+ */
 	arch_mcs_spin_unlock_contended(&next->locked);
 	pv_kick_node(lock, next);
 

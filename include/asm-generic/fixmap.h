@@ -18,6 +18,22 @@
 #include <linux/bug.h>
 #include <linux/mm_types.h>
 
+/*
+ * IAMROOT, 2021.10.09: 
+ * - fix_to_virt: fixmap 인덱스 @x에 대한 fixmap 가상 주소를 반환한다.
+ *                인덱스 0에 해당하는 위치는 fixmap 가장 상부의 FIXADDR_TOP에
+ *                해당한다.
+ *
+ *   예) FIXADDR_TOP : 0xffff_fdff_fea0_0000
+ *       @x          : FIX_PGD (1482)
+ *       PAGE_SHIFT  : 12
+ *
+ *       = 0xffff_fdff_fea0_0000 - (1482 << 12)
+ *       = 0xffff_fdff_fe43_6000
+ *
+ * - virt_to_fix(x): fixmap에 위치한 가상주소 @x에 대한 fixmap 인덱스를
+ *                   반환한다.
+ */
 #define __fix_to_virt(x)	(FIXADDR_TOP - ((x) << PAGE_SHIFT))
 #define __virt_to_fix(x)	((FIXADDR_TOP - ((x)&PAGE_MASK)) >> PAGE_SHIFT)
 
@@ -71,6 +87,10 @@ static inline unsigned long virt_to_fix(const unsigned long vaddr)
 #endif
 
 /* Return a pointer with offset calculated */
+/*
+ * IAMROOT, 2021.10.09: 
+ * @phys를 fixmap의 @idx 위치에 매핑하고, 해당 가상 주소를 반환한다.
+ */
 #define __set_fixmap_offset(idx, phys, flags)				\
 ({									\
 	unsigned long ________addr;					\

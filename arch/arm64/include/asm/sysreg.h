@@ -1179,6 +1179,17 @@
 #define KERNEL_GCR_EL1_EXCL	SYS_GCR_EL1_EXCL_MASK
 #endif
 
+/*
+ * IAMROOT, 2021.08.21:
+ * GCR_EL1 : Tag Control Register.
+ *
+ * 1. GCR_EL1:
+ *      RRND를 1로, Exclude bit 16개를 전부 1로 set 한다.
+ *      RRND가 1이라는 것은 tag값을 ChooseRandomNonExcludedTag가 결정하겠다는 것을 뜻한다.
+ *      ChooseRandomNonExcludedTag는 Allocation Tag 값으로 0부터 15까지의 값을 non-deterministic 하게
+ *      고르게 되는데 Exclude bit[0:15] 에서 set되어 있는 녀석은 선택할 때 제외시킨다.
+ *      근데 만약 16개가 전부 1이라면 Allocation Tag 값으로 0을 사용한다.
+ */
 #define KERNEL_GCR_EL1		(SYS_GCR_EL1_RRND | KERNEL_GCR_EL1_EXCL)
 
 /* RGSR_EL1 Definitions */

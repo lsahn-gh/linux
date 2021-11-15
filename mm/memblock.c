@@ -97,6 +97,11 @@ struct pglist_data __refdata contig_page_data;
 EXPORT_SYMBOL(contig_page_data);
 #endif
 
+/*
+ * IAMROOT, 2021.11.06:
+ * - bootmem_init 에서 설정된다.
+ * - max_pfn을 경우 제일 마지막 frame을 가리키는게 아니라, 마지막의 다음을 가리키고 있다.
+ */
 unsigned long max_low_pfn;
 unsigned long min_low_pfn;
 unsigned long max_pfn;
@@ -108,6 +113,12 @@ static struct memblock_region memblock_reserved_init_regions[INIT_MEMBLOCK_RESER
 static struct memblock_region memblock_physmem_init_regions[INIT_PHYSMEM_REGIONS];
 #endif
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - .meminit.data section에 위치한다.
+ *
+ * - cnt가 1인데, 없을때도 1이고 1개일때도 1이다. 0을 사용하면 안됨.
+ */
 struct memblock memblock __initdata_memblock = {
 	.memory.regions		= memblock_memory_init_regions,
 	.memory.cnt		= 1,	/* empty dummy entry */
@@ -140,6 +151,11 @@ struct memblock_type physmem = {
  */
 static __refdata struct memblock_type *memblock_memory = &memblock.memory;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - memblock_type->cnt는 무조건 1이상이기 때문에 최소한 for문은 한번은 진입할것이다.
+ *   memblock_type->region[0]부터 끝까지 iteration을 수행한다.
+ */
 #define for_each_memblock_type(i, memblock_type, rgn)			\
 	for (i = 0, rgn = &memblock_type->regions[0];			\
 	     i < memblock_type->cnt;					\
@@ -152,7 +168,22 @@ static __refdata struct memblock_type *memblock_memory = &memblock.memory;
 	} while (0)
 
 static int memblock_debug __initdata_memblock;
+/*
+ * IAMROOT, 2021.10.23:
+ * - disk의 raid랑 비슷한 개념으로 똑같은 값을 미러로 사용하는지의 여부
+ *   mirror system을 쓸경우 필요한 데이터보다 2배가 필요한 개념.
+ *   운영하다가 error가 발생하면 error message를 발생한다.
+ *   kernel만 mirror를 쓰고 application은 mirror를 안쓸수있다.
+ *   이 경우 kernel에서도 일부 메모리만 mirror를 쓸수있는데 어떤 memory를
+ *   mirror를 쓸지 mark를 해줘야 된다.
+ *
+ * - arm64에서는 아직까진 사용하지 않아 보인다.
+ */
 static bool system_has_some_mirror __initdata_memblock = false;
+/*
+ * IAMROOT, 2021.10.23:
+ * - paging init때 memblock alloc이 사용이 가능해지면 1이 된다.
+ */
 static int memblock_can_resize __initdata_memblock;
 static int memblock_memory_in_slab __initdata_memblock = 0;
 static int memblock_reserved_in_slab __initdata_memblock = 0;
@@ -206,6 +237,10 @@ bool __init_memblock memblock_overlaps_region(struct memblock_type *type,
  * Return:
  * Found address on success, 0 on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64에서는 미사용. top down 방식만 사용한다.
+ */
 static phys_addr_t __init_memblock
 __memblock_find_range_bottom_up(phys_addr_t start, phys_addr_t end,
 				phys_addr_t size, phys_addr_t align, int nid,
@@ -241,6 +276,10 @@ __memblock_find_range_bottom_up(phys_addr_t start, phys_addr_t end,
  * Return:
  * Found address on success, 0 on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - start 에서 end까지의 free영역을 찾아서 성공하면 start 주소를 return.
+ */
 static phys_addr_t __init_memblock
 __memblock_find_range_top_down(phys_addr_t start, phys_addr_t end,
 			       phys_addr_t size, phys_addr_t align, int nid,
@@ -254,6 +293,11 @@ __memblock_find_range_top_down(phys_addr_t start, phys_addr_t end,
 		this_start = clamp(this_start, start, end);
 		this_end = clamp(this_end, start, end);
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 찾은 free 영역의 끝주소가 size보다 작으면 당연히 size보다 덜
+ * 할당된거니 skip
+ */
 		if (this_end < size)
 			continue;
 
@@ -294,6 +338,10 @@ static phys_addr_t __init_memblock memblock_find_in_range_node(phys_addr_t size,
 	start = max_t(phys_addr_t, start, PAGE_SIZE);
 	end = max(start, end);
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64는 bottom_up이 false로 되있음.
+ */
 	if (memblock_bottom_up())
 		return __memblock_find_range_bottom_up(start, end, size, align,
 						       nid, flags);
@@ -315,6 +363,10 @@ static phys_addr_t __init_memblock memblock_find_in_range_node(phys_addr_t size,
  * Return:
  * Found address on success, 0 on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - start부터 end까지의 free 영역을 탐색해서 start address를 구해온다.
+ */
 static phys_addr_t __init_memblock memblock_find_in_range(phys_addr_t start,
 					phys_addr_t end, phys_addr_t size,
 					phys_addr_t align)
@@ -326,6 +378,11 @@ again:
 	ret = memblock_find_in_range_node(size, align, start, end,
 					    NUMA_NO_NODE, flags);
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - ret == 0이면 free 영역을 못찾아왔다는것.
+ *   mirror flag가 있다면 mirror flag를 지우고 다시한번만 해본다.
+ */
 	if (!ret && (flags & MEMBLOCK_MIRROR)) {
 		pr_warn("Could not allocate %pap bytes of mirrored memory\n",
 			&size);
@@ -338,6 +395,10 @@ again:
 
 static void __init_memblock memblock_remove_region(struct memblock_type *type, unsigned long r)
 {
+/*
+ * IAMROOT, 2021.10.23:
+ * - r보다 높은 region들을 한칸 땡기는 식으로 r region을 삭제를 진행한다.
+ */
 	type->total_size -= type->regions[r].size;
 	memmove(&type->regions[r], &type->regions[r + 1],
 		(type->cnt - (r + 1)) * sizeof(type->regions[r]));
@@ -357,6 +418,10 @@ static void __init_memblock memblock_remove_region(struct memblock_type *type, u
 #ifndef CONFIG_ARCH_KEEP_MEMBLOCK
 /**
  * memblock_discard - discard memory and reserved arrays if they were allocated
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - memory를 buddy system으로 전환할때 관련된 함수.
  */
 void __init memblock_discard(void)
 {
@@ -408,6 +473,10 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	/* We don't allow resizing until we know about the reserved regions
 	 * of memory that aren't suitable for allocation
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - paging_init 이 완료되기전에는 동작안한다.
+ */
 	if (!memblock_can_resize)
 		return -1;
 
@@ -427,6 +496,11 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	else
 		in_slab = &memblock_reserved_in_slab;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - memblock은 물리주소(addr)을 할당받아서 가상주소로 변환을 시켜주고,
+ *   slab은 가상주소(new_array)를 할당받아서 물리주소(addr)로 변환한다.
+ */
 	/* Try to find some space for it */
 	if (use_slab) {
 		new_array = kmalloc(new_size, GFP_KERNEL);
@@ -439,6 +513,11 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 		addr = memblock_find_in_range(new_area_start + new_area_size,
 						memblock.current_limit,
 						new_alloc_size, PAGE_SIZE);
+/*
+ * IAMROOT, 2021.10.23:
+ * 범위 내에서 검색이 실패한경우 마지막부터 바닥까지의 영역으로
+ * 검색을 재시도한다.
+ */
 		if (!addr && new_area_size)
 			addr = memblock_find_in_range(0,
 				min(new_area_start, memblock.current_limit),
@@ -446,6 +525,18 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 
 		new_array = addr ? __va(addr) : NULL;
 	}
+/*
+ * IAMROOT, 2021.10.30:
+ * - 위 if-statement 가 완료된 후에 변수 new_array, addr는 아래와 같은 state를
+ *   가진다.
+ *
+ *   addr = pa(new_array)
+ *   new_array = va(addr)
+ *
+ *   slab을 통한 alloc은 va만 알고 있으므로 addr = pa(new_array)를 해주고,
+ *   memblock을 통한 alloc은 pa만 알고 있으므로 new_array = va(addr)를
+ *   해줘야한다.
+ */
 	if (!addr) {
 		pr_err("memblock: Failed to double %s array from %ld to %ld entries !\n",
 		       type->name, type->max, type->max * 2);
@@ -461,12 +552,23 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	 * reserved region since it may be our reserved array itself that is
 	 * full.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 원래 있던 영역크기 만큼(old_size) 복사를하고, 2배확장된만큼 나머지는
+ *   0으로 채운다.
+ */
 	memcpy(new_array, type->regions, old_size);
 	memset(new_array + type->max, 0, old_size);
 	old_array = type->regions;
 	type->regions = new_array;
 	type->max <<= 1;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - slab 할당자가 동작중이면 kfree로 , 아니면 memblock_free로 할당해제한다.
+ *
+ *   최초엔 static으로 잡혀 있으므로 memblock_free로 지우는개념.
+ */
 	/* Free old array. We needn't free it if the array is the static one */
 	if (*in_slab)
 		kfree(old_array);
@@ -478,6 +580,10 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 	 * Reserve the new array if that comes from the memblock.  Otherwise, we
 	 * needn't do it
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 실제로 reserve로 할당한다.
+ */
 	if (!use_slab)
 		BUG_ON(memblock_reserve(addr, new_alloc_size));
 
@@ -497,6 +603,29 @@ static void __init_memblock memblock_merge_regions(struct memblock_type *type)
 {
 	int i = 0;
 
+/*
+ * IAMROOT, 2021.10.23:
+ *                +------+ end
+ *                |      |
+ *                | next |
+ *                |      |
+ *  end +------+  +------+ base
+ *      |      | 
+ *      | this | 
+ * base +------+ 
+ * 
+ * this의 end와 next base가 동일, nid가 같으며 flag가 같으면 두개의 블럭을
+ * 합병시킨다.
+ *
+ *      +--------+ end
+ *      |        |
+ *      | merged |
+ *      | this   |
+ *      |        |
+ *      |        | 
+ *      |        | 
+ * base +--------+ 
+ */
 	/* cnt never goes below 1 */
 	while (i < type->cnt - 1) {
 		struct memblock_region *this = &type->regions[i];
@@ -512,6 +641,11 @@ static void __init_memblock memblock_merge_regions(struct memblock_type *type)
 		}
 
 		this->size += next->size;
+/*
+ * IAMROOT, 2021.10.23:
+ * - 합병이 됬으므로 next region에 대한것을 삭제하면서 더 위의 region들을
+ *   한칸씩 내림.
+ */
 		/* move forward from next + 1, index of which is i + 2 */
 		memmove(next, next + 1, (type->cnt - (i + 2)) * sizeof(*next));
 		type->cnt--;
@@ -529,6 +663,20 @@ static void __init_memblock memblock_merge_regions(struct memblock_type *type)
  *
  * Insert new memblock region [@base, @base + @size) into @type at @idx.
  * @type must already have extra room to accommodate the new region.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * +-----------+
+ * | max rgn   |
+ * | ...       |
+ * | rgn + cnt |
+ * | ...       |
+ * | rgn + 2   |  
+ * | rgn + 1   | 
+ * | rgn + 0   | 
+ * | ...       |
+ * +-----------+
+ * - 기존 idx자리에서 cnt까지의 block들을 한칸씩 이동시키고 넣는다.
  */
 static void __init_memblock memblock_insert_region(struct memblock_type *type,
 						   int idx, phys_addr_t base,
@@ -564,6 +712,12 @@ static void __init_memblock memblock_insert_region(struct memblock_type *type,
  * Return:
  * 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2021.10.16:
+ * - @nid: 0, 1, 2, ... 같은 node id가 들어오는데 MAX_NUMNODES를
+ *         사용하겟다는것은 어떤 노드든 (any node)상관없다는 의미와 같다.
+ *         Non-NUMA 시스템에서 node id는 0으로 처리된다.
+ */
 static int __init_memblock memblock_add_range(struct memblock_type *type,
 				phys_addr_t base, phys_addr_t size,
 				int nid, enum memblock_flags flags)
@@ -577,6 +731,15 @@ static int __init_memblock memblock_add_range(struct memblock_type *type,
 	if (!size)
 		return 0;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - memblock region(memory, reserve)이 비어있는 상태일때.
+ *   이 경우 특수케이스로 처리하는데 해당 region에 아무것도
+ *   없으므로 단순하게 추가하고 끝낸다.
+ *
+ * - 오버헤드(cnt 보정, memory 공간 중복시 merge 등) 없이 추가 후
+ *   바로 리턴 (fast).
+ */
 	/* special case for empty array */
 	if (type->regions[0].size == 0) {
 		WARN_ON(type->cnt != 1 || type->total_size);
@@ -600,14 +763,57 @@ repeat:
 		phys_addr_t rbase = rgn->base;
 		phys_addr_t rend = rbase + rgn->size;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - region base가 요청된 end 보다 크다면 종료
+ *
+ *  rend +--------+
+ *       |        | 
+ *       | region | 
+ * rbase +--------+ 
+ *                  +-----+ end
+ *                  |     |
+ *                  | new |
+ *                  |     |
+ *                  +-----+ base
+ */
 		if (rbase >= end)
 			break;
+/*
+ * IAMROOT, 2021.10.23:
+ * - region end가 요청된 base 보다 작다면 다음 region 탐색
+ *
+ *                  +-----+ end
+ *                  |     |
+ *                  | new |
+ *                  |     |
+ *                  +-----+ base
+ *  rend +--------+
+ *       |        | 
+ *       | region | 
+ * rbase +--------+ 
+ */
 		if (rend <= base)
 			continue;
 		/*
 		 * @rgn overlaps.  If it separates the lower part of new
 		 * area, insert that portion.
 		 */
+/*
+ * IAMROOT, 2021.10.16:
+ * 여기서부터는 기존 region과 새로 추가할 region이 겹치는 경우이며
+ * 그에 따른 추가 작업을 수행한다.
+ *
+ * - region base가 base 보다 크면 rbase - base 영역만 새로 insert.
+ *
+ * 1) rend >= end 인 상황
+ *  rend +--------+
+ *       |        | +-----+ end
+ *       | region | |     |
+ * rbase +--------+ | new |    <--+--------
+ *                  |     |       | 추가하는 부분
+ *                  +-----+ base  +--------
+ */
 		if (rbase > base) {
 #ifdef CONFIG_NUMA
 			WARN_ON(nid != memblock_get_region_node(rgn));
@@ -619,10 +825,44 @@ repeat:
 						       rbase - base, nid,
 						       flags);
 		}
+/*
+ * IAMROOT, 2021.10.16:
+ * 
+ * rend >= end 라면 추가할 block이 없지만 아래와 같이 rend < end 면
+ *
+ *                  +-----+ end
+ *                  |     |
+ *  rend +--------+ |     |
+ *       |        | |     | 
+ *       | region | |     | 
+ * rbase +--------+ | new |
+ *                  |     |
+ *                  +-----+ base
+ *
+ * base = min(rend, end)에 의해 다음과 같이 base가 변경된다.
+ *
+ *                  +-----+ end
+ *                  | ins |
+ *                  | new |
+ *  rend +--------+ +-----+ (after) base
+ *       |        | |     | 
+ *       | region | |     | 
+ * rbase +--------+ |     |
+ *                  |     |
+ *                  +-----+ (before) base
+ *
+ * 위와 같은 상황에서 '(after) base ~ end'를 마저 추가해야하므로
+ * base는 rend로 설정하고 다음 iterate때 추가한다.
+ */
 		/* area below @rend is dealt with, forget about it */
 		base = min(rend, end);
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - for문 종료후 'base < end' 조건이 참이라면 추가할 block이 있는 것이므로
+ *   해당 block 추가.
+ */
 	/* insert the remaining portion */
 	if (base < end) {
 		nr_new++;
@@ -631,6 +871,10 @@ repeat:
 					       nid, flags);
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - insert할게 없으면 그냥 종료
+ */
 	if (!nr_new)
 		return 0;
 
@@ -639,12 +883,26 @@ repeat:
 	 * insertions; otherwise, merge and return.
 	 */
 	if (!insert) {
+/*
+ * IAMROOT, 2021.10.23:
+ * - 1st loop에서는 memblock region에 추가할 영역의 '갯수(nr_new)'를 계산하고
+ *   만약 '갯수 > max(128)' 라면 memblock region을 현재 크기에서 2배수로
+ *   확장시킨다.
+ *
+ * - 계산이 완료되면 'insert = true' flag를 설정하고 'goto repeat' 통해
+ *   2th loop를 수행하며 이때 요청 region을 추가한다.
+ */
 		while (type->cnt + nr_new > type->max)
 			if (memblock_double_array(type, obase, size) < 0)
 				return -ENOMEM;
 		insert = true;
 		goto repeat;
 	} else {
+/*
+ * IAMROOT, 2021.10.25:
+ * - memblock region 전체를 iter하여 blocks 중에 인접 blocks을 merging
+ *   할 수 있다면 merging하여 1개의 block unit으로 만든다.
+ */
 		memblock_merge_regions(type);
 		return 0;
 	}
@@ -683,6 +941,10 @@ int __init_memblock memblock_add_node(phys_addr_t base, phys_addr_t size,
  *
  * Return:
  * 0 on success, -errno on failure.
+ */
+/*
+ * IAMROOT, 2021.10.16:
+ * - memory의 물리시작주소와 size를 memblock.memory에 추가한다.
  */
 int __init_memblock memblock_add(phys_addr_t base, phys_addr_t size)
 {
@@ -723,6 +985,10 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 	if (!size)
 		return 0;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 영역을 지울때도 파편화의 가능성이 있으므로 늘어날 경우가 생길수있다.
+ */
 	/* we'll create at most two more regions */
 	while (type->cnt + 2 > type->max)
 		if (memblock_double_array(type, base, size) < 0)
@@ -732,11 +998,67 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 		phys_addr_t rbase = rgn->base;
 		phys_addr_t rend = rbase + rgn->size;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - region base가 요청된 end 보다 크다면 영역을 나눌게 없으므로 종료
+ *
+ *  rend +--------+
+ *       |        | 
+ *       | region | 
+ *       |        | 
+ * rbase +--------+ 
+ *                  +------+ end
+ *                  |      |
+ *                  | isol |
+ *                  |      |
+ *                  +------+ base
+ */
 		if (rbase >= end)
 			break;
+/*
+ * IAMROOT, 2021.10.23:
+ * - region end가 요청된 base 보다 작다면 다음 region 탐색
+ *
+ *                  +------+ end
+ *                  |      |
+ *                  | isol |
+ *                  |      |
+ *                  +------+ base
+ *  rend +--------+
+ *       |        | 
+ *       | region | 
+ * rbase +--------+ 
+ */
 		if (rend <= base)
 			continue;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - region base가 base 보다 크다면 그 차이 만큼만 현재 region에 insert 한다
+ *
+ * 1) rend < end 인 상황
+ *  rend +--------+
+ *       |        |
+ *       |        | +------+ end
+ *       |        | |      |
+ *       |        | | isol |
+ *       |        | |      |
+ *       |        | +------+ base
+ *       | region | 
+ * rbase +--------+ 
+ *
+ * 다음과 같이 rgn 값들이 설정될것이다.
+ *
+ *  rend +--------+
+ *       |        |
+ *       |        | +------+ end
+ *       |        | |      |
+ *       |        | | isol |
+ *       | region | |      |
+ *       +--------+ +------+ base
+ *       | insert |
+ * rbase +--------+ 
+ */
 		if (rbase < base) {
 			/*
 			 * @rgn intersects from below.  Split and continue
@@ -748,6 +1070,28 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 			memblock_insert_region(type, idx, rbase, base - rbase,
 					       memblock_get_region_node(rgn),
 					       rgn->flags);
+/*
+ * IAMROOT, 2021.10.23:
+ * 2) rend > end 인 상황
+ * 
+ *  rend +--------+
+ *       |        |
+ *       |        | +------+ end
+ *       |        | |      |
+ *       |        | | isol |
+ *       | region | |      |
+ * rbase +--------+ +------+ base
+ *
+ * 다음과 같이 된다.
+ *
+ *  rend +--------+
+ *       | region |
+ *       +--------+ +------+ end
+ *       |        | |      |
+ *       |        | | isol |
+ *       | insert | |      |
+ * rbase +--------+ +------+ base
+ */
 		} else if (rend > end) {
 			/*
 			 * @rgn intersects from above.  Split and redo the
@@ -759,6 +1103,20 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 			memblock_insert_region(type, idx--, rbase, end - rbase,
 					       memblock_get_region_node(rgn),
 					       rgn->flags);
+/*
+ * IAMROOT, 2021.10.23:
+ *                  +------+ end
+ * rend  +--------+ |      |
+ *       |        | |      |
+ *       |        | | isol |
+ *       | region | |      |
+ * rbase +--------+ |      |
+ *                  +------+ base
+ *
+ * 최초에 한번만 start_rgn이 set되고 end_rgn은 매번 갱신된다.
+ * isolate 영역이 경우에따라 여러개의 region을 포함할수있다.
+ * end_rgn + 1은 iterator과정에서 종료조건을 원활히 찾기 위함이다.
+ */
 		} else {
 			/* @rgn is fully contained, record it */
 			if (!*end_rgn)
@@ -770,6 +1128,10 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - base ~ base + size 삭제를 진행한다.
+ */
 static int __init_memblock memblock_remove_range(struct memblock_type *type,
 					  phys_addr_t base, phys_addr_t size)
 {
@@ -785,6 +1147,16 @@ static int __init_memblock memblock_remove_range(struct memblock_type *type,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - base ~ base + size 주소를 지운다.
+ *
+ *   실제론 별로 호출될일이없다. 산업용장비에서 memory를 물리적으로(hotplug)
+ *   제거하거나 guest os에 할당했던 메모리를 반환받는 상황등에서
+ *   발생할수있다.
+ *
+ *   memblock_add의 반대.
+ */
 int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
 {
 	phys_addr_t end = base + size - 1;
@@ -803,6 +1175,11 @@ int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
  * Free boot memory block previously allocated by memblock_alloc_xx() API.
  * The freeing memory will not be released to the buddy allocator.
  */
+/*
+ * IAMROOT, 2021.11.15:
+ * - 5.10 -> 5.15 변경사항.
+ *   해당 함수가 추가됨. va에 대한 함수.
+ */
 void __init_memblock memblock_free_ptr(void *ptr, size_t size)
 {
 	if (ptr)
@@ -817,6 +1194,11 @@ void __init_memblock memblock_free_ptr(void *ptr, size_t size)
  * Free boot memory block previously allocated by memblock_alloc_xx() API.
  * The freeing memory will not be released to the buddy allocator.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - reserved 영역을 free하는게 보인다.
+ *   memblock_alloc의 반대.
+ */
 int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 {
 	phys_addr_t end = base + size - 1;
@@ -828,6 +1210,10 @@ int __init_memblock memblock_free(phys_addr_t base, phys_addr_t size)
 	return memblock_remove_range(&memblock.reserved, base, size);
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - memblock_reserve는 memblock_add_range에 type만 바꿔서 하는게 보인다.
+ */
 int __init_memblock memblock_reserve(phys_addr_t base, phys_addr_t size)
 {
 	phys_addr_t end = base + size - 1;
@@ -860,6 +1246,11 @@ int __init_memblock memblock_physmem_add(phys_addr_t base, phys_addr_t size)
  * This function isolates region [@base, @base + @size), and sets/clears flag
  *
  * Return: 0 on success, -errno on failure.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - isolate로 해당 범위에 대한 memblock을 선별한뒤 flag를 고치고
+ *   merge가 가능한 memblock은 merge한다.
  */
 static int __init_memblock memblock_setclr_flag(phys_addr_t base,
 				phys_addr_t size, int set, int flag)
@@ -937,6 +1328,10 @@ int __init_memblock memblock_mark_mirror(phys_addr_t base, phys_addr_t size)
  *
  * Return: 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2021.10.30:
+ * - mapping을 하지 말라는 flag를 기존 flag에 더한다.
+ */
 int __init_memblock memblock_mark_nomap(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_setclr_flag(base, size, 1, MEMBLOCK_NOMAP);
@@ -981,6 +1376,10 @@ static bool should_skip_region(struct memblock_type *type,
 	if (!(flags & MEMBLOCK_NOMAP) && memblock_is_nomap(m))
 		return true;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 결국 normal memory만 skip하지 말라는 의미
+ */
 	return false;
 }
 
@@ -1009,6 +1408,10 @@ static bool should_skip_region(struct memblock_type *type,
  *
  * As both region arrays are sorted, the function advances the two indices
  * in lockstep and returns each intersection.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - arm64에서는 기본적으로 reverse로 search.
  */
 void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 		      struct memblock_type *type_a,
@@ -1105,6 +1508,11 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
  *
  * Reverse of __next_mem_range().
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - memory region과 reserve region에서 free영역을 찾아서 해당
+ *   free영역의 start, end, nid를 가져온다.
+ */
 void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 					  enum memblock_flags flags,
 					  struct memblock_type *type_a,
@@ -1112,12 +1520,30 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 					  phys_addr_t *out_start,
 					  phys_addr_t *out_end, int *out_nid)
 {
+/*
+ * IAMROOT, 2021.10.23:
+ * - 이 for문에서 idx 0 ~ 31bit는 type_a에 대한 idx,
+ *   32 ~ 63bit는 tpye+b에 대한 idx로 사용한다.
+ *
+ * - type_a는 memory region, type_b는 reserved region이다.
+ */
 	int idx_a = *idx & 0xffffffff;
 	int idx_b = *idx >> 32;
 
 	if (WARN_ONCE(nid == MAX_NUMNODES, "Usage of MAX_NUMNODES is deprecated. Use NUMA_NO_NODE instead\n"))
 		nid = NUMA_NO_NODE;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 첫진입시 idx가 끝주소면, memblock의 제일 마지막을 지정하기 위함.
+ * - type_b가 있다는건 reserved region도 loop를 돌아야된다는것이므로
+ *   reserved region의 마지막 memblock을 설정해주고 그게 아니면 사용하지
+ *   않는의미로 그냥 0을 넣는다.
+ *
+ * - memory는 실제 존재하는 영역으로 사용하므로 -1을 하고(실제 마지막영역)
+ *   reserved의 경우에는 reserved의 반대편(free)부터 검색을 하므로 마지막
+ *   블럭의 윗공간이 필요하기 때문에 -1을 사용할 필요없다.
+ */
 	if (*idx == (u64)ULLONG_MAX) {
 		idx_a = type_a->cnt - 1;
 		if (type_b != NULL)
@@ -1126,6 +1552,10 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 			idx_b = 0;
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - type_a에 대한, 즉 memory영역을 reverse 탐색을 진행한다.
+ */
 	for (; idx_a >= 0; idx_a--) {
 		struct memblock_region *m = &type_a->regions[idx_a];
 
@@ -1136,6 +1566,10 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 		if (should_skip_region(type_a, m, nid, flags))
 			continue;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - reserve 가 없으면 결과값을 설정하고 종료한다.
+ */
 		if (!type_b) {
 			if (out_start)
 				*out_start = m_start;
@@ -1148,12 +1582,44 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 			return;
 		}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - reserve region을 reverse 탐색한다.
+ */
 		/* scan areas before each reservation */
 		for (; idx_b >= 0; idx_b--) {
 			struct memblock_region *r;
 			phys_addr_t r_start;
 			phys_addr_t r_end;
 
+/*
+ * IAMROOT, 2021.10.23:
+ *
+ * 2개의 region이라면 다음과 같다.
+ *
+ * 높은주소
+ * ===========================
+ * +----------+ 
+ * |          |         
+ * | r(b)     |         
+ * |          |         
+ * +----------+ r_end or PHYS_ADDR_MAX
+ *              
+ * (free 공간)
+ *                      
+ * +----------+ r_start 
+ * |          |         
+ * | r(b-1)   |         
+ * |          |         
+ * +----------+ 
+ * ===========================
+ * 낮은주소
+ *
+ * 최초의 경우에는 r(b)가 없는 상태인데 이 경우 그냥 주소 끝값인
+ * PHYS_ADDR_MAX을 가져온다.
+ * 
+ * 이렇게 되서 r_start ~ r_end 공간이 찾아지게 되는것.
+ */
 			r = &type_b->regions[idx_b];
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
@@ -1163,8 +1629,35 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 			 * break out to advance idx_a
 			 */
 
+/*
+ * IAMROOT, 2021.10.23:
+ * memory가 없는 공간이 탐색됬으므로 다음 memory 영역으로 탐색
+ */
 			if (r_end <= m_start)
 				break;
+/*
+ * IAMROOT, 2021.10.23:
+ *
+ * 다음 예제에서 어떻게 out 값들이 수정되는지 살펴보면
+ *
+ * m_end    +---------+   
+ *          |         |  +-------+ r_end
+ *          | memory  |         
+ *          |         |    free 
+ * m_start  +---------+  
+ *
+ *                       +-------+ r_start
+ *
+ * 수정후 다음과 같이 된다.
+ *
+ * m_end    +---------+   
+ *          |         |  +-------+ r_end <-- out_end
+ *          | memory  |         
+ *          |         |    out
+ * m_start  +---------+  <------------------ out_start
+ *
+ *                       +-------+ r_start
+ */
 			/* if the two regions intersect, we're done */
 			if (m_end > r_start) {
 				if (out_start)
@@ -1173,6 +1666,40 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid,
 					*out_end = min(m_end, r_end);
 				if (out_nid)
 					*out_nid = m_nid;
+/*
+ * IAMROOT, 2021.10.23:
+ * - m_start >= r_start
+ * 해당 memory region이 끝난경우 다음 memory region으로 이동.
+ *
+ *                        ...
+ * m_end    +---------+  | rsv   | 
+ *          | memory  |  +-------+ r_end <-- out_end
+ *          | 탐색됨  |           
+ *          | 탐색됨  |       
+ * m_start  +---------+  <----------------- out_start
+ *
+ *                       +-------+ r_start
+ *                       | rsv   |
+ *                        ...
+ *
+ * (memory가 전부 탐색되어 다음 memory region으로 이동)
+ *
+ * - m_start < r_start
+ *
+ * 해당 free에서 memory 탐색을 할게 없어 다음 free영역을 찾아야되므로
+ * reserve region이동
+ *
+ *                        ...
+ * m_end    +---------+  | rsv   |
+ *          |         |  +-------+ r_end   <-- out_end
+ *          | memory  |         
+ *          | 탐색됨  |    free
+ *          |         |  +-------+ r_start <-- out_start
+ *          |         |  | rsv   |
+ * m_start  +---------+   ...
+ *
+ * 
+ */
 				if (m_start >= r_start)
 					idx_a--;
 				else
@@ -1231,6 +1758,10 @@ void __init_memblock __next_mem_pfn_range(int *idx, int nid,
  *
  * Return:
  * 0 on success, -errno on failure.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 요청된 범위의 memblock의 nid를 교체후 merge
  */
 int __init_memblock memblock_set_node(phys_addr_t base, phys_addr_t size,
 				      struct memblock_type *type, int nid)
@@ -1341,14 +1872,36 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
  * Return:
  * Physical address of allocated memory block on success, %0 on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * 인자에 올수있는 define에 대한 정리.
+ * - start
+ *   MEMBLOCK_LOW_LIMIT : 0
+ *
+ * - end
+ *   MEMBLOCK_ALLOC_ACCESSIBLE : 0. current_limit 를 사용하라는것
+ *   MEMBLOCK_ALLOC_KASAN : 1
+ *   MEMBLOCK_ALLOC_ANYWHERE : max
+ */
 phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
 					phys_addr_t align, phys_addr_t start,
 					phys_addr_t end, int nid,
 					bool exact_nid)
 {
+/*
+ * IAMROOT, 2021.10.23:
+ * - system이 half mirror 운용중 인지에 대한 flags.
+ * - full mirror면 어짜피 system mirror가 전체로 mirror로 운용되므로 딱히
+ *   kernel이 알필요가 없을것이다.
+ */
 	enum memblock_flags flags = choose_memblock_flags();
 	phys_addr_t found;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - Any node의 경우 옛날엔 MAX_NUMNODES(16)을 사용햇었다.
+ *   지금은 NUMA_NO_NODE(-1)을 사용한다.
+ */
 	if (WARN_ONCE(nid == MAX_NUMNODES, "Usage of MAX_NUMNODES is deprecated. Use NUMA_NO_NODE instead\n"))
 		nid = NUMA_NO_NODE;
 
@@ -1361,9 +1914,18 @@ phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
 again:
 	found = memblock_find_in_range_node(size, align, start, end, nid,
 					    flags);
+/*
+ * IAMROOT, 2021.10.23:
+ * - 할당할수 있는 영역을 찾고, reserve에 성공했으면 done.
+ */
 	if (found && !memblock_reserve(found, size))
 		goto done;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - nid가 지정되있으면서 반드시 할필요가 없다면 nid를 그냥 Any로 해서
+ *   전체 node에서 다시 검색.
+ */
 	if (nid != NUMA_NO_NODE && !exact_nid) {
 		found = memblock_find_in_range_node(size, align, start,
 						    end, NUMA_NO_NODE,
@@ -1372,6 +1934,10 @@ again:
 			goto done;
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - flag가 mirror인 경우에만 다시 한번 빼보고 again한다.
+ */
 	if (flags & MEMBLOCK_MIRROR) {
 		flags &= ~MEMBLOCK_MIRROR;
 		pr_warn("Could not allocate %pap bytes of mirrored memory\n",
@@ -1379,9 +1945,17 @@ again:
 		goto again;
 	}
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 실패
+ */
 	return 0;
 
 done:
+/*
+ * IAMROOT, 2021.10.23:
+ * - kasan_init이 호출되는 경우는 pass.
+ */
 	/* Skip kmemleak for kasan_init() due to high volume. */
 	if (end != MEMBLOCK_ALLOC_KASAN)
 		/*
@@ -1406,6 +1980,11 @@ done:
  *
  * Return: physical address of the allocated memory block on success,
  * %0 on failure.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - alloc 함수는 대부분 가상주소를 return하지만 이 함수는 물리주소를
+ *   return 한다.
  */
 phys_addr_t __init memblock_phys_alloc_range(phys_addr_t size,
 					     phys_addr_t align,
@@ -1458,6 +2037,11 @@ phys_addr_t __init memblock_phys_alloc_try_nid(phys_addr_t size, phys_addr_t ali
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - exact_nid는 보통은 false고 memblock_alloc_exact_nid_raw 함수에서만
+ *   true로 들어오는게 보인다.
+ */
 static void * __init memblock_alloc_internal(
 				phys_addr_t size, phys_addr_t align,
 				phys_addr_t min_addr, phys_addr_t max_addr,
@@ -1470,6 +2054,11 @@ static void * __init memblock_alloc_internal(
 	 * this moment memblock may be deinitialized already and its
 	 * internal data may be destroyed (after execution of memblock_free_all)
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - slab 이 사용가능하다면 memblock api을 썻어도 그냥 slab으로 써버리는게
+ *   확인된다.
+ */
 	if (WARN_ON_ONCE(slab_is_available()))
 		return kzalloc_node(size, GFP_NOWAIT, nid);
 
@@ -1487,6 +2076,10 @@ static void * __init memblock_alloc_internal(
 	if (!alloc)
 		return NULL;
 
+/*
+ * IAMROOT, 2021.10.23:
+ * paging init이 끝난 alloc함수들은 전부 가상주소로 return 한다.
+ */
 	return phys_to_virt(alloc);
 }
 
@@ -1507,6 +2100,10 @@ static void * __init memblock_alloc_internal(
  *
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
+ */
+/*
+ * IAMROOT, 2021.10.23:
+ * - memset으로 초기화를 안시키고 바로 반환 한다.
  */
 void * __init memblock_alloc_exact_nid_raw(
 			phys_addr_t size, phys_addr_t align,
@@ -1570,6 +2167,10 @@ void * __init memblock_alloc_try_nid_raw(
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - 해당 요청에 따른 memory를 할당받아온다. 가상주소 return
+ */
 void * __init memblock_alloc_try_nid(
 			phys_addr_t size, phys_addr_t align,
 			phys_addr_t min_addr, phys_addr_t max_addr,
@@ -1580,6 +2181,13 @@ void * __init memblock_alloc_try_nid(
 	memblock_dbg("%s: %llu bytes align=0x%llx nid=%d from=%pa max_addr=%pa %pS\n",
 		     __func__, (u64)size, (u64)align, nid, &min_addr,
 		     &max_addr, (void *)_RET_IP_);
+/*
+ * IAMROOT, 2021.10.23:
+ * - ptr은 kernel에서 대부분 가상주소다.
+ *   바로 다음줄에서 memset을 사용하는게 보이고, 즉 현재시점부터는
+ *   할당받은 메모리를 바로 사용할수있는(리니어 매핑) 상태가 되있는것을
+ *   알 수 있다.
+ */
 	ptr = memblock_alloc_internal(size, align,
 					   min_addr, max_addr, nid, false);
 	if (ptr)
@@ -1629,6 +2237,11 @@ phys_addr_t __init_memblock memblock_reserved_size(void)
 }
 
 /* lowest address */
+/*
+ * IAMROOT, 2021.10.25:
+ * - setup_machine_fdt -> early_init_dt_scan -> early_init_dt_scan_memory
+ *   을 통해서 dt에서 읽은 memory 값으로 최초에 memblock에 추가가 될것이다.
+ */
 phys_addr_t __init_memblock memblock_start_of_DRAM(void)
 {
 	return memblock.memory.regions[0].base;
@@ -1682,6 +2295,10 @@ void __init memblock_enforce_memory_limit(phys_addr_t limit)
 			      PHYS_ADDR_MAX);
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 요청된 범위이외의 영역을 전부 지운다.
+ */
 void __init memblock_cap_memory_range(phys_addr_t base, phys_addr_t size)
 {
 	int start_rgn, end_rgn;
@@ -1731,6 +2348,10 @@ void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 	memblock_cap_memory_range(0, max_addr);
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 해당 addr이 존재하는지 binsearch한다. 반한되는값은 memblock index
+ */
 static int __init_memblock memblock_search(struct memblock_type *type, phys_addr_t addr)
 {
 	unsigned int left = 0, right = type->cnt;
@@ -1815,11 +2436,19 @@ bool __init_memblock memblock_is_region_memory(phys_addr_t base, phys_addr_t siz
  * Return:
  * True if they intersect, false if not.
  */
+/*
+ * IAMROOT, 2021.10.23:
+ * - reseved 영역에서 해당 범위가 겹치는지 여부를 반환.
+ */
 bool __init_memblock memblock_is_region_reserved(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_overlaps_region(&memblock.reserved, base, size);
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - 등록되있는 memory을 aligin단위로 정렬
+ */
 void __init_memblock memblock_trim_memory(phys_addr_t align)
 {
 	phys_addr_t start, end, orig_start, orig_end;
@@ -1895,17 +2524,31 @@ static void __init_memblock __memblock_dump_all(void)
 #endif
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - command line에 memblock=debug param이 지정된 상태에서 동작하며
+ *   해당 함수는 bootmem_init 마지막에서 호출해준다.
+ */
 void __init_memblock memblock_dump_all(void)
 {
 	if (memblock_debug)
 		__memblock_dump_all();
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - paging init이 완료 되고나서 memblock alloc이 사용가능해지면
+ *   호출 된다.
+ */
 void __init memblock_allow_resize(void)
 {
 	memblock_can_resize = 1;
 }
 
+/*
+ * IAMROOT, 2021.10.23:
+ * - command line에 memblock=debug 와 같이 입력이 되어있으면 debug를 set한다.
+ */
 static int __init early_memblock(char *p)
 {
 	if (p && strstr(p, "debug"))
@@ -2106,6 +2749,12 @@ void __init memblock_free_all(void)
 
 #if defined(CONFIG_DEBUG_FS) && defined(CONFIG_ARCH_KEEP_MEMBLOCK)
 
+/*
+ * IAMROOT, 2021.10.23:
+ *
+ * - kernel에서 debugfs 관련 config를 on해서 /sys/kernel/debug 등을 사용해서
+ *   user 영역에서 확인할수있다.
+ */
 static int memblock_debug_show(struct seq_file *m, void *private)
 {
 	struct memblock_type *type = m->private;

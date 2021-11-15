@@ -124,6 +124,12 @@ extern void radix_tree_init(void);
  * operations which are not allowed with IRQ disabled are allowed while the
  * flag is set.
  */
+/* IAMROOT, 2021.09.16:
+ * 이 플래그를 통해 IRQ가 비활성화된 상태에서 부팅 프로세서만 실행되는
+ * 'early bootup code'에 있음을 알 수 있습니다. 이것은 두 가지를 의미합니다.
+ * 플래그가 지워지기 전에 IRQ가 활성화되어서는 안 되며 IRQ 비활성화로 허용되지
+ * 않는 일부 작업은 플래그가 설정되는 동안 허용됩니다.
+ */
 bool early_boot_irqs_disabled __read_mostly;
 
 enum system_states system_state __read_mostly;
@@ -139,6 +145,10 @@ extern void time_init(void);
 /* Default late time init is NULL. archs can override this later. */
 void (*__initdata late_time_init)(void);
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - dt에서 가져온 cmd line string
+ */
 /* Untouched command line saved by arch-specific code. */
 char __initdata boot_command_line[COMMAND_LINE_SIZE];
 /* Untouched saved command line (eg. for /proc) */
@@ -193,6 +203,11 @@ static const char *argv_init[MAX_INIT_ARGS+2] = { "init", NULL, };
 const char *envp_init[MAX_INIT_ENVS+2] = { "HOME=/", "TERM=linux", NULL, };
 static const char *panic_later, *panic_param;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - INIT_SETUP 을 따라가보면 vmlinux.lds에 .init.setup setction에 위치하고 있음이
+ *   보인다.
+ */
 extern const struct obs_kernel_param __setup_start[], __setup_end[];
 
 static bool __init obsolete_checksetup(char *line)
@@ -734,12 +749,38 @@ noinline void __ref rest_init(void)
 	cpu_startup_entry(CPUHP_ONLINE);
 }
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - memory 할당기등이 초기화되기전에 먼저 초기화될 earlycon같은
+ *   early driver들을 찾아서 초기화한다.
+ */
 /* Check for early params. */
 static int __init do_early_param(char *param, char *val,
 				 const char *unused, void *arg)
 {
 	const struct obs_kernel_param *p;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - .init.setup 을 탐색하는 개념
+ *   early_param 으로 source에 정의되어 compile time에 .init.setup에 만들어지는
+ *   정의들이 존재하며 그 값들과 비교하는것들이다.
+ *
+ *   cmd line에 예를들어 다음과 같은 param들이 존재한다고 한다.
+ *   
+ *   initrd=0x41000000,8M console=ttyS0,115200n8
+ *
+ *   이 경우 initrd는 early_param("initrd", early_initrd) 로 지정된 값들이
+ *   호출된것이고, console은 예외적으로 earlycon을 찾는데 해당 정의는
+ *   drivers/tty/serial/earlycon.c 에서 보인다.
+ *
+ *   (early_param("earlycon", param_setup_earlycon))
+ *
+ *   원래는 cmd line string과 early의 str 정의가 같아야하지만 console은 옛날부터
+ *   cmd line에서 그냥 썻던거라 console과 earlycon을 매칭시켜서 찾는다.
+ *
+ *   - 대표 setup_func : early_initrd, param_setup_earlycon
+ */
 	for (p = __setup_start; p < __setup_end; p++) {
 		if ((p->early && parameq(param, p->str)) ||
 		    (strcmp(param, "console") == 0 &&
@@ -765,6 +806,11 @@ void __init parse_early_param(void)
 	static int done __initdata;
 	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
 
+/*
+ * IAMROOT, 2021.10.16:
+ * - setup_arch에서 호출될수도있고, start_kernel에서 호출될수있어 두번호출을
+ *   막기위해 done이 있다.
+ */
 	if (done)
 		return;
 
@@ -928,6 +974,16 @@ static void __init print_unknown_bootoptions(void)
 	memblock_free_ptr(unknown_options, len);
 }
 
+/*
+ * IAMROOT, 2021.09.11:
+ * - __visible
+ *   compile 최적화 때문에 안쓰는 함수를 global export를 안할수 있는데
+ *   이를 방지하기위해 linker한테 알려주는 역할
+ *   
+ * - __no_sanitize_address
+ *   sanitize address 관련 option이 켜져있을때 start_kernel은 영향을 안받게
+ *   하기 위함.
+ */
 asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 {
 	char *command_line;
@@ -1452,6 +1508,13 @@ static int try_to_run_init_process(const char *init_filename)
 
 static noinline void __init kernel_init_freeable(void);
 
+/*
+ * IAMROOT, 2021.10.30: 
+ * "rodata=off"와 같이 설정한 경우 커널 코드 및 rodata 섹션 영역의 데이터가
+ * Read Write가 가능하게 매핑한다.
+ * 
+ * 주의: early param의 경우 parse_rodata() 함수에 존재한다.
+ */
 #if defined(CONFIG_STRICT_KERNEL_RWX) || defined(CONFIG_STRICT_MODULE_RWX)
 bool rodata_enabled __ro_after_init = true;
 static int __init set_debug_rodata(char *str)

@@ -250,6 +250,10 @@ static inline atomic_t *compound_pincount_ptr(struct page *page)
 }
 
 /*
+ * IAMROOT, 2021.09.04:
+ * - struct page는 기본 64byte. 즉 6이 나옴
+ */
+/*
  * Used for sizing the vmemmap region on some architectures
  */
 #define STRUCT_PAGE_MAX_SHIFT	(order_base_2(sizeof(struct page)))
