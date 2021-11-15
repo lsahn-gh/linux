@@ -204,10 +204,10 @@ do_raw_spin_lock_flags(raw_spinlock_t *lock, unsigned long *flags) __acquires(lo
 	mmiowb_spin_lock();
 }
 
-+/*
-+ * IAMROOT, 2021.09.25: 
-+ * - debug용이 아닌 일반 버전
-+ */
+/*
+ * IAMROOT, 2021.09.25: 
+ * - debug용이 아닌 일반 버전
+ */
 static inline int do_raw_spin_trylock(raw_spinlock_t *lock)
 {
 	int ret = arch_spin_trylock(&(lock)->raw_lock);
