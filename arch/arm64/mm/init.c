@@ -295,13 +295,13 @@ void __init arm64_memblock_init(void)
 {
 /*
  * IAMROOT, 2021.10.23:
- * ----- (old 5.10)
- * - 절반만 리니어 매핑영역이므로 vabits 에서 -1 한것을 size로함 (128TB)
- * -----
- * - VA_BITS 48
- *  PAGE_END     = 0xffffff8000000000
- *  _PAGE_OFFSET = 0xffff000000000000
- *  255TB를 좀 넘는 범위
+ * - kernel 영역에서 절반은 lm 영역이므로 lm 영역 사이즈를 구한다. (128TB)
+ *
+ * - VA_BITS 48 환경
+ *     vabits_actual = 48
+ *     PAGE_END      = 0xffff800000000000
+ *     _PAGE_OFFSET  = 0xffff000000000000
+ *     128TB = PAGE_END - _PAGE_OFFSET = 0x800000000000
  */
 	s64 linear_region_size = PAGE_END - _PAGE_OFFSET(vabits_actual);
 
@@ -323,11 +323,9 @@ void __init arm64_memblock_init(void)
  * IAMROOT, 2021.10.23:
  * - 물리주소 범위를 벗어나는 영역을 지운다
  *
- * 표는 적당히 다음과 같은 순서대로 address가 설정되있다고 했을때
- * memblock 상태를 표시한다.
- * ----- (old 5.10)
- * (fdt_enforce_memory_region 이후만 고려)
- * -----
+ *   예) pa 48bits 시스템에서 PHYS_MASK_SHIFT: 48
+ *       1ULL << 48 = 0x1_0000_0000_0000
+ *       0x1_0000_0000_0000 ~ 0xffff_ffff_ffff_ffff 사이
  */
 	/* Remove memory above our supported physical address size */
 	memblock_remove(1ULL << PHYS_MASK_SHIFT, ULLONG_MAX);
@@ -335,6 +333,11 @@ void __init arm64_memblock_init(void)
 	/*
 	 * Select a suitable value for the base of physical memory.
 	 */
+/*
+ * IAMROOT, 2021.10.23:
+ * - memstart_addr를 round_down 하여 1GB 크기만큼 정렬하고 재설정한다.
+ *   ARM64에서 ARM64_MEMSTART_ALIGN은 항상 1GB 크기이다.
+ */
 	memstart_addr = round_down(memblock_start_of_DRAM(),
 				   ARM64_MEMSTART_ALIGN);
 
@@ -348,61 +351,50 @@ void __init arm64_memblock_init(void)
 	 */
 /*
  * IAMROOT, 2021.10.23:
- * - 리니어 매핑 영역보다 큰 물리메모리 영역을 제거한다.
- * 
- * 최초에 dt에서 memstart ~ memblock_end_of_DRAM() 까지 memory add를 한
- * 상태였을것이다.
- *
- * 그런데 만약 memstart_addr + linear_region_size 가 memblock_end_of_DRAM 작다면,
- * 즉 128TB 이상이라면 memblock_addr의 주소를 올려 128 TB의 크기로 맞춰버린다.
- *
- * 그렇게되면 old_memblock_addr ~ memblock_addr 부분이 아직 memblock add 로
- * 남았을것이므로 그 부분을 지우기 위해 0 ~ memblock_addr까지 지운다.
- *
- * memstart_addr 수정전)
- * address                  | memblock
- * -------------------------+--------
- * ..                       | remove
- * memblock_end_of_DRAM()   | remove
- * ..                       | add
- * (linear_region_size      | add
- * 보다 큰 간격)            | add
- * ...                      | add
- * memstart_addr            | add
- * ...                      | remove
- * -------------------------+--------
- *
- * memstart_addr 수정후)
- * address                  | memblock
- * -------------------------+--------
- * ..                       | remove
- * memblock_end_of_DRAM()   | remove
- * ..                       | add
- * linear_region_size       | add
- * ...                      | add
- * memstart_addr      <.    | add 
- * ...                 |    | add <-- memstart_addr이 위로 올라갔으므로
- * (old_memstart_addr) /    | add <-- 이 부분들이 remove되야된다.
- * ...                      | remove
- * -------------------------+--------
- *
- * memblock_remove(0, memstart_addr) 후)
- *
- * address                  | memblock
- * -------------------------+--------
- * ..                       | remove
- * memblock_end_of_DRAM()   | remove
- * ..                       | add
- * linear_region_size       | add
- * ...                      | add
- * memstart_addr            | add 
- * ...                      | *remove
- * old_memstart_addr        | *remove
- * ...                      | remove
- * -------------------------+--------
+ * - lm 영역보다 큰 영역, 또는 pa(_end)가 higher인 영역을 base로 하여 그보다
+ *   상위인 영역을 memblock_remove로 제거한다.
  */
 	memblock_remove(max_t(u64, memstart_addr + linear_region_size,
 			__pa_symbol(_end)), ULLONG_MAX);
+/*
+ * IAMROOT, 2021.11.04:
+ * - 처음에 dts를 통해 memblock_start_of_DRAM() - memblock_end_of_DRAM()까지
+ *   memory region을 추가하였을 것이다.
+ *
+ * - 'memstart_addr + linear_regions_size' < memblock_end_of_DRAM() 라면 
+ *   ( memblock_end_of_DRAM() > 128TB )
+ *   memstart_addr을 보정하고 '(new) memstart_addr - 0' 사이의 영역은 기존에
+ *   추가되어 있던 region이므로 memblock_remove로 삭제한다.
+ *
+ *   memstart_addr을 보정하더라도 '+ linear_regions_size'를 통해
+ *   size(memstart_addr + linear_region_size) == memblock_end_of_DRAM()임을
+ *   보장할 수 있다.
+ *
+ * memstart_addr 수정 전
+ * ---------------------
+ * memblock_end_of_DRAM()
+ * |
+ * '-> +--------+ 
+ *     |        |
+ *     |        |
+ *     |        |  <-- size (memstart_addr + linear_region_size)
+ *          ...
+ *     |        |
+ *     |        |  <-- memstart_addr
+ *
+ * memstart_addr 수정 후
+ * ---------------------
+ * memblock_end_of_DRAM()
+ * |
+ * '-> +--------+  <-- size (memstart_addr + linear_region_size)
+ *     |        |
+ *     |        |
+ *     |        |  <-- memstart_addr (new) -+----
+ *          ...                             | 보정이 필요한 영역
+ *     |        |                           | memblock_remove() 호출
+ *     |        |  <-- memstart_addr (old) -+----
+ *
+ */
 	if (memstart_addr + linear_region_size < memblock_end_of_DRAM()) {
 		/* ensure that memstart_addr remains sufficiently aligned */
 		memstart_addr = round_up(memblock_end_of_DRAM() - linear_region_size,
@@ -540,7 +532,6 @@ void __init arm64_memblock_init(void)
  * IAMROOT, 2021.10.23:
  * - dt에서 지정한 reserved 영역 등록
  */
-
 	early_init_fdt_scan_reserved_mem();
 
 /*

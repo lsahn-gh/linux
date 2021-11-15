@@ -31,6 +31,18 @@
  * Rounds @x down to next multiple of @y (which must be a power of 2).
  * To perform arbitrary rounding down, use rounddown() below.
  */
+/*
+ * IAMROOT, 2021.11.04:
+ * - @y 단위로 align을 맞춘다.
+ *
+ * - 예)
+ *   @x: 0x0004_4000_fea0 (memblock_start_of_DRAM())
+ *   @y: 1 << 30 (ARM64_MEMSTART_ALIGN)
+ *
+ *   = (0x0004_4000_fea0) & ~((__typeof__(0))((1 << 30) - 1))
+ *   = 0x0004_4000_fea0 & 0xffff_c000_0000 (~0x3fff_ffff)
+ *   = 0x0004_4000_0000
+ */
 #define round_down(x, y) ((x) & ~__round_mask(x, y))
 
 #define DIV_ROUND_UP __KERNEL_DIV_ROUND_UP
