@@ -183,6 +183,13 @@ SECTIONS
 
 	HYPERVISOR_DATA_SECTIONS
 
+/*
+ * IAMROOT, 2021.11.16:
+ * - idmap_pg_dir 목적
+ *   head.S에서 mmu disable -> mmu enable로 mmu가 동작할 때 kernel code를
+ *   계속 수행할 수 있도록 돕는 임시 page table. pc + 1은 여전히 pa 주소이므로
+ *   idmap_pg_dir을 통해 수행하지 않는다면 page fault가 발생한다.
+ */
 	idmap_pg_dir = .;
 	. += IDMAP_DIR_SIZE;
 	idmap_pg_end = .;
@@ -302,6 +309,12 @@ SECTIONS
 
 	BSS_SECTION(SBSS_ALIGN, 0, 0)
 
+/*
+ * IAMROOT, 2021.11.16:
+ * - init_pg_dir 목적
+ *   head.S에서 mmu가 enable되고 나서 처리되는 모든 va(kernel code)가 매핑된
+ *   임시 page table. setup_arch() -> paging_init() 이후에 사용되지 않는다.
+ */
 	. = ALIGN(PAGE_SIZE);
 	init_pg_dir = .;
 	. += INIT_DIR_SIZE;

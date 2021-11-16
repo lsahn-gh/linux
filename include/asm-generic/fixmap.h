@@ -20,9 +20,8 @@
 
 /*
  * IAMROOT, 2021.10.09: 
- * - fix_to_virt: fixmap 인덱스 @x에 대한 fixmap 가상 주소를 반환한다.
- *                인덱스 0에 해당하는 위치는 fixmap 가장 상부의 FIXADDR_TOP에
- *                해당한다.
+ * - fix_to_virt: fixmap 인덱스 @x에 해당하는 fixmap 가상 주소를 반환한다.
+ *                인덱스 0에 해당하는 위치는 fixmap 가장 상부의 FIXADDR_TOP이다.
  *
  *   예) FIXADDR_TOP : 0xffff_fdff_fea0_0000
  *       @x          : FIX_PGD (1482)

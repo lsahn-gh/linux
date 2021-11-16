@@ -390,7 +390,7 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 
 /*
  * IAMROOT, 2021.10.09: 
- * - 전 단계의 p4d 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
+ * - p4d(*p4dp) 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
  *   이러한 경우 새로운 pud 테이블을 할당한다. 
  *
  * (*pgtable_alloc):
@@ -474,6 +474,8 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
 /*
  * IAMROOT, 2021.10.09: 
  * - virt 주소와 size를 사용하여 매핑 시작 주소와 끝 주소를 산출한다.
+ *
+ *   phys: PAGE_SIZE로 round down 하여 정렬한다.
  *   매핑 시작 주소(addr)는 virt를 페이지 단위로 round down하여 사용하고,
  *   매핑 끝 주소(end)는 virt+size를 페이지 단위로 round up하여 사용한다.
  *
@@ -486,14 +488,14 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
 
 /*
  * IAMROOT, 2021.10.14:
- * addr ~ next or end 영역을 pgd 단위로 alloc_init_pud를 수행한다.
- * addr = 1GB, end = 1025라고 하고 pgd 단위가 512GB라고 한다면
- *
- * 1 : 1GB ~ 512 GB
- * 2 : 512GB ~ 1024 GB
- * 3 : 1024GB ~ 1025 GB
+ * - addr ~ next or end 영역을 pgd 단위로 alloc_init_pud를 수행한다.
  * 
- * 이렇게 3번이 수행될것이다.
+ *   예) addr: 1GB, end: 1025GB, pgd entry size: 512GB인 경우
+ *       1st loop: 1GB ~ 512 GB
+ *       2nd loop: 512GB ~ 1024 GB
+ *       3th loop: 1024GB ~ 1025 GB
+ * 
+ *       이렇게 3번이 수행될것이다.
  */
 	do {
 		next = pgd_addr_end(addr, end);
@@ -737,6 +739,10 @@ static void __init map_kernel_segment(pgd_t *pgdp, void *va_start, void *va_end,
 	BUG_ON(!PAGE_ALIGNED(pa_start));
 	BUG_ON(!PAGE_ALIGNED(size));
 
+    /*
+     * IAMROOT, 2021.11.17: 
+     * - @va_start ~ @va_end까지의 커널 영역을 @pgdp에 매핑한다.
+     */
 	__create_pgd_mapping(pgdp, pa_start, (unsigned long)va_start, size, prot,
 			     early_pgtable_alloc, flags);
 
@@ -842,6 +848,10 @@ static bool arm64_early_this_cpu_has_bti(void)
 /*
  * Create fine-grained mappings for the kernel.
  */
+/*
+ * IAMROOT, 2021.11.16:
+ * - swapper_pg_dir에 커널 영역을 매핑한다.
+ */
 static void __init map_kernel(pgd_t *pgdp)
 {
 	static struct vm_struct vmlinux_text, vmlinux_rodata, vmlinux_inittext,
@@ -861,8 +871,8 @@ static void __init map_kernel(pgd_t *pgdp)
 
 /*
  * IAMROOT, 2021.10.30: 
- * cpu가 BTI(Branch Target Identification) 기능을 지원하는 경우 이 페이지의
- * 매핑 속성에 PTE_GP를 추가한다.
+ * cpu가 BTI(Branch Target Identification) 기능을 지원하는 경우 커널 영역
+ * 페이지의 매핑 속성에 PTE_GP를 추가한다.
  * 이 기능은 JOP(Jump Oriented Program) & ROP(Return Oriented Program) Attack을 
  * 회피하기 위해 ARMv8.5 & GCC 9.1에서 PAC(Pointer Authentication Code)를 
  * 만들어 방어한다. 만일 위조된 주소를 사용하면 Branch Target Exception이 
@@ -971,6 +981,9 @@ void __init paging_init(void)
 /*
  * IAMROOT, 2021.10.30:
  * - mapping을 위해 잠시 FIX_PGD를 사용한다.
+ *
+ *   보안상의 이유로 FIXMAP을 사용하며 va(swapper_pg_dir)을 사용해도 의도한
+ *   정규 매핑 작업에는 지장이 없다.
  */
 	pgd_t *pgdp = pgd_set_fixmap(__pa_symbol(swapper_pg_dir));
 

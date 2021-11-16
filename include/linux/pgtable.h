@@ -60,8 +60,11 @@
 
 /*
  * IAMROOT, 2021.10.02:
- * - (a >> 12) & (0x1ff)
- *   a : 0xffff_0000_001f_f000 = 1ff
+ * - va(@address)에 대응하는 pte table 인덱스를 구한다.
+ *
+ * - (@address >> 12) & (0x1ff)
+ *   @address: 0xffff_0000_001f_f000
+ *   @return : 0x1ff
  */
 static inline unsigned long pte_index(unsigned long address)
 {
@@ -70,8 +73,11 @@ static inline unsigned long pte_index(unsigned long address)
 
 /*
  * IAMROOT, 2021.10.02:
- * - (a >> 21) & (0x1ff)
- *   a : 0xffff_0000_3fe0_0000 = 1ff
+ * - va(@address)에 대응하는 pmd table 인덱스를 구한다.
+ *
+ * - (@address >> 21) & (0x1ff)
+ *   @address: 0xffff_0000_3fe0_0000
+ *   @return : 0x1ff
  */
 #ifndef pmd_index
 static inline unsigned long pmd_index(unsigned long address)
@@ -83,8 +89,11 @@ static inline unsigned long pmd_index(unsigned long address)
 
 /*
  * IAMROOT, 2021.10.02:
- * - (a >> 30) & (0x1ff)
- *   a : 0xffff_007f_c000_0000 = 1ff
+ * - va(@address)에 대응하는 pud table 인덱스를 구한다.
+ *
+ * - (@address >> 30) & (0x1ff)
+ *   @address: 0xffff_007f_c000_0000
+ *   @return : 0x1ff
  */
 #ifndef pud_index
 static inline unsigned long pud_index(unsigned long address)
@@ -96,6 +105,8 @@ static inline unsigned long pud_index(unsigned long address)
 
 /*
  * IAMROOT, 2021.10.02:
+ * - va(@address)에 대응하는 pgd table 인덱스를 구한다.
+ *
  * VA 48bits, 4단계 table 기준 (ARM64_HW_PGTABLE_LEVEL_SHIFT 참고)
  *
  * - address bit별 영역 정리
@@ -113,7 +124,6 @@ static inline unsigned long pud_index(unsigned long address)
  * PAGE_SIZE | PGDIR_SHIFT | PTRS_PER_PGD | pgd_index(a)       | result
  * 4KB       | 39          | 512(0x200)   | (a >> 39 & (0x1ff) | 0x1ff
  * 16KB      | 47          | 2            | (a >> 47 & (0x2)   | 1
- *
  */
 #ifndef pgd_index
 /* Must be a compile-time constant, so implement it as a macro */
@@ -821,11 +831,6 @@ static inline void arch_swap_restore(swp_entry_t entry, struct page *page)
  */
 /*
  * IAMROOT, 2021.10.09: 
- * pgd_addr_end(addr, end):
- *     addr 주소가 PGDIR_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 512G 단위의 다음 주소를 반환한다.
- * 
  * pgd_addr_end(addr, end):
  *     addr 주소가 PGDIR_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
  *     단 end를 초과하는 경우 end 값을 반환한다.

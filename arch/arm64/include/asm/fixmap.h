@@ -122,9 +122,12 @@ enum fixed_addresses {
 
 /*
  * IAMROOT, 2021.09.04:
- * - FIX_BTMAP_END ~ __end_of_fixed_addresses :
- *   early_ioremap 영역. 256kb * 7
- *   7개 장비를 부팅하자마자 쓸수 있게 하는 영역.
+ * - 정규 매핑 (paging_init) 이전에 I/O 장치들이 사용되어야 하는 경우를 위한 영역.
+ *   1. ACPI 테이블 접근 후 디바이스 정보를 읽어야 하는 경우.
+ *   2. EFI 테이블 접근 후 디바이스 정보를 읽어야 하는 경우.
+ *   3. 일부 디바이스에서 설정 정보를 읽어야 하는 경우.
+ *
+ * - 총 7개의 slot에 각각 256k 크기를 커버한다.
  */
 	FIX_BTMAP_END = __end_of_permanent_fixed_addresses,
 	FIX_BTMAP_BEGIN = FIX_BTMAP_END + TOTAL_FIX_BTMAPS - 1,

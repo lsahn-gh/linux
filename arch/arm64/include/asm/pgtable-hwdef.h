@@ -206,6 +206,20 @@
 #define PMD_SECT_AF		(_AT(pmdval_t, 1) << 10)
 #define PMD_SECT_NG		(_AT(pmdval_t, 1) << 11)
 #define PMD_SECT_CONT		(_AT(pmdval_t, 1) << 52)
+/*
+ * IAMROOT, 2021.11.17: 
+ * - *_SECT_*XN : block/page에 적용하는 access bits.
+ * - *_TABLE_*XN: page table에 적용하는 access bits.
+ *                TABLE bits가 설정되면 자식 table/block/page 모두
+ *                *XN bits가 설정된다. (상속)
+ *
+ * - PXN: kernel이 접근할 수 없도록 설정.
+ *        주로 application code/data, device peripherals addr에 설정된다.
+ * - UXN: application이 접근할 수 없도록 설정.
+ *        커널 영역 addr에 설정된다.
+ *
+ * link: https://developer.arm.com/documentation/den0024/a/BABCEADG
+ */
 #define PMD_SECT_PXN		(_AT(pmdval_t, 1) << 53)
 #define PMD_SECT_UXN		(_AT(pmdval_t, 1) << 54)
 #define PMD_TABLE_PXN		(_AT(pmdval_t, 1) << 59)
