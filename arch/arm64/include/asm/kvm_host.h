@@ -55,6 +55,20 @@
  * Mode of operation configurable with kvm-arm.mode early param.
  * See Documentation/admin-guide/kernel-parameters.txt for more information.
  */
+/*
+ * IAMROOT, 2021.11.19:
+ * -kvm-arm.mode=
+ *		[KVM,ARM] Select one of KVM/arm64's modes of operation.
+ *
+ *			nvhe: Standard nVHE-based mode, without support for
+ *			protected guests.
+ *
+ *			protected: nVHE-based mode with support for guests whose
+ *				state is kept private from the host.
+ *				Not valid if the kernel is running in EL2.
+ *
+ *			Defaults to VHE/nVHE based on hardware support.
+ */
 enum kvm_mode {
 	KVM_MODE_DEFAULT,
 	KVM_MODE_PROTECTED,

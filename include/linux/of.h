@@ -28,6 +28,14 @@
 typedef u32 phandle;
 typedef u32 ihandle;
 
+/*
+ * IAMROOT, 2021.11.19:
+ * of(Open Firmware)
+ *
+ * https://ko.wikipedia.org/wiki/%EC%98%A4%ED%94%88_%ED%8E%8C%EC%9B%A8%EC%96%B4
+ * https://en.wikipedia.org/wiki/Open_Firmware
+ */
+
 struct property {
 	char	*name;
 	int	length;

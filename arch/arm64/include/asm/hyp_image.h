@@ -12,9 +12,8 @@
 
 /*
  * IAMROOT, 2021.11.13:
- * symbol이 kvm_nvhe_sym에 대한것인데 현재 system이 nvhe가 아니면
- * symbol에 kvm_nvhe_sym을 명시해주소, 현재 system이 nvhe이면 결국
- * symbol도 nvhe이니 명시를안한다.
+ * KVM VHE로 동작. host = EL2, GUEST = EL1,
+ * nvhe에 대한 전용 symbol 생성 및 접근을 위한것.
  */
 #ifndef __KVM_NVHE_HYPERVISOR__
 /*
@@ -23,6 +22,11 @@
  */
 #define kvm_nvhe_sym(sym)	__kvm_nvhe_##sym
 #else
+/*
+ * IAMROOT, 2021.11.19:
+ * KVM NVHE로 동작. host = EL1, GUEST = EL1,
+ * system이 nvhe이니 symbol이 전부 nvhe일 것.
+ */
 #define kvm_nvhe_sym(sym)	sym
 #endif
 

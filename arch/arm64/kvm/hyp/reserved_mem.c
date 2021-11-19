@@ -62,8 +62,8 @@ static int __init register_memblock_regions(void)
 
 /*
  * IAMROOT, 2021.11.13:
- * - hyp_memory에 대해서 stage 1, stage 2에 필요한 page 개수를 구하고
- *   memory를 할당한다.
+ * - kvm nvhe로 진입시(EL2부팅, EL1 동작) hyp_memory에 대해서 stage 1,
+ *   stage 2에 필요한 page 개수를 구하고 memory를 할당한다.
  */
 void __init kvm_hyp_reserve(void)
 {
@@ -71,7 +71,9 @@ void __init kvm_hyp_reserve(void)
 	int ret;
 /*
  * IAMROOT, 2021.11.13:
- * - EL2로 부팅했는지 확인.
+ * - hyp mode가 될수없거나 현재 mode가 EL2면 return.
+ *   return이 안된다면, EL2로 부팅을 시도했지만 어떤 이유에서 EL1인 상황.
+ *   kvm nvhe인 상황이다. 
  */
 	if (!is_hyp_mode_available() || is_kernel_in_hyp_mode())
 		return;
