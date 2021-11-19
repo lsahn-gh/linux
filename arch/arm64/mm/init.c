@@ -302,6 +302,59 @@ void __init arm64_memblock_init(void)
  *     PAGE_END      = 0xffff800000000000
  *     _PAGE_OFFSET  = 0xffff000000000000
  *     128TB = PAGE_END - _PAGE_OFFSET = 0x800000000000
+ *
+ * ----- 5.10 -> 5.15 변경점에 대하여 (KASAN 고려 안함)
+ *  5.10 코드 : linear_region_size = BIT(vabits_actual - 1);
+ *
+ *  - 4k, 48bits -> VA_BITS_MIN=48, vabits_actual=48
+ *	 5.10 : BIT(47) = 0x800000000000 = 128TB
+ *	 5.15 : 0xffff800000000000 - 0xffff000000000000 = 0x800000000000 = 128TB
+ *
+ * 위와 같은 상황에서는 기존과 변화가 없지만 lva support하는 52bit 환경에서는
+ * 다음과 같이 달라진다.
+ *
+ * 52bit _PAGE_OFFSET = 0xfff0000000000000
+ *  - 64k, 52bits -> VA_BITS_MIN=48, vabits_actual=52(lva support)
+ *	 5.10 : BIT(51) = 0x8000000000000 = 2048TB
+ *	 5.15 : 0xffff800000000000 - 0xfff0000000000000 = 0xf800000000000 = 3968TB
+ *
+ * 즉 4k, 48bits에서 변한건 없지만 64k, 52bits에서는 범위가 늘어난것이 확인된다.
+ *
+ * 기존 BIT만을 사용해 영역을 절반사용했을때에는 linear 영역이
+ *  PAGE_OFFSET(52) ~ (PAGE_OFFSET(52) + BIT(51))인 2048TB 영역을 사용했었는데
+ *  PAGE_END가 실제론 VA_BITS_MIN을 쓰는 _PAGE_END(48)이다 보니
+ *  (PAGE_OFFSET(52) + BIT(51) ~ _PAGE_END(48)) 영역을 안쓰게 되는 되어 버렸다.
+ *
+ * (PAGE_OFFSET(52) + BIT(51) = _PAGE_END(52) 로 표현된다)
+ *
+ * ==== 5.10 에서 vabits_actual=52 linear_region 영역 ====
+ *
+ *   +--------------------+
+ *   | valloc             |
+ *   +--------------------+ _PAGE_END(48) = 0xffff800000000000
+ *   + 사용안함           |
+ *   +--------------------+ _PAGE_OFFSET(52) + BIT(51) =  0xfff8000000000000
+ *   |                    |
+ *   | linear_region_size | BIT(51) = 2048TB = 0x800000000000
+ *   | (BIT(51) size)     |
+ *   |                    |
+ *   +--------------------+ _PAGE_OFFSET(52) = 0xfff0000000000000
+ *
+ * 그러다 보니 이 "사용안함" 영역도 linear 영역에 포함 시킬려고 현재와 같이
+ * 수정이 된것이다.
+ *
+ * ==== 5.15 에서 vabits_actual=52 linear_region 영역 ====
+ *
+ *   +--------------------+
+ *   | valloc             |
+ *   +--------------------+ _PAGE_END(48) = 0xffff800000000000
+ *   |                    |
+ *   | linear_region_size | 0xf800000000000 = 3968TB
+ *   |                    |
+ *   +--------------------+ _PAGE_OFFSET(52) = 0xfff0000000000000
+ *
+ * 하지만 현재 저 "사용안함" 이였던 영역은 실제 매핑하지 않아 보이므로
+ * linear_region_size는 2048TB영역이라 봐도 무방하다.
  */
 	s64 linear_region_size = PAGE_END - _PAGE_OFFSET(vabits_actual);
 
@@ -361,12 +414,12 @@ void __init arm64_memblock_init(void)
  * - 처음에 dts를 통해 memblock_start_of_DRAM() - memblock_end_of_DRAM()까지
  *   memory region을 추가하였을 것이다.
  *
- * - 'memstart_addr + linear_regions_size' < memblock_end_of_DRAM() 라면 
+ * - 'memstart_addr + linear_region_size' < memblock_end_of_DRAM() 라면 
  *   ( memblock_end_of_DRAM() > 128TB )
  *   memstart_addr을 보정하고 '(new) memstart_addr - 0' 사이의 영역은 기존에
  *   추가되어 있던 region이므로 memblock_remove로 삭제한다.
  *
- *   memstart_addr을 보정하더라도 '+ linear_regions_size'를 통해
+ *   memstart_addr을 보정하더라도 '+ linear_region_size'를 통해
  *   size(memstart_addr + linear_region_size) == memblock_end_of_DRAM()임을
  *   보장할 수 있다.
  *
