@@ -392,6 +392,11 @@ static inline phys_addr_t pgdat_to_phys(struct pglist_data *pgdat)
 }
 
 #ifdef CONFIG_MEMORY_HOTREMOVE
+/*
+ * IAMROOT, 2021.11.20:
+ * - pgdata를 기준으로 시작 주소를 얻어오고 section size만큼 limit를 두어
+ *   해당 영역에 memblock을 할당한다.
+ */
 static struct mem_section_usage * __init
 sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 					 unsigned long size)
@@ -399,6 +404,10 @@ sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 	struct mem_section_usage *usage;
 	unsigned long goal, limit;
 	int nid;
+/*
+ * IAMROOT, 2021.11.20:
+ * - remove가 가능한 상황에서 memory들은 최대한 한곳에 모은다.
+ */
 	/*
 	 * A page may contain usemaps for other sections preventing the
 	 * page being freed and making a section unremovable while
@@ -464,6 +473,10 @@ static void __init check_usemap_section_nr(int nid,
 		usemap_snr, pgdat_snr, nid);
 }
 #else
+/*
+ * IAMROOT, 2021.11.20:
+ * - 일반 memblock 할당과 같은 방법을 사용한다.
+ */
 static struct mem_section_usage * __init
 sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 					 unsigned long size)

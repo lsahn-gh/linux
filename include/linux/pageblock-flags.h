@@ -12,9 +12,28 @@
 #define PAGEBLOCK_FLAGS_H
 
 #include <linux/types.h>
-
+/*
+ * IAMROOT, 2021.11.20:
+ * - migratetype 참고
+ *   MIGRATE_PCPTYPES 들을 의미함.
+ */
 #define PB_migratetype_bits 3
+
 /* Bit indices that affect a whole block of pages */
+/*
+ * IAMROOT, 2021.11.20:
+ * - pageblock을 나타내는데 필요한 bits수
+ * - PB_migrate_end = 0 + 3 - 1 = 2
+ *   PB_migrate_skip            = 3
+ *   NR_PAGEBLOCK_BITS          = 4
+ *
+ * - mgirate가 가능한 memory, 불가능한 memory가 존재한다.
+ *   (ex. kerenl이 사용하는 memory는 migrate가 불가능,
+ *   application memory는 가능(hop plug))
+ * - migrate라는 의미가 이동이 가능하다는 의미도 된다.
+ * - page_order 단위로 관리한다.
+ * - page scan할때 필요로하는 정보를 기록
+ */
 enum pageblock_bits {
 	PB_migrate,
 	PB_migrate_end = PB_migrate + PB_migratetype_bits - 1,

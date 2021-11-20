@@ -44,6 +44,26 @@
  */
 #define PAGE_ALLOC_COSTLY_ORDER 3
 
+/*
+ * IAMROOT, 2021.11.20:
+ * - PCP Type이라함은 이 3개를 가리킨다.
+ *   PCP Type : buddy system에서 cache역할을 하는 memory.
+ *              memory에서 가장 많이 사용하는 type을 이런 cache
+ *              로 쓰겟다는것.
+ *   MIGRATE_UNMOVABLE : kernel 이 사용하는것과 비슷한 제거 불가능한것.
+ *   MIGRATE_MOVABLE : 보통 hotplug로 추가 되는 memory들.
+ *   MIGRATE_RECLAIMABLE : 회수가 가능한 memory. disk를 불러올때 
+ *                         많은 memory를 load하는 상황등의 memory
+ * - MIGRATE_CMA
+ *   kernel에서 연속된 공간을 할당하기엔 매우 어려움이 있는데,
+ *   이를 해결하기 위한 공간. driver등(application)에서만 사용하며
+ *   kernel에서는 사용하지 않음. 이동(movable, reclimable)이 가능하다.
+ *   dt에서 영역을 설정한다.
+ *
+ * - MIGRATE_ISOLATE
+ *   memory를 remove하는 상황에서 잠깐 isolate type등으로 바꾼다.
+ *   이동, 삭제등의 작업중의 memory에 접근하지 말라는 의미
+ */
 enum migratetype {
 	MIGRATE_UNMOVABLE,
 	MIGRATE_MOVABLE,
@@ -1267,6 +1287,11 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  */
 #define PAGE_SECTION_MASK	(~(PAGES_PER_SECTION-1))
 
+/*
+ * IAMROOT, 2021.11.20:
+ * - pageblock_order = HUGETLB_PAGE_ORDER 라고 가정 (9)
+ *   (1 << (15 - 9)) * 
+ */
 #define SECTION_BLOCKFLAGS_BITS \
 	((1UL << (PFN_SECTION_SHIFT - pageblock_order)) * NR_PAGEBLOCK_BITS)
 
