@@ -67,6 +67,10 @@ struct mem_cgroup;
 #define _struct_page_alignment
 #endif
 
+/*
+ * IAMROOT, 2021.11.20:
+ * - struct page default size는 64byte.
+ */
 struct page {
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */

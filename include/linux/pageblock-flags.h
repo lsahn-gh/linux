@@ -27,7 +27,7 @@
  *   PB_migrate_skip            = 3
  *   NR_PAGEBLOCK_BITS          = 4
  *
- * - mgirate가 가능한 memory, 불가능한 memory가 존재한다.
+ * - migrate가 가능한 memory, 불가능한 memory가 존재한다.
  *   (ex. kerenl이 사용하는 memory는 migrate가 불가능,
  *   application memory는 가능(hop plug))
  * - migrate라는 의미가 이동이 가능하다는 의미도 된다.

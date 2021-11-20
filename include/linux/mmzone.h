@@ -502,6 +502,10 @@ enum zone_type {
 	 */
 	ZONE_MOVABLE,
 #ifdef CONFIG_ZONE_DEVICE
+/*
+ * IAMROOT, 2021.11.20:
+ * - device등에서 dram보다 느린 memory를 할당하는경우.
+ */
 	ZONE_DEVICE,
 #endif
 	__MAX_NR_ZONES
@@ -1289,8 +1293,15 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 
 /*
  * IAMROOT, 2021.11.20:
+ * - 128MB범위를 관리한다.
+ *
  * - pageblock_order = HUGETLB_PAGE_ORDER 라고 가정 (9)
- *   (1 << (15 - 9)) * 
+ *   (1 << (15 - 9)) * 4 = 2^6 * 4 = 256(bits) = 32byte
+ *
+ * - 4GB를 관리하는데 필요한 bits 계산.
+ *   pageblock_order당 2MB를 커버한다. 2MB 당 4bit
+ *   1024 * 2 * 4bit = 8192bits = 1kb
+ *   (memmap인경우 64MB. 1.5%정도를사용한다.)
  */
 #define SECTION_BLOCKFLAGS_BITS \
 	((1UL << (PFN_SECTION_SHIFT - pageblock_order)) * NR_PAGEBLOCK_BITS)
@@ -1307,6 +1318,10 @@ static inline unsigned long pfn_to_section_nr(unsigned long pfn)
 {
 	return pfn >> PFN_SECTION_SHIFT;
 }
+/*
+ * IAMROOT, 2021.11.20:
+ * - section nr -> pfn 변환
+ */
 static inline unsigned long section_nr_to_pfn(unsigned long sec)
 {
 	return sec << PFN_SECTION_SHIFT;
@@ -1325,17 +1340,34 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #if SUBSECTION_SHIFT > SECTION_SIZE_BITS
 #error Subsection size exceeds section size
 #else
+/*
+ * IAMROOT, 2021.11.20:
+ * - 27 - 21 = 6
+ *   한 section당 subsecion의 개수 2^6 = 64
+ */
 #define SUBSECTIONS_PER_SECTION (1UL << (SECTION_SIZE_BITS - SUBSECTION_SHIFT))
 #endif
 
 #define SUBSECTION_ALIGN_UP(pfn) ALIGN((pfn), PAGES_PER_SUBSECTION)
 #define SUBSECTION_ALIGN_DOWN(pfn) ((pfn) & PAGE_SUBSECTION_MASK)
 
+/*
+ * IAMROOT, 2021.11.20:
+ * - SUBSECTIONS_PER_SECTION이 64이므로 64bit = 8byte
+ */
 struct mem_section_usage {
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
+/*
+ * IAMROOT, 2021.11.20:
+ * - Documentation/vm/memory-model.rst 참고
+ */
 	DECLARE_BITMAP(subsection_map, SUBSECTIONS_PER_SECTION);
 #endif
 	/* See declaration of similar field in struct zone */
+/*
+ * IAMROOT, 2021.11.20:
+ * - pageblock_bits
+ */
 	unsigned long pageblock_flags[0];
 };
 
