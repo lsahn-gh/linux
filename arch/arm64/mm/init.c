@@ -186,7 +186,11 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 {
 	phys_addr_t zone_mask = DMA_BIT_MASK(zone_bits);
 	phys_addr_t phys_start = memblock_start_of_DRAM();
-
+/*
+ * IAMROOT, 2021.11.27:
+ * - DRAM start 주소가 32bit max보다 크면 memblock_end_of_DRAM()을 쓰겟다는것.
+ * - DRAM start 주소가 zone_mask보다 크면 min(U32_MAX, memblock_end_of_DRAM())
+ */
 	if (phys_start > U32_MAX)
 		zone_mask = PHYS_ADDR_MAX;
 	else if (phys_start > zone_mask)
@@ -195,6 +199,17 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 	return min(zone_mask, memblock_end_of_DRAM() - 1) + 1;
 }
 
+/*
+ * IAMROOT, 2021.11.27:
+ * @min DRAM start pfn
+ * @max DRAM end pfn + 1
+ *
+ * ZONE_DMA    : dt에서 읽은 device max address pfn
+ * ZONE_DMA32  : 32bit pfn
+ * ZONE_NORMAL : DRAM end pfn + 1
+ *
+ * arm64에서는 보통 ZONE_DMA가 없고 ZONE_DMA32를 쓴다.
+ */
 static void __init zone_sizes_init(unsigned long min, unsigned long max)
 {
 	unsigned long max_zone_pfns[MAX_NR_ZONES]  = {0};
@@ -203,6 +218,10 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	phys_addr_t __maybe_unused dma32_phys_limit = max_zone_phys(32);
 
 #ifdef CONFIG_ZONE_DMA
+/*
+ * IAMROOT, 2021.11.27:
+ * - acpi가 disable일경우 fls64는 64.
+ */
 	acpi_zone_dma_bits = fls64(acpi_iort_dma_get_max_cpu_address());
 	dt_zone_dma_bits = fls64(of_dma_get_max_cpu_address(NULL));
 	zone_dma_bits = min3(32U, dt_zone_dma_bits, acpi_zone_dma_bits);

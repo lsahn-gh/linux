@@ -361,6 +361,10 @@ struct page *sparse_decode_mem_map(unsigned long coded_mem_map, unsigned long pn
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - mem_secion에 sparse 정보를 저장한다.
+ */
 static void __meminit sparse_init_one_section(struct mem_section *ms,
 		unsigned long pnum, struct page *mem_map,
 		struct mem_section_usage *usage, unsigned long flags)
@@ -593,6 +597,11 @@ static void __init sparse_buffer_fini(void)
 	sparsemap_buf = NULL;
 }
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - sparse buffer에서 size align에 맞게 공간을 구해온다.
+ *   만약에 구해오는 ptr 주소와 그 전 ptr 사이에 공간이 있다면 그 공간은 free를한다.
+ */
 void * __meminit sparse_buffer_alloc(unsigned long size)
 {
 	void *ptr = NULL;
@@ -631,6 +640,10 @@ void __weak __meminit vmemmap_populate_print_last(void)
 /*
  * Initialize sparse on a specific node. The node spans [pnum_begin, pnum_end)
  * And number of present sections in this node is map_count.
+ */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 해당 nid에 대해서 sparse방식으로 mem map을 초기화한다.
  */
 static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 				   unsigned long pnum_end,
@@ -695,6 +708,8 @@ failed:
  * IAMROOT, 2021.11.13:
  * - memory model에는 크게 flat memory, sparse memory가 있는데
  *   arm64는 sparse memory만을 사용한다.
+ * - 같은 nid를 가진 present memory를 sparse 방식으로 mem section을
+ *   초기화한다.
  */
 void __init sparse_init(void)
 {

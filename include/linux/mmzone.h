@@ -428,6 +428,11 @@ enum zone_type {
 	 * platforms may need both zones as they support peripherals with
 	 * different DMA addressing limitations.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - kernel에서 memory를 할당할때 가능한 ZONE_DMA에 할당하지 않도록
+ *   노력을 한다
+ */
 #ifdef CONFIG_ZONE_DMA
 	ZONE_DMA,
 #endif
@@ -1397,6 +1402,14 @@ struct mem_section {
 	 * Making it a UL at least makes someone do a cast
 	 * before using it wrong.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - section mem map에 대한 pointer 겸 해서 flag(SECTION_MAP_MASK)를 저장한다.
+ *   bit | 63...32 | 31...15 | 14...6 | 5 | 4     | 3     | 2      | 1   | 0       |
+ *       | mem map - pfn     | nid    | - | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
+ * - 참고 함수
+ *   sparse_encode_mem_map
+ */
 	unsigned long section_mem_map;
 
 	struct mem_section_usage *usage;
@@ -1491,6 +1504,10 @@ extern size_t mem_section_usage_size(void);
 #define SECTION_IS_EARLY		(1UL<<3)
 #define SECTION_TAINT_ZONE_DEVICE	(1UL<<4)
 #define SECTION_MAP_LAST_BIT		(1UL<<5)
+/*
+ * IAMROOT, 2021.11.27:
+ * - 하위 5bit. 0xffff_ffff_ffff_ffe0 
+ */
 #define SECTION_MAP_MASK		(~(SECTION_MAP_LAST_BIT-1))
 #define SECTION_NID_SHIFT		6
 

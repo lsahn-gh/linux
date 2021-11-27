@@ -1126,6 +1126,19 @@ out:
  * in the sub-tree pointed by np, or the whole tree if NULL is passed. If no
  * DMA constrained device is found, it returns PHYS_ADDR_MAX.
  */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 장치에서 dma-ranges를 찾는다. 가장 작은 max주소를 찾는다.
+ * - ex) 마지막 주소들이 다음과 같이 존재할때
+ *   A 0x8000, 0x4000 -> 0x8000 선택 (장치내에선 가장 큰 주소 선택돔)
+ *   B 0x6000 -> 0x6000
+ *   C 0x5000 -> 0x5000
+ *   장치 중에선 가장 작은 C의 0x5000이 결과 값으로 return 될것
+ *
+ * - dma-ranges 참고
+ *   https://elinux.org/Device_Tree_Usage
+ *   https://www.devicetree.org/specifications/
+ */
 phys_addr_t __init of_dma_get_max_cpu_address(struct device_node *np)
 {
 	phys_addr_t max_cpu_addr = PHYS_ADDR_MAX;
@@ -1143,10 +1156,19 @@ phys_addr_t __init of_dma_get_max_cpu_address(struct device_node *np)
 	ranges = of_get_property(np, "dma-ranges", &len);
 	if (ranges && len) {
 		of_dma_range_parser_init(&parser, np);
+/*
+ * IAMROOT, 2021.11.27:
+ * - cpu 관점에서는 last address가 중요하다. zone device의 제한을 걸어야되기때문이다.
+ *   이 주소를 cpu_end로 생각한다.
+ */
 		for_each_of_range(&parser, &range)
 			if (range.cpu_addr + range.size > cpu_end)
 				cpu_end = range.cpu_addr + range.size - 1;
-
+/*
+ * IAMROOT, 2021.11.27:
+ * - 한개의 deivce에서는 가장 높은주소를, 전체 device에서는 가장 낮은 주소를
+ *   가져오는 개념이된다.
+ */
 		if (max_cpu_addr > cpu_end)
 			max_cpu_addr = cpu_end;
 	}

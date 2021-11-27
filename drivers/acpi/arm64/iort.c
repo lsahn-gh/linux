@@ -1643,6 +1643,10 @@ void __init acpi_iort_init(void)
  * Extract the highest CPU physical address accessible to all DMA masters in
  * the system. PHYS_ADDR_MAX is returned when no constrained device is found.
  */
+/*
+ * IAMROOT, 2021.11.27:
+ * - disable인 경우 0xffff_ffff_ffff_ffff를 사용.
+ */
 phys_addr_t __init acpi_iort_dma_get_max_cpu_address(void)
 {
 	phys_addr_t limit = PHYS_ADDR_MAX;
