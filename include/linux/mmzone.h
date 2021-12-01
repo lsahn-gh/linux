@@ -1359,6 +1359,8 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 /*
  * IAMROOT, 2021.11.20:
  * - SUBSECTIONS_PER_SECTION이 64이므로 64bit = 8byte
+ * - mem_section에 연결되며 subsection은 SUBSECTIONS_PER_SECTION 단위로,
+ *   pageblock_flags는 pageblok_order단위로 관리될것이다.
  */
 struct mem_section_usage {
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
@@ -1382,10 +1384,9 @@ struct page;
 struct page_ext;
 /*
  * IAMROOT, 2021.11.13:
- * - 해당 범위에 memory가 연결되있는지 안되있는지를 관리하기 위한
- *   자료구조.
- * - mem_section 하나가 1GB 범위를 담당한다.
- * - 48bit의 경우 256TB이므로 mem section은 256 * 1024개가 될것이다.
+ * - 한 section을 관리하기 위한 자료구조. usage, mem_map이 mapping된다.
+ * - 4K page일경우 section은 128MB. 32k개의 page를 관리한다.
+ * - page는 mem_map이라는 이름으로 section_mem_map에 주소가 mapping된다.
  * - CONFIG_PAGE_EXTENSION이 unset인 경우에
  *   sizeof(struct mem_section) = 16byte
  */
@@ -1405,10 +1406,22 @@ struct mem_section {
 /*
  * IAMROOT, 2021.11.27:
  * - section mem map에 대한 pointer 겸 해서 flag(SECTION_MAP_MASK)를 저장한다.
- *   bit | 63...32 | 31...15 | 14...6 | 5 | 4     | 3     | 2      | 1   | 0       |
- *       | mem map - pfn     | nid    | - | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
+ *   bit | 63...32 | 31...15 | 14...5 | 4     | 3     | 2      | 1   | 0       |
+ *       | mem map - pfn     | -      | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
  * - 참고 함수
  *   sparse_encode_mem_map
+ *  pfn을 offset으로 하여 해당 pfn의 struct page에 바로 접근할수있게 하는
+ *  형식이다.
+ *
+ * - sparse_init일때 잠깐 nid는 mem_section을 초기화 할때만 잠깐 사용한다.
+ *   bit | 63....6 | 5 | 4     | 3     | 2      | 1   | 0       |
+ *       | nid     | - | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
+ *
+ * - mem_map
+ *   mem_section에 대한 struct page들.
+ *   section크기가 128MB, 4k page일경우 section 1개당 32k개의 page를 가져야되니
+ *   mem_map은 32k개의 struct page가 되고, struct page가 64byte일경우 32k개의
+ *   크기는 2MB가 되어 PMD size와 같아진다.
  */
 	unsigned long section_mem_map;
 
@@ -1432,6 +1445,8 @@ struct mem_section {
  * - 한개의 root가 관리하는 section 숫자.
  * - extream인 경우
  *   PAGE_SIZE / sizeof(struct mem_sections)  = 4096 / 16 = 256 개
+ *   section size가 2^27(128MB)인 경우
+ *   root 한개당 32GB를 커버한다.
  * - static인 경우 root를 사용하지 않아서 그냥 1이됨.
  */
 #ifdef CONFIG_SPARSEMEM_EXTREME
@@ -1449,6 +1464,7 @@ struct mem_section {
  *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 1 =  2MB
  * ex) 48PA bits, 4k page, extreme인 경우
  *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 256 =  8192 
+ *   root 한개당 32GB이므로 총 256TB에 대한 영역이 된다.
  */
 #define NR_SECTION_ROOTS	DIV_ROUND_UP(NR_MEM_SECTIONS, SECTIONS_PER_ROOT)
 #define SECTION_ROOT_MASK	(SECTIONS_PER_ROOT - 1)
@@ -1467,6 +1483,8 @@ static inline unsigned long *section_to_usemap(struct mem_section *ms)
 /*
  * IAMROOT, 2021.11.13:
  * - section 번호(nr)에 해당하는 mem_section을 구해온다.
+ * - extream, 4KB page인 경우 root 한개당 32GB영역을 커버하고 그 root 한개안에서
+ *   32GB가 section size인 128MB씩 8192개(NR_SECTION_ROOTS)로 관리되게 된다.
  */
 static inline struct mem_section *__nr_to_section(unsigned long nr)
 {

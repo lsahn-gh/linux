@@ -8081,6 +8081,16 @@ bool __weak arch_has_descending_max_zone_pfns(void)
  * starts where the previous one ended. For example, ZONE_DMA32 starts
  * at arch_max_dma_pfn.
  */
+/*
+ * IAMROOT, 2021.12.01:
+ * - zone_sizes_init 에서 불러와 졌을때 max_zone_pfn의 설정사항
+ *   [ZONE_DMA] = dt에서 읽은 DMA PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.
+ *   [ZONE_DMA32] = U32_MAX PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.
+ *   [ZONE_NORMAL] = memblock_end_of_DRAM()의 PFN
+ *   [ZONE_HIGHMEM] = 0
+ *   [ZONE_MOVABLE] = 0
+ *   [ZONE_DEVICE] = 0
+ */
 void __init free_area_init(unsigned long *max_zone_pfn)
 {
 	unsigned long start_pfn, end_pfn;
@@ -8101,6 +8111,17 @@ void __init free_area_init(unsigned long *max_zone_pfn)
  * - DRAM start pfn과 비교해서 zone의 start, end pfn을
  *   arch_zone_.. 전역변수에 설정한다.
  * - ZONE_DMA -> ZONE_DMA32 -> ZONE_NORMAL 순으로 설정이 된다.
+ *   만약 DRAM end 주소가 충분히 작을경우 ZONE_DMA나 ZONE_DMA32에서
+ *   memblock_end_of_DRAM() PFN이 되있을것이므로 ZONE_DMA, ZONE_DMA32에
+ *   pfn이 다할당되고 ZONE_NORMAL은 start_pfn, end_pfn이 같을것이다.
+ *
+ *   > ZONE_DMA이 DRAM end pfn일경우
+ *   ZONE_DMA32, ZONE_NORMAL 의 start, end pfn은 같을것이다.
+ *   > ZONE_DMA32이 DRAM end pfn일경우
+ *   ZONE_NORMAL의 start, end pfn이 같을 것이다.
+ *
+ *   > ZONE_DMA의 max pfn과 ZONE_DMA32의 max pfn이 같거나 ZONE_DMA가 클경우
+ *   ZONE_DMA32의 start, end pfn이 같을 것이다.
  */
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		if (descending)

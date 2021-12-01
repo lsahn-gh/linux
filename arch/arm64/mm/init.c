@@ -180,7 +180,10 @@ static void __init reserve_crashkernel(void)
  */
 /*
  * IAMROOT, 2021.10.23:
- * - ram 크기 or zone_bits 이내로 범위를 조정한다.
+ * - DRAM start주소가 U32_MAX가 넘으면 zone 범위를 그냥 DRAM end주소로 확장하고
+ *   그게 아니면 U32_MAX범위의 DRAM에 포함되는 영역에서 DRAM end, 
+ *   DRAM start, zone_mask를 비교해 DRAM 내에서 max_zone_phys 를 구한다
+ *
  */
 static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 {
@@ -188,8 +191,51 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 	phys_addr_t phys_start = memblock_start_of_DRAM();
 /*
  * IAMROOT, 2021.11.27:
- * - DRAM start 주소가 32bit max보다 크면 memblock_end_of_DRAM()을 쓰겟다는것.
- * - DRAM start 주소가 zone_mask보다 크면 min(U32_MAX, memblock_end_of_DRAM())
+ * - DRAM start 주소가 32bit max보다 크면 zone_mask가 MAX값이 되므로 결국
+ *   memblock_end_of_DRAM()을 쓰겟다는것.
+ *
+ *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
+ *   | DRAM |
+ *   +------+ DRAM memblock_start_of_DRAM() > U32_MAX
+ *
+ * - DRAM start 주소가 zone_mask보다 크면 min(U32_MAX, memblock_end_of_DRAM()).
+ *   memblock_start_of_DRAM()은 U32_MAX보다 작거나 같다.
+ *
+ *   > zone_mask(U32_MAX) <= memblock_end_of_DRAM()
+ *
+ *   +------+ DRAM memblock_end_of_DRAM()
+ *   | DRAM | new zone_mask(U32_MAX) == max_zone_phys
+ *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
+ *   |      |
+ *   +------+ old zone_mask
+ *
+ *   > zone_mask(U32_MAX) > memblock_end_of_DRAM()
+ *
+ *   +------+ new zone_mask(U32_MAX)
+ *   |      |
+ *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
+ *   | DRAM | 
+ *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
+ *   |      |
+ *   +------+ old zone_mask
+ *
+ * - 위 두경우가 아니면 zone_mask를 그대로 DMA_BIT_MASK(zone_bits).
+ *   zone_mask는 memblock_start_of_DRAM() 보다 크거나 같은상태.
+ *
+ *   > zone_mask < memblock_end_of_DRAM();
+ *
+ *   +------+ DRAM memblock_end_of_DRAM()
+ *   | DRAM | zone_mask == max_zone_phys
+ *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
+ *
+ *   > zone_mask > memblock_end_of_DRAM();
+ *
+ *   +------+ zone_mask
+ *   |      | 
+ *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
+ *   | DRAM |
+ *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
+ *
  */
 	if (phys_start > U32_MAX)
 		zone_mask = PHYS_ADDR_MAX;

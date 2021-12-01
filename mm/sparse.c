@@ -38,6 +38,11 @@ EXPORT_SYMBOL(mem_section);
  * node the page belongs to.
  */
 #if MAX_NUMNODES <= 256
+/*
+ * IAMROOT, 2021.11.30:
+ *  해당 mem_secion이 무슨 nid인지 바로 알아내기 위한 용도.
+ *  이 변수를 통해 section nr만알고있으면 바로 nid를 구할수있다.
+ */
 static u8 section_to_node_table[NR_MEM_SECTIONS] __cacheline_aligned;
 #else
 static u16 section_to_node_table[NR_MEM_SECTIONS] __cacheline_aligned;
@@ -134,7 +139,7 @@ static inline int sparse_index_init(unsigned long section_nr, int nid)
  */
 /*
  * IAMROOT, 2021.11.13:
- * - nid는 bit6부터 저장한다.
+ * - nid는 bit6부터 저장한다. sparse를 초기화할때만 사용한다.
  */
 static inline unsigned long sparse_encode_early_nid(int nid)
 {
@@ -340,6 +345,12 @@ static void __init memblocks_present(void)
  * the identity pfn - section_mem_map will return the actual
  * physical page frame number.
  */
+/*
+ * IAMROOT, 2021.11.30:
+ * - mem_map은 section_map_size() 으로(2MB) align되되어 생성되었고, 
+ *   mem_section에 나눠줄때도 section_map_size()으로 align해서 잘라서 주기
+ *   때문에 ~SECTION_MAP_MASK에 걸릴일은 없을것이다.
+ */
 static unsigned long sparse_encode_mem_map(struct page *mem_map, unsigned long pnum)
 {
 	unsigned long coded_mem_map =
@@ -363,12 +374,20 @@ struct page *sparse_decode_mem_map(unsigned long coded_mem_map, unsigned long pn
 
 /*
  * IAMROOT, 2021.11.27:
- * - mem_secion에 sparse 정보를 저장한다.
+ * - mem_section에 mem_map address를 저장하고 mem_map을 가지고 있다는 flag와
+ *   인자의 flags를 저장하고 mem_section_usage 주소를 세팅한다.
  */
 static void __meminit sparse_init_one_section(struct mem_section *ms,
 		unsigned long pnum, struct page *mem_map,
 		struct mem_section_usage *usage, unsigned long flags)
 {
+/*
+ * IAMROOT, 2021.11.30:
+ * - SECTION_MAP_MASK가 아닌 영역. 즉 flag영역을 제외한 나머지는 지운다.
+ *   section_mem_map에 임시적으로 SECTION_NID_SHIFT 로 nid를 저장했었고,
+ *   flag는 SECTION_IS_ONLINE, SECTION_MARKED_PRESENT 가 set되 있었을 것이다.
+ *   즉 nid값만 지우게 된다.
+ */
 	ms->section_mem_map &= ~SECTION_MAP_MASK;
 	ms->section_mem_map |= sparse_encode_mem_map(mem_map, pnum)
 		| SECTION_HAS_MEM_MAP | flags;
@@ -406,8 +425,15 @@ static inline phys_addr_t pgdat_to_phys(struct pglist_data *pgdat)
 #ifdef CONFIG_MEMORY_HOTREMOVE
 /*
  * IAMROOT, 2021.11.20:
- * - pgdata를 기준으로 시작 주소를 얻어오고 section size만큼 limit를 두어
- *   해당 영역에 memblock을 할당한다.
+ * - nid에 해당하는 memory에서 mem_secion_usage로 사용할 memory를 얻어온다.
+ *   node_data(pgdat)는 해당 nid에 존재하리라 예측하고, node_data 시작주소로해서
+ *   secsion size내에서 구해오도록 노력한다.
+ *   즉 한 section에서 node_data와 mem_secion_usage가 같이 존재하게 할려는 목적.
+ *
+ * - 일단 mem_secion 개수만큼 memory를 아래 함수에서 할당하고, 
+ *   그 이후에 mem_secion을 하나하나돌며 mem_section_usage_size() 만큼 잘라서
+ *   해당 mem_secion에서 사용할 memory를 mapping 해준다.
+ *
  */
 static struct mem_section_usage * __init
 sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
@@ -465,6 +491,7 @@ static void __init check_usemap_section_nr(int nid,
 /*
  * IAMROOT, 2021.11.20:
  * - usemap과 pgdat이 있는곳이 같은 section에 있는지 검사한다.
+ *   pgdat(node_data)와 usage는 이전에 같은 section에 위치하도록 노력했었다.
  *   같은 section이면 return
  */
 	if (usemap_snr == pgdat_snr)
@@ -472,7 +499,7 @@ static void __init check_usemap_section_nr(int nid,
 
 /*
  * IAMROOT, 2021.11.20:
- * - 그전이랑 같은 node를 사용하고 있으면 return.
+ * - pgdat와 usage가 같지 않더라도 그전 section과 같다면 return.
  */
 	if (old_usemap_snr == usemap_snr && old_pgdat_snr == pgdat_snr)
 		/* skip redundant message */
@@ -480,8 +507,10 @@ static void __init check_usemap_section_nr(int nid,
 
 /*
  * IAMROOT, 2021.11.20:
- * - usemap, pgdat가 같은 section이 아니면서 그전 node와도 같은 section이
- *   아닌 경우에 들어온다.
+ * - usemap, pgdat가 같은 section이 아닌 경우에 들어온다.
+ * - old section number를 갱신한다.
+ * - usage가 존재하는 memory와 usage가 mapping되있는 mem_section의
+ *   nid가 같은지 검사한다. 같지 않다면 return.
  */
 	old_usemap_snr = usemap_snr;
 	old_pgdat_snr = pgdat_snr;
@@ -653,6 +682,11 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 	unsigned long pnum;
 	struct page *map;
 
+/*
+ * IAMROOT, 2021.11.20:
+ * - nid에 해당하는 node memory에서 mem_secion_usage buffer를 만든다.
+ *   nid에 해당하는 node memory에서 할당실패시 nid무관하게 다시 시도한다.
+ */
 	usage = sparse_early_usemaps_alloc_pgdat_section(NODE_DATA(nid),
 			mem_section_usage_size() * map_count);
 	if (!usage) {
@@ -661,9 +695,9 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 	}
 /*
  * IAMROOT, 2021.11.20:
- * - nid에 해당하는 node memory에서 sparse buffer를 만들고 buffer에서 일단
- *   map memory할당 요청을 한다. 만약 실패한다면 다른 node에서 map memory할당을
- *   시도한다.
+ * - nid에 해당하는 node memory에서 sparse buffer(mem_map)를 만든다.
+ *   일단 sparse buffer자체는 nid에 맞는 memory로만 가져오고 추후에
+ *   각 mem_secion에 나눠줄때 모자르게되면 nid무관으로해서 memory를 가져온다.
  */
 	sparse_buffer_init(map_count * section_map_size(), nid);
 	for_each_present_section_nr(pnum_begin, pnum) {
@@ -708,8 +742,91 @@ failed:
  * IAMROOT, 2021.11.13:
  * - memory model에는 크게 flat memory, sparse memory가 있는데
  *   arm64는 sparse memory만을 사용한다.
- * - 같은 nid를 가진 present memory를 sparse 방식으로 mem section을
- *   초기화한다.
+ * - mem_secion을 초기화한다.
+ *   > mem_section root 및 present mem_secion 생성
+ *   > mem_section_usage를 초기화한다.
+ *   > mem_map을 초기화한다.
+ *   > mem_section.usage에 mem_section_usage를 매핑하고
+ *   mem_section.section_mem_map에 sparse_encode_mem_map을 통해 mem_map을
+ *   매핑한다.
+ *  - section_to_node_table을 초기화한다.
+ *
+ * ---
+ * 4K page 기준 address 변환
+ *
+ *   63.............12
+ *   PFN : page frame number :  __phys_to_pfn, __pfn_to_phys,
+ *   63........27
+ *   section           : PA_SECTION_SHIFT, PFN_SECTION_SHIFT
+ *
+ * --- mem block에 생성된 memory들 중간정리
+ * - mem_secion의 root
+ *   > 위치
+ *   nid 무관 mem_block
+ *   > 역할
+ *   root 한개당 secion(128MB) 256개 관리. (총 32GB)
+ *   root는 총 8192개 있다.(총 256TB)
+ *   > memory 사용량
+ *   (struct mem_secion *) * 8192 = 64kb
+ *   NR_SECTION_ROOTS 개수 만큼 nid무관으로 생성된다.
+ *   memory_present 에서 초기화된다.  8192개(NR_SECTION_ROOTS) 만큼 필요하므로
+ *   64kb 크기만큼의 memblock으로 할당된다.
+ *
+ * - nid별 mem_secion
+ *   > 위치
+ *   해당 nid의 mem_block에 위치하도록 노력한다.
+ *   > 역할
+ *   128MB 영역관리. mem_section_usage, mem_map이 mapping된다.
+ *   > memory 사용량
+ *   mem_block에 존재하는 nid 종류와 해당 nid memory가 차지하는 section 개수에
+ *   따라서 생성된다. nid mem_block의 pfn으로 pfn이 속하는 section을 구하며,
+ *   해당 section에 대한 mem_section이 존재하지 않으면 mem_secion에 256개
+ *   (SECTIONS_PER_ROOT) 만큼을 한번에 할당한다.
+ *   > section_mem_map에 mem_secion의 nid등의 flag를 encode한다.
+ *
+ * - nid별 mem_secion_usage
+ *   > 위치
+ *   해당 nid의 mem_block에 위치하도록 노력한다.
+ *   node_data와 같은 section에 위치하도록 노력한다.
+ *   > 역할
+ *   1개의 mem_secion(128MB)에 대해서 subsection_map과 pageblock_flags를 관리한다.
+ *   pageblock_flags는 pageblock_order(2MB) 단위로 나눠서 관리한다.
+ *   subsection_map은 SUBSECTIONS_PER_SECTION(2MB) 단위로 나눠서 64개로 관리한다.
+ *   > memory 사용량
+ *   subsecion_map하나당 1bit. mem_secion엔 subsecion_map이 64개 존재하므로
+ *   총 64bit인 8byte를 사용한다.
+ *   pageblock_flags는 pageblock_order하나당 4bit. mem_secion엔 pageblock_bits
+ *   64개 존재하므로 4 * 64 = 256 bit. 총 32byte.
+ *   두개를 더하면 40byte에 해당한다. 즉 mem_secion 단위인 128MB당 40byte의
+ *   관리 비용이 소모된다.
+ *
+ * - node_data
+ *   > 위치
+ *   해당 nid의 mem_blcok에 위치하도록 노력한다.
+ *   > 역할
+ *   해당 nid의 start_pfn과 size가 저장되있다.
+ *
+ * - section_map(mem_map)
+ *   > 위치
+ *   해당 nid의 mem_block에 위치하도록 노력한다.
+ *   > 역할
+ *   struct page가 PAGE_PER_SECTION개만큼 모여 있다.
+ *   > memory 사용량
+ *   struct page는 64byte고(option에 따라서 늘어난다면 align에 의해서 128byte
+ *   가 될수있다.) section당 page수는 32k(PAGE_PER_SECION)이므로 2MB(PMD_SIZE)
+ *   가 된다. 즉 한개의 section 128MB에 대한 struct page를 관리하는데 2MB가
+ *   필요하다.
+ *
+ * ---
+ * 변환식 정리
+ *
+ * from       | to         | func example
+ * -----------+------------+--------------------------
+ * section_nr | mem_secion | __nr_to_section
+ *            | nid        | section_to_node_table
+ *            | pfn        | section_nr_to_pfn
+ * -----------+------------+--------------------------
+ * pfn        | section_nr | pfn_to_section_nr
  */
 void __init sparse_init(void)
 {
