@@ -141,6 +141,12 @@ void put_online_mems(void)
 	percpu_up_read(&mem_hotplug_lock);
 }
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - early param으로 설정. (cmdline_parse_movable_node)
+ *   해당 option이 true가 되면 kernelcore, movablecore가 ignore된다.
+ *   (find_zone_movable_pfns_for_nodes)
+ */
 bool movable_node_enabled = false;
 
 #ifndef CONFIG_MEMORY_HOTPLUG_DEFAULT_ONLINE

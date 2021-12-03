@@ -21,6 +21,14 @@ struct of_pci_range_parser {
 #define of_range_parser of_pci_range_parser
 
 struct of_pci_range {
+/*
+ * IAMROOT, 2021.11.27:
+ * - dma-ranges = <i/o_adress cpu_addr size>
+ * - ex) cell은 1이라가정. dma-ranges = <0x00000000 0x80000000 0x10000000>
+ *   i/o_adress = 0x0000
+ *   cpu_addr = 0x80000000
+ *   size = 0x10000000
+ */
 	union {
 		u64 pci_addr;
 		u64 bus_addr;

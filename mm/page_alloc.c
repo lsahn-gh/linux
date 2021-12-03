@@ -352,16 +352,43 @@ static unsigned long nr_kernel_pages __initdata;
 static unsigned long nr_all_pages __initdata;
 static unsigned long dma_reserve __initdata;
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - free_area_init 에서 초기화된다. zone의 start pfn, end pfn이 저장된다.
+ */
 static unsigned long arch_zone_lowest_possible_pfn[MAX_NR_ZONES] __initdata;
 static unsigned long arch_zone_highest_possible_pfn[MAX_NR_ZONES] __initdata;
+/*
+ * IAMROOT, 2021.11.27:
+ * - early param으로 설정된다.
+ *   percent로 설정되면 (kernelcore=nn%, movablecore=nn%)
+ *   required_kernelcore_percent, required_movablecore_percent가 설정되고
+ *   양으로 설정되면(kernelcore=nn[KMGTPE], movablecore=nn[KMGPTE])
+ *   required_kernelcore, required_movablecore가 설정된다.
+ */
 static unsigned long required_kernelcore __initdata;
 static unsigned long required_kernelcore_percent __initdata;
 static unsigned long required_movablecore __initdata;
 static unsigned long required_movablecore_percent __initdata;
+/*
+ * IAMROOT, 2021.11.27:
+ * - find_zone_movable_pfns_for_nodes 에서 movable_node_is_enabled()인
+ *   경우 해당 nid에 제일 작은 memblock의 pfn이 설정된다.
+ */
 static unsigned long zone_movable_pfn[MAX_NUMNODES] __initdata;
+/*
+ * IAMROOT, 2021.11.27:
+ * - early param으로 설정된다.
+ *   (kernelcore=mirror)
+ */
 static bool mirrored_kernelcore __meminitdata;
 
 /* movable_zone is the "real" zone pages in ZONE_MOVABLE are taken from */
+/*
+ * IAMROOT, 2021.11.27:
+ * - find_usable_zone_for_movable 에서 초기화 된다. arm64에선 보통은
+ *   ZONE_NORMAL(or ZONE_DMA32)이 될것이다.
+ */
 int movable_zone;
 EXPORT_SYMBOL(movable_zone);
 
@@ -7079,6 +7106,13 @@ void __init get_pfn_range_for_nid(unsigned int nid,
  * assumption is made that zones within a node are ordered in monotonic
  * increasing memory addresses so that the "highest" populated zone is used
  */
+/*
+ * IAMROOT, 2021.11.27:
+ * - movable로 사용할 zone을 찾는다. 높은 ZONE부터 순회를 하므로
+ *   arm64의 경우 ZONE_NORMAL이 선택될것이다.
+ *   (메모리가 작은 경우는 ZONE_DMA32밖에 없을것이므로 ZONE_DMA32)가
+ *   선택될수도 있다. menconfig에 따라 달라진다.)
+ */
 static void __init find_usable_zone_for_movable(void)
 {
 	int zone_index;
@@ -7703,6 +7737,10 @@ unsigned long __init node_map_pfn_alignment(void)
  * Return: the minimum PFN based on information provided via
  * memblock_set_node().
  */
+/*
+ * IAMROOT, 2021.11.27:
+ * - DRAM start pfn을 가져온다.
+ */
 unsigned long __init find_min_pfn_with_active_regions(void)
 {
 	return PHYS_PFN(memblock_start_of_DRAM());
@@ -7712,6 +7750,10 @@ unsigned long __init find_min_pfn_with_active_regions(void)
  * early_calculate_totalpages()
  * Sum pages in active regions for movable zone.
  * Populate N_MEMORY for calculating usable_nodes.
+ */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 모든 memblock을 순회해 page개수를 합산하고 해당 nid를 N_MEMORY 한다.
  */
 static unsigned long __init early_calculate_totalpages(void)
 {
@@ -7735,12 +7777,22 @@ static unsigned long __init early_calculate_totalpages(void)
  * memory. When they don't, some nodes will have more kernelcore than
  * others
  */
+/*
+ * IAMROOT, 2021.11.27:
+ * - memory-hotplug.rst
+ */
 static void __init find_zone_movable_pfns_for_nodes(void)
 {
 	int i, nid;
 	unsigned long usable_startpfn;
 	unsigned long kernelcore_node, kernelcore_remaining;
 	/* save the state before borrow the nodemask */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 현재 N_MEMORY를 저장을 일단 하고 early_calculate_totalpages에서 page개수를
+ *   세면서 N_MEMORY를 갱신한다. 갱신된 N_MEMORY으 개수를 usable_nodes에 저장한다.
+ *   saved_node_state는 이 함수가 끝나는시점에 복구된다.
+ */
 	nodemask_t saved_node_state = node_states[N_MEMORY];
 	unsigned long totalpages = early_calculate_totalpages();
 	int usable_nodes = nodes_weight(node_states[N_MEMORY]);
@@ -7753,7 +7805,16 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * If movable_node is specified, ignore kernelcore and movablecore
 	 * options.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 각 nid별로 movable로 사용할수있는 pfn을 전부 설정한다는것.
+ */
 	if (movable_node_is_enabled()) {
+/*
+ * IAMROOT, 2021.11.27:
+ * - hotplug인 memblock을 찾아서, 해당 membloc의 nid를 구한다.
+ *   nid에 맞는 zone_movable_pfn에 해당 nid에서 제일 작은 pfn을 넣는다.
+ */
 		for_each_mem_region(r) {
 			if (!memblock_is_hotpluggable(r))
 				continue;
@@ -7775,6 +7836,14 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	if (mirrored_kernelcore) {
 		bool mem_below_4gb_not_mirrored = false;
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - mirror가 아닌 memblock을 순회한다.
+ * - 4GB미만 영역은 중요영역(kernelcore)이므로 mirror여야 된다. 즉
+ *   early param으로 kernelcore를 mirror라고 설정했는데 정작 dt에서
+ *   에서 중요 memory 영역(4GB 미만) 설정에선 mirror로 안되있어 warrning을 뿌린것.
+ * - mirror 영역인것은 movable로 사용할수 없다는 의미가 내포된다.
+ */
 		for_each_mem_region(r) {
 			if (memblock_is_mirror(r))
 				continue;
@@ -7803,6 +7872,10 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * If kernelcore=nn% or movablecore=nn% was specified, calculate the
 	 * amount of necessary memory.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - 해당 percent 에따른 totalpage 개수를 구한다.
+ */
 	if (required_kernelcore_percent)
 		required_kernelcore = (totalpages * 100 * required_kernelcore_percent) /
 				       10000UL;
@@ -7818,6 +7891,13 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * will be used for required_kernelcore if it's greater than
 	 * what movablecore would have allowed.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - movablecore, kernelcore 개수를 정한다.
+ *   percent로 구했거나 early param으로 구한 required_movablecore값을 buddy단위로
+ *   (MAX_ORDER_NR_PAGES)로 고치고, 범위를 한번 검사하여 required_kernelcore까지
+ *   구한다.
+ */
 	if (required_movablecore) {
 		unsigned long corepages;
 
@@ -7837,14 +7917,30 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * If kernelcore was not specified or kernelcore size is larger
 	 * than totalpages, there is no ZONE_MOVABLE.
 	 */
+/*
+ * IAMROOT, 2021.11.27:
+ * - kernelcore 가 없거나 kernelcore가 totalpage보다 많은 상황은 말이 안되므로
+ *   ZONE_MOVABLE를 그냥 안하고 복귀한다.
+ */
 	if (!required_kernelcore || required_kernelcore >= totalpages)
 		goto out;
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - arm64의 경우 대부분의 경우 ZONE_NORMAL -> ZONE_DMA32순으로 지정되었으며,
+ *   movable zone은 해당 zone의 start pfn이 될것이다.
+ */
 	/* usable_startpfn is the lowest possible pfn ZONE_MOVABLE can be at */
 	usable_startpfn = arch_zone_lowest_possible_pfn[movable_zone];
 
 restart:
 	/* Spread kernelcore memory as evenly as possible throughout nodes */
+/*
+ * IAMROOT, 2021.11.27:
+ * - required_kernelcore : kernelcore pfn. (movable이 아닌 memory)
+ *   usable_nodes        : node 개수
+ *   kernelcore_node     : node당 kernelcore pfn의 개수
+ */
 	kernelcore_node = required_kernelcore / usable_nodes;
 	for_each_node_state(nid, N_MEMORY) {
 		unsigned long start_pfn, end_pfn;
@@ -7933,6 +8029,10 @@ restart:
 
 out2:
 	/* Align start of ZONE_MOVABLE on all nids to MAX_ORDER_NR_PAGES */
+/*
+ * IAMROOT, 2021.11.27:
+ * - max order 로 roundup한다.
+ */
 	for (nid = 0; nid < MAX_NUMNODES; nid++)
 		zone_movable_pfn[nid] =
 			roundup(zone_movable_pfn[nid], MAX_ORDER_NR_PAGES);
@@ -7981,6 +8081,16 @@ bool __weak arch_has_descending_max_zone_pfns(void)
  * starts where the previous one ended. For example, ZONE_DMA32 starts
  * at arch_max_dma_pfn.
  */
+/*
+ * IAMROOT, 2021.12.01:
+ * - zone_sizes_init 에서 불러와 졌을때 max_zone_pfn의 설정사항
+ *   [ZONE_DMA] = dt에서 읽은 DMA PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.
+ *   [ZONE_DMA32] = U32_MAX PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.
+ *   [ZONE_NORMAL] = memblock_end_of_DRAM()의 PFN
+ *   [ZONE_HIGHMEM] = 0
+ *   [ZONE_MOVABLE] = 0
+ *   [ZONE_DEVICE] = 0
+ */
 void __init free_area_init(unsigned long *max_zone_pfn)
 {
 	unsigned long start_pfn, end_pfn;
@@ -7996,6 +8106,23 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 	start_pfn = find_min_pfn_with_active_regions();
 	descending = arch_has_descending_max_zone_pfns();
 
+/*
+ * IAMROOT, 2021.11.27:
+ * - DRAM start pfn과 비교해서 zone의 start, end pfn을
+ *   arch_zone_.. 전역변수에 설정한다.
+ * - ZONE_DMA -> ZONE_DMA32 -> ZONE_NORMAL 순으로 설정이 된다.
+ *   만약 DRAM end 주소가 충분히 작을경우 ZONE_DMA나 ZONE_DMA32에서
+ *   memblock_end_of_DRAM() PFN이 되있을것이므로 ZONE_DMA, ZONE_DMA32에
+ *   pfn이 다할당되고 ZONE_NORMAL은 start_pfn, end_pfn이 같을것이다.
+ *
+ *   > ZONE_DMA이 DRAM end pfn일경우
+ *   ZONE_DMA32, ZONE_NORMAL 의 start, end pfn은 같을것이다.
+ *   > ZONE_DMA32이 DRAM end pfn일경우
+ *   ZONE_NORMAL의 start, end pfn이 같을 것이다.
+ *
+ *   > ZONE_DMA의 max pfn과 ZONE_DMA32의 max pfn이 같거나 ZONE_DMA가 클경우
+ *   ZONE_DMA32의 start, end pfn이 같을 것이다.
+ */
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		if (descending)
 			zone = MAX_NR_ZONES - i - 1;
