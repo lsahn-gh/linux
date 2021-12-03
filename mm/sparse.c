@@ -698,6 +698,10 @@ failed:
  */
 void __init sparse_init(void)
 {
+/*
+ * IAMROOT, 2021.11.25:
+ * pnum : present section number
+ */
 	unsigned long pnum_end, pnum_begin, map_count = 1;
 	int nid_begin;
 

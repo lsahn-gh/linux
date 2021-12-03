@@ -830,26 +830,28 @@ repeat:
  * 
  * rend >= end 라면 추가할 block이 없지만 아래와 같이 rend < end 면
  *
- *                  +-----+ end
- *                  |     |
- *  rend +--------+ |     |
- *       |        | |     | 
- *       | region | |     | 
- * rbase +--------+ | new |
- *                  |     |
- *                  +-----+ base
+ *           (rend > end)                               (rend == end)
+ *                  +-----+ end           ||                  +-----+ end
+ *                  |     |               ||                  |     |
+ *  rend +--------+ |     |               ||                  |     |
+ *       |        | |     |               ||                  |     | 
+ *       | region | |     |               ||  rend +--------+ |     | 
+ * rbase +--------+ | new |               ||       |        | | new |
+ *                  |     |               ||       | region | |     |
+ *                  +-----+ base          || rbase +--------+ +-----+ base
  *
  * base = min(rend, end)에 의해 다음과 같이 base가 변경된다.
  *
- *                  +-----+ end
- *                  | ins |
- *                  | new |
- *  rend +--------+ +-----+ (after) base
- *       |        | |     | 
- *       | region | |     | 
- * rbase +--------+ |     |
- *                  |     |
- *                  +-----+ (before) base
+ *           (rend > end)                               (rend == end)
+ *                  +-----+ end           ||                  +-----+ end        
+ *                  | ins |               ||                  | ins |            
+ *                  | new |               ||                  | new |            
+ *  rend +--------+ +-----+ (after) base  ||                  +-----+ (aft) base 
+ *       |        | |     |               ||                  |     |           
+ *       | region | |     |               ||  rend +--------+ |     |            
+ * rbase +--------+ |     |               ||       |        | |     |           
+ *                  |     |               ||       | region | |     |           
+ *                  +-----+ (before) base || rbase +--------+ +-----+ (bef) base
  *
  * 위와 같은 상황에서 '(after) base ~ end'를 마저 추가해야하므로
  * base는 rend로 설정하고 다음 iterate때 추가한다.

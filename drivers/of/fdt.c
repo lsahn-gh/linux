@@ -1506,40 +1506,70 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 /*
  * IAMROOT, 2021.10.16:
  * - dt prop memory에서 읽어온 regi의 base, size값을 가지고 등록하는 함수.
+ * - arm64의 범위는 0 ~ U64_MAX 이므로 실제 base + size가 U64_MAX를 넘
  */
 void __init __weak early_init_dt_add_memory_arch(u64 base, u64 size)
 {
 	const u64 phys_offset = MIN_MEMBLOCK_ADDR;
 
+/*
+ * IAMROOT, 2021.11.25:
+ * base & ~PAGE_MASK값과 size의 합이 PAGE_SIZE 이상인지를 확인.
+ */
 	if (size < PAGE_SIZE - (base & ~PAGE_MASK)) {
 		pr_warn("Ignoring memory block 0x%llx - 0x%llx\n",
 			base, base + size);
 		return;
 	}
 
+/*
+ * IAMROOT, 2021.11.25:
+ * base가 PAGE_ALIGN이 안되있다면 base를 PAGE_SIZE로 round_up하고
+ * round_up된 값만큼 size에서 뺀다.
+ */
 	if (!PAGE_ALIGNED(base)) {
 		size -= PAGE_SIZE - (base & ~PAGE_MASK);
 		base = PAGE_ALIGN(base);
 	}
 	size &= PAGE_MASK;
 
+/*
+ * IAMROOT, 2021.11.25:
+ * start값이 max 범위 위인지를 검사.
+ */
 	if (base > MAX_MEMBLOCK_ADDR) {
 		pr_warn("Ignoring memory block 0x%llx - 0x%llx\n",
 			base, base + size);
 		return;
 	}
 
+/*
+ * IAMROOT, 2021.11.25:
+ * end값이 max 범위를 넘는다면, max에서 base를 뺀만큼만 size로
+ * 취급한다.
+ */
 	if (base + size - 1 > MAX_MEMBLOCK_ADDR) {
 		pr_warn("Ignoring memory range 0x%llx - 0x%llx\n",
 			((u64)MAX_MEMBLOCK_ADDR) + 1, base + size);
 		size = MAX_MEMBLOCK_ADDR - base + 1;
 	}
 
+/*
+ * IAMROOT, 2021.11.25:
+ * end값이 min 범위 아래인지를 검사.
+ */
 	if (base + size < phys_offset) {
 		pr_warn("Ignoring memory block 0x%llx - 0x%llx\n",
 			base, base + size);
 		return;
 	}
+
+/*
+ * IAMROOT, 2021.11.25:
+ * start값이 min 범위 아래인지를 검사.
+ * min 범위 아래라면 min ~ base까지의 값을 size에서 빼고 base를 min으로
+ * 조정한다.
+ */
 	if (base < phys_offset) {
 		pr_warn("Ignoring memory range 0x%llx - 0x%llx\n",
 			base, phys_offset);
