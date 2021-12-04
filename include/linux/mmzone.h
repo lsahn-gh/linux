@@ -607,6 +607,21 @@ struct zone {
 	 * mem_hotplug_begin/end(). Any reader who can't tolerant drift of
 	 * present_pages should get_online_mems() to get a stable value.
 	 */
+/*
+ * IAMROOT, 2021.12.04:
+ *
+ * - managed_pages : buddy system이 관리하는 pages. 대표적으로
+ *   reserved pages(mem_map)를 제외한 것들.
+ *   present_pages - managed_pages를 통해 간접적으로 unmanaged
+ *   page를 알 수 있다고 주석에 나온다.
+ * - cma_pages : 보통 driver를 짜면 cma_pages를 자주쓴다.
+ *
+ *----
+ * calculate_node_totalpages 에서 설정된다.
+ * - spanned_pages : hole을 포함한 해당 node및 zone의 page수
+ * - present_pages : hole을 제외한 해당 node zone읜 page수
+ * - present_early_pages : 일단 present_pages와 같게 설정된다.
+*/
 	atomic_long_t		managed_pages;
 	unsigned long		spanned_pages;
 	unsigned long		present_pages;
@@ -870,12 +885,20 @@ typedef struct pglist_data {
 	 *
 	 * Nests above zone->lock and zone->span_seqlock
 	 */
+/*
+ * IAMROOT, 2021.12.04:
+ * - pgdat_init_internals에서 초기화된다.
+ */
 	spinlock_t node_size_lock;
 #endif
 /*
  * IAMROOT, 2021.12.04:
- * - free_area_init_node에서 초기화된다. nid가 속한 memblock을 찾아서
+ * - node_start_pfn
+ *   free_area_init_node에서 초기화된다. nid가 속한 memblock을 찾아서
  *   해당 start_pfn으로 설정된다.
+ * -node_present_pages, node_spanned_pages
+ *  calculate_node_totalpages에서 초기화된다. node_present_pages에는
+ *  node_spanned_pages 에서 hole을 제외한 실제 pages 수가 저장된다.
  */
 	unsigned long node_start_pfn;
 	unsigned long node_present_pages; /* total number of physical pages */
@@ -886,6 +909,11 @@ typedef struct pglist_data {
  * - free_area_init_node에서 초기화된다. 해당 구조체의 nid.
  */
 	int node_id;
+/*
+ * IAMROOT, 2021.12.04:
+ * - pgdat_init_internals에서 kswapd_wait, pfmemalloc_wait
+ *   가 초기화된다.
+ */
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
 	struct task_struct *kswapd;	/* Protected by
@@ -924,6 +952,10 @@ typedef struct pglist_data {
 	 * If memory initialisation on large machines is deferred then this
 	 * is the first PFN that needs to be initialised.
 	 */
+/*
+ * IAMROOT, 2021.12.04:
+ * - pgdat_set_deferred_range에서 ULONG_MAX로 초기화된다.
+ */
 	unsigned long first_deferred_pfn;
 #endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */
 
@@ -938,6 +970,10 @@ typedef struct pglist_data {
 	 *
 	 * Use mem_cgroup_lruvec() to look up lruvecs.
 	 */
+/*
+ * IAMROOT, 2021.12.04:
+ * - pgdat_init_internals에서 초기화된다.
+ */
 	struct lruvec		__lruvec;
 
 	unsigned long		flags;
@@ -945,6 +981,10 @@ typedef struct pglist_data {
 	ZONE_PADDING(_pad2_)
 
 	/* Per-node vmstats */
+/*
+ * IAMROOT, 2021.12.04:
+ * - free_area_init_core에서 boot_nodestat가 넣어진다.
+ */
 	struct per_cpu_nodestat __percpu *per_cpu_nodestats;
 	atomic_long_t		vm_stat[NR_VM_NODE_STAT_ITEMS];
 } pg_data_t;
@@ -1068,6 +1108,10 @@ static inline void zone_set_nid(struct zone *zone, int nid) {}
 
 extern int movable_zone;
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - arm64는 high을 쓰지 않는다.
+ */
 static inline int is_highmem_idx(enum zone_type idx)
 {
 #ifdef CONFIG_HIGHMEM

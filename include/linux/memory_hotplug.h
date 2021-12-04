@@ -282,6 +282,10 @@ void pgdat_resize_unlock(struct pglist_data *pgdat, unsigned long *flags)
 {
 	spin_unlock_irqrestore(&pgdat->node_size_lock, *flags);
 }
+/*
+ * IAMROOT, 2021.12.04:
+ * - pgdat_init_internals 에서 초기화된다.
+ */
 static inline
 void pgdat_resize_init(struct pglist_data *pgdat)
 {

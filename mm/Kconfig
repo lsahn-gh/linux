@@ -734,6 +734,11 @@ config STACK_MAX_DEFAULT_SIZE_MB
 
 	  A sane initial value is 100 MB.
 
+# IAMROOT, 2021.12.04:
+# memory가 많은 system일 경우 struct page를 초기화하는데만
+# 5분 10분이 걸린다. booting중에 single kthread로만 동작
+# 하는데, 그래서 일부 데이터를 나중에 kthread가 초기화를
+# 진행하게 한다.
 config DEFERRED_STRUCT_PAGE_INIT
 	bool "Defer initialisation of struct pages to kthreads"
 	depends on SPARSEMEM

@@ -1,4 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
+
+# IAMROOT, 2021.12.04:
+# memmap의 확장이 필요한경우, memmap을 확장하지 않고 page extra
+# 란것을 상용한다. debug를 사용할때 관련 정보들이 저장된다.
 config PAGE_EXTENSION
 	bool "Extend memmap on extra space for more information on page"
 	help
