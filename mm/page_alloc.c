@@ -7139,6 +7139,12 @@ static void __init find_usable_zone_for_movable(void)
  * highest usable zone for ZONE_MOVABLE. This preserves the assumption that
  * zones within a node are in order of monotonic increases memory addresses
  */
+/*
+ * IAMROOT, 2021.12.04:
+ * - 해당 nid에 대한 movable 영역은 이전에 zone_movable_pfn에 초기화를 했었다.
+ *   만약 해당당 nid에 대해서 zone movable이 존재를 안한다면 adjust를 안한다.
+ *
+ */
 static void __init adjust_zone_range_for_zone_movable(int nid,
 					unsigned long zone_type,
 					unsigned long node_start_pfn,
@@ -7170,6 +7176,15 @@ static void __init adjust_zone_range_for_zone_movable(int nid,
  * Return the number of pages a zone spans in a node, including holes
  * present_pages = zone_spanned_pages_in_node() - zone_absent_pages_in_node()
  */
+/*
+ * IAMROOT, 2021.12.04:
+ * @zone_type : zone index (enum zone_type)
+ * @node_start_pfn : memblock의 node start pfn
+ * @node_end_pfn   : memblock의 node end pfn
+ * @zone_start_pfn : out
+ * @zone_end_pfn   : out
+ * @return : zone size
+ */
 static unsigned long __init zone_spanned_pages_in_node(int nid,
 					unsigned long zone_type,
 					unsigned long node_start_pfn,
@@ -7184,6 +7199,11 @@ static unsigned long __init zone_spanned_pages_in_node(int nid,
 		return 0;
 
 	/* Get the start and end of the zone */
+/*
+ * IAMROOT, 2021.12.04:
+ * - memblock의 node pfn과 zone 전체 주소에 대한 start, end 주소 사이에서
+ *   zone_start_pfn, zone_end_pfn을 일단 구한다.
+ */
 	*zone_start_pfn = clamp(node_start_pfn, zone_low, zone_high);
 	*zone_end_pfn = clamp(node_end_pfn, zone_low, zone_high);
 	adjust_zone_range_for_zone_movable(nid, zone_type,
@@ -7286,6 +7306,10 @@ static unsigned long __init zone_absent_pages_in_node(int nid,
 	return nr_absent;
 }
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - nid에 대한 zone 정보를 초기화 한다.
+ */
 static void __init calculate_node_totalpages(struct pglist_data *pgdat,
 						unsigned long node_start_pfn,
 						unsigned long node_end_pfn)
@@ -7293,6 +7317,10 @@ static void __init calculate_node_totalpages(struct pglist_data *pgdat,
 	unsigned long realtotalpages = 0, totalpages = 0;
 	enum zone_type i;
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - zone index를 순회하며 nid에 대한 zone정보를 초기화한다.
+ */
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		struct zone *zone = pgdat->node_zones + i;
 		unsigned long zone_start_pfn, zone_end_pfn;
@@ -7641,6 +7669,11 @@ static void __init free_area_init_node(int nid)
 	/* pg_data_t should be reset to zero when it's allocated */
 	WARN_ON(pgdat->nr_zones || pgdat->kswapd_highest_zoneidx);
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - memblock읠 순회해 해당 nid의 start_pfn, end_pfn을 구해와서
+ *   pgdata에 설정을 한다.
+ */
 	get_pfn_range_for_nid(nid, &start_pfn, &end_pfn);
 
 	pgdat->node_id = nid;
@@ -7779,7 +7812,11 @@ static unsigned long __init early_calculate_totalpages(void)
  */
 /*
  * IAMROOT, 2021.11.27:
- * - memory-hotplug.rst
+ * - node memory마다 kernel core 영역을 할당해준다. 결국 결과값으로
+ *   nid별 zone_movable_pfn을 갱신해서 nid마다 movable 시작주소를 초기화한다.
+ *
+ * - 참고 자료
+ *   memory-hotplug.rst
  */
 static void __init find_zone_movable_pfns_for_nodes(void)
 {
@@ -7960,6 +7997,16 @@ restart:
 		 */
 		kernelcore_remaining = kernelcore_node;
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - kernel core 영역을 그냥 시작주소 ~ kernel core사용량 만큼의 영역을
+ *   할당하면 node 0번에 모든 kerenl core영역이 있게 된다.
+ *
+ *   각 node 별로 kernel core영역이 존재해야 해당 cpu가 자기 node memory에서
+ *   kernel core로 접근이 되는게 성능상 이점이 있다.
+ *
+ *   즉 아래 code는 kernel core를 각 node memory마다 적절히 분배하기 위함이다.
+ */
 		/* Go through each range of PFNs within this node */
 		for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
 			unsigned long size_pages;
@@ -7968,9 +8015,51 @@ restart:
 			if (start_pfn >= end_pfn)
 				continue;
 
+/*
+ * IAMROOT, 2021.12.04:
+ *
+ * - 다음 상황으로 가정을 하고 진행한다.
+ * node 마다 16기가 라고 가정. DMA32 ZONE이 있다고 가정.
+ * DMA32의 크기는 2GB, NORMAL의 크기는 30GB
+ * DMA32의 끝주소는 4GB. 즉
+ * usable_startpfn = arch_zone_lowest_possible_pfn[movable_zone] = 0x880000
+ * kernel core : movable core = 1 : 3 = 8 : 24
+ *
+ *  ZONE     NODE
+ * +------+ +--------+ node1의 end_pfn
+ * |      | |        |
+ * |      | | node 1 | 
+ * |      | |        |
+ * |      | |_______ |_movable core(16 - 4) = 12GB
+ * |      | | 4GB  | | kernel core 4GB
+ * |NORMAL| +--------+ node1의 start_pfn
+ * |      |
+ * |      |
+ * |      | +--------+ node0의 end_pfn
+ * |      | | node 0 |
+ * |      | |        |           
+ * |      | |        |
+ * |      | |______  |_movable core(16 - 2 - 2) = 12GB
+ * |      | | 2GB  | | kernel core 2GB
+ * +------+ +--------+ -> usable_startpfn -> (갱신) node0의 start_pfn
+
+ *
+ * +------+ +--------+
+ * |      | |        | -> start_pfn < usable_startpfn 조건문에서 kernel core
+ * |DMA32 | | node 0 |    영역으로 들어가게된다.
+ * |      | | 2GB    |    kernel core 8GB중 2GB기가 할당. 6GB가 남음.
+ * +-----+  +--------+ node0의 start_pfn
+ *
+ * 한 node에서 usable_startpfn이 중간에 있으므로 kernel core영역을 node0에
+ * 나눠서 넣어야 되는 상황이 있고
+ */
 			/* Account for what is only usable for kernelcore */
 			if (start_pfn < usable_startpfn) {
 				unsigned long kernel_pages;
+/*
+ * IAMROOT, 2021.12.04:
+ * - kernel core로 쓸 page를 일단 계산한다.
+ */
 				kernel_pages = min(end_pfn, usable_startpfn)
 								- start_pfn;
 
@@ -7978,8 +8067,12 @@ restart:
 							kernelcore_remaining);
 				required_kernelcore -= min(kernel_pages,
 							required_kernelcore);
-
-				/* Continue if range is now fully accounted */
+/*
+ * IAMROOT, 2021.12.04:
+ * - kernel core영역이 더 남아 있는 상황. 계속 진행해야되서 zone_movable_pfn이
+ *   갱신된다.
+ */
+				/* Continue if range ow fully accounted */
 				if (end_pfn <= usable_startpfn) {
 
 					/*
@@ -8017,6 +8110,10 @@ restart:
 		}
 	}
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - required_kernelcore가 남았을대 나머지 할당을 위해 restart
+ */
 	/*
 	 * If there is still required_kernelcore, we do another pass with one
 	 * less node in the count. This will push zone_movable_pfn[nid] further
@@ -8090,6 +8187,17 @@ bool __weak arch_has_descending_max_zone_pfns(void)
  *   [ZONE_HIGHMEM] = 0
  *   [ZONE_MOVABLE] = 0
  *   [ZONE_DEVICE] = 0
+ *
+ * - movable zone의 장점
+ *   참고 : https://www.ibm.com/docs/en/linux-on-systems?topic=know-zones
+ *   Memory in the Movable zone cannot be used for arbitrary kernel allocations,
+ *   but only for memory buffers that can easily be moved by the kernel,
+ *   such as user memory allocations and page cache memory.
+ *   Memory in the Movable zone can more easily be taken offline than memory
+ *   in other zones.
+ *
+ *   1. user memory alloc시 메모리 단편화 문제 해결
+ *   2. hot remove 관련영역
  */
 void __init free_area_init(unsigned long *max_zone_pfn)
 {
@@ -8174,6 +8282,10 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 	 * enable future "sub-section" extensions of the memory map.
 	 */
 	pr_info("Early memory node ranges\n");
+/*
+ * IAMROOT, 2021.12.04:
+ * - 모든 memblock을 순회하며 section마다 subsection bitmap을 초기화한다.
+ */
 	for_each_mem_pfn_range(i, MAX_NUMNODES, &start_pfn, &end_pfn, &nid) {
 		pr_info("  node %3d: [mem %#018Lx-%#018Lx]\n", nid,
 			(u64)start_pfn << PAGE_SHIFT,

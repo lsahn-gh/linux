@@ -837,6 +837,10 @@ typedef struct pglist_data {
 	 * zones may be populated, but it is the full list. It is referenced by
 	 * this node's node_zonelists as well as other node's node_zonelists.
 	 */
+/*
+ * IAMROOT, 2021.12.04:
+ * - calculate_node_totalpages에서 초기화 된다.
+ */
 	struct zone node_zones[MAX_NR_ZONES];
 
 	/*
@@ -868,10 +872,19 @@ typedef struct pglist_data {
 	 */
 	spinlock_t node_size_lock;
 #endif
+/*
+ * IAMROOT, 2021.12.04:
+ * - free_area_init_node에서 초기화된다. nid가 속한 memblock을 찾아서
+ *   해당 start_pfn으로 설정된다.
+ */
 	unsigned long node_start_pfn;
 	unsigned long node_present_pages; /* total number of physical pages */
 	unsigned long node_spanned_pages; /* total size of physical page
 					     range, including holes */
+/*
+ * IAMROOT, 2021.12.04:
+ * - free_area_init_node에서 초기화된다. 해당 구조체의 nid.
+ */
 	int node_id;
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
@@ -1291,7 +1304,7 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 #define PAGES_PER_SECTION       (1UL << PFN_SECTION_SHIFT)
 /*
  * IAMROOT, 2021.11.13:
- * - 0x8000 - 1 = 0x7fff
+ * - 0x8000 - 1 = 0x7fff (128MB)
  *   ~0x7fff = 0xffff_ffff_ffff_8000
  */
 #define PAGE_SECTION_MASK	(~(PAGES_PER_SECTION-1))
@@ -1338,6 +1351,13 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #define SUBSECTION_SHIFT 21
 #define SUBSECTION_SIZE (1UL << SUBSECTION_SHIFT)
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - 4k page기준. 21 - 12 = 9
+ *   PFN_SUBSECTION_SHIFT = 9
+ *   PAGES_PER_SUBSECTION = 2^9 = 512
+ *   PAGE_SUBSECTION_MASK = ~(0x1ff)
+ */
 #define PFN_SUBSECTION_SHIFT (SUBSECTION_SHIFT - PAGE_SHIFT)
 #define PAGES_PER_SUBSECTION (1UL << PFN_SUBSECTION_SHIFT)
 #define PAGE_SUBSECTION_MASK (~(PAGES_PER_SUBSECTION-1))
@@ -1367,6 +1387,8 @@ struct mem_section_usage {
 /*
  * IAMROOT, 2021.11.20:
  * - Documentation/vm/memory-model.rst 참고
+ * - 4K page기준 subsection은 0 ~ 63까지의 index를 가진다.
+ *   사용하는 subsection index에 set bit가 된다.
  */
 	DECLARE_BITMAP(subsection_map, SUBSECTIONS_PER_SECTION);
 #endif
@@ -1598,6 +1620,14 @@ static inline struct mem_section *__pfn_to_section(unsigned long pfn)
 
 extern unsigned long __highest_present_section_nr;
 
+/*
+ * IAMROOT, 2021.12.04:
+ * - SUBSECTION 단위의 subsection index를 가져온다. (0 ~ 63)
+ * ex) 0x12345
+ * (0x12345 & 0x7fff) / 0x200 
+ * = (0x2345) / 0x200 = 0x11 = 17
+ *  
+ */
 static inline int subsection_map_index(unsigned long pfn)
 {
 	return (pfn & ~(PAGE_SECTION_MASK)) / PAGES_PER_SUBSECTION;
