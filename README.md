@@ -139,5 +139,9 @@
 - sparse_init() -> sparse_init_nid() 진행중
 
 ### 27주차
-- 2021.11.20, Zoom 온/오프라인(15명 참석)
+- 2021.11.27, Zoom 온/오프라인(15명 참석)
+- zone_sizes_init() 진행중
+
+### 28주차
+- 2021.12.04, Zoom 온/오프라인(9명 참석)
 - zone_sizes_init() 진행중
