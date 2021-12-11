@@ -356,6 +356,62 @@ static inline int TestClearPage##uname(struct page *page) { return 0; }
  *   SetPageLocked
  *   ClearPageLocked
  *   PG_locked bit가 제어된다.
+ *
+ * - __유무
+ *   __가 없는건 atomic, __가 있는건 none atomic
+ *
+ * - 함수 정리
+ *
+ * t : test, c : clear, s : set
+ *                 | atomic          | none atomic 
+ *-----------------+-----------------+---------------+
+ * define          | s | c | ts | tc | t | __s | __c |
+ *-----------------+---|---|----+----+---+-----+-----+
+ * TESTPAGEFLAG    |   |   |    |    | o |     |     |
+ * ----------------+---------------------------------+
+ * __SETPAGEFLAG   |   |   |    |    |   | o   |     |
+ * __CLEARPAGEFLAG |   |   |    |    |   |     | o   |
+ * __PAGEFLAG      |   |   |    |    | o | o   | o   |  
+ * ----------------+---------------------------------+
+ * SETPAGEFLAG     | o |   |    |    |   |     |     |
+ * CLEARPAGEFLAG   |   | o |    |    |   |     |     |
+ * PAGEFLAG        | o | o |    |    | o |     |     |
+ * ----------------+---------------------------------+
+ * TESTCLEARFLAG   |   |   |    | o  |   |     |     |
+ * TESTSETFLAG     |   |   | o  |    |   |     |     |
+ * TESTSCFLAG      |   |   | o  | o  |   |     |     |
+ * ----------------+---------------------------------+
+ *
+ *                 | atomic          | none atomic
+ * ----------------+-----------------+---------------+
+ * lname           | s | c | ts | tc | t | __s | __c | policy
+ * ----------------+---+---+----+----+---+-----+----+-------------
+ * locked          |   |   |    |    | o | o   | o   | PF_NO_TAIL 
+ * waiters         | o | o |    |    | o |     | o   | PF_ONLY_HEAD
+ * error           | o | o |    | o  | o |     |     | PF_NO_TAIL
+ * referenced      | o | o |    | o  | o | o   |     | PF_HEAD
+ * dirty           | o | o | o  | o  | o |     | o   | PF_HEAD
+ * lru             | o | o |    | o  | o |     | o   | PF_HEAD
+ * active          | o | o |    | o  | o |     | o   | PH_HEAD
+ * workingset      | o | o |    | o  | o |     |     | PH_HEAD
+ * slab            |   |   |    |    | o | o   | o   | PF_NO_TAIL
+ * slob_free       |   |   |    |    | o | o   | o   | PF_NO_TAIL
+ * checked         | o | o |    |    | o |     |     | PF_NO_COMPOUND
+ * pinned          | o | o | o  | o  | o |     |     | PF_NO_COMPOUND
+ * savepinned      | o | o |    |    | o |     |     | PF_NO_COMPOUND
+ * foreign         | o | o |    |    | o |     |     | PF_NO_COMPOUND
+ * xen_remapped    | o | o |    | o  | o |     |     | PF_NO_COMPOUND
+ * reserved        | o | o |    |    | o | o   | o   | PF_NO_COMPOUND
+ * swapbacked      | o | o |    |    | o | o   | o   | PF_NO_TAIL
+ * private         | o | o |    |    | o |     |     | PF_ANY
+ * private_2       | o | o | o  | o  | o |     |     | PF_ANY
+ * onwer_priv_1    | o | o |    | o  | o |     |     | PF_ANY
+ * writeback       |   |   | o  | o  | o |     |     | PF_NO_TAIL
+ * mappedtodisk    | o | o |    |    | o |     |     | PF_NO_TAIL
+ * ----------------+---------------------------------+---------------
+ * reclaim(Reclaim)| o | o |    | o  | o |     |     | PF_NO_TAIL
+ * reclaim         | o | o |    | o  | o |     |     | PF_NO_COMPOUND
+ * (Readahead)     |---------------------------------+--------------
  */
 __PAGEFLAG(Locked, locked, PF_NO_TAIL)
 PAGEFLAG(Waiters, waiters, PF_ONLY_HEAD) __CLEARPAGEFLAG(Waiters, waiters, PF_ONLY_HEAD)
