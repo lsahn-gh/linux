@@ -108,6 +108,10 @@ static inline bool is_migrate_movable(int mt)
 	return is_migrate_cma(mt) || mt == MIGRATE_MOVABLE;
 }
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - order 단위로 MIGRATE_TYPES을 순회한다.
+ */
 #define for_each_migratetype_order(order, type) \
 	for (order = 0; order < MAX_ORDER; order++) \
 		for (type = 0; type < MIGRATE_TYPES; type++)
@@ -119,6 +123,12 @@ extern int page_group_by_mobility_disabled;
 #define get_pageblock_migratetype(page)					\
 	get_pfnblock_flags_mask(page, page_to_pfn(page), MIGRATETYPE_MASK)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - zone_init_free_lists에서 초기화된다.
+ * - nr_free : buddy free page. buddy에서는 free page만을
+ *   관리한다.
+ */
 struct free_area {
 	struct list_head	free_list[MIGRATE_TYPES];
 	unsigned long		nr_free;
@@ -544,6 +554,10 @@ struct zone {
 #ifdef CONFIG_NUMA
 	int node;
 #endif
+  /*
+   * IAMROOT, 2021.12.11:
+   * - zone_pcp_init 에서 초기화된다.
+   */
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
@@ -648,11 +662,19 @@ struct zone {
 	seqlock_t		span_seqlock;
 #endif
 
+  /*
+   * IAMROOT, 2021.12.11:
+   * - zone_init_free_lists에서 set 된다.
+   */
 	int initialized;
 
 	/* Write-intensive fields used from the page allocator */
 	ZONE_PADDING(_pad1_)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - zone_init_free_lists에서 초기화된다.
+ */
 	/* free areas of different sizes */
 	struct free_area	free_area[MAX_ORDER];
 
@@ -1001,6 +1023,10 @@ typedef struct pglist_data {
 #define node_start_pfn(nid)	(NODE_DATA(nid)->node_start_pfn)
 #define node_end_pfn(nid) pgdat_end_pfn(NODE_DATA(nid))
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - node의 end_pfn
+ */
 static inline unsigned long pgdat_end_pfn(pg_data_t *pgdat)
 {
 	return pgdat->node_start_pfn + pgdat->node_spanned_pages;

@@ -24,6 +24,35 @@
 #define VMALLOC_START		(MODULES_END)
 #define VMALLOC_END		(VMEMMAP_START - SZ_256M)
 
+/*
+ * IAMROOT, 2021.12.11:
+ *
+ *   vaddr                             paddr
+ * +-------------+                    +------+ 0xffff_ffff_ffff_ffff
+ * |             |                    |      |
+ * |             |                    +------+ 
+ * |  +----------|<--VMEMMAP_END      |      |
+ * |  |          |                    |      |
+ * |  |          |                    |      |
+ * |  | VMEMMAP  |                    | DRAM |
+ * |  |          |                    |      |
+ * |  | +--------+                    |      |
+ * |  | | memmap |                    |      |
+ * |  +----------|<---VMEMMAP_START---+------+ DRAM start address (0x2000_0000)
+ * |             |                    |      |
+ * |             |                    |      |
+ * +-------------+<---vmemmap---------+------+ 0x0000
+ * |             |
+ * ...        
+ * |             |
+ * | LM 영역     |
+ * |             |
+ * +-------------+<---memstart_addr (0xffff_0000_0000_0000)
+ *
+ * ex)
+ * __pfn_to_page(0x0) = vmemmap (fault가 된다.)
+ * __pfn_to_page(0x2_0000) = VMEMMAP_START
+ */
 #define vmemmap			((struct page *)VMEMMAP_START - (memstart_addr >> PAGE_SHIFT))
 
 #ifndef __ASSEMBLY__

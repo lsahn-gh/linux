@@ -168,6 +168,10 @@
  *
  * The markers follow same syntax rules as __init / __initdata.
  */
+/*
+ * IAMROOT, 2021.12.11:
+ * - TODO
+ */
 #define __ref            __section(".ref.text") noinline
 #define __refdata        __section(".ref.data")
 #define __refconst       __section(".ref.rodata")

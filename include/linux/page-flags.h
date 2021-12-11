@@ -252,6 +252,10 @@ static inline void page_init_poison(struct page *page, size_t size)
  * PF_SECOND:
  *     the page flag is stored in the first tail page.
  */
+/*
+ * IAMROOT, 2021.12.11:
+ * - order로 page를 할당할때 struct page가 head, tail등이 될수있다.
+ */
 #define PF_POISONED_CHECK(page) ({					\
 		VM_BUG_ON_PGFLAGS(PagePoisoned(page), page);		\
 		page; })
@@ -339,6 +343,20 @@ static inline int TestClearPage##uname(struct page *page) { return 0; }
 #define TESTSCFLAG_FALSE(uname)						\
 	TESTSETFLAG_FALSE(uname) TESTCLEARFLAG_FALSE(uname)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - __PAGEFLAG 선언시 만들어지는 함수들. (Locked로 예로 듬)
+ *   PageLocked
+ *   __SetPageLocked
+ *   __ClearPageLocked
+ *   PG_locked bit가 제어된다.
+ *
+ * - PAGEFLAG 선언시 만들어지는 함수들. (Locked로 예로 듬)
+ *   PageLocked
+ *   SetPageLocked
+ *   ClearPageLocked
+ *   PG_locked bit가 제어된다.
+ */
 __PAGEFLAG(Locked, locked, PF_NO_TAIL)
 PAGEFLAG(Waiters, waiters, PF_ONLY_HEAD) __CLEARPAGEFLAG(Waiters, waiters, PF_ONLY_HEAD)
 PAGEFLAG(Error, error, PF_NO_TAIL) TESTCLEARFLAG(Error, error, PF_NO_TAIL)

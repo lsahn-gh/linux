@@ -398,12 +398,21 @@ static inline void __nodes_fold(nodemask_t *dstp, const nodemask_t *origp,
 enum node_states {
 	N_POSSIBLE,		/* The node could become online at some point */
 	N_ONLINE,		/* The node is online */
+/*
+ * IAMROOT, 2021.12.11:
+ * - NORMAL_MEMORY이하인 zone을 가지고있을 경우 check_for_memory에서
+ *   set됬다.
+ */
 	N_NORMAL_MEMORY,	/* The node has regular memory */
 #ifdef CONFIG_HIGHMEM
 	N_HIGH_MEMORY,		/* The node has regular or high memory */
 #else
 	N_HIGH_MEMORY = N_NORMAL_MEMORY,
 #endif
+/*
+ * IAMROOT, 2021.12.11:
+ * - node_present_pages 가 있을경우
+ */
 	N_MEMORY,		/* The node has memory(regular, high, movable) */
 	N_CPU,		/* The node has one or more cpus */
 	N_GENERIC_INITIATOR,	/* The node has one or more Generic Initiators */

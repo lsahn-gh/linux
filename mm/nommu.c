@@ -48,6 +48,10 @@ EXPORT_SYMBOL(high_memory);
 struct page *mem_map;
 unsigned long max_mapnr;
 EXPORT_SYMBOL(max_mapnr);
+/*
+ * IAMROOT, 2021.12.11:
+ * - memmap_init_range에서 갱신된다. 가장 높은 present memory pfn주소
+ */
 unsigned long highest_memmap_pfn;
 int sysctl_nr_trim_pages = CONFIG_NOMMU_INITIAL_TRIM_EXCESS;
 int heap_stack_gap = 0;

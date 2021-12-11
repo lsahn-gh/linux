@@ -19,12 +19,21 @@
 #define __page_to_pfn(page)	((unsigned long)((page) - mem_map) + \
 				 ARCH_PFN_OFFSET)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - vmemmap을 쓸경우 vmemmap을 시작으로 pfn을 구하면 되기때문에
+ *   flat과 동일한 성능이 나온다.
+ */
 #elif defined(CONFIG_SPARSEMEM_VMEMMAP)
 
 /* memmap is virtually contiguous.  */
 #define __pfn_to_page(pfn)	(vmemmap + (pfn))
 #define __page_to_pfn(page)	(unsigned long)((page) - vmemmap)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - vmemmap을 사용안할경우 직접 memmap 구조체를 가져와 구해야된다.
+ */
 #elif defined(CONFIG_SPARSEMEM)
 /*
  * Note: section's mem_map is encoded to reflect its start_pfn.
@@ -59,6 +68,11 @@
 #define	__phys_to_pfn(paddr)	PHYS_PFN(paddr)
 #define	__pfn_to_phys(pfn)	PFN_PHYS(pfn)
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - memmap으로 접근해 struct page 주소를 가져오거나
+ *   반대로 struct page주소로 pfn을 구해온다.
+ */
 #define page_to_pfn __page_to_pfn
 #define pfn_to_page __pfn_to_page
 

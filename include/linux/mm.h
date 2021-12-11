@@ -145,6 +145,12 @@ extern int mmap_rnd_compat_bits __read_mostly;
  * mm_zero_struct_page they should wrap the defines below in a #ifndef and
  * define their own version of this macro in <asm/pgtable.h>
  */
+/*
+ * IAMROOT, 2021.12.11:
+ * - 아키텍처에 따라 작은 size를 memset하는데 비용이 클수가 있으므로
+ *   바로 long size로 접근해 0으로 초기화시키는 방법을 사용한다.
+ *   long이 64bit가 아닌경우 그냥 memset처리한다.
+ */
 #if BITS_PER_LONG == 64
 /* This function must be updated when the size of struct page grows above 80
  * or reduces below 56. The idea that compiler optimizes out switch()
@@ -1097,6 +1103,14 @@ vm_fault_t finish_mkwrite_fault(struct vm_fault *vmf);
  * sets it, so none of the operations on it need to be atomic.
  */
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - 각 정보의 bit 사용개수로 위치가 define에 따라 flag에서 offset이 결정된다.
+ *   64bit system일경우 정보를 전부 저장할수있지만 32bit경우 저장을 다 못하는경우
+ *   compile error를 일으킨다.
+ * - 사용하지 않는 정보는 WIDTH가 0으로 설정된다. 이경우 flag를 mask하거나
+ *   or로 set할때 변경사항이 없기때문에 compile최적화에서 code가 없어질것이다.
+ */
 /* Page flags: | [SECTION] | [NODE] | ZONE | [LAST_CPUPID] | ... | FLAGS | */
 #define SECTIONS_PGOFF		((sizeof(unsigned long)*8) - SECTIONS_WIDTH)
 #define NODES_PGOFF		(SECTIONS_PGOFF - NODES_WIDTH)
@@ -1128,6 +1142,11 @@ vm_fault_t finish_mkwrite_fault(struct vm_fault *vmf);
 
 #define ZONEID_PGSHIFT		(ZONEID_PGOFF * (ZONEID_SHIFT != 0))
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - WIDTH가 0일경우. 즉 정보를 기록할 필요가 없는 상황이다.
+ *   flags mask를 하거나 set할때 아무것도 안고쳐질것이다.
+ */
 #define ZONES_MASK		((1UL << ZONES_WIDTH) - 1)
 #define NODES_MASK		((1UL << NODES_WIDTH) - 1)
 #define SECTIONS_MASK		((1UL << SECTIONS_WIDTH) - 1)
@@ -1426,6 +1445,12 @@ static inline bool __cpupid_match_pid(pid_t task_pid, int cpupid)
 }
 
 #define cpupid_match_pid(task, cpupid) __cpupid_match_pid(task->pid, cpupid)
+/*
+ * IAMROOT, 2021.12.11:
+ * - cpuid_last를 page에 저장할때 3가지 방법이 존재한다.
+ *   64bit system에서는 대부분 flag에 저장하고 32bit에서는 4byte를 더 추가해
+ *   그곳에 저장할것이다.
+ */
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 static inline int page_cpupid_xchg_last(struct page *page, int cpupid)
 {
@@ -1595,6 +1620,10 @@ static inline void set_page_node(struct page *page, unsigned long node)
 	page->flags |= (node & NODES_MASK) << NODES_PGSHIFT;
 }
 
+/*
+ * IAMROOT, 2021.12.11:
+ * - 해당 page가 속한 zone, node, section을 flag에 encode한다.
+ */
 static inline void set_page_links(struct page *page, enum zone_type zone,
 	unsigned long node, unsigned long pfn)
 {

@@ -202,6 +202,10 @@ struct page {
 		 * If the page can be mapped to userspace, encodes the number
 		 * of times this page is referenced by a page table.
 		 */
+/*
+ * IAMROOT, 2021.12.11:
+ * - -1 부터 시작을한다.
+ */
 		atomic_t _mapcount;
 
 		/*
@@ -217,6 +221,12 @@ struct page {
 	};
 
 	/* Usage count. *DO NOT USE DIRECTLY*. See page_ref.h */
+/*
+ * IAMROOT, 2021.12.11:
+ * - 최초에 struct page가 초기화되면 _refcount가 1로 설정될것이다.
+ * - page allocator(buddy system)에서 최초에 page를 초기화할때
+ *   _refcount를 -1시킨다. 그래서 미리 +1을 해놓는것이다.
+ */
 	atomic_t _refcount;
 
 #ifdef CONFIG_MEMCG
