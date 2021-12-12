@@ -48,7 +48,11 @@
 
 /*
  * IAMROOT, 2021.10.23:
- * - arm64_memblock_init에서 초기화된다. 이 값이 초기화 되기전엔
+ * - memstart_addr: 
+ *   커널 va <-> pa 변환에 사용되는 DRAM 물리 시작 주소가 사용한다.
+ *   단, VA_BITS=52 환경에서는 DRAM 물리 시작 주소를 보정하여 사용한다.
+ *
+ *   arm64_memblock_init에서 초기화된다. 이 값이 초기화 되기전엔
  *   리니어 매핑이 완료되지 않은 상태이므로
  *   phys_to_virt등의 변환 매크로를 사용할수 없다.
  *
@@ -56,37 +60,34 @@
  *   다음과 같은 예제 사유를 따른다.
  *   
  * ex) VA_BITS = 48, vabits_actual = 48, 
- *     PAGE_SIZE = 4k, memstart = 0x8000_0000
+ *     PAGE_SIZE = 4k, PHYS_OFFSET = memstart_addr = 0x8000_0000
  *
  *	PAGE_OFFSET = 0xffff_0000_0000_0000
  *
- *	phys_addr = 0x9000_0000
- *	
  *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	x = 0x9000_0000
  *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - 0x8000_0000 |
  *				      0xffff_0000_0000_0000
  *				    = 0xffff_0000_1000_0000
  *
  * ex) VA_BITS = 52,  vabits_actual = 48,
- *     PAGE_SIZE = 16, memstart = 0x8000_0000 (틀린사례)
+ *     PAGE_SIZE = 16, PHYS_OFFSWET = memstart_addr = 0x8000_0000 (틀린사례)
  *				    
  *	PAGE_OFFSET = 0xfff0_0000_0000_0000
- *
- *	phys_addr = 0x9000_0000
  *	
  *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	x = 0x9000_0000
  *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - 0x8000_0000 |
  *				      0xfff0_0000_0000_0000
  *				    = 0xfff0_0000_1000_0000
  *
  * ex) VA_BITS = 52,  vabits_actual = 48,
- *     PAGE_SIZE = 16, memstart = -0xe_ffff_8000_0000 (memstart가 보정된 사례)
+ *     PAGE_SIZE = 16, PHYS_OFFSET = memstart_addr = -0xe_ffff_8000_0000 (memstart가 보정된 사례)
  *				    
  *	PAGE_OFFSET = 0xfff0_0000_0000_0000
  *
- *	phys_addr = 0x9000_0000
- *	
  *	__phys_to_virt(x) = (((x) - PHYS_OFFSET) | PAGE_OFFSET)
+ *	x = 0x9000_0000
  *	__phys_to_virt(0x9000_0000) = 0x9000_0000 - (-0xe_ffff_8000_0000) |
  *				      0xfff0_0000_0000_0000
  *				    = 0xffff_0000_1000_0000
