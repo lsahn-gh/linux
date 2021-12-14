@@ -170,7 +170,17 @@
  */
 /*
  * IAMROOT, 2021.12.11:
- * - TODO
+ * - __ref:
+ *   .init 섹션에 위치한 코드들은 부트업이 완료되면 삭제되는데,
+ *   .init 섹션에 위치한 코드를 호출하는 문장이 포함된 함수는
+ *   실제로 호출하지 않을때에도 warnning 에러가 발생한다.
+ *   이러한 warnning을 없애기 위해 사용한다.
+ *
+ *   예) 아래 함수는 부팅 후에 삭제된 memblock 코드를 포함하고 있으나,
+ *       부팅 후에 실제 호출되지는 않는다.
+ *       __ref sparse_index_alloc()
+ *         -> static inline memblock_alloc_node() 
+ *           -> __init memblock_alloc_try_nid()
  */
 #define __ref            __section(".ref.text") noinline
 #define __refdata        __section(".ref.data")

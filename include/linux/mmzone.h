@@ -1506,6 +1506,11 @@ struct mem_section {
  *  형식이다.
  *
  * - sparse_init일때 잠깐 nid는 mem_section을 초기화 할때만 잠깐 사용한다.
+ *   그래서 early nid라고 표현하고, 이 nid 정보는 mem_map 포인터와 
+ *   같이 저장되는 일은 없다. early nid의 정보가 담긴 후에 나중에 실제
+ *   엔코딩된 mem_map 포인터를 담아 사용한다.
+ *   참고로 nid 정보는 mem_map 초기화 이후 page->flags에 저장된다.
+ * 
  *   bit | 63....6 | 5 | 4     | 3     | 2      | 1   | 0       |
  *       | nid     | - | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
  *
