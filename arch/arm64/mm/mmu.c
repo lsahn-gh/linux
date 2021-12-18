@@ -139,6 +139,10 @@ static phys_addr_t __init early_pgtable_alloc(int shift)
 	return phys;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 경우에 따라 old, new에 따른 type검사를 수행한다.
+ */
 static bool pgattr_change_is_safe(u64 old, u64 new)
 {
 	/*
@@ -148,6 +152,12 @@ static bool pgattr_change_is_safe(u64 old, u64 new)
 	pteval_t mask = PTE_PXN | PTE_RDONLY | PTE_WRITE | PTE_NG;
 
 	/* creating or taking down mappings is always safe */
+/*
+ * IAMROOT, 2021.12.18:
+ * - old == 0 : 이전이 없음. 즉 새로 생기는 상황.
+ * - new == 0 : 새로운게 없음. 즉 삭제 되는 상황.
+ * - 새로 생기거나 삭제되는 경우에는 type을 따질 필요가 없으므로 trun
+ */
 	if (old == 0 || new == 0)
 		return true;
 
@@ -1383,6 +1393,12 @@ static void free_empty_tables(unsigned long addr, unsigned long end,
 }
 #endif
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - ARM64_KERNEL_USES_PMD_MAPS을 지원안하는 경우 4k단위로, 아니면 2MB단위로
+ *   memmap을 mapping한다.
+ * - vmemmap의 영역에 memmap을 mapping한다.
+ */
 #if !ARM64_KERNEL_USES_PMD_MAPS
 int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 		struct vmem_altmap *altmap)
@@ -1403,6 +1419,10 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 
 	WARN_ON((start < VMEMMAP_START) || (end > VMEMMAP_END));
 	do {
+/*
+ * IAMROOT, 2021.12.18:
+ * - PMD_SIZE(2MB) 씩 자른다.
+ */
 		next = pmd_addr_end(addr, end);
 
 		pgdp = vmemmap_pgd_populate(addr, node);
@@ -1418,11 +1438,19 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 			return -ENOMEM;
 
 		pmdp = pmd_offset(pudp, addr);
+/*
+ * IAMROOT, 2021.12.18:
+ * - 한번에 2MB씩 초기화를 할예정이므로 pmd populate를 안한다.
+ */
 		if (pmd_none(READ_ONCE(*pmdp))) {
 			void *p = NULL;
 
 			p = vmemmap_alloc_block_buf(PMD_SIZE, node, altmap);
 			if (!p) {
+/*
+ * IAMROOT, 2021.12.18:
+ * - 2MB mpping이 실패했으면 4k(PAGE_SIZE)단위로 다시 mapping을 시도한다.
+ */
 				if (vmemmap_populate_basepages(addr, next, node, altmap))
 					return -ENOMEM;
 				continue;
@@ -1751,6 +1779,10 @@ int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
 	return 1;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - PMD_SIZE(2MB)인 phys를 PMD entry에 기록한다.
+ */
 int pmd_set_huge(pmd_t *pmdp, phys_addr_t phys, pgprot_t prot)
 {
 	pmd_t new_pmd = pfn_pmd(__phys_to_pfn(phys), mk_pmd_sect_prot(prot));

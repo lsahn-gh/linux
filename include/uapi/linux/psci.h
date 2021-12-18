@@ -78,6 +78,22 @@
 #define PSCI_0_2_AFFINITY_LEVEL_ON_PENDING	2
 
 /* PSCI v0.2 multicore support in Trusted OS returned by MIGRATE_INFO_TYPE */
+/*
+ * IAMROOT, 2021.12.18:
+ * - PSCI_0_2_TOS_UP_MIGRATE
+ *   해당 cpu하나에서만 동작을 하고 있고 다른 cpu로 이동이 가능한경우
+ * - PSCI_0_2_TOS_UP_NO_MIGRATE
+ *   해당 cpu말고 다른 cpu로 이동이 불가능한경우
+ * - PSCI_0_2_TOS_MP
+ *   multi core로 동작하고 있는 경우
+ *
+ * - ex) cpu 0, 1, 2가 있는 상황에서 secure firmware가 0번 cpu에
+ *   동작을 하고 있다고 가정을 했을때.
+ *   PSCI_0_2_TOS_UP_MIGRATE 이면 1, 2번 cpu로 이동 가능
+ *   PSCI_0_2_TOS_UP_NO_MIGRATE 이면 0번 cpu에서만 동작이 가능한 상태.
+ *   PSCI_0_2_TOS_MP 이 경우엔 multi core로 동작이 가능하므로 migrate를
+ *   할 필요가 없는 상태.
+ */
 #define PSCI_0_2_TOS_UP_MIGRATE			0
 #define PSCI_0_2_TOS_UP_NO_MIGRATE		1
 #define PSCI_0_2_TOS_MP				2

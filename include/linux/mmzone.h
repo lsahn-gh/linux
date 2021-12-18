@@ -1651,11 +1651,22 @@ static inline int present_section_nr(unsigned long nr)
 	return present_section(__nr_to_section(nr));
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 mem_section이 할당된 상태인지 검사하고, 할당되었으면 memmap을 가진지
+ *   검사한다.
+ * - static 일 경우 section은 항상 존재할테니 memmap이 있는지 flag를 검사해야된다.
+ * - extreme일 경우 section이 null인 경우가 있을것이다.
+ */
 static inline int valid_section(struct mem_section *section)
 {
 	return (section && (section->section_mem_map & SECTION_HAS_MEM_MAP));
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - boot time때 sparse_init_nid에서 set됬었다.
+ */
 static inline int early_section(struct mem_section *section)
 {
 	return (section && (section->section_mem_map & SECTION_IS_EARLY));
@@ -1708,6 +1719,10 @@ static inline int subsection_map_index(unsigned long pfn)
 	return (pfn & ~(PAGE_SECTION_MASK)) / PAGES_PER_SUBSECTION;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - subsection_map에서 해당 pfn이 set되있는지 확인한다.
+ */
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 static inline int pfn_section_valid(struct mem_section *ms, unsigned long pfn)
 {

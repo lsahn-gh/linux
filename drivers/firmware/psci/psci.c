@@ -47,6 +47,10 @@
  * require cooperation with a Trusted OS driver.
  */
 static int resident_cpu = -1;
+/*
+ * IAMROOT, 2021.12.18:
+ * - dt에서 psci node를 읽어 해당 정보로 초기화된다.
+ */
 struct psci_operations psci_ops;
 static enum arm_smccc_conduit psci_conduit = SMCCC_CONDUIT_NONE;
 
@@ -57,8 +61,18 @@ bool psci_tos_resident_on(int cpu)
 
 typedef unsigned long (psci_fn)(unsigned long, unsigned long,
 				unsigned long, unsigned long);
+/*
+ * IAMROOT, 2021.12.18:
+ * - dt에서 psci node에서 method property에서 지정된 smc, hvc인지에 따라 callback
+ *   함수가 결정된다.(hvc = __invoke_psci_fn_hvc, smc = __invoke_psci_fn_smc);
+ */
 static psci_fn *invoke_psci_fn;
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci version이 0.1로 dt에서 설정되있는 경우 각 property들의 id를 읽어
+ *   저장된다.
+ */
 static struct psci_0_1_function_ids psci_0_1_function_ids;
 
 struct psci_0_1_function_ids get_psci_0_1_function_ids(void)
@@ -75,7 +89,15 @@ struct psci_0_1_function_ids get_psci_0_1_function_ids(void)
 				(PSCI_1_0_EXT_POWER_STATE_ID_MASK | \
 				PSCI_1_0_EXT_POWER_STATE_TYPE_MASK)
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci_init_cpu_suspend 에서 초기화된다. CPU_SUSPEND 지원시 값이 설정된다.
+ */
 static u32 psci_cpu_suspend_feature;
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci_init_system_reset2에서 초기화된다. SYSTEM_RESET2 지원시 true가 된다.
+ */
 static bool psci_system_reset2_supported;
 
 static inline bool psci_has_ext_power_state(void)
@@ -84,6 +106,12 @@ static inline bool psci_has_ext_power_state(void)
 				PSCI_1_0_FEATURES_CPU_SUSPEND_PF_MASK;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - osi(OS Initiated)
+ * - 그 전에 psci0.2 init을 하면서 가져온 psci_cpu_suspend_feature에서 
+ *   OSI를 지원하는지 확인한다.
+ */
 bool psci_has_osi_support(void)
 {
 	return psci_cpu_suspend_feature & PSCI_1_0_OS_INITIATED;
@@ -154,6 +182,10 @@ static u32 psci_0_2_get_version(void)
 	return invoke_psci_fn(PSCI_0_2_FN_PSCI_VERSION, 0, 0, 0);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci 1.0 init시 OSI를 지원한다면 @enable false로 진입한다.
+ */
 int psci_set_osi_mode(bool enable)
 {
 	unsigned long suspend_mode;
@@ -274,6 +306,11 @@ static void set_conduit(enum arm_smccc_conduit conduit)
 	psci_conduit = conduit;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - method property를 찾고, 존재하면 해당 string값이 hvc, smc인지 검사하고,
+ *   해당 callback함수를 set한다.
+ */
 static int get_set_conduit_method(struct device_node *np)
 {
 	const char *method;
@@ -296,6 +333,13 @@ static int get_set_conduit_method(struct device_node *np)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - register_restart_handler에 psci_sys_reset_nb가 등록되고 후에
+ *   do_kernel_restart에서 호출될때 notifier_block.notifiler_call이 호출되어
+ *   이 함수가 실행될것이다.
+ * - dt에서 invoke_psci_fn에 hvc, smc에 대한 callback함수가 설정되었을것이다.
+ */
 static int psci_sys_reset(struct notifier_block *nb, unsigned long action,
 			  void *data)
 {
@@ -375,6 +419,10 @@ static const struct platform_suspend_ops psci_suspend_ops = {
 	.enter          = psci_system_suspend_enter,
 };
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - reset2 지원하는지 확인하여 psci_system_reset2_supported를 설정한다.
+ */
 static void __init psci_init_system_reset2(void)
 {
 	int ret;
@@ -385,6 +433,11 @@ static void __init psci_init_system_reset2(void)
 		psci_system_reset2_supported = true;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - kernel config로 suspend 설정이 되있는지 확인하고 feature지원 여부를 확인하여
+ *   psci_suspend_ops를 설정한다.
+ */
 static void __init psci_init_system_suspend(void)
 {
 	int ret;
@@ -410,6 +463,12 @@ static void __init psci_init_cpu_suspend(void)
  * Detect the presence of a resident Trusted OS which may cause CPU_OFF to
  * return DENIED (which would be fatal).
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci의 migratet type을 가져와 print로 출력한다.
+ * - secure firmware가 multi core를 지원하는 경우 PSCI_0_2_TOS_MP이 되
+ *   print하고 넘어 갈 것이고 uni core인 경우 동작 cpuid를 출력한다.
+ */
 static void __init psci_init_migrate(void)
 {
 	unsigned long cpuid;
@@ -417,6 +476,10 @@ static void __init psci_init_migrate(void)
 
 	type = psci_ops.migrate_info_type();
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - multi core를 지원을 하므로 migrate가 필요없다는것.
+ */
 	if (type == PSCI_0_2_TOS_MP) {
 		pr_info("Trusted OS migration not required\n");
 		return;
@@ -433,6 +496,11 @@ static void __init psci_init_migrate(void)
 		return;
 	}
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - Uni process인 경우
+ * - 현재 secure firmwere가 어떤 cpu에서 동작을 하고 있는지 알아온다.
+ */
 	cpuid = psci_migrate_info_up_cpu();
 	if (cpuid & ~MPIDR_HWID_BITMASK) {
 		pr_warn("MIGRATE_INFO_UP_CPU reported invalid physical ID (0x%lx)\n",
@@ -446,6 +514,13 @@ static void __init psci_init_migrate(void)
 	pr_info("Trusted OS resident on physical CPU 0x%lx\n", cpuid);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci feature를 지원하는지 확인하고 지원한다면 smccc version을 알아오고
+ *   ARM_SMCCC_VERSION_1_1보다 높은 경우 smccc관련 정보들을 다시 설정한다.
+ * - SVE를 지원하고 ARM_SMCCC_VERSION_1_3보다 높은 경우 smccc_has_sve_hint를
+ *   true로 설정하는게 보인다.
+ */
 static void __init psci_init_smccc(void)
 {
 	u32 ver = ARM_SMCCC_VERSION_1_0;
@@ -471,6 +546,12 @@ static void __init psci_init_smccc(void)
 
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 0.2 version에 대한 ops를 연결한다.
+ * - restart_handler_list에 psci_sys_reset_nb을 추가한다. kernel이 restart 될때
+ *   callback으로 실행해야되는 함수를 등록한다.
+ */
 static void __init psci_0_2_set_functions(void)
 {
 	pr_info("Using standard PSCI v0.2 function IDs\n");
@@ -492,6 +573,10 @@ static void __init psci_0_2_set_functions(void)
 
 /*
  * Probe function for PSCI firmware versions >= 0.2
+ */
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci version정보, feature등을 가져와 지원을 한다면 해당 정보들을 초기화한다.
  */
 static int __init psci_probe(void)
 {
@@ -528,6 +613,10 @@ typedef int (*psci_initcall_t)(const struct device_node *);
  *
  * Probe based on PSCI PSCI_VERSION function
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci 0.2관련 초기화 수행
+ */
 static int __init psci_0_2_init(struct device_node *np)
 {
 	int err;
@@ -548,6 +637,10 @@ static int __init psci_0_2_init(struct device_node *np)
 
 /*
  * PSCI < v0.2 get PSCI Function IDs via DT.
+ */
+/*
+ * IAMROOT, 2021.12.18:
+ * - method property를 가져와 해당 property의 callback을 등록하고, id를 설정한다.
  */
 static int __init psci_0_1_init(struct device_node *np)
 {
@@ -585,6 +678,10 @@ static int __init psci_0_1_init(struct device_node *np)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci0.2 초기화 + psci_has_osi_suppoert
+ */
 static int __init psci_1_0_init(struct device_node *np)
 {
 	int err;
@@ -610,6 +707,20 @@ static const struct of_device_id psci_of_match[] __initconst = {
 	{},
 };
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - dt에서 psci_of_match의 compatible을 검색한다.
+ * - ex) version 0.1
+ *   psci {
+ *	compatible = "arm,psci";
+ *	method = "smc";
+ *	cpu_off = <0x84000002>;
+ *	cpu_on = <0xC4000003>;
+ *	};
+ *
+ * - psci ops를 설정하고 version, feature정보를 가져와 조건을 확인하여 정보들을
+ *   초기화한다.
+ */
 int __init psci_dt_init(void)
 {
 	struct device_node *np;
@@ -623,6 +734,10 @@ int __init psci_dt_init(void)
 		return -ENODEV;
 
 	init_fn = (psci_initcall_t)matched_np->data;
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당하는 psci_of_match의 data 함수를 호출한다.
+ */
 	ret = init_fn(np);
 
 	of_node_put(np);

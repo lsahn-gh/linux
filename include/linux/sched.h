@@ -2087,6 +2087,12 @@ static inline int _cond_resched(void) { return 0; }
 
 #endif /* !defined(CONFIG_PREEMPTION) || defined(CONFIG_PREEMPT_DYNAMIC) */
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - CONFIG_PREEMPT_VOLUNTARY일 경우만 동작한다.
+ * - PREEMPT가 안되는 os의 경우 잠시 sleep하여 다른 thread한테 스케쥴자원을
+ *   양보하기 위함이다.
+ */
 #define cond_resched() ({			\
 	___might_sleep(__FILE__, __LINE__, 0);	\
 	_cond_resched();			\

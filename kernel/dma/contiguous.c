@@ -168,6 +168,10 @@ void __init dma_pernuma_cma_reserve(void)
  * has been activated and all other subsystems have already allocated/reserved
  * memory.
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - TODO
+ */
 void __init dma_contiguous_reserve(phys_addr_t limit)
 {
 	phys_addr_t selected_size = 0;

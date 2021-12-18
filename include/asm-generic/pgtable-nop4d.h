@@ -28,6 +28,10 @@ static inline int pgd_present(pgd_t pgd)	{ return 1; }
 static inline void pgd_clear(pgd_t *pgd)	{ }
 #define p4d_ERROR(p4d)				(pgd_ERROR((p4d).pgd))
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - arm64에서는 pgd를 p4d로 사용하기때문에 딱히 아무것도 안한다.
+ */
 #define pgd_populate(mm, pgd, p4d)		do { } while (0)
 #define pgd_populate_safe(mm, pgd, p4d)		do { } while (0)
 /*

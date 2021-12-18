@@ -225,6 +225,10 @@ extern u64 smccc_has_sve_hint;
  * struct arm_smccc_res - Result from SMC/HVC call
  * @a0-a3 result values from registers 0 to 3
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - smccc-call.S의 SMCCC macro에 의해 요청후 결과값.
+ */
 struct arm_smccc_res {
 	unsigned long a0;
 	unsigned long a1;
@@ -353,6 +357,10 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
 			unsigned long a5, unsigned long a6, unsigned long a7,
 			struct arm_smccc_res *res, struct arm_smccc_quirk *quirk);
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - arm_smccc_smc, arm_smccc_hvc는 smccc-call.S의 .macro SMCCC instr 매크로가 된다.
+ */
 #define arm_smccc_smc(...) __arm_smccc_smc(__VA_ARGS__, NULL)
 
 #define arm_smccc_smc_quirk(...) __arm_smccc_smc(__VA_ARGS__)
@@ -539,6 +547,10 @@ asmlinkage void __arm_smccc_hvc(unsigned long a0, unsigned long a1,
  * (SMCCC_RET_NOT_SUPPORTED) is returned in @res.a0 (if supplied).
  *
  * The return value also provides the conduit that was used.
+ */
+/*
+ * IAMROOT, 2021.12.18:
+ * - smccc + hvc or smc 호출
  */
 #define arm_smccc_1_1_invoke(...) ({					\
 		int method = arm_smccc_1_1_get_conduit();		\

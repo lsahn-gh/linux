@@ -17,6 +17,10 @@
  * with 4K (section size = 2M) but not with 16K (section size = 32M) or
  * 64K (section size = 512M).
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - 2MB mapping은 4k page쪽에만 현재 구현된 상태.
+ */
 #ifdef CONFIG_ARM64_4K_PAGES
 #define ARM64_KERNEL_USES_PMD_MAPS 1
 #else

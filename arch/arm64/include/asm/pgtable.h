@@ -359,6 +359,10 @@ static inline void __check_racy_pte_update(struct mm_struct *mm, pte_t *ptep,
 		     __func__, pte_val(old_pte), pte_val(pte));
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - pte entry에 @pte값을 기록한다.
+ */
 static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
 			      pte_t *ptep, pte_t pte)
 {
@@ -457,6 +461,10 @@ static inline pgprot_t mk_pud_sect_prot(pgprot_t prot)
 	return __pgprot((pgprot_val(prot) & ~PUD_TABLE_BIT) | PUD_TYPE_SECT);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - prot에 PMD_TABLE_BIT를 제거하고 PMD_TYPE_SECT를 추가한다.
+ */
 static inline pgprot_t mk_pmd_sect_prot(pgprot_t prot)
 {
 	return __pgprot((pgprot_val(prot) & ~PMD_TABLE_BIT) | PMD_TYPE_SECT);
@@ -536,6 +544,14 @@ static inline pmd_t pmd_mkdevmap(pmd_t pmd)
 #define __pmd_to_phys(pmd)	__pte_to_phys(pmd_pte(pmd))
 #define __phys_to_pmd_val(phys)	__phys_to_pte_val(phys)
 #define pmd_pfn(pmd)		((__pmd_to_phys(pmd) & PMD_MASK) >> PAGE_SHIFT)
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 pfn을 pmd entry로 쓰기 위한 작업.
+ *   해당 pfn의 물리주소와 prot로 값을만든다.
+ * - ex) pfn = 0x12345, prot = PROT_SECT_NORMAL | PMD_TYPE_SECT
+ *   address = 0x1234_5000 
+ *   pmd = __pmd(0x1234_5000 | prot) = 0x1234_5000 | prot
+ */
 #define pfn_pmd(pfn,prot)	__pmd(__phys_to_pmd_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #define mk_pmd(page,prot)	pfn_pmd(page_to_pfn(page),prot)
 
@@ -645,6 +661,10 @@ static inline bool in_swapper_pgdir(void *addr)
 static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 {
 #ifdef __PAGETABLE_PMD_FOLDED
+/*
+ * IAMROOT, 2021.12.18:
+ * - pmd를 사용안하는 경우
+ */
 	if (in_swapper_pgdir(pmdp)) {
 		set_swapper_pgd((pgd_t *)pmdp, __pgd(pmd_val(pmd)));
 		return;

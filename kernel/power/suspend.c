@@ -38,14 +38,27 @@ const char * const pm_labels[] = {
 	[PM_SUSPEND_STANDBY] = "standby",
 	[PM_SUSPEND_MEM] = "mem",
 };
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 PM_SUSPEND_XXX가 지원한다면 labels에서 string pointer를 가져와 set한다.
+ * */
 const char *pm_states[PM_SUSPEND_MAX];
 static const char * const mem_sleep_labels[] = {
 	[PM_SUSPEND_TO_IDLE] = "s2idle",
 	[PM_SUSPEND_STANDBY] = "shallow",
 	[PM_SUSPEND_MEM] = "deep",
 };
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 PM_SUSPEND_XXX가 지원한다면 labels에서 string pointer를 가져와 set한다.
+ */
 const char *mem_sleep_states[PM_SUSPEND_MAX];
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 초기값은 idle인데 psci에서 suspend관련 초기화를 할때
+ *   PM_SUSPEND_STANDBY or PM_SUSPEND_MEM이 설정된다.
+ */
 suspend_state_t mem_sleep_current = PM_SUSPEND_TO_IDLE;
 suspend_state_t mem_sleep_default = PM_SUSPEND_MAX;
 suspend_state_t pm_suspend_target_state;
@@ -54,6 +67,10 @@ EXPORT_SYMBOL_GPL(pm_suspend_target_state);
 unsigned int pm_suspend_global_flags;
 EXPORT_SYMBOL_GPL(pm_suspend_global_flags);
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci에서 suspend 관련 초기화를 할때 설정된다.
+ */
 static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_s2idle_ops *s2idle_ops;
 static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
@@ -199,6 +216,13 @@ __setup("mem_sleep_default=", mem_sleep_default_setup);
 /**
  * suspend_set_ops - Set the global suspend method table.
  * @ops: Suspend operations to use.
+ */
+/*
+ * IAMROOT, 2021.12.18:
+ * - system이 suspend상태로 동작할수있는 platform_suspend_ops를 설정한다.
+ * - psci_init_system_suspend에서 호출됬을때의 ops는 psci_suspend_ops이고
+ *   여기선 state가 PM_SUSPEND_MEM이므로 PM_SUSPEND_MEM쪽으로 초기화가 일단
+ *   진행하는것으로 보인다.
  */
 void suspend_set_ops(const struct platform_suspend_ops *ops)
 {

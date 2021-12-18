@@ -64,6 +64,12 @@ EXPORT_SYMBOL(__stack_chk_guard);
 /*
  * Function pointers to optional machine specific functions
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci_0_2_set_functions과 같은 power management관련 함수들이 호출될때
+ *   callback함수가 설정된다.
+ * - ex) psci_sys_poweroff
+ */
 void (*pm_power_off)(void);
 EXPORT_SYMBOL_GPL(pm_power_off);
 

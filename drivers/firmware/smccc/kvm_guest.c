@@ -11,11 +11,19 @@
 
 static DECLARE_BITMAP(__kvm_arm_hyp_services, ARM_SMCCC_KVM_NUM_FUNCS) __ro_after_init = { };
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - TODO
+ */
 void __init kvm_init_hyp_services(void)
 {
 	struct arm_smccc_res res;
 	u32 val[4];
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - smc로 설정되있으면 아에 안한다.
+ */
 	if (arm_smccc_1_1_get_conduit() != SMCCC_CONDUIT_HVC)
 		return;
 

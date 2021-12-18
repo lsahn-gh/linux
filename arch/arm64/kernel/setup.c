@@ -234,6 +234,10 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	dump_stack_set_arch_desc("%s (DT)", name);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - PASS
+ */
 static void __init request_standard_resources(void)
 {
 	struct memblock_region *region;

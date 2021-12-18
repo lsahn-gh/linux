@@ -31,6 +31,10 @@ SYM_FUNC_START(__arm_smccc_sve_check)
 SYM_FUNC_END(__arm_smccc_sve_check)
 EXPORT_SYMBOL(__arm_smccc_sve_check)
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - SMCCC 호출규약에 따라 각 register에 해당하는 값들을 설정한다.
+ */
 	.macro SMCCC instr
 	stp     x29, x30, [sp, #-16]!
 	mov	x29, sp

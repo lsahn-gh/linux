@@ -12,12 +12,21 @@
 #include <linux/platform_device.h>
 #include <asm/archrandom.h>
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - psci 0.2이상인 경우 smccc version까지 획득해오는 루틴이 있으며
+ *   해당 루틴에서 version, conduit, trng 지원여부를 설정한다.
+ */
 static u32 smccc_version = ARM_SMCCC_VERSION_1_0;
 static enum arm_smccc_conduit smccc_conduit = SMCCC_CONDUIT_NONE;
 
 bool __ro_after_init smccc_trng_available = false;
 u64 __ro_after_init smccc_has_sve_hint = false;
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - smccc version, conduit, trng available등을 설정한다.
+ */
 void __init arm_smccc_version_init(u32 version, enum arm_smccc_conduit conduit)
 {
 	smccc_version = version;

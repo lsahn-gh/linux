@@ -38,6 +38,10 @@ pgprot_t __init __weak early_memremap_pgprot_adjust(resource_size_t phys_addr,
 	return prot;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - PASS
+ */
 void __init early_ioremap_reset(void)
 {
 	after_paging_init = 1;

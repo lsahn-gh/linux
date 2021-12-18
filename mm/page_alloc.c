@@ -405,6 +405,11 @@ EXPORT_SYMBOL(nr_node_ids);
 EXPORT_SYMBOL(nr_online_nodes);
 #endif
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 작은 system일 경우 migrate 지원을 안함으로 type을
+ *   나눠서 운영을 하지 않는다.
+ */
 int page_group_by_mobility_disabled __read_mostly;
 
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
@@ -547,6 +552,10 @@ static inline bool defer_init(int nid, unsigned long pfn, unsigned long end_pfn)
 #endif
 
 /* Return a pointer to the bitmap storing bits affecting a block of pages */
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 struct page의 mem_section에서 usemap을 가져온다.
+ */
 static inline unsigned long *get_pageblock_bitmap(const struct page *page,
 							unsigned long pfn)
 {
@@ -612,6 +621,15 @@ static __always_inline int get_pfnblock_migratetype(const struct page *page,
  * @pfn: The target page frame number
  * @mask: mask of bits that the caller is interested in
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 @pfn이 속한 pageblock의 migratetype을 @flags로 수정한다.
+ * - memmap_init_zone_range에서 진입했을 경우 @flags가 MIGRATE_MOVABLE.
+ * - pageblock_order 단위로 진입을 할건데 이 경우 pageblock_order로 align
+ *   되있는 struct page에 해당하는 page block의 usemap만 @flags로 설정한다.
+ * - 해당 @pfn에 해당하는 usemap을 bitmap연산으로 찾아서 cmpxchg로 set한다.
+ *   atomic연산이고, 성공할때까지 for문으로 검사를 하는 방식.
+ */
 void set_pfnblock_flags_mask(struct page *page, unsigned long flags,
 					unsigned long pfn,
 					unsigned long mask)
@@ -642,6 +660,10 @@ void set_pfnblock_flags_mask(struct page *page, unsigned long flags,
 	}
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 struct page가 속한 pageblock의 migratetype을 변경한다.
+ */
 void set_pageblock_migratetype(struct page *page, int migratetype)
 {
 	if (unlikely(page_group_by_mobility_disabled &&
@@ -6624,6 +6646,8 @@ overlap_memmap_init(unsigned long zone, unsigned long *pfn)
  *			 runtime에 들어왔다면 MEMINIT_HOTPLUG일 것이다.
  * @altmap 기본적인 memmap 초기화가 아닌 특수목적 memmap 초기화
  * @migratetype enum migratetype
+ *
+ * clamp된 범위를 page로 순회하며 struct page를 초기화한다.
  */
 void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone,
 		unsigned long start_pfn, unsigned long zone_end_pfn,
@@ -6687,6 +6711,12 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 
 		page = pfn_to_page(pfn);
 		__init_single_page(page, pfn, zone, nid);
+/*
+ * IAMROOT, 2021.12.18:
+ * - kernel boot가 완료된후 hotplug로 memory가 추가되면 context가
+ *   MEMINIT_HOTPLUG이다. 일단 초기화만 하고 사용을 안하기 위해
+ *   reserved로 표시를 해놓는다.
+ */
 		if (context == MEMINIT_HOTPLUG)
 			__SetPageReserved(page);
 
@@ -6695,8 +6725,19 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 		 * such that unmovable allocations won't be scattered all
 		 * over the place during system boot.
 		 */
+/*
+ * IAMROOT, 2021.12.18:
+ * - pfn단위로 for문을 순회하는 와중에서도 pageblock_nr_pages으로 align
+ *   되있는 pfn에 대해서만 migratetype을 설정한다.
+ */
 		if (IS_ALIGNED(pfn, pageblock_nr_pages)) {
 			set_pageblock_migratetype(page, migratetype);
+/*
+ * IAMROOT, 2021.12.18:
+ * - 부팅중에 context가 ealry인 경우에는 할필요 없겟지만 부팅이 완료중에
+ *   hotplug memory가 초기화되는 중에는
+ *   PREEMPT를 확인이 필요하므로 해당 sleep이 존재하는것이다.
+ */
 			cond_resched();
 		}
 		pfn++;
@@ -6807,6 +6848,11 @@ static void __meminit zone_init_free_lists(struct zone *zone)
  *   zone/node above the hole except for the trailing pages in the last
  *   section that will be appended to the zone/node below.
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - hole page들을 reserved한다.
+ * - pfn_valid에서 false된 pfn들은 pageblock_nr_pages단위로 skip한다.
+ */
 static void __init init_unavailable_range(unsigned long spfn,
 					  unsigned long epfn,
 					  int zone, int node)
@@ -6838,7 +6884,7 @@ static void __init init_unavailable_range(unsigned long spfn,
  * @hole_pfn 
  * - memblock의 start_pfn, end_pfn과 zone의 zone_start_pfn, zone_end_pfn에서
  *   겹치는 영역을 초기화한다.
- *   */
+ */
 static void __init memmap_init_zone_range(struct zone *zone,
 					  unsigned long start_pfn,
 					  unsigned long end_pfn,
@@ -6857,6 +6903,12 @@ static void __init memmap_init_zone_range(struct zone *zone,
 	memmap_init_range(end_pfn - start_pfn, nid, zone_id, start_pfn,
 			  zone_end_pfn, MEMINIT_EARLY, NULL, MIGRATE_MOVABLE);
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 이전에 초기화됬던 범위의 end_pfn이 hole_pfn이 되므로, 현재 범위의
+ *   start_pfn과 hole_pfn사이에 공간이 있다면 해당 범위는 hole이 될것이다.
+ *   해당 범위에 대해서 unavailabe시킨다.
+ */
 	if (*hole_pfn < start_pfn)
 		init_unavailable_range(*hole_pfn, start_pfn, zone_id, nid);
 
@@ -8473,6 +8525,8 @@ bool __weak arch_has_descending_max_zone_pfns(void)
  *
  *   1. user memory alloc시 메모리 단편화 문제 해결
  *   2. hot remove 관련영역
+ *
+ * - zone, subsection, node의 zone정보 초기화, memmap 초기화를 수행한다.
  */
 void __init free_area_init(unsigned long *max_zone_pfn)
 {

@@ -13,6 +13,11 @@
 
 extern bool smccc_trng_available;
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - secure firmware에 trng version을 알아와서 1.0 이상이면
+ *   true로 return한다.
+ */
 static inline bool __init smccc_probe_trng(void)
 {
 	struct arm_smccc_res res;

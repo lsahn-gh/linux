@@ -139,6 +139,14 @@ EXPORT_SYMBOL(devm_register_reboot_notifier);
  *	Notifier list for kernel code which wants to be called
  *	to restart the system.
  */
+/*
+ * IAMROOT, 2021.12.18:
+ * - list로 되어있다. do_kernel_restart에서 호출되며 kernel이 restart하면서
+ *   호출해야되는 nb 차례로 실행되는 구조를 가진다.
+ *
+ * - 현재까지 확인된 추가된 nb.
+ *   psci_sys_reset_nb
+ */
 static ATOMIC_NOTIFIER_HEAD(restart_handler_list);
 
 /**
@@ -178,6 +186,10 @@ static ATOMIC_NOTIFIER_HEAD(restart_handler_list);
  *
  *	Currently always returns zero, as atomic_notifier_chain_register()
  *	always returns zero.
+ */
+/*
+ * IAMROOT, 2021.12.18:
+ * - notifier_block을 restart_handler_list에 등록해준다.
  */
 int register_restart_handler(struct notifier_block *nb)
 {

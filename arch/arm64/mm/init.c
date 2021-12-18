@@ -287,6 +287,17 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	free_area_init(max_zone_pfns);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 pfn이 유효한지에 대해 검사한다.
+ * 1. 너무 큰 pfn인지 검사한다. 
+ *  > PHYS_PFN, PFN_PHYS이 제대로 동작하는지
+ *  > pfn_to_section_nr이 제대로 동작하는지 검사한다. (section 범위 초과 여부)
+ * 2. 해당 pfn의 mem_section을 가져와서 유효한지 검사한다.
+ *  > 실제 전체 mem_secion범위가 hole인 pfn인 경우(아에 메모리에 존재하지 않는범위)
+ * 3. early인 경우 memblock에서, 아닌 경우 subsection에서 해당 memory가 할당
+ * 됬는지 검사한다.
+ */
 int pfn_valid(unsigned long pfn)
 {
 	phys_addr_t addr = PFN_PHYS(pfn);
@@ -317,6 +328,10 @@ int pfn_valid(unsigned long pfn)
 	 * memory sections covering all of hotplug memory including
 	 * both normal and ZONE_DEVICE based.
 	 */
+/*
+ * IAMROOT, 2021.12.18:
+ * - early인경우 memblock을 통해서 확인한다.
+ */
 	if (!early_section(ms))
 		return pfn_section_valid(ms, pfn);
 

@@ -399,6 +399,10 @@ static void * __ref __earlyonly_bootmem_alloc(int node,
 					       MEMBLOCK_ALLOC_ACCESSIBLE, node);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 node에 size만큼 memory를 할당한다.
+ */
 void * __meminit vmemmap_alloc_block(unsigned long size, int node)
 {
 	/* If the main allocator is up use that, fallback to bootmem. */
@@ -427,6 +431,10 @@ static void * __meminit altmap_alloc_block_buf(unsigned long size,
 					       struct vmem_altmap *altmap);
 
 /* need to make sure size is all the same during early stage */
+/*
+ * IAMROOT, 2021.12.18:
+ * - 그전에 할당해놨던 sparse_buffer에서 size만큼 잘라온다.
+ */
 void * __meminit vmemmap_alloc_block_buf(unsigned long size, int node,
 					 struct vmem_altmap *altmap)
 {
@@ -483,6 +491,12 @@ static void * __meminit altmap_alloc_block_buf(unsigned long size,
 	return __va(__pfn_to_phys(pfn));
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - @pte는 memmap을 가리키고 있다.
+ * - 이미 mapping이 되있는 경우. 이미 할당이 완료된 @pte가 해당 node에
+ *   존재하는지 검사한다.
+ */
 void __meminit vmemmap_verify(pte_t *pte, int node,
 				unsigned long start, unsigned long end)
 {
@@ -494,6 +508,10 @@ void __meminit vmemmap_verify(pte_t *pte, int node,
 			start, end - 1);
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - pte table entry에 할당받은 memmap을 연결한다.
+ */
 pte_t * __meminit vmemmap_pte_populate(pmd_t *pmd, unsigned long addr, int node,
 				       struct vmem_altmap *altmap)
 {
@@ -511,6 +529,10 @@ pte_t * __meminit vmemmap_pte_populate(pmd_t *pmd, unsigned long addr, int node,
 	return pte;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 node에 size만큼 memory를 할당받고 0으로 초기화한다.
+ */
 static void * __meminit vmemmap_alloc_block_zero(unsigned long size, int node)
 {
 	void *p = vmemmap_alloc_block(size, node);
@@ -522,6 +544,10 @@ static void * __meminit vmemmap_alloc_block_zero(unsigned long size, int node)
 	return p;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 addr의 pte table을 pmd entry와 연결한다.
+ */
 pmd_t * __meminit vmemmap_pmd_populate(pud_t *pud, unsigned long addr, int node)
 {
 	pmd_t *pmd = pmd_offset(pud, addr);
@@ -534,6 +560,10 @@ pmd_t * __meminit vmemmap_pmd_populate(pud_t *pud, unsigned long addr, int node)
 	return pmd;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 해당 addr의 pmd table을 pud entry와 연결한다.
+ */
 pud_t * __meminit vmemmap_pud_populate(p4d_t *p4d, unsigned long addr, int node)
 {
 	pud_t *pud = pud_offset(p4d, addr);
@@ -546,6 +576,12 @@ pud_t * __meminit vmemmap_pud_populate(p4d_t *p4d, unsigned long addr, int node)
 	return pud;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - arm64에서는 pgd를 p4d로 그대로 사용한다.
+ * - p4d table에 접근 -> 비어있다면 pud table (page size)를 할당 받아옴.
+ * - 해당 addr의 새로 할당받은 pud table을 p4d(pgd) entry와 연결한다.
+ */
 p4d_t * __meminit vmemmap_p4d_populate(pgd_t *pgd, unsigned long addr, int node)
 {
 	p4d_t *p4d = p4d_offset(pgd, addr);
@@ -558,6 +594,12 @@ p4d_t * __meminit vmemmap_p4d_populate(pgd_t *pgd, unsigned long addr, int node)
 	return p4d;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - pupulate
+ *   mapping하는 과정
+ * - arm64에서는 pgd역할을 p4d에 하므로 이 함수는 아무것도 안한다.
+ */
 pgd_t * __meminit vmemmap_pgd_populate(unsigned long addr, int node)
 {
 	pgd_t *pgd = pgd_offset_k(addr);
@@ -570,6 +612,12 @@ pgd_t * __meminit vmemmap_pgd_populate(unsigned long addr, int node)
 	return pgd;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - 4k 단위로 memmap mapping
+ * - vmemmap_populate에서 2MB size 단위의 mapping실패시 4k size단위로 재시도를
+ *   하기 위해 이 함수를 호출한다.
+ */
 int __meminit vmemmap_populate_basepages(unsigned long start, unsigned long end,
 					 int node, struct vmem_altmap *altmap)
 {
@@ -590,6 +638,11 @@ int __meminit vmemmap_populate_basepages(unsigned long start, unsigned long end,
 		pud = vmemmap_pud_populate(p4d, addr, node);
 		if (!pud)
 			return -ENOMEM;
+/*
+ * IAMROOT, 2021.12.18:
+ * - vmemmap_populate에서 2MB씩 할당에 실패해서 이 함수에 진입한경우
+ *   pgd ~ pud까지 이미 populate되있엇을 것이고, 이 다음부터 실제 수행될것이다.
+ */
 		pmd = vmemmap_pmd_populate(pud, addr, node);
 		if (!pmd)
 			return -ENOMEM;
@@ -602,6 +655,11 @@ int __meminit vmemmap_populate_basepages(unsigned long start, unsigned long end,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2021.12.18:
+ * - vmemmap을 사용하는 경우 해당 함수로 진입한다.
+ *   vmemmap영역에 memmap을 mapping한다.
+ */
 struct page * __meminit __populate_section_memmap(unsigned long pfn,
 		unsigned long nr_pages, int nid, struct vmem_altmap *altmap)
 {
