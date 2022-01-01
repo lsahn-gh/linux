@@ -155,6 +155,14 @@ char __initdata boot_command_line[COMMAND_LINE_SIZE];
 char *saved_command_line;
 /* Command line for parameter parsing */
 static char *static_command_line;
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * extra_command_line -> bootconfig kernel.*
+ *
+ * extra_init_args    -> bootconfig init.* 
+ */
+
 /* Untouched extra command line */
 static char *extra_command_line;
 /* Extra init arguments */
@@ -281,6 +289,10 @@ static int __init loglevel(char *str)
 early_param("loglevel", loglevel);
 
 #ifdef CONFIG_BLK_DEV_INITRD
+/*
+ * IAMROOT, 2022.01.01: 
+ * initrd 헤더에서 size와 csum 값을 읽어 반환한다. 
+ */
 static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 {
 	u32 size, csum;
@@ -290,6 +302,12 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 
 	if (!initrd_end)
 		return NULL;
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * initrd 영역의 가장 마지막에서 "#BOOTCONFIG\n" 문자열을 찾는다.
+ * align 관계로 1바이트씩 최대 4번 이동하여 비교 검색한다.
+ */
 
 	data = (char *)initrd_end - BOOTCONFIG_MAGIC_LEN;
 	/*
@@ -302,6 +320,13 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 		data--;
 	}
 	return NULL;
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * <----------------initrd-------------------------------------->
+ *                           | header            | #BOOTCONFIG\n
+ *                           | size + csum + ... |
+ */
 
 found:
 	hdr = (u32 *)(data - 8);
@@ -431,12 +456,22 @@ static void __init setup_boot_config(void)
 	/* Cut out the bootconfig data even if we have no bootconfig option */
 	data = get_boot_config_from_initrd(&size, &csum);
 
+/*
+ * IAMROOT, 2022.01.01: 
+ * cmdline 문자열에서 "bootconfig"를 찾는다. 
+ * 못찾은 경우 곧바로 빠져나간다.
+ */
 	strlcpy(tmp_cmdline, boot_command_line, COMMAND_LINE_SIZE);
 	err = parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL,
 			 bootconfig_params);
 
 	if (IS_ERR(err) || !bootconfig_found)
 		return;
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * TODO: bootconfig 용법에 대해, 또한 XBC file에 대해 추후 더 알아보자.
+ */
 
 	/* parse_args() stops at the next param of '--' and returns an address */
 	if (err)
@@ -653,6 +688,15 @@ static void __init setup_command_line(char *command_line)
 	static_command_line = memblock_alloc(len, SMP_CACHE_BYTES);
 	if (!static_command_line)
 		panic("%s: Failed to allocate %zu bytes\n", __func__, len);
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * - saved_command_line:
+ *      extra_command_line + boot_command_line
+ *
+ & - static_command_line:
+ *      extra_command_line + command_line
+ */
 
 	if (xlen) {
 		/*

@@ -98,6 +98,15 @@ static const char *__init cpu_read_enable_method(int cpu)
  */
 int __init init_cpu_ops(int cpu)
 {
+/*
+ * IAMROOT, 2022.01.01: 
+ * 예)
+ *    cpu#0 {
+ *         device_type = "cpu";
+ *         compatible = "arm,cortex-a72";
+ *         enable-method = "spin-table";   // or psci
+ *         ...
+ */
 	const char *enable_method = cpu_read_enable_method(cpu);
 
 	if (!enable_method)

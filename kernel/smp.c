@@ -1070,6 +1070,10 @@ static int __init maxcpus(char *str)
 early_param("maxcpus", maxcpus);
 
 /* Setup number of possible processor ids */
+/*
+ * IAMROOT, 2022.01.01: 
+ * - nr_cpu_ids: possible cpu 수
+ */
 unsigned int nr_cpu_ids __read_mostly = NR_CPUS;
 EXPORT_SYMBOL(nr_cpu_ids);
 

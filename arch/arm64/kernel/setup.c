@@ -117,6 +117,12 @@ struct mpidr_hash mpidr_hash;
  *			  MPIDR value. Resulting algorithm is a collision
  *			  free hash carried out through shifting and ORing
  */
+
+/*
+ * IAMROOT, 2022.01.01: 
+ * MPIDR 값을 읽어서 affinity level 별로 필요한 shift 값들을 저장해두고, 
+ * 추후 cpu_suspend() 및 cpu_resume() 내부의 어셈블리 코드에서 사용한다.
+ */
 static void __init smp_build_mpidr_hash(void)
 {
 	u32 i, affinity, fs[4], bits[4], ls;
