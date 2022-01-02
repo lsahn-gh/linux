@@ -2573,6 +2573,11 @@ EXPORT_SYMBOL_GPL(cpu_bit_bitmap);
 const DECLARE_BITMAP(cpu_all_bits, NR_CPUS) = CPU_BITS_ALL;
 EXPORT_SYMBOL(cpu_all_bits);
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - smp_cpu_setup 에서 mpidr, numa node id, enable-method가 설정된
+ *   cpu들에 대해서 possible로 설정된다.
+ */
 #ifdef CONFIG_INIT_ALL_POSSIBLE
 struct cpumask __cpu_possible_mask __read_mostly
 	= {CPU_BITS_ALL};

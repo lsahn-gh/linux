@@ -22,6 +22,11 @@ EXPORT_SYMBOL(node_data);
  * - 일단 parsing이 된 node들을 저장해놓는 용도.
  */
 nodemask_t numa_nodes_parsed __initdata;
+/*
+ * IAMROOT, 2022.01.02:
+ * - of_parse_and_init_cpus에서 초기화된다.
+ *   cpu의 numa node id가 저장된다.
+ */
 static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
 
 /*
@@ -139,6 +144,10 @@ void numa_store_cpu_info(unsigned int cpu)
 	set_cpu_numa_node(cpu, cpu_to_node_map[cpu]);
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - numa node id를 cpu_to_node에 cpu를 index로해서 저장한다.
+ */
 void __init early_map_cpu_to_node(unsigned int cpu, int nid)
 {
 	/* fallback to node 0 */

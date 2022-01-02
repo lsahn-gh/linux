@@ -122,6 +122,30 @@ struct mpidr_hash mpidr_hash;
  * IAMROOT, 2022.01.01: 
  * MPIDR 값을 읽어서 affinity level 별로 필요한 shift 값들을 저장해두고, 
  * 추후 cpu_suspend() 및 cpu_resume() 내부의 어셈블리 코드에서 사용한다.
+ *
+ * - cpu_resume()등의 함수에서 cpu mpidr로 hash table에 접근한다.
+ *   즉 cpu mpidr로 key값을 만드는데, 모든 cpu의 mpidr에 대해서 중복되는
+ *   key값이 안생기면서 최소한의 hash table을 만들어야되는데,
+ *   이 함수에서는 mpdir로 key값을 만들때 필요한 shift값들과
+ *   hash table에 필요한 bits를 계산한다.
+ *   이때 affinity level이라는 개념을 도입해서 각 level별로 범위를
+ *   나누고 첫 3bit를 
+ * 
+ * - mpidr 로 hash의 범위를 정하는 과정.
+ *
+ *   1) 0번 cpu를 제외한 모든 cpu를 0번 cpu와 xor하고 모두 or 시킨다.
+ *
+ *   2) affinity level이라는 개념을 도입한다. level은 0 ~ 3까지 존재하며
+ *   각 범위는 다음과 같다.
+ *	level | 0     | 1      | 2       | 3       |
+ *	bits  | 0 ~ 2 | 8 ~ 10 | 16 ~ 18 | 32 ~ 35 |
+ *   (해당 범위의 첫 3bit만 사용한다.)
+ *
+ *   3) 각각의 affinity level 범위에서 fisrt bit 번호를 구한다.
+ *   4) 각각의 affinity level 범위에서
+ *   last bit + 1 - fisrt bit 번호를 구한다.
+ *   5) 각 affinity level에서 사용할 shift값을 3), 4)에서 구한값으로
+ *   계산한다.
  */
 static void __init smp_build_mpidr_hash(void)
 {
@@ -131,6 +155,15 @@ static void __init smp_build_mpidr_hash(void)
 	 * Pre-scan the list of MPIDRS and filter out bits that do
 	 * not contribute to affinity levels, ie they never toggle.
 	 */
+/*
+ * IAMROOT, 2022.01.02:
+ * - boot cpu의 mpidr과 나머지 cpu들의 mpidr을 xor 시킨 값들을 mask에
+ *   전부 or 시켜 저장한다.
+ * ex) cpu 0 mpdir : 0x1, cpu 1 mpdir :0x2
+ *     mask = 0x3
+ * ex) cpu 0 mpdir : 0xf01, cpu 1 mpdir :0xf02
+ *     mask = 0x3
+ */
 	for_each_possible_cpu(i)
 		mask |= (cpu_logical_map(i) ^ cpu_logical_map(0));
 	pr_debug("mask of set bits %#llx\n", mask);
@@ -139,6 +172,12 @@ static void __init smp_build_mpidr_hash(void)
 	 * check how many bits are required to represent them.
 	 */
 	for (i = 0; i < 4; i++) {
+/*
+ * IAMROOT, 2022.01.02:
+ * 각 level별로 mpidr의 bits를 다음과 같이 가져온다.
+ * level | 0     | 1      | 2       | 3       |
+ * bits  | 0 ~ 2 | 8 ~ 10 | 16 ~ 18 | 32 ~ 35 |
+ */
 		affinity = MPIDR_AFFINITY_LEVEL(mask, i);
 		/*
 		 * Find the MSB bit and LSB bits position
@@ -146,7 +185,26 @@ static void __init smp_build_mpidr_hash(void)
 		 * to express the affinity level.
 		 */
 		ls = fls(affinity);
+/*
+ * IAMROOT, 2022.01.02:
+ * - bit가 존재한다면 first bit number를 저장한다.
+ */
 		fs[i] = affinity ? ffs(affinity) - 1 : 0;
+/*
+ * IAMROOT, 2022.01.02:
+ * - last bit 번호와 first bit 번호의 차이를 저장한다.
+ *   affinity | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+ *   ls       | 0 | 1 | 2 | 2 | 4 | 4 | 4 | 4
+ *   ffs      | 0 | 1 | 2 | 1 | 4 | 1 | 2 | 1
+ *   fs       | 0 | 0 | 1 | 0 | 3 | 0 | 1 | 0
+ *   bits     | 0 | 1 | 1 | 2 | 1 | 4 | 3 | 4
+ *
+ * - bits
+ *   ls - fs로 그 사이에 bit가 몇개 필요한지 적당히 계산한다.
+ *   affinity가 1, 2, 4이라면 bit가 1개만 존재할것이므로 1
+ *   affinity가 3이라면 bit가 2개 존재할것이므로 2로 정확하게 되지만
+ *   affinity가 5, 6, 7인 경우엔 조금 많게 잡히는것이 보인다.
+ */
 		bits[i] = ls - fs[i];
 	}
 	/*
@@ -159,6 +217,62 @@ static void __init smp_build_mpidr_hash(void)
 	 * of CPUs that is not an exact power of 2 and their bit
 	 * representation might contain holes, eg MPIDR_EL1[7:0] = {0x2, 0x80}.
 	 */
+/*
+ * IAMROOT, 2022.01.02:
+ * level                     | 0 | 1 | 2  | 3  |
+ * --------------------------+---+---+----+----+
+ * MPIDR_LEVEL_SHIFT(level)  | 0 | 8 | 16 | 32 |
+ *
+ * ex) mask = 0x050404 라고 가정한다.
+ * affinity level별 mask 값은 다음과 같을것이다.
+ *
+ * level    | 3 |  2    | 1     | 0
+ * affinity | 0 | 0b101 | 0b100 | 0b100 |
+ *
+ * 여기서 사용할것은 결국 1로 set된 bit들일 것이다.
+ * level 0
+ * affinity 값이 0b100인데 2번 bit만을 사용하는거나 다름없으므로 이것을
+ * 0번으로 움직인다.
+ * affinityt level 0 : 0b100 -> 0b01
+ *
+ * level 1
+ * affinity 값이 0b100인데 2번 bit만을 사용하는거나 다름없으므로 이것을
+ * 0번으로 움직인다.
+ * affinityt level 1 : 0b100 -> 0b01
+ * 그런데 level0에서 bit를 1개 쓰고 있으므로 이 칸을 고려해준다.
+ * affinityt level 1 : 0b100 -> 0b01 -> 0b10
+ *
+ * level 2
+ * affinity 값이 0b101인데 이 경우는 그대로 사용한다.
+ * 그런데 level0, 1에서 bit를 2개 쓰고 있으므로 이 칸을 고려해준다.
+ * affinityt level 2 : 0b101 -> 0b10100
+ * 
+ * affinity level 1, 2, 3을 전부 or시키면 0b10111 이라는 범위가 나올것이고
+ * 이 값으로 mpidr를 모두 표현할수있게 된다.
+ *
+ * - 즉 first bit번호를 만큼은 사용안하는 bit이므로 제거(압축)하는
+ *   개념으로 사용한다.
+ * - fist bit ~ last bit 번호 차이를 각 affinity level에 필요한
+ *   bit수로 계산하여 bit를 남겨놓는 개념으로 사용한다.
+ * - 각 affinity level의 first bit와 bits로 각 affinity 범위의
+ *   shift 개수를 구해놓는다.
+ * - 구해놓은 shift로 나중에 mpidr로 key값을 만들때 사용한다.
+ *   Git blame 참고
+ * u32 hash(u64 mpidr_el1) {
+ *	u32 l[4];
+ *	u64 mpidr_el1_masked = mpidr_el1 & mpidr_el1_mask;
+ *	l[0] = mpidr_el1_masked & 0xff;
+ *	l[1] = mpidr_el1_masked & 0xff00;
+ *	l[2] = mpidr_el1_masked & 0xff0000;
+ *	l[3] = mpidr_el1_masked & 0xff00000000;
+ *	return (l[0] >> aff0_shift | l[1] >> aff1_shift |
+ *	l[2] >> aff2_shift | l[3] >> aff3_shift);
+ * }
+ *
+ * - 즉 masking을 8bit의 범위로 나누고 각 범위를 몇 bit shift시켜
+ *   hash의 key값을 만들기 위한 각 범위별 shift bit 개수를 계산해낸다.
+ *
+ */
 	mpidr_hash.shift_aff[0] = MPIDR_LEVEL_SHIFT(0) + fs[0];
 	mpidr_hash.shift_aff[1] = MPIDR_LEVEL_SHIFT(1) + fs[1] - bits[0];
 	mpidr_hash.shift_aff[2] = MPIDR_LEVEL_SHIFT(2) + fs[2] -
@@ -323,6 +437,11 @@ arch_initcall(reserve_memblock_reserved_regions);
  * IAMROOT, 2021.09.11:
  * - logical cpu to mpdir mapping.
  *   kernel code는 전부 logical cpu를 쓴다.
+ *
+ * - smp_setup_processor_id 에서 boot cput(0번)에 대해서 미리
+ *   mpidr을 읽어와 설정한다.
+ * - of_parse_and_init_cpus 에서 나머지 cpu에 대해서 dt에서
+ *   해당 cpu mpidr을 읽어서 해당 값으로 설정된다.
  */
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 

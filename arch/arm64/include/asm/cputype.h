@@ -12,12 +12,37 @@
 #define MPIDR_HWID_BITMASK	UL(0xff00ffffff)
 
 #define MPIDR_LEVEL_BITS_SHIFT	3
+/*
+ * IAMROOT, 2022.01.02:
+ * - 1 << 3 = 8
+ */
 #define MPIDR_LEVEL_BITS	(1 << MPIDR_LEVEL_BITS_SHIFT)
+/*
+ * IAMROOT, 2022.01.02:
+ * - 0x7 = 0b111
+ */
 #define MPIDR_LEVEL_MASK	((1 << MPIDR_LEVEL_BITS) - 1)
 
+/*
+ * IAMROOT, 2022.01.02:
+ * level                     | 0 | 1 | 2  | 3  |
+ * --------------------------+---+---+----+----+
+ * 1 << level                | 1 | 2 | 4  | 8  |
+ * >> 1                      | 0 | 1 | 2  | 4  |
+ * << MPIDR_LEVEL_BITS_SHIFT | 0 | 8 | 16 | 32 |
+ */
 #define MPIDR_LEVEL_SHIFT(level) \
 	(((1 << level) >> 1) << MPIDR_LEVEL_BITS_SHIFT)
 
+/*
+ * IAMROOT, 2022.01.02:
+ * 각 level별로 1로 masking 되있는 영역을 0번지로 해서 가져온다
+ * mpidr = 0b....0111_0000_0000_0000_0111_0000_0111_0000_0111
+ *           level 3 |           level 2 |  level2 | level 0 | 
+ * 즉
+ * level | 0     | 1      | 2       | 3       |
+ * bits  | 0 ~ 2 | 8 ~ 10 | 16 ~ 18 | 32 ~ 35 |
+ */
 #define MPIDR_AFFINITY_LEVEL(mpidr, level) \
 	((mpidr >> MPIDR_LEVEL_SHIFT(level)) & MPIDR_LEVEL_MASK)
 

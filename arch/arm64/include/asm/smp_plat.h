@@ -15,6 +15,8 @@
 
 /*
  * IAMROOT, 2022.01.01: 
+ * - smp_build_mpidr_hash 에서 초기화된다.
+ *
  * 예) big/little: 4 core + 4 core
  *     mask: 0x0000_0303;
  *     shift_aff[] = { 0, 6, 12, * };
@@ -30,6 +32,10 @@ struct mpidr_hash {
 
 extern struct mpidr_hash mpidr_hash;
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - 2^(bits)
+ */
 static inline u32 mpidr_hash_size(void)
 {
 	return 1 << mpidr_hash.bits;

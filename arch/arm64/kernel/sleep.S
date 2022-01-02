@@ -36,6 +36,11 @@
  * Note: input and output registers must be disjoint register sets
          (eg: a macro instance with mpidr = x1 and dst = x1 is invalid)
  */
+/*
+ * IAMROOT, 2022.01.02:
+ * - smp_build_mpidr_hash 함수에서 hash table을 만든다. Git blame을
+ *   살펴보면 위 주석과 비슷한 함수가 소개되잇다.
+ */
 	.macro compute_mpidr_hash dst, rs0, rs1, rs2, rs3, mpidr, mask
 	and	\mpidr, \mpidr, \mask		// mask out MPIDR bits
 	and	\dst, \mpidr, #0xff		// mask=aff0
@@ -97,6 +102,21 @@ SYM_FUNC_START(__cpu_suspend_enter)
 	ret
 SYM_FUNC_END(__cpu_suspend_enter)
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - cpu_resume이 idmap.text에 있어 mmu가 off인 상황에서도 동작이 가능한
+ *   영역임이 확인된다.
+ *
+ * - smp_build_mpidr_hash 의 Git blame을 살펴보면 cpu_resume이
+ *   virtual address space가 setup이 안된 공간에서 실행된다고 하는데
+ *   이 idmap.text에 존재하고 mmu contorl을 한다는 의미인듯 하다.
+ *
+ *   The hash algorithm is quite simple and can easily be implemented
+ *   in assembly code, to be used in code paths where the kernel virtual
+ *   address space is not set-up (ie cpu_resume) and instruction and data
+ *   fetches are strongly ordered so code must be compact and must
+ *   carry out few data accesses.
+ */
 	.pushsection ".idmap.text", "awx"
 SYM_CODE_START(cpu_resume)
 	bl	init_kernel_el

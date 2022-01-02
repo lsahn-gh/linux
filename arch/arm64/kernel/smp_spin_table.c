@@ -104,6 +104,11 @@ static int smp_spin_table_cpu_prepare(unsigned int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - 해당 cpu를 release 시키고 sev를 보낸다.
+ *   즉 linux가 직접 secondary cpu를 제어하는것이 보인다.
+ */
 static int smp_spin_table_cpu_boot(unsigned int cpu)
 {
 	/*

@@ -58,6 +58,10 @@ struct cpu_operations {
 int __init init_cpu_ops(int cpu);
 extern const struct cpu_operations *get_cpu_ops(int cpu);
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - booting cpu는 무조건 0번이다.
+ */
 static inline void __init init_bootcpu_ops(void)
 {
 	init_cpu_ops(0);

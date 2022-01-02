@@ -36,6 +36,10 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - spin-table방식과는 다르게 psci를 통해서 cpu on을 하는것이 보인다.
+ */
 static int cpu_psci_cpu_boot(unsigned int cpu)
 {
 	phys_addr_t pa_secondary_entry = __pa_symbol(function_nocfi(secondary_entry));
@@ -65,6 +69,10 @@ static int cpu_psci_cpu_disable(unsigned int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - spin-table방식과는 다르게 psci를 통해서 제어하는것이 보인다.
+ */
 static void cpu_psci_cpu_die(unsigned int cpu)
 {
 	/*

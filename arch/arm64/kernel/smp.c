@@ -472,6 +472,10 @@ void __init smp_prepare_boot_cpu(void)
 	kasan_init_hw_tags();
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - dt에서 hwid를 읽어온다.
+ */
 static u64 __init of_get_cpu_mpidr(struct device_node *dn)
 {
 	const __be32 *cell;
@@ -505,6 +509,10 @@ static u64 __init of_get_cpu_mpidr(struct device_node *dn)
  * cpu. cpu_logical_map was initialized to INVALID_HWID to avoid
  * matching valid MPIDR values.
  */
+/*
+ * IAMROOT, 2022.01.02:
+ * - 중복 초기화를 수행하는지 검사한다.
+ */
 static bool __init is_mpidr_duplicate(unsigned int cpu, u64 hwid)
 {
 	unsigned int i;
@@ -518,6 +526,10 @@ static bool __init is_mpidr_duplicate(unsigned int cpu, u64 hwid)
 /*
  * Initialize cpu operations for a logical cpu and
  * set it in the possible mask on success
+ */
+/*
+ * IAMROOT, 2022.01.02:
+ * - dt에서 해당 cpu의 enable-method를 찾아 설정하고 cpu를 possible한다.
  */
 static int __init smp_cpu_setup(int cpu)
 {
@@ -535,6 +547,10 @@ static int __init smp_cpu_setup(int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - of_parse_and_init_cpus에서 true로 설정된다.
+ */
 static bool bootcpu_valid __initdata;
 static unsigned int cpu_count = 1;
 
@@ -657,6 +673,13 @@ static void __init acpi_parse_and_init_cpus(void)
  * cpu logical map array containing MPIDR values related to logical
  * cpus. Assumes that cpu_logical_map(0) has already been initialized.
  */
+/*
+ * IAMROOT, 2022.01.02:
+ * - boot cpu(cpu 0번)은 smp_setup_processor_id에서 __cpu_logical_map에
+ *   mpidr이 설정되잇다.
+ * - dt에서 각 cpu들의 mpidr, numa node id를 읽어
+ *   __cpu_logical_map, cpu_to_node_map에 설정한다.
+ */
 static void __init of_parse_and_init_cpus(void)
 {
 	struct device_node *dn;
@@ -686,6 +709,12 @@ static void __init of_parse_and_init_cpus(void)
 		 * the logical map built from DT is validated and can
 		 * be used.
 		 */
+/*
+ * IAMROOT, 2022.01.02:
+ * - smp_setup_processor_id에서 boot cput(0번)에 대한 mpidr은
+ *   미리 설정되었었다. 0번 cpu에 대한 mpidr이면 nid만 설정하면되니
+ *   nid만 설정한다.
+ */
 		if (hwid == cpu_logical_map(0)) {
 			if (bootcpu_valid) {
 				pr_err("%pOF: duplicate boot cpu reg property in DT\n",
@@ -708,6 +737,11 @@ static void __init of_parse_and_init_cpus(void)
 		if (cpu_count >= NR_CPUS)
 			goto next;
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - 해당 cpu의 nid와 hwid를 설정한다.
+ * - 설정된 순서대로 cpu번호가 부여됨이 확인된다.
+ */
 		pr_debug("cpu logical map 0x%llx\n", hwid);
 		set_cpu_logical_map(cpu_count, hwid);
 
@@ -722,6 +756,11 @@ next:
  * cpu logical map array containing MPIDR values related to logical
  * cpus. Assumes that cpu_logical_map(0) has already been initialized.
  */
+/*
+ * IAMROOT, 2022.01.02:
+ * -dt에서 각각의 cpu에 대하여 mpdir, numa node id, enable-method를
+ *  읽어서 저장하고 cpu를 possible한다.
+ */
 void __init smp_init_cpus(void)
 {
 	int i;
@@ -735,6 +774,11 @@ void __init smp_init_cpus(void)
 		pr_warn("Number of cores (%d) exceeds configured maximum of %u - clipping\n",
 			cpu_count, nr_cpu_ids);
 
+/*
+ * IAMROOT, 2022.01.02:
+ * - of_parse_and_init_cpus에서 boot cpu에 대한 mpdir 정보를 못 찾을 경우
+ *   에러로 처리한다.
+ */
 	if (!bootcpu_valid) {
 		pr_err("missing boot CPU MPIDR, not enabling secondaries\n");
 		return;
@@ -747,6 +791,11 @@ void __init smp_init_cpus(void)
 	 * with entries in cpu_logical_map while initializing the cpus.
 	 * If the cpu set-up fails, invalidate the cpu_logical_map entry.
 	 */
+/*
+ * IAMROOT, 2022.01.02:
+ * - cpu 1번부터 enable-method를 찾고 possible 한다.
+ *   dt에서 enable-method를 못찾았다면 invalid로 변경해버린다.
+ */
 	for (i = 1; i < nr_cpu_ids; i++) {
 		if (cpu_logical_map(i) != INVALID_HWID) {
 			if (smp_cpu_setup(i))
