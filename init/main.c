@@ -170,6 +170,12 @@ static char *extra_init_args;
 
 #ifdef CONFIG_BOOT_CONFIG
 /* Is bootconfig on command line? */
+/*
+ * IAMROOT, 2022.01.04:
+ * - setup_boot_config 에서 bootconfg param이 찾아진경우
+ *   bootconfig_found가 true가 된다. 또한 "--" param으로 종료된경우
+ *   commandline ~ "--" 까지의 길이가 저장된다.
+ */
 static bool bootconfig_found;
 static size_t initargs_offs;
 #else
@@ -326,6 +332,13 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
  * <----------------initrd-------------------------------------->
  *                           | header            | #BOOTCONFIG\n
  *                           | size + csum + ... |
+ * - Documentation/admin-guide/bootconfig.rst 참고
+ *   Since the boot configuration file is loaded with initrd,
+ *   it will be added to the end of the initrd (initramfs)
+ *   image file with padding, size, checksum and 12-byte magic word
+ *   as below.
+ *
+ *   [initrd][bootconfig][padding][size(le32)][checksum(le32)][#BOOTCONFIGn]
  */
 
 found:
@@ -471,9 +484,16 @@ static void __init setup_boot_config(void)
 /*
  * IAMROOT, 2022.01.01: 
  * TODO: bootconfig 용법에 대해, 또한 XBC file에 대해 추후 더 알아보자.
+ * -bootconfig
+ *  Documentation/admin-guide/bootconfig.rst
+ * -XBC(extra boot config)
  */
 
 	/* parse_args() stops at the next param of '--' and returns an address */
+/*
+ * IAMROOT, 2022.01.04:
+ * - param이 "--"로 종료되면 err이 해당 지점의 위치가 된다.
+ */
 	if (err)
 		initargs_offs = err - tmp_cmdline;
 

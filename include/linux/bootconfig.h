@@ -25,6 +25,10 @@
  * The checksum will be used with the BOOTCONFIG_MAGIC and the size for
  * embedding the bootconfig in the initrd image.
  */
+/*
+ * IAMROOT, 2022.01.04:
+ * - 대충 1byte씩 더한것을 checksum으로 쓴다.
+ */
 static inline __init u32 xbc_calc_checksum(void *data, u32 size)
 {
 	unsigned char *p = data;
@@ -37,6 +41,13 @@ static inline __init u32 xbc_calc_checksum(void *data, u32 size)
 }
 
 /* XBC tree node */
+/*
+ * IAMROOT, 2022.01.04:
+ * - child, parent, next : 존재할경우 xbc_nodes 의 index번호가 위치한다.
+ *   xbc_node는 XBC_NODE_MAX개의 배열로 초기화된다. 
+ * - data = (bootconfig ~ 해당 value의 마지막주소까지의  offset) | flag
+ *   flag에는 XBC_VALUE등이 들어간다.
+ */
 struct xbc_node {
 	u16 next;
 	u16 child;

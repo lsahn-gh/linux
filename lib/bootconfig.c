@@ -26,6 +26,11 @@
 
 static struct xbc_node *xbc_nodes __initdata;
 static int xbc_node_num __initdata;
+/*
+ * IAMROOT, 2022.01.04:
+ * - xbc_init 에서 memblock에 할당된 bootconfig string 주소로 초기화된다.
+ * - xbc_data_size는 strlen(xbc_data) + 1 로 초기화된다.
+ */
 static char *xbc_data __initdata;
 static size_t xbc_data_size __initdata;
 static struct xbc_node *last_parent __initdata;
@@ -624,6 +629,17 @@ static int __init __xbc_parse_keys(char *k)
 	return __xbc_add_key(k);
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - 같은 부류의 value들은 child, 다른 부류의 value들은 sibling의 개념으로
+ *   데이터가 초기화된다.
+ *   ex)
+ *   a = 1, 2, 3
+ *   b = 4
+ *   node는 a.1, a.2, a.3, b.4가 생긴다고 했을때
+ *   a.1 -> a.2 -> a.3 은 child로 연결되고
+ *   a.3 -> b.4 은 sibling으로 연결된다.
+ */
 static int __init xbc_parse_kv(char **k, char *v, int op)
 {
 	struct xbc_node *prev_parent = last_parent;
@@ -811,6 +827,12 @@ void __init xbc_destroy_all(void)
  * @epos will be updated with the error position which is the byte offset
  * of @buf. If the error is not a parser error, @epos will be -1.
  */
+/*
+ * IAMROOT, 2022.01.04:
+ * - Documentation/admin-guide/bootconfig.rst 참고
+ *   해당 규칙에 따라 node를 만든다.
+ * - xbc_nodes를 초기화 한다.
+ */
 int __init xbc_init(char *buf, const char **emsg, int *epos)
 {
 	char *p, *q;
@@ -845,6 +867,11 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 	xbc_data_size = ret + 1;
 	last_parent = NULL;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - p : next pos
+ *   q : {}=+;:'\n'#을 찾은 위치
+ */
 	p = buf;
 	do {
 		q = strpbrk(p, "{}=+;:\n#");
@@ -858,6 +885,10 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 		c = *q;
 		*q++ = '\0';
 		switch (c) {
+/*
+ * IAMROOT, 2022.01.04:
+ * - := or +=
+ */
 		case ':':
 		case '+':
 			if (*q++ != '=') {
@@ -869,6 +900,10 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 			}
 			fallthrough;
 		case '=':
+/*
+ * IAMROOT, 2022.01.04:
+ * -
+ */
 			ret = xbc_parse_kv(&p, q, c);
 			break;
 		case '{':

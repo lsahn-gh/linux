@@ -163,6 +163,9 @@ static int parse_one(char *param,
 }
 
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
+/*
+ * IAMROOT, 2022.01.04:
+ * - */
 char *parse_args(const char *doing,
 		 char *args,
 		 const struct kernel_param *params,
@@ -196,7 +199,8 @@ char *parse_args(const char *doing,
 		irq_was_disabled = irqs_disabled();
 /*
  * IAMROOT, 2021.10.16:
- * -parse_early_options parse_args를 불러왔을때 unkown은 do_early_param.
+ * -parse_early_options parse_args를 불러왔을때 unknown은 do_early_param.
+ * - setup_boot_config 에서는 bootconfig_params
  */
 		ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, arg, unknown);
