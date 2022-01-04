@@ -152,8 +152,24 @@ void (*__initdata late_time_init)(void);
 /* Untouched command line saved by arch-specific code. */
 char __initdata boot_command_line[COMMAND_LINE_SIZE];
 /* Untouched saved command line (eg. for /proc) */
+/*
+ * IAMROOT, 2022.01.05:
+ * - setup_command_line에서 초기화된다.
+ * - extra_command_line, boot_command_line, extra_init_args를 보관한다.
+ *   [extra_command_line][boot_command_line][ -- ][extra_init_args]
+ * - strlen(extra_command_line) + strlen(boot_command_line) + 1 +
+ *   4(" -- "고려) 길이의 memblock
+ */
 char *saved_command_line;
 /* Command line for parameter parsing */
+/*
+ * IAMROOT, 2022.01.05:
+ * - setup_command_line에서 초기화된다.
+ * - extra_command_line, boot_command_line를 보관한다.
+ *   [extra_command_line][boot_command_line]
+ * - strlen(extra_command_line) + strlen(boot_command_line) + 1
+ *   길이의 memblock
+ */
 static char *static_command_line;
 
 /*
@@ -164,8 +180,18 @@ static char *static_command_line;
  */
 
 /* Untouched extra command line */
+/*
+ * IAMROOT, 2022.01.05:
+ * - setup_boot_config 에서 초기화된다.
+ * - bootconfig의 kernel key와 value string이 있는 memblock
+ */
 static char *extra_command_line;
 /* Extra init arguments */
+/*
+ * IAMROOT, 2022.01.05:
+ * - setup_boot_config 에서 초기화된다.
+ * - bootconfig의 init key와 value string이 있는 memblock
+ */
 static char *extra_init_args;
 
 #ifdef CONFIG_BOOT_CONFIG
@@ -371,10 +397,22 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 
 #ifdef CONFIG_BOOT_CONFIG
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - key string을 만들때 임시로 저장할 버퍼
+ */
 static char xbc_namebuf[XBC_KEYLEN_MAX] __initdata;
 
 #define rest(dst, end) ((end) > (dst) ? (end) - (dst) : 0)
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - root의 value를 buf에 string으로 담는다.
+ * - buf, size가 NULL, 0값이면 필요한 buf size가 계산된다.
+ * - a.b, c, d=3,4 라는 데이터가 있다면 다음과 같이 string이
+ *   만들어질 것이다.
+ *   a.b c d=3,4
+ */
 static int __init xbc_snprint_cmdline(char *buf, size_t size,
 				      struct xbc_node *root)
 {
@@ -389,14 +427,26 @@ static int __init xbc_snprint_cmdline(char *buf, size_t size,
 		if (ret < 0)
 			return ret;
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - child가 있다는건 value라는것.
+ */
 		vnode = xbc_node_get_child(knode);
 		if (!vnode) {
+/*
+ * IAMROOT, 2022.01.05:
+ * - value가 없다면 완성된 key string을 buf에 옮긴다.
+ */
 			ret = snprintf(buf, rest(buf, end), "%s ", xbc_namebuf);
 			if (ret < 0)
 				return ret;
 			buf += ret;
 			continue;
 		}
+/*
+ * IAMROOT, 2022.01.05:
+ * - value를 string까지 완성시키고 key=value 포맷으로 string을 만든다.
+ */
 		xbc_array_for_each_value(vnode, val) {
 			ret = snprintf(buf, rest(buf, end), "%s=\"%s\" ",
 				       xbc_namebuf, val);
@@ -411,6 +461,12 @@ static int __init xbc_snprint_cmdline(char *buf, size_t size,
 #undef rest
 
 /* Make an extra command line under given key word */
+/*
+ * IAMROOT, 2022.01.05:
+ * - 해당 key string을 xbc_nodes에서 검색한다.
+ * - 검색이 되면 memblock_alloc에 해당 key node와 value node로
+ *   cmdline string을 만들어 return한다.
+ */
 static char * __init xbc_make_cmdline(const char *key)
 {
 	struct xbc_node *root;
@@ -426,6 +482,11 @@ static char * __init xbc_make_cmdline(const char *key)
 	if (len <= 0)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - 계산된 buf length + 1(null 고려)로 memblock에서 할당받고
+ *   할당 된 buffer로 cmdline string을 만든다.
+ */
 	new_cmdline = memblock_alloc(len + 1, SMP_CACHE_BYTES);
 	if (!new_cmdline) {
 		pr_err("Failed to allocate memory for extra kernel cmdline.\n");
@@ -457,6 +518,14 @@ static int __init warn_bootconfig(char *str)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - initrd_end 에서 boot_config size와 data를 찾는다.
+ * - boot_command_line 에서 bootconfig arg를 찾는다.
+ * - bootconfig checksum 검사를 수행한다.
+ * - string으로 이루어진 bootconfig를 xbc_nodes로 변환한다.
+ * - 변환된 xbc_nodes에서 kernel, init key를 찾아서 저장한다.
+ */
 static void __init setup_boot_config(void)
 {
 	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
@@ -492,8 +561,9 @@ static void __init setup_boot_config(void)
 	/* parse_args() stops at the next param of '--' and returns an address */
 /*
  * IAMROOT, 2022.01.04:
- * - param이 "--"로 종료되면 err이 해당 지점의 "--"의 pointr가 된다.
- *   initargs_offs 는 cmdline ~ bootconfg string 종료지점까지의 길이가 될것이다.
+ * - param이 "--"로 종료되면 err이 해당 지점의 "--"이후의 postion이다.
+ *   initargs_offs 는 cmdline ~ bootconfg + "--" string 종료지점까지의
+ *   길이가 될것이다.
  */
 	if (err)
 		initargs_offs = err - tmp_cmdline;
@@ -691,6 +761,10 @@ static inline void smp_prepare_cpus(unsigned int maxcpus) { }
  * parsing is performed in place, and we should allow a component to
  * store reference of name/value for future reference.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - saved_command_line, static_command_line을 초기화한다.
+ */
 static void __init setup_command_line(char *command_line)
 {
 	size_t len, xlen = 0, ilen = 0;
@@ -739,6 +813,14 @@ static void __init setup_command_line(char *command_line)
 		 * The order should always be
 		 * " -- "[bootconfig init-param][cmdline init-param]
 		 */
+/*
+ * IAMROOT, 2022.01.05:
+ * - extra_init_args를 saved_command_line 뒤에 복사한다.
+ * - initargs_offs가 있다는건 " -- "이 이미 고려됬다는것.
+ *   boot_command_line에 이미 "--"이 존재 한다. 위에서
+ *   extra_init_args에 "--"를 고려 했었는데 이미 boot_command_line에
+ *   "--"있으므로 겹치니 length인 4를 빼준다.
+ */
 		if (initargs_offs) {
 			len = xlen + initargs_offs;
 			strcpy(saved_command_line + len, extra_init_args);

@@ -165,7 +165,8 @@ static int parse_one(char *param,
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
 /*
  * IAMROOT, 2022.01.04:
- * - */
+ * -
+ */
 char *parse_args(const char *doing,
 		 char *args,
 		 const struct kernel_param *params,
@@ -192,6 +193,7 @@ char *parse_args(const char *doing,
 /*
  * IAMROOT, 2021.10.16:
  * - param이 없고 --가 있으면 종료한다.
+ *   args는 " -- "뒤의 postion일 것이다.
  */
 		/* Stop at -- */
 		if (!val && strcmp(param, "--") == 0)

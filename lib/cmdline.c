@@ -232,6 +232,13 @@ bool parse_option_str(const char *str, const char *option)
  * You can use " around spaces, but can't escape ".
  * Hyphens and underscores equivalent in parameter names.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * @args parse 시작 postion
+ * @param parse된 arg
+ * @val param의 value
+ * @return next pos
+ */
 char *next_arg(char *args, char **param, char **val)
 {
 	unsigned int i, equals = 0;

@@ -115,6 +115,10 @@ static inline __init bool xbc_node_is_array(struct xbc_node *node)
  * Note that the leaf node can have subkey nodes in addition to the
  * value node.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - node가 key이고 child가 없거나 child가 value면 leaf로 판단한다.
+ */
 static inline __init bool xbc_node_is_leaf(struct xbc_node *node)
 {
 	return xbc_node_is_key(node) &&
@@ -158,6 +162,10 @@ xbc_find_value(const char *key, struct xbc_node **vnode)
  * Search a (key) node whose key matches @key from whole of XBC tree and
  * return the node if found. If not found, returns NULL.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - key에 대한 node를 xbc_nodes에서 탐색한다.
+ */
 static inline struct xbc_node * __init xbc_find_node(const char *key)
 {
 	return xbc_node_find_subkey(NULL, key);
@@ -169,6 +177,11 @@ static inline struct xbc_node * __init xbc_find_node(const char *key)
  *
  * Return the first subkey node of the @node. If the @node has no child
  * or only value node, this will return NULL.
+ */
+/*
+ * IAMROOT, 2022.01.05:
+ * - 다음 key를 검색하기위해 child를 가져온다. 만약 child가 value라면
+ *   sibling을 가져온다.
  */
 static inline struct xbc_node * __init xbc_node_get_subkey(struct xbc_node *node)
 {
@@ -246,6 +259,10 @@ static inline struct xbc_node * __init xbc_node_get_subkey(struct xbc_node *node
  *
  * Iterate key-value pairs under @node. Each key node and value string are
  * stored in @knode and @value respectively.
+ */
+/*
+ * IAMROOT, 2022.01.05:
+ * - node부터 순회하며 leaf(key)와 leaf의 value를 조회한다.
  */
 #define xbc_node_for_each_key_value(node, knode, value)			\
 	for (knode = NULL, value = xbc_node_find_next_key_value(node, &knode);\

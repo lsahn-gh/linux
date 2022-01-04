@@ -40,12 +40,29 @@ static int xbc_node_num __initdata;
  */
 static char *xbc_data __initdata;
 static size_t xbc_data_size __initdata;
+/*
+ * IAMROOT, 2022.01.04:
+ * - key나 value의 node가 연쇄적으로 생성될때 직전 parent를 기억하기 위해
+ *   사용한다.
+ */
 static struct xbc_node *last_parent __initdata;
 static const char *xbc_err_msg __initdata;
+/*
+ * IAMROOT, 2022.01.04:
+ * - error가 발생한 postion을 저장한다. error 발생시 return되어 사용된다.
+ */
 static int xbc_err_pos __initdata;
+/*
+ * IAMROOT, 2022.01.04:
+ * - bracket 처리를 할때 보조용으로 사용한다.
+ */
 static int open_brace[XBC_DEPTH_MAX] __initdata;
 static int brace_index __initdata;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - errorr가 발생한 postion을 저장한다.
+ */
 static int __init xbc_parse_error(const char *msg, const char *p)
 {
 	xbc_err_msg = msg;
@@ -134,6 +151,14 @@ const char * __init xbc_node_get_data(struct xbc_node *node)
 	return xbc_data + offset;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - node에 저장된 data와 prefix를 비교한다.
+ * ex) prefix = abc.123.456, node data = abc일 경우
+ *     prefix가 123.456으로 갱신되면서 true.
+ *     그 다음 해당 함수가 호출됬을대 node data가 123이면
+ *     prefix가 456d으로 갱신.
+ */
 static bool __init
 xbc_node_match_prefix(struct xbc_node *node, const char **prefix)
 {
@@ -162,6 +187,11 @@ xbc_node_match_prefix(struct xbc_node *node, const char **prefix)
  * several words jointed with '.'. If @parent is NULL, this searches the
  * node from whole tree. Return NULL if no node is matched.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - key에 해당하는 node를 탐색한다. key가 123.456.789 같은 값이면
+ *   최정적으로 789 node를 return할것이다.
+ */
 struct xbc_node * __init
 xbc_node_find_subkey(struct xbc_node *parent, const char *key)
 {
@@ -173,6 +203,12 @@ xbc_node_find_subkey(struct xbc_node *parent, const char *key)
 		node = xbc_root_node();
 
 	while (node && xbc_node_is_key(node)) {
+/*
+ * IAMROOT, 2022.01.05:
+ * - 해당 node에서 탐색이 실패한경우 sibling을 탐색한다.
+ * - 성공했는데 key가 아직 null이 아닌 경우 key가 abc.123 과 같은
+ *   연쇄 값이므로 탐색이 아직 안끝낫다.
+ */
 		if (!xbc_node_match_prefix(node, &key))
 			node = xbc_node_get_next(node);
 		else if (*key != '\0')
@@ -234,6 +270,12 @@ xbc_node_find_value(struct xbc_node *parent, const char *key,
  * This is expected to be used with xbc_find_node() to list up all (child)
  * keys under given key.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - node는 key의 마지막 node일 것이다(key = 123.456.789였다면 789 node)
+ * - parent로 역순으로 올라가 최종적으로 key를 완성하기 위함이다.
+ *   keys에 저장해놨다가 역순으로 while을 돌며 완성하는 개념.
+ */
 int __init xbc_node_compose_key_after(struct xbc_node *root,
 				      struct xbc_node *node,
 				      char *buf, size_t size)
@@ -283,6 +325,11 @@ int __init xbc_node_compose_key_after(struct xbc_node *root,
  * under @root node (including @root node itself).
  * Return the next node or NULL if next leaf node is not found.
  */
+/*
+ * IAMROOT, 2022.01.05:
+ * - root부터 시작해 leaf를찾는다.
+ * - leaf는 key의 마지막 node를 의미한다.
+ */
 struct xbc_node * __init xbc_node_find_next_leaf(struct xbc_node *root,
 						 struct xbc_node *node)
 {
@@ -296,6 +343,10 @@ struct xbc_node * __init xbc_node_find_next_leaf(struct xbc_node *root,
 		if (!node)
 			node = xbc_nodes;
 	} else {
+/*
+ * IAMROOT, 2022.01.05:
+ * - subkey를 뒤져본다.
+ */
 		/* Leaf node may have a subkey */
 		next = xbc_node_get_subkey(node);
 		if (next) {
@@ -306,6 +357,10 @@ struct xbc_node * __init xbc_node_find_next_leaf(struct xbc_node *root,
 		if (node == root)	/* @root was a leaf, no child node. */
 			return NULL;
 
+/*
+ * IAMROOT, 2022.01.05:
+ * - 현재 node의 subkey에도 없으면 parent로 역순으로 올라가 찾아본다.
+ */
 		while (!node->next) {
 			node = xbc_node_get_parent(node);
 			if (node == root)
@@ -334,6 +389,10 @@ found:
  * is found, or NULL if no next leaf node is found.
  * Note that this returns 0-length string if the key has no value, or
  * the value of the first entry if the value is an array.
+ */
+/*
+ * IAMROOT, 2022.01.05:
+ * - leaf를 찾고 leaf에 해당하는 value data를 return한다.
  */
 const char * __init xbc_node_find_next_key_value(struct xbc_node *root,
 						 struct xbc_node **leaf)
@@ -408,6 +467,45 @@ static inline __init struct xbc_node *xbc_last_child(struct xbc_node *node)
 	return node;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * ps) last_parent node를 lpnode, 추가 node를 Nnode 라고 명명
+ * - lpnode 가 없는경우
+ *   before            after
+ *   -------------------------------
+ *   node1 -> ..       node1 -> ..
+ *    |(sibling)        |(sibling)
+ *   node2 -> ..       node2 -> ..
+ *                      |(sibling)
+ *                     Nnode
+ *                  
+ *   현재 node가 최초의 node가 되므로 parent는 없다는 의미로 XBC_NODE_MAX
+ *   로 설정한다.
+ *   최초의 node끼리는 sibling(next)으로 연결된다.
+ *
+ * - lpnode 가 있고 lpnode의 child가 없는경우 or
+ *   head로 강제 설정인 경우
+ *   lpnode와 부모자식으로 연결한다. last_parent의 자식을
+ *   sibling으로 연결한다
+ *
+ *   before                         after
+ *   ----------------------------------------
+ *         (child)                   (child)
+ *   lpnode ------> (NULL)     lpnode ------> Nnode 
+ *   lpnode ------> cnode      lpnode ------> Nnode -> cnode
+ *
+ * - lpnode 가 있고 lpnode의 child가 있는경우
+ *   lpnode의 cnode의 제일 마지막 snode에 추가한ㄷ.
+ *   before                         after
+ *   ----------------------------------------
+ *         (child)                   (child)
+ *   lpnode ------> cnode     lpnode ------> cnode 
+ *                    | (sibling)              |
+ *                  snode                    snode
+ *                    |                        |
+ *                  (null)                   nNode
+ *
+ */
 static struct xbc_node * __init __xbc_add_sibling(char *data, u32 flag, bool head)
 {
 	struct xbc_node *sib, *node = xbc_add_node(data, flag);
@@ -435,16 +533,29 @@ static struct xbc_node * __init __xbc_add_sibling(char *data, u32 flag, bool hea
 	return node;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - lpnode의 child의 last sibling에 위치시킨다.
+ */
 static inline struct xbc_node * __init xbc_add_sibling(char *data, u32 flag)
 {
 	return __xbc_add_sibling(data, flag, false);
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - lpnode의 child가 된다.(head sibling)
+ */
 static inline struct xbc_node * __init xbc_add_head_sibling(char *data, u32 flag)
 {
 	return __xbc_add_sibling(data, flag, true);
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - lpnode의 child의 마지막 sibling에 추가한다. lpnode를 생성된 node로
+ *   업데이트한다.
+ */
 static inline __init struct xbc_node *xbc_add_child(char *data, u32 flag)
 {
 	struct xbc_node *node = xbc_add_sibling(data, flag);
@@ -470,6 +581,10 @@ static inline __init bool xbc_valid_keyword(char *key)
 	return *key == '\0';
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - #로 시작했던 문자열은 comment처리한다.
+ */
 static char *skip_comment(char *p)
 {
 	char *ret;
@@ -490,6 +605,10 @@ static char *skip_spaces_until_newline(char *p)
 	return p;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - bracket 진입전 last_parent를 저장해놓는다. depth검사도 수행한다.
+ */
 static int __init __xbc_open_brace(char *p)
 {
 	/* Push the last key as open brace */
@@ -500,6 +619,11 @@ static int __init __xbc_open_brace(char *p)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - bracket의 {, }의 쌍이 맞는지 검사하고 last_parent를 depth에 맞게
+ *   갱신한다.
+ */
 static int __init __xbc_close_brace(char *p)
 {
 	brace_index--;
@@ -574,12 +698,24 @@ static int __init __xbc_parse_value(char **__v, char **__n)
 	return c;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - value들을 child node로 만들어 연결한다.
+ *   x = v1, v2, v3일경우
+ *         (child)         (child)        (child)   
+ *  x_node ------> v1_node ------> v2_node -----> v3_node
+ *  (XBC_KEY)     (XBC_VALUE)     (XBC_VALUE)     (XBC_VALUE)
+ */
 static int __init xbc_parse_array(char **__v)
 {
 	struct xbc_node *node;
 	char *next;
 	int c = 0;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - lpnode가 존재하면 lpnode의 cnode를 lpnode로 갱신한다.
+ */
 	if (last_parent->child)
 		last_parent = xbc_node_get_child(last_parent);
 
@@ -609,6 +745,31 @@ struct xbc_node *find_match_node(struct xbc_node *node, char *k)
 	return node;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - lpnode에서 시작해서 해당 key와 일치하는 node를 찾는다. 없는경우
+ *   node를 새로 생성한다.
+ * - node가 새로 생성하거나 검색이 된경우 lpnode를 해당 node로 갱신한다.
+ *
+ * - 새로 node가 생성되는 경우엔 lpnode의 child의 제일 마지막 sibling이
+ *   된다.
+ *
+ * -------------------- (상세)
+ * - lpnode가 없는 경우
+ *   key값과 일치하는 node를 찾는다. 찾은경우 lpnode를 해당 node로
+ *   설정하고 못찾았으면 node를 생성한다.
+ * - lpnode가 있는 있는 경우.
+ *   이미 상위에서 tree를 타고 왔다는 것을 의미 한다.
+ *   
+ * --- lpnode의 child가 없는경우
+ *     node를 생성하고 해당 node를 lpnode의 child로 한다.
+ * --- lpnode의 child가 있으면서 해당 cnode가 value인경우
+ *     cnode의 sibling에서 find_match_node를 시작한다.
+ * --- 그 외의 경우
+ *     lpnode의 child에서 find_match_node를 시작한다.
+ *     
+ * node가 생성되거나 찾아지면 lpnode는 해당 node로 업데이트될것이다.
+ */
 static int __init __xbc_add_key(char *k)
 {
 	struct xbc_node *node, *child;
@@ -624,6 +785,12 @@ static int __init __xbc_add_key(char *k)
 	else {
 		child = xbc_node_get_child(last_parent);
 		/* Since the value node is the first child, skip it. */
+/*
+ * IAMROOT, 2022.01.05:
+ * - 연속 key를 child로 두어야되는데 그전에 이미 child가 value인게
+ *   이미 있다면 value node의 sibling에 key node를 생성한다.
+ *   그렇기 때문에 value를 만나면 sibling에 key node를 만들것이다.
+ */
 		if (child && xbc_node_is_value(child))
 			child = xbc_node_get_next(child);
 		node = find_match_node(child, k);
@@ -669,6 +836,7 @@ static int __init __xbc_parse_keys(char *k)
 
 /*
  * IAMROOT, 2022.01.04:
+ * ps) last_parent node를 lpnode라고 명명
  * - last_parent를 이용해, 원래 last_parent를 prev_parent로 저장해놓고
  *   last_parent로 마지막 parent를 기억하며 add를 하고 작업이 다끝나면
  *   prev_parent로 last_parent를 복구한다.
@@ -680,6 +848,11 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
 	char *next;
 	int c, ret;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - 일단 key를 찾는다. 못찾으면 생성될것이다. lpnode는 key node로
+ *   갱신되었을 것이다.
+ */
 	ret = __xbc_parse_keys(*k);
 	if (ret)
 		return ret;
@@ -693,9 +866,8 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
  * ex) a1.a2.a3 의 param일 경우 last_parent는 a3 node를 가리키고 있을것이다.
  * 이경우 child가 존재하고, 해당 node가 value일 경우 이미 해당 key에 대한
  * 값이 존재하는 경우이다.
- * op가 :=인 경우는 대체 되므로 현재 진입한 vale(v)로 재초기화를 수행하고,
- * +=s는 경우는 value가 추가 되는 개념이라 child를 추가하는것이 보인다.
- *
+ * op가 :=인 경우는 대체 되므로 현재 진입한 vavlue(v)로 재초기화를 수행하고,
+ * +=인 경우는 value가 추가 되는 개념이라 head child로 추가한다.
  */
 	child = xbc_node_get_child(last_parent);
 	if (child && xbc_node_is_value(child)) {
@@ -723,6 +895,11 @@ array:
 			return c;
 	}
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - 복귀하기 위한 준비. 함수 진입전 last_parent로 원복하고 c가 bracket일
+ *   경우 검사를 수행한다.
+ */
 	last_parent = prev_parent;
 
 	if (c == '}') {
@@ -731,6 +908,10 @@ array:
 			return ret;
 	}
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - value parse가 끝난 주소로 갱신한다.
+ */
 	*k = next;
 
 	return 0;
@@ -764,6 +945,10 @@ static int __init xbc_parse_key(char **k, char *n)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - key parse 및 add를 수행하고 bracket open처리를 한다.
+ */
 static int __init xbc_open_brace(char **k, char *n)
 {
 	int ret;
@@ -776,6 +961,10 @@ static int __init xbc_open_brace(char **k, char *n)
 	return __xbc_open_brace(n - 1);
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - key parse 및 add를 수행하고 bracket close처리를 한다.
+ */
 static int __init xbc_close_brace(char **k, char *n)
 {
 	int ret;
@@ -788,11 +977,19 @@ static int __init xbc_close_brace(char **k, char *n)
 	return __xbc_close_brace(n - 1);
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - bracket이 짝이 맞는지, key length, depth등을 검사한다.
+ */
 static int __init xbc_verify_tree(void)
 {
 	int i, depth, len, wlen;
 	struct xbc_node *n, *m;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - closed bracket이 부족한경우.
+ */
 	/* Brace closing */
 	if (brace_index) {
 		n = &xbc_nodes[open_brace[brace_index]];
@@ -818,6 +1015,10 @@ static int __init xbc_verify_tree(void)
 	depth = 1;
 	len = 0;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - key length, depth 길이, 를 검사.
+ */
 	while (n) {
 		wlen = strlen(xbc_node_get_data(n)) + 1;
 		len += wlen;
@@ -883,6 +1084,11 @@ void __init xbc_destroy_all(void)
  */
 /*
  * IAMROOT, 2022.01.04:
+ * @buf in. bootconfig string이 있는 buffer
+ * @emsg out. error 발생이유에 대한 string out
+ * @epos out. error가 발생한 buf의 pos
+ * @return result
+ *
  * - Documentation/admin-guide/bootconfig.rst 참고
  *   해당 규칙에 따라 node를 만든다.
  * - xbc_nodes를 초기화 한다.
