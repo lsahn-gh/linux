@@ -492,7 +492,8 @@ static void __init setup_boot_config(void)
 	/* parse_args() stops at the next param of '--' and returns an address */
 /*
  * IAMROOT, 2022.01.04:
- * - param이 "--"로 종료되면 err이 해당 지점의 위치가 된다.
+ * - param이 "--"로 종료되면 err이 해당 지점의 "--"의 pointr가 된다.
+ *   initargs_offs 는 cmdline ~ bootconfg string 종료지점까지의 길이가 될것이다.
  */
 	if (err)
 		initargs_offs = err - tmp_cmdline;

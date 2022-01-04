@@ -43,7 +43,8 @@ static inline __init u32 xbc_calc_checksum(void *data, u32 size)
 /* XBC tree node */
 /*
  * IAMROOT, 2022.01.04:
- * - child, parent, next : 존재할경우 xbc_nodes 의 index번호가 위치한다.
+ * - child, parent, next : parent는 XBC_NODE_MAX일 경우 존재하지 않는다(root)
+ *						   xbc_nodes 의 index번호가 위치한다.
  *   xbc_node는 XBC_NODE_MAX개의 배열로 초기화된다. 
  * - data = (bootconfig ~ 해당 value의 마지막주소까지의  offset) | flag
  *   flag에는 XBC_VALUE등이 들어간다.

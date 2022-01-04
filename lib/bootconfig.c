@@ -24,7 +24,14 @@
  * node (for array).
  */
 
+/*
+ * IAMROOT, 2022.01.04:
+ */
 static struct xbc_node *xbc_nodes __initdata;
+/*
+ * IAMROOT, 2022.01.04:
+ * node가 한개씩 추가 될때마다 증가한다. XBC_NODE_MAX가 max개.
+ */
 static int xbc_node_num __initdata;
 /*
  * IAMROOT, 2022.01.04:
@@ -345,7 +352,13 @@ const char * __init xbc_node_find_next_key_value(struct xbc_node *root,
 }
 
 /* XBC parse and tree build */
-
+/*
+ * IAMROOT, 2022.01.04:
+ * @node output
+ * @data param(key)가 되는 string. alpha, num, -, _으로 이뤄져있으며 '\0'로 종료.
+ *		 memblock에 복사된 commandline에 존재한다.
+ * @flag data가 XBC_VALUE인지 XBC_KEY인지 등의 flag. offset과 or되어 보관된다.
+ */
 static int __init xbc_init_node(struct xbc_node *node, char *data, u32 flag)
 {
 	unsigned long offset = data - xbc_data;
@@ -360,6 +373,11 @@ static int __init xbc_init_node(struct xbc_node *node, char *data, u32 flag)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * memblock으로 할당되었던 xbc_nods에서 xbc_node_num을 idx로 하여
+ * 해당 member로 초기화한다.
+ */
 static struct xbc_node * __init xbc_add_node(char *data, u32 flag)
 {
 	struct xbc_node *node;
@@ -437,6 +455,10 @@ static inline __init struct xbc_node *xbc_add_child(char *data, u32 flag)
 	return node;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - alpha, num, -, _ 인 char만 pass, 아닌경우 \0이면 정상, 아니면 실패
+ */
 static inline __init bool xbc_valid_keyword(char *key)
 {
 	if (key[0] == '\0')
@@ -496,6 +518,12 @@ static int __init __xbc_close_brace(char *p)
 /*
  * Return delimiter or error, no node added. As same as lib/cmdline.c,
  * you can use " around spaces, but can't escape " for value.
+ */
+/*
+ * IAMROOT, 2022.01.04:
+ * @__v value string. parse되면 '\0'이 붙어 trim이 될것이다.
+ * @__n next value pos. trim된 __v의 다음 위치를 가리킬것이다.
+ * @return c ,;\n#}중 하나. 
  */
 static int __init __xbc_parse_value(char **__v, char **__n)
 {
@@ -612,12 +640,21 @@ add_node:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * - '.'을 parse하여 param을 나눠 key를 추가한다.
+ */
 static int __init __xbc_parse_keys(char *k)
 {
 	char *p;
 	int ret;
 
 	k = strim(k);
+
+/*
+ * IAMROOT, 2022.01.04:
+ * param이 ab.bc.cd 와 같은 형식일 경우 ab, bc, cd로 한번씩 __xbc_add_key한다.
+ */
 	while ((p = strchr(k, '.'))) {
 		*p++ = '\0';
 		ret = __xbc_add_key(k);
@@ -626,19 +663,15 @@ static int __init __xbc_parse_keys(char *k)
 		k = p;
 	}
 
+
 	return __xbc_add_key(k);
 }
 
 /*
  * IAMROOT, 2022.01.04:
- * - 같은 부류의 value들은 child, 다른 부류의 value들은 sibling의 개념으로
- *   데이터가 초기화된다.
- *   ex)
- *   a = 1, 2, 3
- *   b = 4
- *   node는 a.1, a.2, a.3, b.4가 생긴다고 했을때
- *   a.1 -> a.2 -> a.3 은 child로 연결되고
- *   a.3 -> b.4 은 sibling으로 연결된다.
+ * - last_parent를 이용해, 원래 last_parent를 prev_parent로 저장해놓고
+ *   last_parent로 마지막 parent를 기억하며 add를 하고 작업이 다끝나면
+ *   prev_parent로 last_parent를 복구한다.
  */
 static int __init xbc_parse_kv(char **k, char *v, int op)
 {
@@ -655,8 +688,18 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
 	if (c < 0)
 		return c;
 
+/*
+ * IAMROOT, 2022.01.04:
+ * ex) a1.a2.a3 의 param일 경우 last_parent는 a3 node를 가리키고 있을것이다.
+ * 이경우 child가 존재하고, 해당 node가 value일 경우 이미 해당 key에 대한
+ * 값이 존재하는 경우이다.
+ * op가 :=인 경우는 대체 되므로 현재 진입한 vale(v)로 재초기화를 수행하고,
+ * +=s는 경우는 value가 추가 되는 개념이라 child를 추가하는것이 보인다.
+ *
+ */
 	child = xbc_node_get_child(last_parent);
 	if (child && xbc_node_is_value(child)) {
+
 		if (op == '=')
 			return xbc_parse_error("Value is redefined", v);
 		if (op == ':') {
@@ -693,6 +736,17 @@ array:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.01.04:
+ * @param pos
+ * @n '\n'이나 '}'. param의 마지막 주소
+ *
+ * 여러개의 key로 이루어진 param이 올 경우 last_parent로 가장 최근의
+ * parent를 기억해서 연속으로 add를 하는 방식을 사용한다.
+ *
+ * last_parent를 다 사용하고 나면 prev_parent를 사용해
+ * 해당 함수 진입전으로 last_parent을 복구한다.
+ */
 static int __init xbc_parse_key(char **k, char *n)
 {
 	struct xbc_node *prev_parent = last_parent;
@@ -871,6 +925,9 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
  * IAMROOT, 2022.01.04:
  * - p : next pos
  *   q : {}=+;:'\n'#을 찾은 위치
+ *   ex) char *p = "123{456";
+ *   q = strpbrk(p, "{");
+ *   printf("%s", q); -> {456
  */
 	p = buf;
 	do {
@@ -883,6 +940,12 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 		}
 
 		c = *q;
+/*
+ * IAMROOT, 2022.01.04:
+ * - ex) str = "123{456";
+ *   c = {;
+ *   123{456 -> 123'\0'456
+ */
 		*q++ = '\0';
 		switch (c) {
 /*
@@ -902,7 +965,9 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 		case '=':
 /*
  * IAMROOT, 2022.01.04:
- * -
+ * - q : value
+ *   p : param
+ *   ex) abc=123 -> p = abc, q = 123, c = '='
  */
 			ret = xbc_parse_kv(&p, q, c);
 			break;
