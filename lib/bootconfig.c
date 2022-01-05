@@ -1092,7 +1092,69 @@ void __init xbc_destroy_all(void)
  * - Documentation/admin-guide/bootconfig.rst 참고
  *   해당 규칙에 따라 node를 만든다.
  * - xbc_nodes를 초기화 한다.
+ *
+ * ---
+ * - param(keys)
+ * param 은 여러개의 key로 이뤄질수있다.
+ *
+ * ex) foo = value1 => key는 foo
+ *     foo.bar.baz = value1 => key는 foo, bar, baz
+ *
+ * key 한개당 xbc_node 한개가 되며, xbc_node에는 해당 key의 string 주소가
+ * XBC_KEY flag와 or되어 data로 저장된다.
+ *
+ * 같은 param에서 나온 key끼리는 부모자식 관계를 형성한다.
+ *
+ * ex) foo.bar.baz 라는 param에서
+ * foo -(child)-> bar -(child)-> baz
+ *
+ * - 서로다른 param끼리는 sibling(next)로 이어진다.
+ *
+ * ex) foo.bar.baz, abc.def 라는 param이 있다고 했을때
+ *
+ *   foo-(child)-> bar -(child)-> baz
+ *    |
+ *    (sibling)
+ *    |
+ *   abc-(child)-> def
+ *  
+ * - value
+ * value도 param과 마찬가지로 여러개로 구성이 될수 있는데, array라고 부른다.
+ *
+ * 마지막 key node에서 그다음 child가 value라면 그다음부턴 무조건 value라고
+ * 생각한다.
+ *
+ * ex) foo(KEY) -(child)-> bar(KEY) -(child)-> v1(VALUE) -> ....
+ * v1이 value인게 감지되면 그 뒤에 있는 node들은 전부 value가 된다.
+ *                                  
+ * boot command의 operation에 따라 해당 key의 value가 추가되거나 새로 덮어
+ * 써지거나 할수있다.)
+ * op 
+ *  = : 이 전에 해당 key에 대한 value가 들어가있다면 fail.
+ * += : 이 전에 해당 key에 대한 value가 들어가있다면 제일 첫번째 child로 추가 
+ * := : 이 전에 해당 key에 대한 value가 있다면 다 지우고 현재 value로 치환.
+ *
+ * - subkey
+ * ex) foo.bar = v1 이라는 boot config가 node로 이미 만들어져있다고 한다.
+ * 
+ * foo->bar->v1(value)
+ *
+ * 만약 이때 foo.bar.baz = v2 boot config를 찾게되면 다음과 같이 추가된다.
+ *
+ * foo->bar->v1(value)
+ *           |
+ *        (sibling)
+ *           |
+ *          baz(key)->v2(value)
+ *
+ * xbc_node의 규칙상 마지막 key node의 다음은 무조건 value여야 되는데
+ * 위와 같은 상황일 경우는 첫번째 value의 sibling을 subkey라는 개념으로
+ * 고려해 위와 같이 추가한다.
+ *
+ * 그래서 node를 add하거나 search할때 위의 subkey를 고려하여 첫번째 value에
+ * 대해서는 sibling을 확인하는것이 source에서 보인다.
  */
+
 int __init xbc_init(char *buf, const char **emsg, int *epos)
 {
 	char *p, *q;

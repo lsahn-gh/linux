@@ -147,28 +147,47 @@ void (*__initdata late_time_init)(void);
 
 /*
  * IAMROOT, 2021.10.16:
- * - dt에서 가져온 cmd line string
+ * - command line 관련 정리
+ *
+ * command line관련    | 내용
+ * ====================+=============================================
+ * boot_command_line   | dt에서 가져옴. [bootcmds...][--][bootcmd init args]
+ * --------------------+---------------------------------------------
+ * command_line (start | arm64는 boot_command_line를 그대로 사용한다.
+ * _kernel의 지역변수  | 
+ * --------------------+---------------------------------------------
+ * extra_command_line  | initrd에서 bootconfig의 key kernel 와 value들
+ * --------------------+---------------------------------------------
+ * extra_init_args     | initrd에서 bootconfig의 key init 과 value들
+ * --------------------+---------------------------------------------
+ * bootcmd init param  | boot_command_line에서 " -- "이후의 command들
+ * --------------------+---------------------------------------------
+ * saved_command_line  | [extra_command_line][bootcmds....--][extra_init_args]
+ *                     | [bootcmd init param]
+ * --------------------+---------------------------------------------
+ * static_command_line | [extra_command_line][command_line]
+ * --------------------+---------------------------------------------
  */
 /* Untouched command line saved by arch-specific code. */
 char __initdata boot_command_line[COMMAND_LINE_SIZE];
 /* Untouched saved command line (eg. for /proc) */
 /*
  * IAMROOT, 2022.01.05:
- * - setup_command_line에서 초기화된다.
- * - extra_command_line, boot_command_line, extra_init_args를 보관한다.
- *   [extra_command_line][boot_command_line][ -- ][extra_init_args]
- * - strlen(extra_command_line) + strlen(boot_command_line) + 1 +
- *   4(" -- "고려) 길이의 memblock
+ * - setup_command_line에서 초기화된다.(memblock 할당)
+ *
+ * - boot_command_line에서 init args가 없는 경우
+ *  [extra_command_line][bootcmds...][ -- ][extra_init_args]
+ * - boot_command_line에서 init args가 있는 경우
+ *  [extra_command_line][bootcmds....--][extra_init_args][bootcmd init param]
  */
 char *saved_command_line;
 /* Command line for parameter parsing */
 /*
  * IAMROOT, 2022.01.05:
- * - setup_command_line에서 초기화된다.
- * - extra_command_line, boot_command_line를 보관한다.
- *   [extra_command_line][boot_command_line]
- * - strlen(extra_command_line) + strlen(boot_command_line) + 1
- *   길이의 memblock
+ * - setup_command_line에서 초기화된다.(memblock할당)
+ *
+ * - extra_command_line, command_line를 보관한다.
+ *   [extra_command_line][command_line]
  */
 static char *static_command_line;
 
@@ -183,14 +202,14 @@ static char *static_command_line;
 /*
  * IAMROOT, 2022.01.05:
  * - setup_boot_config 에서 초기화된다.
- * - bootconfig의 kernel key와 value string이 있는 memblock
+ * - initrd에서 가져온 bootconfig의 kernel key와 value string이 있는 memblock
  */
 static char *extra_command_line;
 /* Extra init arguments */
 /*
  * IAMROOT, 2022.01.05:
  * - setup_boot_config 에서 초기화된다.
- * - bootconfig의 init key와 value string이 있는 memblock
+ * - initrd에서 가져온 bootconfig의 init key와 value string이 있는 memblock
  */
 static char *extra_init_args;
 
@@ -561,9 +580,16 @@ static void __init setup_boot_config(void)
 	/* parse_args() stops at the next param of '--' and returns an address */
 /*
  * IAMROOT, 2022.01.04:
+ * - boot_command_line에서 "--"기준으로 뒷부분은 init args가 된다.
+ *   boot_command_line = [일반 bootcmds][--][bootcmd init args]
+ *
+ * - 그래서 "--" 이없다면 init args가 없다는 개념이 된다.
+ *
  * - param이 "--"로 종료되면 err이 해당 지점의 "--"이후의 postion이다.
- *   initargs_offs 는 cmdline ~ bootconfg + "--" string 종료지점까지의
+ *   initargs_offs 는 cmdline ~ bootconfg ~ "--" string 종료지점까지의
  *   길이가 될것이다.
+ * - 즉 init args전까지의 길이를 구해옿고 후에 saved_command_line
+ *   설정할때 init args를 맨뒤에 복사해 놓을때 사용한다.
  */
 	if (err)
 		initargs_offs = err - tmp_cmdline;
@@ -813,21 +839,64 @@ static void __init setup_command_line(char *command_line)
 		 * The order should always be
 		 * " -- "[bootconfig init-param][cmdline init-param]
 		 */
+		if (initargs_offs) {
 /*
  * IAMROOT, 2022.01.05:
- * - extra_init_args를 saved_command_line 뒤에 복사한다.
- * - initargs_offs가 있다는건 " -- "이 이미 고려됬다는것.
- *   boot_command_line에 이미 "--"이 존재 한다. 위에서
- *   extra_init_args에 "--"를 고려 했었는데 이미 boot_command_line에
- *   "--"있으므로 겹치니 length인 4를 빼준다.
+ *  - initargs_offs가 존재.(boot_command_line에 init param이 존재하는 상황
+ *  boot_command_line = [cmds...][ -- ][cmdline init param]
+ *                      |.............||..................|
+ *                        initargs_off        
+ *
+ *  saved_command_line은 다음과 같은 상황일 것이다.
+ *  saved_command_line = [extra_command_line][boot_command_line               ]
+ *                       |                   [cmds...}[ -- ][cmdline initparam]
+ *                       |   xlen           + initargs_off |
  */
-		if (initargs_offs) {
+
 			len = xlen + initargs_offs;
+
+/*
+ * IAMROOT, 2022.01.05:
+ *
+ * 즉 boot_command_line에서 [--]이후에 extra_init_args를 복사한다.
+ *
+ * saved_command_line = [extra_command_line][bootcmds....--][extra_init_args]
+ *                      [ len = xlen        + initargs_offs]
+ */
 			strcpy(saved_command_line + len, extra_init_args);
+
+/*
+ * IAMROOT, 2022.01.05:
+ * ilen에는 위에서 " -- "를 고려해서 4byte를 더해놨었다. 하지만
+ * initargs_offs에 " -- " string에 대해서 이미 더해져있으므로 다시 ilen에서
+ * 4byte를 빼는것이다.
+ */
 			len += ilen - 4;	/* strlen(extra_init_args) */
+/*
+ * IAMROOT, 2022.01.05:
+ * 제일 뒷부분에 원본 boot_command_line에서 initparam을 가져와 붙인다.
+ * - saved_command_line
+ * [extra_command_line][bootcmds....--][extra_init_args][bootcmd init param]
+ * [ len(    xlen      + initargs_offs +   ilen        |
+ */
 			strcpy(saved_command_line + len,
 				boot_command_line + initargs_offs - 1);
 		} else {
+/*
+ * IAMROOT, 2022.01.05:
+ *  - initargs_offs가 안하는 상황
+ *  (boot_command_line에 init param이 없음
+ *  boot_command_line = [cmds...]
+ *
+ *  saved_command_line은 다음과 같은 상황일 것이다.
+ *  saved_command_line = [extra_command_line][boot_command_line]
+ *                                           [cmds.............]
+ *
+ * " -- "와 extra_init_args를 더해준다.
+ *
+ *  - saved_command_line
+ *  [extra_command_line][bootcmds...][ -- ][extra_init_args]
+ */
 			len = strlen(saved_command_line);
 			strcpy(saved_command_line + len, " -- ");
 			len += 4;

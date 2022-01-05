@@ -192,7 +192,7 @@ char *parse_args(const char *doing,
 		args = next_arg(args, &param, &val);
 /*
  * IAMROOT, 2021.10.16:
- * - param이 없고 --가 있으면 종료한다.
+ * - value가 없고 param이 "--" 이면 종료한다.
  *   args는 " -- "뒤의 postion일 것이다.
  */
 		/* Stop at -- */
