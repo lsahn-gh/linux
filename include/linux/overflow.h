@@ -189,6 +189,14 @@ static inline __must_check size_t __ab_c_size(size_t a, size_t b, size_t c)
  *
  * Return: number of bytes needed or SIZE_MAX on overflow.
  */
+
+/*
+ * IAMROOT, 2022.01.08: 
+ * struct_size(ai, groups, nr_groups) =
+ *      __ab_c_size(nr_groups, sizeof(*(ai)->member), sizeof(*(ai)))
+ *                 (4,         16,                     60)
+ *      = 4 * 16 + 60
+ */
 #define struct_size(p, member, count)					\
 	__ab_c_size(count,						\
 		    sizeof(*(p)->member) + __must_be_array((p)->member),\

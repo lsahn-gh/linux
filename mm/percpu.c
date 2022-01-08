@@ -3002,7 +3002,8 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 		 */
 /*
  * IAMROOT, 2022.01.08:
- * 유닛들 중 사용하지 않는 유닛이 1/3 이상인 경우 낭비로 판정하여 skip 한다.
+ * 필요한 유닛(possible cpus)들의 1/3을 초과하는, 즉 사용하지 않는 유닛들이 
+ * 발생하면 너무 많이 낭비가 된다 판단하여 skip 한다.
  */
 		if (wasted > num_possible_cpus() / 3)
 			continue;
@@ -3023,12 +3024,27 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 	upa = best_upa;
 
 	/* allocate and fill alloc_info */
+/*
+ * IAMROOT, 2022.01.08: 
+ * nr_units: 사용하지 않는 유닛도 모두 더한다.
+ */
 	for (group = 0; group < nr_groups; group++)
 		nr_units += roundup(group_cnt[group], upa);
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * pcpu_alloc_info 구조체를 할당해온다.
+ *   내부에 그룹(노드)별 구조체인 pcpu_group_info들이 채워지며
+ *   마지막에 유닛 수만큼 4바이트 정보가 추가된다.
+ */
 	ai = pcpu_alloc_alloc_info(nr_groups, nr_units);
 	if (!ai)
 		return ERR_PTR(-ENOMEM);
+/*
+ * IAMROOT, 2022.01.08: 
+ * 0번 그룹만 cpu_map을 연결해두었었다.
+ * 그 정보를 사용하여 전체 그룹 수 만큼 cpu_map을 기록한다.
+ */
 	cpu_map = ai->groups[0].cpu_map;
 
 	for (group = 0; group < nr_groups; group++) {
@@ -3036,6 +3052,10 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 		cpu_map += roundup(group_cnt[group], upa);
 	}
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * 나머지 ai 정보를 채운다.
+ */
 	ai->static_size = static_size;
 	ai->reserved_size = reserved_size;
 	ai->dyn_size = dyn_size;
@@ -3043,6 +3063,12 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 	ai->atom_size = atom_size;
 	ai->alloc_size = alloc_size;
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * pcpu_group_info[]->base_offset와 
+ * pcpu_group_info[]->cpu_map[]이 가리키는 곳에 cpu 번호를 기록한다.
+ *                    즉 unit->cpu map을 완성시칸다.
+ */
 	for (group = 0, unit = 0; group < nr_groups; group++) {
 		struct pcpu_group_info *gi = &ai->groups[group];
 
@@ -3111,6 +3137,10 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 	unsigned long max_distance;
 	int group, i, highest_group, rc = 0;
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * pcpu_alloc_info 구조체를 할당해온다.
+ */
 	ai = pcpu_build_alloc_info(reserved_size, dyn_size, atom_size,
 				   cpu_distance_fn);
 	if (IS_ERR(ai))
