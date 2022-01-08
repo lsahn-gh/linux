@@ -45,6 +45,17 @@
  */
 #define round_down(x, y) ((x) & ~__round_mask(x, y))
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * DIV_ROUND_UP(x, a)
+ *     x값을 a단위로 roundup한다음 a단위로 나눈다.
+ * 예) x=4, a=16
+ *     -> 1
+ * 예) x=16, a=4
+ *     -> 4
+ * 예) x=17, a=4
+ *     -> 5
+ */
 #define DIV_ROUND_UP __KERNEL_DIV_ROUND_UP
 
 #define DIV_ROUND_DOWN_ULL(ll, d) \

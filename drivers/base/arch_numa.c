@@ -203,6 +203,11 @@ void __init setup_per_cpu_areas(void)
 	 * Always reserve area for module percpu variables.  That's
 	 * what the legacy allocator did.
 	 */
+/*
+ * IAMROOT, 2022.01.08: 
+ * arm64의 경우 embed 방식으로 first chunk를 생성한다.
+ * 그 외의 경우 아키텍처에 따라 page 방식으로 만드는 방법도 있다.
+ */
 	rc = pcpu_embed_first_chunk(PERCPU_MODULE_RESERVE,
 				    PERCPU_DYNAMIC_RESERVE, PAGE_SIZE,
 				    pcpu_cpu_distance,
@@ -210,6 +215,17 @@ void __init setup_per_cpu_areas(void)
 	if (rc < 0)
 		panic("Failed to initialize percpu areas.");
 
+/*
+ * IAMROOT, 2022.01.08: 
+ * delta: 
+ *     delta = pcpu_base_addr - __per_cpu_start
+ *         1) pcpu_base_addr: 
+ *            1st chunk의 첫 static 주소
+ *              (run 타입에 결정, 실제 per-cpu 접근할 주소가 담긴다)
+ *         2) __per_cpu_start:
+ *           .data.percpu.* 섹션의 시작 주소
+ *		(compile 타임에 결정, static 변수에 접근할 때 사용하지 않는다.)
+ */
 	delta = (unsigned long)pcpu_base_addr - (unsigned long)__per_cpu_start;
 	for_each_possible_cpu(cpu)
 		__per_cpu_offset[cpu] = delta + pcpu_unit_offsets[cpu];
