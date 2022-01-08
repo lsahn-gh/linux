@@ -2875,9 +2875,9 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 
 	/* calculate size_sum and ensure dyn_size is enough for early alloc */
 /*
- * IAMROOT, 2022.01.08: 
+ * IAMROOT, 2022.01.08:
  * ARM64:
- *   size_sum = static(compile 결정) + reserved_size(8K) + dyn_size(28K) 
+ *   size_sum = static(compile 결정) + reserved_size(8K) + dyn_size(28K)
  */
 
 	size_sum = PFN_ALIGN(static_size + reserved_size +
@@ -2894,10 +2894,10 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 
 	/* determine the maximum # of units that can fit in an allocation */
 /*
- * IAMROOT, 2022.01.08: 
+ * IAMROOT, 2022.01.08:
  * upa: unit per allocation
- *      SMP 시스템에서 atom_size가 M단위의 큰 할당을 사용하고, 더 빠른 
- *      성능을 내게한다. 
+ *      SMP 시스템에서 atom_size가 M단위의 큰 할당을 사용하고, 더 빠른
+ *      성능을 내게한다.
  *      arm64) atom_size가 4K가 사용되므로 항상 1로 산출된다.
  *
  * 예) atom_size=2M, min_unit_size=44K
@@ -2906,7 +2906,7 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  *        2) while 후 -> 2M % 46 || offset_in_page(2M / 46)
  *           2M를 나머지 없이 떨어지는 값으로 만들면 46, 45, ... 32
  *           2M % 32=0, offset_in_page(2M/32)=0
- *           결국 best_upa=32
+ *           결국 max_upa=32
  */
 	alloc_size = roundup(min_unit_size, atom_size);
 	upa = alloc_size / min_unit_size;
@@ -2915,7 +2915,7 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 	max_upa = upa;
 
 /*
- * IAMROOT, 2022.01.08: 
+ * IAMROOT, 2022.01.08:
  * 노드별 해당 cpu를 그룹화한다.
  * 예) NUMA: node#0:cpu#0-3, node#1:cpu#4-7
  *     group_map[], group_cnt[], nr_groups ?
@@ -2923,6 +2923,18 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  *        group_map[4..7]=1    <- 4~7번 cpu는 1번 노드로 배치
  *        group_cnt[0..1]=4    <- 각 노드는 각가 4개의 cpu를 가진다.
  *        nr_groups=2          <- 2개의 노드
+ *
+ *  예2) NUMA node#0:cpu#0-3 node#1:cpu4-5 node#2:cpu6-7 node#3:cpu8-11
+ * 		 group_map[], group_cnt[], nr_groups ?
+ *     -> group_map[0..3]=0
+ *        group_map[4..5]=1
+ * 		  group_map[6..7]=2
+ * 		  group_map[8..11]=3
+ *        group_cnt[0]=4
+ *     	  group_cnt[1]=2
+ * 		  group_cnt[2]=2
+ * 		  group_cnt[3]=4
+ *        nr_groups=4
  */
 	cpumask_copy(&mask, cpu_possible_mask);
 
@@ -2957,19 +2969,25 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 		int allocs = 0, wasted = 0;
 
 /*
- * IAMROOT, 2022.01.08: 
- * alloc_size가 atom_size의 배수로 되어 있고, 이 값은 1, 2, 4M 이런 단위를 
+ * IAMROOT, 2022.01.08:
+ * alloc_size가 atom_size의 단위로 정렬되어 있고, 이 값은 1, 2, 4M 이런 단위를
  * 사용하며 2의 승수 단위 나눌때에만 나머지가 없다. 따라서 upa가 32부터 시작한
  * 경우 32, 16, 8, 4, 2, 1과 같은 값 이외에는 continue를 통해 skip 한다.
+ * 예) 2M%32 != 0 || ((2M/32)%4k != 0)
  */
 		if (alloc_size % upa || (offset_in_page(alloc_size / upa)))
 			continue;
 
 /*
- * IAMROOT, 2022.01.08: 
+ * IAMROOT, 2022.01.08:
  * 모든 노드에 대해 반복하며 allocs, wasted를 누적하여 구한다.
  * allocs: 할당할 수
  * wasted: 낭비되는 유닛 수
+ * 예) upa = 32 -> allocs = 4 : wasted = 32-4+32-2+32-2+32-4 = 116 (낭비)
+ * 예) upa = 16 -> allocs = 4 : wasted = 16-4+16-2+16-2+16-4 = 52 (낭비)
+ * 예) upa = 8 -> allocs = 4 : wasted = 8-4+8-2+8-2+8-4 = 20 (낭비)
+ * 예) upa = 4 -> allocs = 4 : wasted = 4-4+4-2+4-2+4-4 = 4 (정상)) -> 확정
+ * 예) upa = 2 -> allocs = 6 : wasted = 4-4+2-2+2-2+4-4 = 0 (정상))
  */
 		for (group = 0; group < nr_groups; group++) {
 			int this_allocs = DIV_ROUND_UP(group_cnt[group], upa);
@@ -2983,7 +3001,7 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 		 * passes the following check.
 		 */
 /*
- * IAMROOT, 2022.01.08: 
+ * IAMROOT, 2022.01.08:
  * 유닛들 중 사용하지 않는 유닛이 1/3 이상인 경우 낭비로 판정하여 skip 한다.
  */
 		if (wasted > num_possible_cpus() / 3)
@@ -2991,8 +3009,8 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 
 		/* and then don't consume more memory */
 /*
- * IAMROOT, 2022.01.08: 
- * 다시 반복할 때 allocs 수가 기존에 산출한 alloc 수보다 커지는 경우 
+ * IAMROOT, 2022.01.08:
+ * 다시 반복할 때 allocs 수가 기존에 산출한 alloc 수보다 커지는 경우
  * 더 이상 진행할 필요가 없으므로 break 한다.
  * 즉 allocs가 가장 작은 값으로 사용한다.
  */
