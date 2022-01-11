@@ -261,6 +261,10 @@ struct ftrace_likely_data {
 #endif
 
 /* Are two types/vars the same type (ignoring qualifiers)? */
+/*
+ * IAMROOT, 2022.01.11:
+ * @return typeof(a) == type(b) ? 1 : 0
+ */
 #define __same_type(a, b) __builtin_types_compatible_p(typeof(a), typeof(b))
 
 /*

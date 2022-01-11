@@ -59,6 +59,13 @@ static inline bool __must_check __must_check_overflow(bool overflow)
  * alias for __builtin_add_overflow, but add type checks similar to
  * below.
  */
+/*
+ * IAMROOT, 2022.01.11: 
+ * d = a + b
+ * add연산을 수행하여 결과값도 출력하면서 overflow 검사도 수행한다.
+ *
+ * bool __builtin_add_overflow ( type1 a, type2 b, type3 * res)
+ */
 #define check_add_overflow(a, b, d) __must_check_overflow(({	\
 	typeof(a) __a = (a);			\
 	typeof(b) __b = (b);			\
@@ -68,6 +75,13 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	__builtin_add_overflow(__a, __b, __d);	\
 }))
 
+/*
+ * IAMROOT, 2022.01.11: 
+ * d = a - b
+ * sub연산을 수행하여 결과값도 출력하면서 overflow 검사도 수행한다.
+ *
+ * bool __builtin_sub_overflow ( type1 a, type2 b, type3 * res)
+ */
 #define check_sub_overflow(a, b, d) __must_check_overflow(({	\
 	typeof(a) __a = (a);			\
 	typeof(b) __b = (b);			\
@@ -77,6 +91,13 @@ static inline bool __must_check __must_check_overflow(bool overflow)
 	__builtin_sub_overflow(__a, __b, __d);	\
 }))
 
+/*
+ * IAMROOT, 2022.01.11: 
+ * d = a * b
+ * 곱셈연산을 수행하여 결과값도 출력하면서 overflow 검사도 수행한다.
+ *
+ * bool __builtin_mul_overflow ( type1 a, type2 b, type3 * res)
+ */
 #define check_mul_overflow(a, b, d) __must_check_overflow(({	\
 	typeof(a) __a = (a);			\
 	typeof(b) __b = (b);			\
@@ -165,6 +186,23 @@ static inline __must_check size_t array3_size(size_t a, size_t b, size_t c)
 /*
  * Compute a*b+c, returning SIZE_MAX on overflow. Internal helper for
  * struct_size() below.
+ */
+/*
+ * IAMROOT, 2022.01.11: 
+ * a * b + c의 overflow 검사를 겸해서 결과값을 return
+ *
+ * ex)
+ * struct example {
+ *		...
+ *		type z[];
+ * }
+ * 위와 같이 마지막 member가 alloc형일 경우, 마지막 member의 개수(a or b)를
+ * 고려해 struct 에 필요한 size를 구하는 용도로 사용한다.
+ *
+ * 위 예로 봤을때
+ * a : z의 개수
+ * b : z의 크기
+ * c : sizeof(struct example)
  */
 static inline __must_check size_t __ab_c_size(size_t a, size_t b, size_t c)
 {

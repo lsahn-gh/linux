@@ -13,6 +13,28 @@
  * e.g. in a structure initializer (or where-ever else comma expressions
  * aren't permitted).
  */
+/*
+ * IAMROOT, 2022.01.11: 
+ * e가 0이 아닐경우 컴파일 오류.
+ *
+ * - e == 0
+ *   int:(-!!(e)) -> int:(-0) -> int:0
+ *   sizeof(struct {int:0}) => 0
+ *
+ * - e == 1
+ *   int:(-!!(e)) -> int:(-1) -> int:-1
+ *   sizeof(struct {int:-1}) => error
+ *
+ * - int: x의 의미
+ * struct 등에서 member를 type a:1 로 쓰는 경우가 있는데 이 경우 해당 type형으로
+ * 1번 bit를(1이 시작 bit번호.) 사용하겠다는것이다.
+ *
+ * int: x의 경우는 해당 bit만큼의 padding을 의미한다고 한다.
+ * (https://publications.gbdirect.co.uk//c_book/chapter6/bitfields.html)
+ * minus padding값은 유효하지 않으므로 compile때 에러를 출력하는것이다.
+ *
+ * 즉 e가 0이 아닌 값이 오면 무조건 minus값으로 padding이 입력되게 하는 개념
+ */
 #define BUILD_BUG_ON_ZERO(e) ((int)(sizeof(struct { int:(-!!(e)); })))
 #endif /* __CHECKER__ */
 

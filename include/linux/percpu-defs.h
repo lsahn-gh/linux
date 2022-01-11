@@ -19,6 +19,10 @@
 
 #ifdef CONFIG_SMP
 
+/*
+ * IAMROOT, 2022.01.11:
+ * - PERCPU_INPUT 에서 정의된 section이름의 뒷주소들
+ */
 #ifdef MODULE
 #define PER_CPU_SHARED_ALIGNED_SECTION ""
 #define PER_CPU_ALIGNED_SECTION ""

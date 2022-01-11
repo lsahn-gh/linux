@@ -174,6 +174,10 @@ static int __init early_cpu_to_node(int cpu)
 	return cpu_to_node_map[cpu];
 }
 
+/*
+ * IAMROOT, 2022.01.11:
+ * cpu의 numa node id를 구한후, node끼리의 거리를 return 한다.
+ */
 static int __init pcpu_cpu_distance(unsigned int from, unsigned int to)
 {
 	return node_distance(early_cpu_to_node(from), early_cpu_to_node(to));
@@ -193,6 +197,17 @@ static void __init pcpu_fc_free(void *ptr, size_t size)
 	memblock_free_early(__pa(ptr), size);
 }
 
+/*
+ * IAMROOT, 2022.01.11:
+ * - embed vs paged
+ *   embed(arm64) : vmalloc의 위에서부터 아래로 자라는 방식으로 메모리 할당.
+ *   paged : vmalloc의 밑에서부터 위로 자라는 방식으로 메모리 할당.
+ *
+ * - 관련 api
+ *   --- DEFINE_PER_CPU 시리즈
+ *   --- per_cpu_ptr, per_cpu_offset, this_cpu_offset, this_cpu_ptr(많이쓰임),
+ * __verify_pcu_ptr, 
+ */
 void __init setup_per_cpu_areas(void)
 {
 	unsigned long delta;

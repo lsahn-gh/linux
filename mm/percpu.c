@@ -2851,14 +2851,31 @@ early_param("percpu_alloc", percpu_alloc_setup);
  * On success, pointer to the new allocation_info is returned.  On
  * failure, ERR_PTR value is returned.
  */
+/*
+ * IAMROOT, 2022.01.11:
+ * - unit
+ *   static + reserved + dyn 을 합쳐 부르는말.
+ *
+ * - group
+ *   cpu끼리의 numa가 서로 같은 numa인 경우(LOCAL_DISTANCE) group이라 칭함.
+ */
 static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 				size_t reserved_size, size_t dyn_size,
 				size_t atom_size,
 				pcpu_fc_cpu_distance_fn_t cpu_distance_fn)
 {
+/*
+ * IAMROOT, 2022.01.11:
+ * - group_map[cpu 번호] = 해당 cpu가 속한 group
+ * - group_cnt[group 번호] = 해당 group에 속한 cpu cnt 
+ */
 	static int group_map[NR_CPUS] __initdata;
 	static int group_cnt[NR_CPUS] __initdata;
 	static struct cpumask mask __initdata;
+/*
+ * IAMROOT, 2022.01.11:
+ * PERCPU_INPUT 참고
+ */
 	const size_t static_size = __per_cpu_end - __per_cpu_start;
 	int nr_groups = 1, nr_units = 0;
 	size_t size_sum, min_unit_size, alloc_size;
@@ -2907,6 +2924,24 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  *           2M를 나머지 없이 떨어지는 값으로 만들면 46, 45, ... 32
  *           2M % 32=0, offset_in_page(2M/32)=0
  *           결국 max_upa=32
+ *
+ * - alloc 당 unit 의 max개수를 정한다. atom_size가 클경우,
+ *   1개의 alloc memory에 여러개의 unit이 들어갈수있다.
+ *   --- alloc_size % upa가 있는 경우
+ *		alloc당 unit 개수를 줄임으로 unit 당 size를 늘린다.
+ *
+ *		ex) alloc_size=2M, upa=46(2M/44K)
+ *		그냥 바로 unit당 alloc size를 구해보면
+ *		alloc_size / upa = 45590.26..
+ *		즉 소수점 size가 남게 되고 upa당 size는 45590 byte가 될것이다.
+ *
+ *		upa를 소수점이 안남을때까지 줄이면 upa는 32가 된다
+ *		2M / 32 = 65536
+ *		alloc당 unit개수는 32개가 되고, unit의 size는 65536으로 커지고
+ *		소수점 size는 없으니 남는 사이즈도 없다.
+ *
+ *	--- offset_in_page(alloc_size / upa)
+ *		page align확인.
  */
 	alloc_size = roundup(min_unit_size, atom_size);
 	upa = alloc_size / min_unit_size;
@@ -2983,13 +3018,32 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  * 모든 노드에 대해 반복하며 allocs, wasted를 누적하여 구한다.
  * allocs: 할당할 수
  * wasted: 낭비되는 유닛 수
- * 예) upa = 32 -> allocs = 4 : wasted = 32-4+32-2+32-2+32-4 = 116 (낭비)
- * 예) upa = 16 -> allocs = 4 : wasted = 16-4+16-2+16-2+16-4 = 52 (낭비)
- * 예) upa = 8 -> allocs = 4 : wasted = 8-4+8-2+8-2+8-4 = 20 (낭비)
- * 예) upa = 4 -> allocs = 4 : wasted = 4-4+4-2+4-2+4-4 = 4 (정상)) -> 확정
- * 예) upa = 2 -> allocs = 6 : wasted = 4-4+2-2+2-2+4-4 = 0 (정상))
+ *
+ * ex) group_cnt[4] = {4, 2, 2, 4};
+ * wasted[x] = (this_allocs[x] * upa - group_cnt[x])
+ * 1) upa = 32, this_allocs[4] = {1, 1, 1, 1};
+ *	allocs = 4 : wasted = (32-4) + (32-2) + (32-2) + (32-4) = 116 (낭비)
+ * 2) upa = 16, this_allocs[4] = {1, 1, 1, 1};
+ *	allocs = 4 : wasted = (16-4) + (16-2) + (16-2) + (16-4) = 52 (낭비)
+ * 3) upa = 8, this_allocs[4] = {1, 1, 1, 1};
+ *	allocs = 4 : wasted = (8-4) + (8-2) + (8-2) + (8-4) = 20 (낭비)
+ * 4) upa = 4, this_allocs[4] = {1, 1, 1, 1};
+ *	allocs = 4 : wasted = (4-4) + (4-2) + (4-2) + (4-4) = 4 (정상))
+ *	-> 확정. 5)에서 allocs가 6으로 커지므로 break됨.
+ * 5) upa = 2, this_allocs[4] = {2, 1, 1, 2};
+ *	allocs = 6 : wasted = (4-4) + (2-2) + (2-2) + (4-4) = 0 (정상))
+ *
+ * 즉 wasted가 없는 경우가 있을지라도 allocs가 적은게 우선이 된다.
  */
 		for (group = 0; group < nr_groups; group++) {
+/*
+ * IAMROOT, 2022.01.11:
+ * - group_cnt[group] = group에 속한 cpu개수
+ * - this_allocs = group에 속한 cpu개수를 전부 넣을수있는 upa단위의 할당 횟수
+ * - wasted = (upa 단위로 할당한 size) - (group에 속한 cpu개수)
+ *			= upa * this_allocs - (group에 속한 cpu개수)
+ * group_cnt[group]이 upa의 배수에 맞지 않는다면 round up된만큼 wasted가 생긴다.
+ */
 			int this_allocs = DIV_ROUND_UP(group_cnt[group], upa);
 			allocs += this_allocs;
 			wasted += this_allocs * upa - group_cnt[group];
@@ -3124,6 +3178,9 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  * RETURNS:
  * 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2022.01.11:
+ */
 int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 				  size_t atom_size,
 				  pcpu_fc_cpu_distance_fn_t cpu_distance_fn,
@@ -3140,6 +3197,11 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 /*
  * IAMROOT, 2022.01.08: 
  * pcpu_alloc_info 구조체를 할당해온다.
+ * - setup_per_cpu_areas 에서 불러진 경우
+ *   @reserved_size PERCPU_MODULE_RESERVE. 8k
+ *   @dyn_size PERCPU_DYNAMIC_RESERVE 28k
+ *   @atom_size PAGE_SIZE
+ *   @cpu_distance_fn pcpu_cpu_distance,
  */
 	ai = pcpu_build_alloc_info(reserved_size, dyn_size, atom_size,
 				   cpu_distance_fn);

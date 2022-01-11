@@ -39,6 +39,32 @@ extern char __init_begin[], __init_end[];
 extern char _sinittext[], _einittext[];
 extern char __start_ro_after_init[], __end_ro_after_init[];
 extern char _end[];
+/*
+ * IAMROOT, 2022.01.11: 
+ * - PERCPU_INPUT 에 정의.
+ *
+ * - lds에서 percpu section(.data..percpu) 위치 
+ *
+ * .init.data {
+ * ..
+ * }
+ * .exit.data : {
+ * ..
+ * }
+ *
+ * .data..percpu {
+ *	__per_cpu_load
+ *	__per_cpu_start
+ *	.. 
+ *	__per_cpu_end
+ * }
+ *
+ * HYPERVISOR_PERCPU_SECTION
+ * HYPERVISOR_RELOC_SECTION
+ * .rela.dyn : ALIGN(8) {
+ *	*(.rela .rela*)
+ *	}
+ */
 extern char __per_cpu_load[], __per_cpu_start[], __per_cpu_end[];
 extern char __kprobes_text_start[], __kprobes_text_end[];
 extern char __entry_text_start[], __entry_text_end[];

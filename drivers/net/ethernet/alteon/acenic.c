@@ -155,6 +155,11 @@ MODULE_DEVICE_TABLE(pci, acenic_pci_tbl);
 #define ace_sync_irq(irq)	synchronize_irq(irq)
 
 #ifndef offset_in_page
+
+/*
+ * IAMROOT, 2022.01.11:
+ * offset_in_page(ptr) == !PAGE_ALIGNED(ptr)
+ */
 #define offset_in_page(ptr)	((unsigned long)(ptr) & ~PAGE_MASK)
 #endif
 

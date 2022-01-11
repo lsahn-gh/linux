@@ -255,6 +255,11 @@ static inline void *offset_to_ptr(const int *off)
 #endif /* __ASSEMBLY__ */
 
 /* &a[0] degrades to a pointer: a different type from an array */
+/*
+ * IAMROOT, 2022.01.11: 
+ * a가 배열이 아니면 compile error. 배열이 아니면 &(a)[0]문법이 적용되지 않는다.
+ * __same_type으로 &(a)[0] 문법이 적용되는지 code 생성없이 확인한다.
+ */
 #define __must_be_array(a)	BUILD_BUG_ON_ZERO(__same_type((a), &(a)[0]))
 
 /*

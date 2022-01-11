@@ -73,6 +73,13 @@ struct pcpu_group_info {
 };
 
 struct pcpu_alloc_info {
+/*
+ * IAMROOT, 2022.01.11:
+ * atom_size : 최소 할당단위
+ * alloc_size : 실제 할당 사이즈
+ * __ai_size  : 내부 전용
+ * nr_groups : group개수. group은 numa를 뜻함.
+ */
 	size_t			static_size;
 	size_t			reserved_size;
 	size_t			dyn_size;
