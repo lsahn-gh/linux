@@ -66,18 +66,34 @@ extern void *pcpu_base_addr;
 extern const unsigned long *pcpu_unit_offsets;
 
 struct pcpu_group_info {
+/*
+ * IAMROOT, 2022.01.12:
+ * - nr_units : upa(unit per allocate)로 roundup 된 unit 개수.
+ * - base_offset : cpu_map의 첫 시작 주소에서부터의 offset.
+ *   여기서 cpu_map의 첫 시작 주소는 원래 struct pcpu_alloc_info 할당햇을때
+ *   의 cpu_map[0] 주소를 의미한다.
+ * | struct pcpu_alloc_info | groups[]  | cpu_map*             |
+ *                                       '--cpu_map[0] 여기가 기준
+ * cpu_map : upa 단위로 group마다 roundup 되어 넉넉히 할당되고
+ *           각 cpu_map에 나눠져서 연결되었다.
+ */
 	int			nr_units;	/* aligned # of units */
 	unsigned long		base_offset;	/* base address offset */
 	unsigned int		*cpu_map;	/* unit->cpu map, empty
 						 * entries contain NR_CPUS */
 };
 
+/*
+ * IAMROOT, 2022.01.12:
+ *                          | nr_groups | nr_units             |
+ * | struct pcpu_alloc_info | groups[]  | cpu_map*             |
+ */
 struct pcpu_alloc_info {
 /*
  * IAMROOT, 2022.01.11:
  * atom_size : 최소 할당단위
  * alloc_size : 실제 할당 사이즈
- * __ai_size  : 내부 전용
+ * __ai_size  : 내부 전용. 전체 size에서 PFN_ALGIN된 size.
  * nr_groups : group개수. group은 numa를 뜻함.
  */
 	size_t			static_size;

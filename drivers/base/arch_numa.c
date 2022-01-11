@@ -31,7 +31,11 @@ static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
 
 /*
  * IAMROOT, 2021.11.06:
- * - numa_alloc_distance에서 설정된다.
+ * - numa_alloc_distance에서 memblock으로 할당되고,
+ *   초기값으로 from, to가 같은, 즉 자기자신만을
+ *   LOCAL_DISTANCE로, 나머지를 REMOTE_DISTANCE로 초기화한다.
+ * - of_numa_parse_distance_map_v1에서 dt에서 읽은 값으로 재설정을 한다.
+ * - numa_distance[from * numa_distance_cnt + to] 의 방식으로 접근한다.
  */
 static int numa_distance_cnt;
 static u8 *numa_distance;
@@ -203,7 +207,7 @@ static void __init pcpu_fc_free(void *ptr, size_t size)
  *   embed(arm64) : vmalloc의 위에서부터 아래로 자라는 방식으로 메모리 할당.
  *   paged : vmalloc의 밑에서부터 위로 자라는 방식으로 메모리 할당.
  *
- * - 관련 api
+ * - percpu 관련 api
  *   --- DEFINE_PER_CPU 시리즈
  *   --- per_cpu_ptr, per_cpu_offset, this_cpu_offset, this_cpu_ptr(많이쓰임),
  * __verify_pcu_ptr, 

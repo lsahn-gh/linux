@@ -2435,6 +2435,20 @@ phys_addr_t per_cpu_ptr_to_phys(void *addr)
  * Pointer to the allocated pcpu_alloc_info on success, NULL on
  * failure.
  */
+/*
+ * IAMROOT, 2022.01.11:
+ * 
+ * - struct_size(ai, groups, nr_groups) = sizeof(struct pcpu_alloc_info) +
+ *	sizeof(struct pcpu_group_info) * nr_groups
+ * - base_size = 위 struct_size에서 구한 값을 struct pcpu_group_info
+ *   member인 cpu_map type size로 align
+ *
+ * +------------------------- ai_size -----------------------+
+ * +------ base_size --------------------+                   |
+ * | ai              | groups[nr_groups] | cpu_map[nr_units] |
+ *                   | groups[0]         | cpu_map[0]
+ *                        '------------------' 모든 값 NR_CPUS
+ */
 struct pcpu_alloc_info * __init pcpu_alloc_alloc_info(int nr_groups,
 						      int nr_units)
 {
@@ -2451,8 +2465,16 @@ struct pcpu_alloc_info * __init pcpu_alloc_alloc_info(int nr_groups,
 	if (!ptr)
 		return NULL;
 	ai = ptr;
+/*
+ * IAMROOT, 2022.01.12:
+ * - ptr이 cpu_map[nr_units] 의 시작 주소가 된다.
+ */
 	ptr += base_size;
-
+/*
+ * IAMROOT, 2022.01.12:
+ * - 일단 cpu_maps 전체를 초기화하기 위해 ai->groups[0]에 연결하고
+ *   초기화한다.
+ */
 	ai->groups[0].cpu_map = ptr;
 
 	for (unit = 0; unit < nr_units; unit++)
@@ -2939,8 +2961,7 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  *		2M / 32 = 65536
  *		alloc당 unit개수는 32개가 되고, unit의 size는 65536으로 커지고
  *		소수점 size는 없으니 남는 사이즈도 없다.
- *
- *	--- offset_in_page(alloc_size / upa)
+ *   --- offset_in_page(alloc_size / upa)
  *		page align확인.
  */
 	alloc_size = roundup(min_unit_size, atom_size);
@@ -3101,6 +3122,18 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  */
 	cpu_map = ai->groups[0].cpu_map;
 
+/*
+ * IAMROOT, 2022.01.11:
+ * ex) group_cnt[4] = {4, 2, 2, 4}, upa = 4
+ * nr_units = 4 + 4 + 4 + 4 = 16
+ *
+ * | ai | groups[0..nr_groups] | cpu_map[0..nr_units] |
+ * | ai | groups[0..3]         | cpu_map[0..15]       |
+ *        gorup[0] ------------->cpu_map[0]
+ *        group[1] ---------------->cpu_map[4]
+ *        group[2] ------------------->cpu_map[8]
+ *        group[3] ----------------------->cpu_map[12]
+ */
 	for (group = 0; group < nr_groups; group++) {
 		ai->groups[group].cpu_map = cpu_map;
 		cpu_map += roundup(group_cnt[group], upa);
@@ -3133,6 +3166,11 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 		 */
 		gi->base_offset = unit * ai->unit_size;
 
+/*
+ * IAMROOT, 2022.01.12:
+ * - cpu가 group에 속해 있다면 해당 group info의 cpu_map에 cpu 번호를
+ *   순서대로 넣는다.
+ */
 		for_each_possible_cpu(cpu)
 			if (group_map[cpu] == group)
 				gi->cpu_map[gi->nr_units++] = cpu;

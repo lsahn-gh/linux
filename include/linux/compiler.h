@@ -257,8 +257,14 @@ static inline void *offset_to_ptr(const int *off)
 /* &a[0] degrades to a pointer: a different type from an array */
 /*
  * IAMROOT, 2022.01.11: 
- * a가 배열이 아니면 compile error. 배열이 아니면 &(a)[0]문법이 적용되지 않는다.
- * __same_type으로 &(a)[0] 문법이 적용되는지 code 생성없이 확인한다.
+ * a가 array(type [])이 아니면 compile error.
+ * array(type [])이나 pointer(type *)가 아니면 &(a)[0]문법이 적용되지 않는다.
+ * 또한 a가 array, pointer이든 간에 &(a)[0]을 함으로써 우측은 pointer type이
+ * 된다.
+ * a가 array일 경우 __same_type(type a[], type *a) => 0 => 정상
+ * a가 pointer일 경우 __same_type(type *a, type *a) => 1 => compile error
+ * 가 되어 pointer로 잘못 선언되었는지 확인도 겸한다.
+ * 즉 a는 반드시 array만을 검사한다.
  */
 #define __must_be_array(a)	BUILD_BUG_ON_ZERO(__same_type((a), &(a)[0]))
 

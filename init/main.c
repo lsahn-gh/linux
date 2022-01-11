@@ -191,18 +191,12 @@ char *saved_command_line;
  */
 static char *static_command_line;
 
-/*
- * IAMROOT, 2022.01.01: 
- * extra_command_line -> bootconfig kernel.*
- *
- * extra_init_args    -> bootconfig init.* 
- */
-
 /* Untouched extra command line */
 /*
  * IAMROOT, 2022.01.05:
  * - setup_boot_config 에서 초기화된다.
  * - initrd에서 가져온 bootconfig의 kernel key와 value string이 있는 memblock
+ *   extra_command_line -> bootconfig kernel.*
  */
 static char *extra_command_line;
 /* Extra init arguments */
@@ -210,6 +204,7 @@ static char *extra_command_line;
  * IAMROOT, 2022.01.05:
  * - setup_boot_config 에서 초기화된다.
  * - initrd에서 가져온 bootconfig의 init key와 value string이 있는 memblock
+ *   extra_init_args    -> bootconfig init.* 
  */
 static char *extra_init_args;
 
@@ -858,7 +853,8 @@ static void __init setup_command_line(char *command_line)
 /*
  * IAMROOT, 2022.01.05:
  *
- * 즉 boot_command_line에서 [--]이후에 extra_init_args를 복사한다.
+ * saved_command_line + len의 boot_command_line의 [--]이후의 위치를 뜻하며
+ * 그자리에 extra_init_args를 복사한다.
  *
  * saved_command_line = [extra_command_line][bootcmds....--][extra_init_args]
  *                      [ len = xlen        + initargs_offs]

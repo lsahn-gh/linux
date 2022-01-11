@@ -264,6 +264,12 @@ struct ftrace_likely_data {
 /*
  * IAMROOT, 2022.01.11:
  * @return typeof(a) == type(b) ? 1 : 0
+ *
+ * ps) []과 *을 다른 type으로 취급한다.
+ * __same_type(int, int) => 1
+ * __same_type(int, char) => 0
+ * __same_type(int [], int []) => 1
+ * __same_type(int *, int []) => 0
  */
 #define __same_type(a, b) __builtin_types_compatible_p(typeof(a), typeof(b))
 
