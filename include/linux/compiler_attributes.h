@@ -214,6 +214,11 @@
  * gcc: https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#Common-Function-Attributes
  * clang: https://clang.llvm.org/docs/AttributeReference.html#flatten
  */
+/*
+ * IAMROOT, 2022.01.12:
+ * https://awesomekling.github.io/Smarter-C++-inlining-with-attribute-flatten/
+ * 함수에서 호출하는 모든 함수가 inline으로 동작한다.
+ */
 # define __flatten			__attribute__((flatten))
 
 /*

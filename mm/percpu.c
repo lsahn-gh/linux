@@ -2875,11 +2875,24 @@ early_param("percpu_alloc", percpu_alloc_setup);
  */
 /*
  * IAMROOT, 2022.01.11:
+ * - struct pcpu_alloc_info 구조체를 초기화한다.
+ *   1) alloc_size를 구한다.(pcpu_alloc_info.alloc_size)
+ *   2) 해당 alloc_size에 몇개의 unit을 넣을수 있는지 산출한다.
+ *   4) unit_size를 구한다.(pcpu_alloc_info.unit_size)
+ *   5) 같은 numa node에 있는 cpu끼리 group화 하여 정보를 초기화하고 해당
+ *   group에 속한 cpu정보를 넣는다.(pcpu_alloc_info.group, group.cpu_map)
+ *
+ * ---
+ *
  * - unit
- *   static + reserved + dyn 을 합쳐 부르는말.
+ *   static + reserved + dyn 을 합쳐 부르는말. cpu 한개당 unit 1개가 할당
+ *   되며, alloc에 따라 cpu가 할당되지 않은 unit도 존재한다.
  *
  * - group
  *   cpu끼리의 numa가 서로 같은 numa인 경우(LOCAL_DISTANCE) group이라 칭함.
+ *
+ * - upa(unit per allocation)
+ *   1번의 alloc으로 관리할수있는 unit 수
  */
 static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 				size_t reserved_size, size_t dyn_size,
@@ -2929,11 +2942,22 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 	 * which can accommodate 4k aligned segments which are equal to
 	 * or larger than min_unit_size.
 	 */
+/*
+ * IAMROOT, 2022.01.12:
+ * 한개의 unit에 필요한 size를 확정한다.
+ */
 	min_unit_size = max_t(size_t, size_sum, PCPU_MIN_UNIT_SIZE);
 
 	/* determine the maximum # of units that can fit in an allocation */
 /*
  * IAMROOT, 2022.01.08:
+ * alloc size를 확정한다. atom_size단위로 alloc을 요청하는데, 만약 atom_size가
+ * 클 경우 min_unit_size보다 커질것이므로 여러개의 unit을 관리할수있을것이다.
+ * alloc_size를 unit_size로 나눠서 나머지가 안남고, page_align되게 unit_size를
+ * 조정한다.(alloc_size당 unit개수를 낮추는게 결국 unit_size를 높이게 된다.)
+ *
+ * --- 
+ *
  * upa: unit per allocation
  *      SMP 시스템에서 atom_size가 M단위의 큰 할당을 사용하고, 더 빠른
  *      성능을 내게한다.
@@ -3026,10 +3050,14 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 
 /*
  * IAMROOT, 2022.01.08:
- * alloc_size가 atom_size의 단위로 정렬되어 있고, 이 값은 1, 2, 4M 이런 단위를
+ * - alloc_size가 atom_size의 단위로 정렬되어 있고, 이 값은 1, 2, 4M 이런 단위를
  * 사용하며 2의 승수 단위 나눌때에만 나머지가 없다. 따라서 upa가 32부터 시작한
  * 경우 32, 16, 8, 4, 2, 1과 같은 값 이외에는 continue를 통해 skip 한다.
  * 예) 2M%32 != 0 || ((2M/32)%4k != 0)
+ *
+ * - 위에서 max_upa를 정할때 같은 방식으로 upa를 넘기는것을 확인했었다.
+ *   page_align이 안맞거나alloc_size를 upa로 나눴을때 나머지가 있는 upa는
+ *   skip한다.
  */
 		if (alloc_size % upa || (offset_in_page(alloc_size / upa)))
 			continue;
@@ -3060,7 +3088,7 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 /*
  * IAMROOT, 2022.01.11:
  * - group_cnt[group] = group에 속한 cpu개수
- * - this_allocs = group에 속한 cpu개수를 전부 넣을수있는 upa단위의 할당 횟수
+ * - this_allocs = group에 속한 cpu개수를 전부 넣을수있는 할당횟수.
  * - wasted = (upa 단위로 할당한 size) - (group에 속한 cpu개수)
  *			= upa * this_allocs - (group에 속한 cpu개수)
  * group_cnt[group]이 upa의 배수에 맞지 않는다면 round up된만큼 wasted가 생긴다.
@@ -3170,6 +3198,15 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  * IAMROOT, 2022.01.12:
  * - cpu가 group에 속해 있다면 해당 group info의 cpu_map에 cpu 번호를
  *   순서대로 넣는다.
+ *
+ * ex) group_cnt[4] = {4, 2, 2, 4}, upa = 4
+ *     NUMA node#0:cpu#0-3 node#1:cpu4-5 node#2:cpu6-7 node#3:cpu8-11
+ *
+ * | ai | groups[0..3]  | cpu_map[0..15]                               |
+ *        gorup[0] ------>&cpu_map[0] = {0, 1, 2, 3}
+ *        group[1] --------->&cpu_map[4] = {4, 5, NR_CPUS, NR_CPUS}
+ *        group[2] ------------>&cpu_map[8] = {6, 7, NR_CPUS, NR_CPUS}
+ *        group[3] ---------------->&cpu_map[12] = {8, 9, 10, 11}
  */
 		for_each_possible_cpu(cpu)
 			if (group_map[cpu] == group)
