@@ -485,6 +485,10 @@ static inline void bitmap_replace(unsigned long *dst,
 		__bitmap_replace(dst, old, new, mask, nbits);
 }
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - unset bit를 찾아서 rs, set bit를 찾아서 re로 return한다.
+ */
 static inline void bitmap_next_clear_region(unsigned long *bitmap,
 					    unsigned int *rs, unsigned int *re,
 					    unsigned int end)

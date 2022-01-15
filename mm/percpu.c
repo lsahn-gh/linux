@@ -132,15 +132,45 @@
 
 static int pcpu_unit_pages __ro_after_init;
 static int pcpu_unit_size __ro_after_init;
+/*
+ * IAMROOT, 2022.01.15:
+ * - 전체 unit개수. (사용하지 않은 unit도 포함된 수)
+ */
 static int pcpu_nr_units __ro_after_init;
 static int pcpu_atom_size __ro_after_init;
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu_to_depopulate_slot + 1로 구해진다.
+ *   총 slot 개수
+ */
 int pcpu_nr_slots __ro_after_init;
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu_sidelined_slot + 1의 자리에 위치한다.
+ *   pcpu는 빨리 동작해야되므로 미리 free chunk를
+ *   준비해놓는 slot
+ */
 static int pcpu_free_slot __ro_after_init;
+/*
+ * IAMROOT, 2022.01.15:
+ * - 가장 바깥의 slot. unit_size로 구해진다.
+ */
 int pcpu_sidelined_slot __ro_after_init;
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu_free_slot + 1에 위치한다.
+ */
 int pcpu_to_depopulate_slot __ro_after_init;
 static size_t pcpu_chunk_struct_size __ro_after_init;
 
 /* cpus with the lowest and highest unit addresses */
+/*
+ * IAMROOT, 2022.01.15:
+ * 아래 변수들 대부분은 pcpu_setup_first_chunk 에서 설정한다.
+ *
+ * - pcpu_low_unit_cpu, pcpu_high_unit_cpu
+ *   제일 낮은 unit주소로부터 unit의 시작위치가 가장 높은것과 낮은것의 cpu번호가 저장된다.
+ */
 static unsigned int pcpu_low_unit_cpu __ro_after_init;
 static unsigned int pcpu_high_unit_cpu __ro_after_init;
 
@@ -160,6 +190,10 @@ static const size_t *pcpu_group_sizes __ro_after_init;
  * chunks, this one can be allocated and mapped in several different
  * ways and thus often doesn't live in the vmalloc area.
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * - dynamic chunk를 관리한다.
+ */
 struct pcpu_chunk *pcpu_first_chunk __ro_after_init;
 
 /*
@@ -167,11 +201,19 @@ struct pcpu_chunk *pcpu_first_chunk __ro_after_init;
  * chunk and serves it for reserved allocations.  When the reserved
  * region doesn't exist, the following variable is NULL.
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * - reserved chunk를 전용으로 관리한다.
+ */
 struct pcpu_chunk *pcpu_reserved_chunk __ro_after_init;
 
 DEFINE_SPINLOCK(pcpu_lock);	/* all internal data structures */
 static DEFINE_MUTEX(pcpu_alloc_mutex);	/* chunk create/destroy, [de]pop, map ext */
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu_nr_slots 개수만큼 생긴다. list header 관리.
+ */
 struct list_head *pcpu_chunk_lists __ro_after_init; /* chunk list slots */
 
 /* chunks which need their map areas extended, protected by pcpu_lock */
@@ -230,6 +272,13 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
 	return addr >= start_addr && addr < end_addr;
 }
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - unit_size to slot
+ * - ex) size = 96k 라고 가정.
+ *   highbit = 17(bit 16)
+ *   max(17 - 5 + 2, 1) = 14
+ */
 static int __pcpu_size_to_slot(int size)
 {
 	int highbit = fls(size);	/* size is in bytes */
@@ -286,6 +335,15 @@ static unsigned long pcpu_chunk_addr(struct pcpu_chunk *chunk,
 /*
  * The following are helper functions to help access bitmaps and convert
  * between bitmap offsets to address offsets.
+ */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 해당 index block의 alloc map을 가져온다.
+ * - ex) index=2
+ * blk   | 0     | 1      | 2      | 3      | ...
+ * alloc | 0..15 | 16..31 | 32..47 | 48..63 | ...
+ *                          ^
+ *  &alloc_map[(1024 * 2) / BITS_PER_LONG(64)] == &alloc_map[32]
  */
 static unsigned long *pcpu_index_alloc_map(struct pcpu_chunk *chunk, int index)
 {
@@ -616,6 +674,10 @@ static inline void pcpu_update_empty_pages(struct pcpu_chunk *chunk, int nr)
  * This is used to determine if the hint region [a, b) overlaps with the
  * allocated region [x, y).
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * - (a, b) 와 (x, y)가 겹치는지 확인한다.
+ */
 static inline bool pcpu_region_overlap(int a, int b, int x, int y)
 {
 	return (a < y) && (x < b);
@@ -633,15 +695,34 @@ static inline bool pcpu_region_overlap(int a, int b, int x, int y)
  */
 static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
 {
+/*
+ * IAMROOT, 2022.01.15:
+ * - start ~ end전까지 0인 bit가 되며, contig는 즉 연속적인 free size를 의미한다.
+ */
 	int contig = end - start;
 
 	block->first_free = min(block->first_free, start);
+/*
+ * IAMROOT, 2022.01.15:
+ * - start가 0이면 처음부터 free임으로 left_free가 contig가 된다.
+ */
 	if (start == 0)
 		block->left_free = contig;
-
+/*
+ * IAMROOT, 2022.01.15:
+ * - 마지막까지 contig면 right부터 contig이므로 right_free를 갱신한다.
+ */
 	if (end == block->nr_bits)
 		block->right_free = contig;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - size가 큰것이 우선순위가 높다.
+ * - 아에 0번째에 위치하거나 우측에 위치하는게 우선순위가 높다.
+ * - contig가 기존 config_hint보다 클경우
+ *   scan_hint <- contig_hint <- contig 로 밀어내기를 한다. 예외상황일 경우엔
+ *   scan_hint를 초기화 시켜버린다.
+ */
 	if (contig > block->contig_hint) {
 		/* promote the old contig_hint to be the new scan_hint */
 		if (start > block->contig_hint_start) {
@@ -662,7 +743,13 @@ static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
 		}
 		block->contig_hint_start = start;
 		block->contig_hint = contig;
+/*
+ * IAMROOT, 2022.01.15:
+ * - size가 동일한 경우, 위치가 아에 처음이거나 기존 contig_hint_start보다
+ *   우측에 있으면 contig_hint_start를 start로 갱신한다.
+ */
 	} else if (contig == block->contig_hint) {
+
 		if (block->contig_hint_start &&
 		    (!start ||
 		     __ffs(start) > __ffs(block->contig_hint_start))) {
@@ -681,6 +768,11 @@ static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
 			block->scan_hint_start = start;
 			block->scan_hint = contig;
 		}
+/*
+ * IAMROOT, 2022.01.15:
+ * - contig_hint보다 현재 contig가 작은 경우.
+ *   scan_hint와 비교하여 더 유리한경우 scan_hint를 contig로 대체한다.
+ */
 	} else {
 		/*
 		 * The region is smaller than the contig_hint.  So only update
@@ -782,7 +874,17 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
 	unsigned int rs, re, start;	/* region start, region end */
 
 	/* promote scan_hint to contig_hint */
+/*
+ * IAMROOT, 2022.01.15:
+ * 1. scan_hint가 있는경우.
+ *  - 초기화 : scan_hint를 contig_hint로 바꾸고 scan_hint를 초기화한다.
+ *  - bitmap : scan_hint 다음 영역부터 시작한다.
+ * 2 scan_hint가 없는경우
+ *  - 초기화 : contig_hint를 초기화한다.
+ *  - bitmap : first_free 부터 시작한다.
+ */
 	if (block->scan_hint) {
+
 		start = block->scan_hint_start + block->scan_hint;
 		block->contig_hint_start = block->scan_hint_start;
 		block->contig_hint = block->scan_hint;
@@ -794,6 +896,10 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
 
 	block->right_free = 0;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - block내에 alloc_map의 bit가 0인부분을 찾아서 update한다
+ */
 	/* iterate over free areas and update the contig hints */
 	bitmap_for_each_clear_region(alloc_map, rs, re, start,
 				     PCPU_BITMAP_BLOCK_BITS)
@@ -810,6 +916,17 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
  * refreshed by a full scan iff the chunk's contig hint is broken.  Block level
  * scans are required if the block's contig hint is broken.
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * @bit_off 할당 시작 위치
+ * @bits    이미 할당한 size. 1bit당 4byte
+ * - hint
+ *   free 영역이 가장 큰곳을 의미한다.
+ * - start_offset의 경우
+ *   bits_off = 0, bits = start_offset의 map 단위
+ * - end_offset의 경우
+ *   bits_off = last offset - end_offset, end_offset의 map단위
+ */
 static void pcpu_block_update_hint_alloc(struct pcpu_chunk *chunk, int bit_off,
 					 int bits)
 {
@@ -825,6 +942,19 @@ static void pcpu_block_update_hint_alloc(struct pcpu_chunk *chunk, int bit_off,
 	 * are [start, end).  e_index always points to the last block in the
 	 * range.
 	 */
+/*
+ * IAMROOT, 2022.01.15:
+ * - ex) bit_off = 0x450, bits = 0x500
+ *   s_index = 0x450 / 0x400 = 0x1 
+ *   e_index = (0x450 + 0x500 - 1) / 0x400 = 0x2
+ *   s_off = (0x450 & 0x3ff) = 0x50
+ *   e_off = (0x450 + 0x500 - 1) & 0x3ff + 1 = 0x150
+ *
+ *                         v`s_index           v`e_index
+ *   blk       | 0       | 1                 | 2                      | 3       |
+ *   alloc_map | 0       | x400 x450 x500 .. | x800 x850 x900 x950 .. | xC00 .. | ..
+ *                              ^s_off                        ^e_off
+ */
 	s_index = pcpu_off_to_block_index(bit_off);
 	e_index = pcpu_off_to_block_index(bit_off + bits - 1);
 	s_off = pcpu_off_to_block_off(bit_off);
@@ -839,21 +969,51 @@ static void pcpu_block_update_hint_alloc(struct pcpu_chunk *chunk, int bit_off,
 	 * If the allocation breaks the contig_hint, a scan is required to
 	 * restore this hint.
 	 */
+/*
+ * IAMROOT, 2022.01.15:
+ * - s_block이 빈페이지인 경우.
+ */
 	if (s_block->contig_hint == PCPU_BITMAP_BLOCK_BITS)
 		nr_empty_pages++;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 할당시작지점이 s_block의 first_free(처음 빈자리)인 경우와 일치한경우이다.
+ *   이 경우 현재 first free 지점에서 bits만큼 할당이 되었으므로
+ *   새로운 first_free지점을 찾아서 갱신을 해야된다.
+ *
+ * ex) bits = 4
+ *
+ * old)
+ *  1111000000
+ *      ^first_free == s_off 
+ * 
+ * new)
+ *      .s_off 
+ *      v 
+ *  1111111100
+ *          ^first_free(new)
+ */
 	if (s_off == s_block->first_free)
 		s_block->first_free = find_next_zero_bit(
 					pcpu_index_alloc_map(chunk, s_index),
 					PCPU_BITMAP_BLOCK_BITS,
 					s_off + bits);
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 해당영역이 겹치면 scan_hint를 초기화한다.
+ */
 	if (pcpu_region_overlap(s_block->scan_hint_start,
 				s_block->scan_hint_start + s_block->scan_hint,
 				s_off,
 				s_off + bits))
 		s_block->scan_hint = 0;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 빈영역중에 가장 큰영역(contig_hint)과 요청 영역이 겹치면 contig를 갱신해야될것이다.
+ */
 	if (pcpu_region_overlap(s_block->contig_hint_start,
 				s_block->contig_hint_start +
 				s_block->contig_hint,
@@ -864,6 +1024,12 @@ static void pcpu_block_update_hint_alloc(struct pcpu_chunk *chunk, int bit_off,
 			s_block->left_free = 0;
 		pcpu_block_refresh_hint(chunk, s_index);
 	} else {
+/*
+ * IAMROOT, 2022.01.15:
+ * - left_free, right_free를 갱신한다.
+ *   s_index == e_index이면 같은 block에서 마지막 right_free가 생길것이므로 계산을하고
+ *   한 block을 초과하는경우는 s_block의 right가 전부 채워질것이므로 0이된다.
+ */
 		/* update left and right contig manually */
 		s_block->left_free = min(s_block->left_free, s_off);
 		if (s_index == e_index)
@@ -876,7 +1042,16 @@ static void pcpu_block_update_hint_alloc(struct pcpu_chunk *chunk, int bit_off,
 	/*
 	 * Update e_block.
 	 */
+/*
+ * IAMROOT, 2022.01.15:
+ * - s_block을 처리할때와 비슷한방식으로 e_block을 처리한다.
+ */
 	if (s_index != e_index) {
+
+/*
+ * IAMROOT, 2022.01.15:
+ * - end_offset이 없는경우 마지막 block은 전부 미사용일 것이다.
+ */
 		if (e_block->contig_hint == PCPU_BITMAP_BLOCK_BITS)
 			nr_empty_pages++;
 
@@ -1312,6 +1487,10 @@ static void pcpu_init_md_block(struct pcpu_block_md *block, int nr_bits)
 	block->nr_bits = nr_bits;
 }
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - chunk_md와 각각의 md_blocks를 초기화한다.
+ */
 static void pcpu_init_md_blocks(struct pcpu_chunk *chunk)
 {
 	struct pcpu_block_md *md_block;
@@ -1337,6 +1516,12 @@ static void pcpu_init_md_blocks(struct pcpu_chunk *chunk)
  *
  * RETURNS:
  * Chunk serving the region at @tmp_addr of @map_size.
+ */
+/*
+ * IAMROOT, 2022.01.15:
+ * reserved or dynamic 영역을 초기화한다.
+ * @tmp_addr 해당 영역의 시작 주소
+ * @map_size 해당 영역의 size
  */
 static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 							 int map_size)
@@ -1409,6 +1594,17 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 
 	chunk->free_bytes = map_size;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - start_offset과 end_offset의 범위는 사용을 안할것이므로 아에 bits을 unset한다.
+ * - ex) region memory map
+ *
+ *           |                   region_size                     |
+ *           | start_offset |   map_size            | end_offset |
+ * alloc_map | 111.....1111 | 0000000....0000000000 | 1111...111 |
+ * bound_map | 100.....0000 | 1000000....0000000000 | 100....000 | 1
+ *                            ^first_free
+ */
 	if (chunk->start_offset) {
 		/* hide the beginning of the bitmap */
 		offset_bits = chunk->start_offset / PCPU_MIN_ALLOC_SIZE;
@@ -2504,6 +2700,23 @@ void __init pcpu_free_alloc_info(struct pcpu_alloc_info *ai)
  *
  * Print out information about @ai using loglevel @lvl.
  */
+/*
+ * IAMROOT, 2022.01.15:
+ *
+ * rpi4 예)
+ * percpu: Embedded 24 pages/cpu s58904 r8192 d31208 u98304
+ * pcpu-alloc: s58904 r8192 d31208 u98304 alloc=24*4096
+ * pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3
+ *
+ * x86 예)
+ * percpu: Embedded 56 pages/cpu s192512 r8192 d28672 u262144
+ * pcpu-alloc: s192512 r8192 d28672 u262144 alloc=1*2097152
+ * pcpu-alloc: [0] 0 1 2 3 4 5 6 7 
+ *
+ * - alloc 1회마다 unit이 어떻게 저장되있는지 출력한다.
+ *   []안의 값은 group이고, 그 밖에 잇는 값은 해당 group의 unit에 대응하는 cpu번호가
+ *   표시되고, 할당이 안된 unit은 ---로 표시된다.
+ */
 static void pcpu_dump_alloc_info(const char *lvl,
 				 const struct pcpu_alloc_info *ai)
 {
@@ -2535,14 +2748,28 @@ static void pcpu_dump_alloc_info(const char *lvl,
 		int unit = 0, unit_end = 0;
 
 		BUG_ON(gi->nr_units % upa);
+/*
+ * IAMROOT, 2022.01.15:
+ * - 한번의 alloc이 for문의 1주기가 된다. 즉 한번의 alloc에서의 cpu 정보를 출력한다.
+ * - ex) pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3
+ *   alloc이 4번 발생했다. 0번 group에 0, 1, 2, 3이라는 cpu 번호가 있따.
+ */
 		for (alloc_end += gi->nr_units / upa;
 		     alloc < alloc_end; alloc++) {
+/*
+ * IAMROOT, 2022.01.15:
+ * - [group_idx] cpu_idx
+ */
 			if (!(alloc % apl)) {
 				pr_cont("\n");
 				printk("%spcpu-alloc: ", lvl);
 			}
 			pr_cont("[%0*d] ", group_width, group);
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 해당 unit에 cpu가 있으면 cpu번호, 없으면 ---
+ */
 			for (unit_end += upa; unit < unit_end; unit++)
 				if (gi->cpu_map[unit] != NR_CPUS)
 					pr_cont("%0*d ",
@@ -2614,6 +2841,16 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	size_t size_sum = ai->static_size + ai->reserved_size + ai->dyn_size;
 	size_t static_size, dyn_size;
 	struct pcpu_chunk *chunk;
+/*
+ * IAMROOT, 2022.01.15:
+ * - group_offsets : 임시 배열. group 개수만큼 생성. 해당 group의 base_offset 저장.
+ * - group_size : group개수 만큼 생성. 해당 group의 unit들이 사용하는 memory size 저장
+ * - unit_off : possible cpu개수만큼 생성.
+ *   제일 낮은 unit 주소로부터 해당 unit들의 시작위치 offset
+ * - unit_map
+ *   possible cpu개수만큼 생성, 초기값으로 UNIT_MAX로 설정
+ *   cpu to unit 번호.
+ */
 	unsigned long *group_offsets;
 	size_t *group_sizes;
 	unsigned long *unit_off;
@@ -2764,6 +3001,10 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	 * configured sizes.
 	 */
 	static_size = ALIGN(ai->static_size, PCPU_MIN_ALLOC_SIZE);
+/*
+ * IAMROOT, 2022.01.15:
+ * - static_size를 align하고 align으로 추가된 size를 dyn_size에서 뺀다.
+ */
 	dyn_size = ai->dyn_size - (static_size - ai->static_size);
 
 	/*
@@ -2774,10 +3015,24 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	 * pcpu_first_chunk, will always point to the chunk that serves
 	 * the dynamic region.
 	 */
+/*
+ * IAMROOT, 2022.01.15:
+ * - reserved가 있으면 tmp_addr은 reserved 영역, 아니면 dynamic 영역의 시작주소가
+ *   될것이다.
+ * - 그에 따라 map_size도 reserved_size를 보고 해당 영역 size로 정해진다.
+ */
 	tmp_addr = (unsigned long)base_addr + static_size;
 	map_size = ai->reserved_size ?: dyn_size;
 	chunk = pcpu_alloc_first_chunk(tmp_addr, map_size);
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - reserved_size가 있다면 방금 초기화한게 reserved 영역이므로 해당 영역을
+ *   관리하도록한다.
+ * - reserved 다음영역은 dynamic 영역이므로 한번더 pcpu_alloc_chunk으로 
+ *   dynamic 영역을 초기화한다.
+ * - 초기화된 dynamic 영역은 pcpu_first_chunk로 관리된다.
+ */
 	/* init dynamic chunk if necessary */
 	if (ai->reserved_size) {
 		pcpu_reserved_chunk = chunk;
@@ -3254,7 +3509,15 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
  * 0 on success, -errno on failure.
  */
 /*
- * IAMROOT, 2022.01.11:
+ * IAMROOT, 2022.01.15:
+ * - alloc_info를 구해오고 group마다 unit_map과 할당 정보를 초기화한다.
+ * - 사용하지 않은 cpu_map을 참고해 unitmemory를 할당해제 한다.
+ * - node(group)마다 unit들을 할당하고. static 영역을 복사한다. 또한
+ *   이때 alloc_info를 참고해 사용하지 않은 memory는 해제한다.
+ * - base(가장 낮은 주소의 unit_memory 주소)와 max_distance(unit memory span size)를
+ *   구한다. 이때 max_distance가 vmalloc size의 3/4을 넘는지 확인한다.
+ * - 각 node마다 base_offset을 구한다.
+ * - pcpu_setup_first_chunk를 수행한다.
  */
 int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 				  size_t atom_size,
@@ -3283,6 +3546,13 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 	if (IS_ERR(ai))
 		return PTR_ERR(ai);
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - size_sum : unit size
+ * - areas : group 주소를 저장할 임시배열
+ *
+ * group 주소를 저장해놓을 임시 배열을 할당해놓는다.
+ */
 	size_sum = ai->static_size + ai->reserved_size + ai->dyn_size;
 	areas_size = PFN_ALIGN(ai->nr_groups * sizeof(void *));
 
@@ -3299,10 +3569,19 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 		unsigned int cpu = NR_CPUS;
 		void *ptr;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 최초에 cpu가 세팅된 cpu_map을 찾는다.
+ */
 		for (i = 0; i < gi->nr_units && cpu == NR_CPUS; i++)
 			cpu = gi->cpu_map[i];
 		BUG_ON(cpu == NR_CPUS);
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu_embed_first_chunk에서 불러왔을때 alloc_fn == pcpu_fc_alloc
+ * - cpu의 nid가 속한 memblock에서 해당 group의 unit memory을 할당해온다.
+ */
 		/* allocate space for the whole group */
 		ptr = alloc_fn(cpu, gi->nr_units * ai->unit_size, atom_size);
 		if (!ptr) {
@@ -3313,13 +3592,31 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 		kmemleak_free(ptr);
 		areas[group] = ptr;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - base : 할당받은 unit memory주소에서 가장 낮은 주소를 가지고잇는걸 저장한다.
+ * - highest_group : 가장 높은 주소의 unit memory를 가지고 있는 group 번호를 저장한다.
+ */
 		base = min(ptr, base);
+
 		if (ptr > areas[highest_group])
 			highest_group = group;
 	}
+
+/*
+ * IAMROOT, 2022.01.15:
+ * - max_distance
+ *   제일 낮은 group unit memory start addr ~ 제일 높은 group unit memory 주소의 end addr
+ */
 	max_distance = areas[highest_group] - base;
 	max_distance += ai->unit_size * ai->groups[highest_group].nr_units;
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - 후에 2nd, 3rd chuk를 생성할때 vmalloc공간에 mapping을 하는데 2nd는 1st를 만들었을때
+ *   사용했던 offset size를 가지고 만들고, 3rd부터는 2nd에서 만들었던 공간에서 자라는
+ *   방식으로 할당되기 때문에 여유공간이 필요하다. 그래서 어느정도 여유공간을 두는것이다.
+ */
 	/* warn if maximum distance is further than 75% of vmalloc space */
 	if (max_distance > VMALLOC_TOTAL * 3 / 4) {
 		pr_warn("max_distance=0x%lx too large for vmalloc space 0x%lx\n",
@@ -3336,6 +3633,13 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 	 * allocations are complete; otherwise, we may end up with
 	 * overlapping groups.
 	 */
+/*
+ * IAMROOT, 2022.01.15:
+ * 1.사용하지 않은 cpu_map을 찾아 해당 unit memory를 해제한다.
+ * 2. percpu section(static data)를 각 group의 unit마다 복사한다.
+ * 3. 실제 사용하는 unit_size보다 많은 영역이 unit memory로 할당된경우 해당 영역을
+ * free한다.
+ */
 	for (group = 0; group < ai->nr_groups; group++) {
 		struct pcpu_group_info *gi = &ai->groups[group];
 		void *ptr = areas[group];
@@ -3352,6 +3656,10 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - base_offset : 제일 낮은 unit memory의 주소부터 현재 group의 unit memory 주소의 offset
+ */
 	/* base address is now known, determine group base offsets */
 	for (group = 0; group < ai->nr_groups; group++) {
 		ai->groups[group].base_offset = areas[group] - base;

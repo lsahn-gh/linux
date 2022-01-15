@@ -5,6 +5,10 @@
 #include <linux/lcm.h>
 
 /* Lowest common multiple */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 최소공배수
+ */
 unsigned long lcm(unsigned long a, unsigned long b)
 {
 	if (a && b)

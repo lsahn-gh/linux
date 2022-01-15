@@ -20,6 +20,10 @@
  * @a: first value
  * @b: second value
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 최소 공약수
+ */
 unsigned long gcd(unsigned long a, unsigned long b)
 {
 	unsigned long r = a | b;

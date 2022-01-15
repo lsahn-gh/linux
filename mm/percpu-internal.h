@@ -17,6 +17,10 @@
  * we don't know if a new contig hint would be better than the current one.
  */
 struct pcpu_block_md {
+/*
+ * IAMROOT, 2022.01.15:
+ * - 
+ */
 	int			scan_hint;	/* scan hint for block */
 	int			scan_hint_start; /* block relative starting
 						    position of the scan hint */
@@ -39,20 +43,52 @@ struct pcpu_chunk {
 
 	struct list_head	list;		/* linked to pcpu_slot lists */
 	int			free_bytes;	/* free bytes in the chunk */
+/*
+ * IAMROOT, 2022.01.15:
+ * - chunk의 전체 bits가 저장된다.
+ */
 	struct pcpu_block_md	chunk_md;
 	void			*base_addr;	/* base address of this chunk */
 
+/*
+ * IAMROOT, 2022.01.15:
+ * - region 전체영역을 PCPU_MIN_ALLOC_SIZE 단위로 관리하기
+ *   위한 bitmap
+ */
 	unsigned long		*alloc_map;	/* allocation map */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 사용중인 영역과 free영역의 시작마다 1로 set된다. 끝을 구별
+ *   해야되므로 1bit를 더 관리해야된다.
+ * - alloc_map보다 1bit를 더 관리해야된다.
+ * - start_offset이 있으면 0번 bit, start_offset 지점의 영역 bit에
+ *   1이 set된다. 즉 처음부터 안쓰는범위를 제외한다.
+ * - end_offset이 있으면 region last bit, start_offset + map_size
+ *   지점의 영역 bit에 1이 set된다. 즉 처음부터 안쓰는범위를 제외한다.
+ */
 	unsigned long		*bound_map;	/* boundary map */
+/*
+ * IAMROOT, 2022.01.15:
+ * - region 영역에 대해서 PCPU_BITMAP_BLOCK_SIZE 단위로 관리한다.
+ */
 	struct pcpu_block_md	*md_blocks;	/* metadata blocks */
 
 	void			*data;		/* chunk data */
 	bool			immutable;	/* no [de]population allowed */
 	bool			isolated;	/* isolated from active chunk
 						   slots */
+/*
+ * IAMROOT, 2022.01.15:
+ * - align에 필요한 offset. align이 할필요가없었다면 0일것이다.
+ */
 	int			start_offset;	/* the overlap with the previous
 						   region to have a page aligned
 						   base_addr */
+/*
+ * IAMROOT, 2022.01.15:
+ * - align을 한후에 region 맨끝에 사용하지 않은 공간에 대한
+ *   offset.
+ */
 	int			end_offset;	/* additional area required to
 						   have the region end page
 						   aligned */
@@ -61,8 +97,19 @@ struct pcpu_chunk {
 #endif
 
 	int			nr_pages;	/* # of pages served by this chunk */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 초기값은 nr_pages와 같다.
+ */
 	int			nr_populated;	/* # of populated pages */
 	int                     nr_empty_pop_pages; /* # of empty populated pages */
+/*
+ * IAMROOT, 2022.01.15:
+ * - 실제 사용하는 mapping이 된 page를 표현한 bitmap.
+ *   총 bits는 region size로 계산된다.
+ *   1bit당 PAGE_SIZE.
+ * - 초기값으로 모든 bit가 set된다.
+ */
 	unsigned long		populated[];	/* populated bitmap */
 };
 
@@ -84,6 +131,10 @@ extern struct pcpu_chunk *pcpu_reserved_chunk;
  * This conversion is from the number of physical pages that the chunk
  * serves to the number of bitmap blocks used.
  */
+/*
+ * IAMROOT, 2022.01.15:
+ * - chunk의 크기를 block 단위로 나눈 개수
+ */
 static inline int pcpu_chunk_nr_blocks(struct pcpu_chunk *chunk)
 {
 	return chunk->nr_pages * PAGE_SIZE / PCPU_BITMAP_BLOCK_SIZE;
@@ -95,6 +146,10 @@ static inline int pcpu_chunk_nr_blocks(struct pcpu_chunk *chunk)
  *
  * This conversion is from physical pages to the number of bits
  * required in the bitmap.
+ */
+/*
+ * IAMROOT, 2022.01.15:
+ * - pages를 PCPU_MIN_ALLOC_SIZE로 관리하기위한 bits를 구한다.
  */
 static inline int pcpu_nr_pages_to_map_bits(int pages)
 {
@@ -133,6 +188,10 @@ extern struct pcpu_alloc_info pcpu_stats_ai;
 
 /*
  * For debug purposes. We don't care about the flexible array.
+ */
+/*
+ * IAMROOT, 2022.01.15:
+ * - pcpu debug
  */
 static inline void pcpu_stats_save_ai(const struct pcpu_alloc_info *ai)
 {

@@ -936,6 +936,9 @@ if CGROUPS
 config PAGE_COUNTER
 	bool
 
+# IAMROOT, 2022.01.15:
+# cgroup에서 사용하는 memory controller
+
 config MEMCG
 	bool "Memory controller"
 	select PAGE_COUNTER
