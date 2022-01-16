@@ -1,4 +1,4 @@
-# 최신 ARM64 리눅스 커널 5.10 분석
+# 최신 ARM64 리눅스 커널 5.10/5.15 분석
 
 ## 커뮤니티: IAMROOT 18차
 - [www.iamroot.org][#iamroot] | IAMROOT 홈페이지
@@ -165,3 +165,6 @@
 - 2022.01.08, Zoom 온라인(12명 참석)
 - setup_per_cpu_areas() 진행중
 
+### 34주차
+- 2022.01.15, Zoom 온라인(12명 참석)
+- setup_per_cpu_areas() 진행중
