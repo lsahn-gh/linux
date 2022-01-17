@@ -510,6 +510,16 @@ static inline void bitmap_next_set_region(unsigned long *bitmap,
  * @rs and @re should be integer variables and will be set to start and end
  * index of the current clear or set region.
  */
+/*
+ * IAMROOT, 2022.01.17:
+ * bits는 PCPU_BITMAP_BLOCK_BITS개일 것이다 (1024개)
+ * 
+ * ex) 11111000011111000001111100000
+ *          ^   ^    ^    ^    ^    ^
+ *          <--->    <---->    <----->
+ *           0회차    1회차     2회차
+ *          이 영역들을 찾아서 각 iter마다 rs, re로 나올것이다.
+ */
 #define bitmap_for_each_clear_region(bitmap, rs, re, start, end)	     \
 	for ((rs) = (start),						     \
 	     bitmap_next_clear_region((bitmap), &(rs), &(re), (end));	     \
