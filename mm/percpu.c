@@ -699,10 +699,37 @@ static inline bool pcpu_region_overlap(int a, int b, int x, int y)
  * @block contig_hint, scan_hint, first_free가 저장되는 metadata block
  * @start, end 검색이 된 free area의 start ~ end
  *
- * pcpu 전체 영역에서 free area를 scan중이면서 해당 scan정보를 block에 update
- * 한다.
+ * metablock정보를 업데이트한다. @start ~ @end까지의 범위가 비교되는
+ * free area가 되며 해당 정보로 metablock의 contig_hint, scan_hint가
+ * udpate된다.
  *
+ * scan_hint는 존재하지 않거나 조건에따라
+ * contig_hint 와 size가 같을경우 오른쪽에 위치하며(high address) 아니면
+ * 왼쪽(low address)에만 위치해야 한다.
+ *
+ * 결과1) scan_hint_start가 없는 경우
+ * +-----------------------------------------------------------------------+
+ * |  |xx|                                |xxxxxxxxxxxxx|                  |
+ * +-----------------------------------------------------------------------+
+ *    ^                                   ^
+ *    first_free                          contig_hint_start
+ *
+ * 결과2) scan_hint가 존재
+ * +-----------------------------------------------------------------------+
+ * |  |xx|            |xxxxx|             |xxxxxxxxxxxxx|                  |
+ * +-----------------------------------------------------------------------+
+ *    ^               ^                   ^
+ *    first_free      scan_hint_start     contig_hint_start
+ *
+ * 결과3) scan_hint가 존재2
+ * +-----------------------------------------------------------------------+
+ * |  |xx|            |xxxxx|             |xxxxx|                          |
+ * +-----------------------------------------------------------------------+
+ *    ^               ^                   ^
+ *    first_free      contig_hint_start   scan_hint_start
+ * 이 경우엔 무조건 contig_hint == scan_hint
  * --
+ *
  * first_free, scan_hint_start, conitg_hint_start 의 큰 개념은 다음과 같다.
  * (x : free인 memory라고 가정)
  *
@@ -753,84 +780,6 @@ static inline bool pcpu_region_overlap(int a, int b, int x, int y)
  *  3) 만약 contig_hint가 0으로 시작되면 full scan을 의미한다.
  *
  * ---
- * - pcpu_block_update 함수의 전체적인 설명
- *  meta_data의 contig_hint, scan_hint를 free area size(contig)와 비교하여
- *  update한다.
- *
- * 1) contig_hint < contig
- *
- * 만약 갱신되는 contig가 기존 contig_hint보다 크다면 그다음에 주요 조건은
- * 갱신되는 contig의 위치이다. 위의 그림대로 무조건
- *  scan_hint_start < contig_hint_start 의 순서가 되야된다.
- *
- * ex1)
- * +-----------------------------------------------------------------------+
- * |  |xx|             |xxxxx|             |xxxxxxxxxxxxx|                 |
- * +-----------------------------------------------------------------------+
- *    ^                ^                   ^
- *    scan_hint       contig_hint          start
- *
- *  이 경우라면 자연스럽게 contig_hint -> scan_hint가 되고 contig_hint는 contig가
- *  될것이다.
- *
- * ex1의 after)
- * +-----------------------------------------------------------------------+
- * |  |xx|             |xxxxx|             |xxxxxxxxxxxxx|                 |
- * +-----------------------------------------------------------------------+
- *    ^                ^                   ^
- *    (없어짐)         (new)scan_hint      (new)contig_hint
- *  ps)만약 scan_hint가 contig_hint보다 크다면 갱신이 안된다. 즉 무조건 이전
- *  contig_hint를 scan_hint로 강등 되는건 아니고 size등을 확인해서 갱신한다.
- *
- * 그런데 만약 contig가 기존 contig_hint보다 뒤에 있는 경우등이 생긴다.
- *
- * ex2)
- * +-----------------------------------------------------------------------+
- * |  |xx|             |xxxxxxxxxxxxx|     |xxxxxxx|                       |
- * +-----------------------------------------------------------------------+
- *    ^                ^                   ^
- *    scan_hint       start                contig_hint
- *
- * ex3)
- * +-----------------------------------------------------------------------+
- * |  |xxxxxxx|        |xxx|                |xxxxxxx|                      |
- * +-----------------------------------------------------------------------+
- *    ^                ^                   ^
- *    start            scan_hint           contig_hint
- *
- *  ex)2의 경우엔 contig_hint가 new scan_hint가 되는데 결국 new scan_hint가
- *  new contig_hint보다 오른쪽에 있는경우가 되므로 invalid이므로 scan_hint가
- *  없어진다.
- *
- * ex2 after)
- * +-----------------------------------------------------------------------+
- * |  |xx|             |xxxxxxxxxxxxx|         |xxxxxxx|                   |
- * +-----------------------------------------------------------------------+
- *    ^                ^                       ^
- *    scan_hint       start->(new)contig_hint  contig_hint->(new)scan_hint
- *    ->삭제                                   ->scan_hint가 new contig_hint보다
- *                                              오른쪽에 있으므로 삭제
- *
- * ex3)의 경우엔 start가 new contig_hint가 되는데 제일 왼쪽에 있으로
- * scan_hint는 마찬가지로 없어질것이다.
- *
- * ex3 after)
- * +-----------------------------------------------------------------------+
- * |  |xxxxxxx|        |xxx|                |xxxxxxx|                      |
- * +-----------------------------------------------------------------------+
- *    ^                ^                   ^
- *    start            scan_hint->삭제     contig_hint -> scan_hint
- *    ->(new)contig_hint                   ->new contig_hint보다 오른쪽에
- *                                           있으므로 삭제
- *
- * 2) contig_hint == contig
- * contig_hint < contig일때와 위치는 비슷한 개념으로 접근한다.
- * contig와 contig_hint끼리는 start주소가 정렬이 잘되있는것으로 갱신을 하고,
- * contig가 scan_hint랑 비교될시에는 더 오른쪽에 있거나 size가 큰것이
- * 우선시 된다.
- *
- * 3) contig_hint > contig
- * contig_hint가 이미 contig보다 조건이 좋으므로 scan_hint랑만 비교한다.
  */
 static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
 {
@@ -859,7 +808,6 @@ static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
 		if (start > block->contig_hint_start) {
 /*
  * IAMROOT, 2022.01.17:
- * ex) scan_hint -> contig_hint인 경우
  * before) 
  * +-----------------------------------------------------------------------+
  * |  |xx|            |xxxxx|       |xxxxxxxxx|       |NNNNNNNNNNNNNNNN    |
@@ -874,6 +822,10 @@ static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
  * +-----------------------------------------------------------------------+
  *    ^                             ^                 ^
  *    first_free                    scan_hint         contig_hint
+ *
+ * scan_hint < contig_hint인 경우 무조건 위의 경우만이 존재할것이다.
+ * (scan_hint < contig_hint이면서 scan_hint가 contig_hint 오른쪽에 있는 경우가
+ * 없다.)
  */
 			if (block->contig_hint > block->scan_hint) {
 				block->scan_hint_start =
@@ -1120,7 +1072,7 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
 	if (block->scan_hint) {
 /*
  * IAMROOT, 2022.01.17:
- * ex) scan_hint < contig_hint < contig && config_hint_start < start
+ * ex) scan_hint_start < contig_hint_start
  * before)
  *    |free|      |free 영역      |           |free 영역        |
  * +-----------------------------------------------------------------------+
@@ -1130,7 +1082,17 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
  *    first_free  scan_hint_start |            contig_hint_start
  *                                |
  *                     scan_hint_start + scan_hint => start
- *  즉 scan_hint_start + scan_hint부터 update를 시작한다.
+ *
+ * ex) contig_hint_start < scan_hint_start
+ * before)
+ *    |free|      |free 영역        |    |free 영역      |
+ * +----------------------------------------------------------------+
+ * |  |xxxx|      |<- contig_hint ->|    |<- scan_hint ->|          |
+ * +----------------------------------------------------------------+
+ *    ^           ^                      ^               ^
+ *    first_free  contig_hint_start      scan_hint_start |
+ *                                                       |
+ *                                       scan_hint_start + scan_hint => start
  */
 		start = block->scan_hint_start + block->scan_hint;
 		block->contig_hint_start = block->scan_hint_start;
