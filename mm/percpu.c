@@ -155,7 +155,7 @@ static int pcpu_atom_size __ro_after_init;
  * | ...         |
  * | 2           | 16 ~ 31 byte chunk
  * | 1           | 0 ~ 15 byte chunk
- * | 0           | first chunk
+ * | 0           | free size가 부족한 chunk
  * +-------------+-------------------------------------
  */
 int pcpu_nr_slots __ro_after_init;
@@ -308,6 +308,8 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
  *   Mb |  18 |  19 |  20 |  21 |  22 |  23 |  24 |  25 |  26 |  27 |
  *   Gb |  28 |  29 |  30 |  31 |  32 |  33 |  34 |  35 |  36 |  37 |
  * ex) 96k => 14번, 32k => 13번
+ *
+ * - 0번 slot은 이 수식으로 계산되지 않고 다른방법으로 chunk가 할당된다.
  */
 static int __pcpu_size_to_slot(int size)
 {
