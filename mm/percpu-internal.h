@@ -16,6 +16,20 @@
  * scan_hint == contig_hint.  This is necessary because when scanning forward,
  * we don't know if a new contig hint would be better than the current one.
  */
+
+/*
+ * IAMROOT, 2022.01.18: 
+ * pcpu_block_md는 메타 데이터 블록 구조체이다.
+ * 각 청크의 비트 맵은 여러 개의 전체(full) 블록으로 분할된다.
+ * 모든 단위는 비트 단위이다.
+ *
+ * scan_hint는 contig_hint 이전에 알려진 가장 큰 연속 영역이다.
+ * 그러나 그것이 반드시 실제 가장 큰 contig 힌트는 아니다. 
+ * 불변성: contig_hint_start < scan_hint_start 
+ *         (iff contig_hint == scan_hint)
+ * 이것은 앞으로(forward) 스캔할 때 새로운 contig 힌트가 현재 힌트보다 
+ * 더 나은지 알 수 없기 때문에 필요하다.
+ */
 struct pcpu_block_md {
 /*
  * IAMROOT, 2022.01.15:
