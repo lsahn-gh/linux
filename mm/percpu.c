@@ -142,6 +142,21 @@ static int pcpu_atom_size __ro_after_init;
  * IAMROOT, 2022.01.15:
  * - pcpu_to_depopulate_slot + 1로 구해진다.
  *   총 slot 개수
+ * - size에 따른 slot번호 변환은 __pcpu_size_to_slot 참고
+ *
+ * - pcpu_unit_size를 기준으로 slot번호 할당
+ * +-------------+-------------------------------------
+ * | slot 번호   | slot에 넣어지는 것
+ * +-------------+-------------------------------------
+ * | slot nr + 3 | pcpu_to_depopulate_slot
+ * | slot nr + 2 | pcpu_free_slot
+ * | slot nr + 1 | pcpu_sidelined_slot
+ * | slot nr     | __pcpu_size_to_slot(pcpu_unit_size)
+ * | ...         |
+ * | 2           | 16 ~ 31 byte chunk
+ * | 1           | 0 ~ 15 byte chunk
+ * | 0           | first chunk
+ * +-------------+-------------------------------------
  */
 int pcpu_nr_slots __ro_after_init;
 /*
@@ -278,6 +293,21 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
  * - ex) size = 96k 라고 가정.
  *   highbit = 17(bit 16)
  *   max(17 - 5 + 2, 1) = 14
+ *
+ * --
+ *  - byte단위로 올때 slot 번호
+ *
+ *  byte |   0 | 16 |  32 |  64 | 128 | 256 | 512 |
+ *  slot |   1 |  2 |   3 |   4 |   5 |   6 |   7 |
+ *
+ *  ex) 17byte면 2번슬롯
+ *
+ * - Kb, Mb, Gb 단위 이상일때 슬롯 번호
+ *  단위|   1 |   2 |   4 |   8 |  16 |  32 |  64 | 128 | 256 | 512 |
+ *   Kb |   8 |   9 |  10 |  11 |  12 |  13 |  14 |  15 |  16 |  17 |
+ *   Mb |  18 |  19 |  20 |  21 |  22 |  23 |  24 |  25 |  26 |  27 |
+ *   Gb |  28 |  29 |  30 |  31 |  32 |  33 |  34 |  35 |  36 |  37 |
+ * ex) 96k => 14번, 32k => 13번
  */
 static int __pcpu_size_to_slot(int size)
 {
@@ -1838,6 +1868,15 @@ static void pcpu_init_md_blocks(struct pcpu_chunk *chunk)
  * reserved or dynamic 영역을 초기화한다.
  * @tmp_addr 해당 영역의 시작 주소
  * @map_size 해당 영역의 size
+ *
+ * ---
+ *
+ * region : start_offset, end_offset이 포함된 전체 영역
+ * populate : region을 page_size 단위로 관리하는 bitmap
+ * alloc_map : region을 PCPU_MIN_ALLOC_SIZE 단위로 관리하는 bitmap
+ * bound_map : alloc_map의 경계를 표시하기위해 사용하는 bitmap
+ * md_blocks : alloc_map을 PCPU_BITMAP_BLOCK_BITS단위로 관리하는 배열.
+ * ---
  */
 static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 							 int map_size)
@@ -1912,7 +1951,7 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 
 /*
  * IAMROOT, 2022.01.15:
- * - start_offset과 end_offset의 범위는 사용을 안할것이므로 아에 bits을 unset한다.
+ * - start_offset과 end_offset의 범위는 사용을 안할것이므로 아에 bits을 set한다.
  * - ex) region memory map
  *
  *           |                   region_size                     |

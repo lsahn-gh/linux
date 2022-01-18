@@ -59,15 +59,20 @@ struct pcpu_chunk {
 	int			free_bytes;	/* free bytes in the chunk */
 /*
  * IAMROOT, 2022.01.15:
- * - chunk의 전체 bits가 저장된다.
+ * - md_blocks는 4096byte단위의 관리라면 chunk_md는 chunk의 전체에 대한
+ *   alloc_map 관리를 담당한다.
  */
 	struct pcpu_block_md	chunk_md;
 	void			*base_addr;	/* base address of this chunk */
 
 /*
  * IAMROOT, 2022.01.15:
- * - region 전체영역을 PCPU_MIN_ALLOC_SIZE 단위로 관리하기
- *   위한 bitmap
+ * - region 영역에 대한 4byte단위(PCPU_MIN_ALLOC_SIZE)의 관리 bitmap이다.
+ * - bound_map으로 free, alloc area를 구별한다.
+ * - page단위로 chunk->md_blocks로 관리된다. 1024(PCPU_BITMAP_BLOCK_BITS)단위
+ *
+ * 실제 4byte당 할당여부는 alloc_map을 통하고, alloc, free에 대한 영역은
+ * 4096byte단위로 mb_blocks를 통해 관리하는 식이다.
  */
 	unsigned long		*alloc_map;	/* allocation map */
 /*
@@ -93,7 +98,7 @@ struct pcpu_chunk {
 						   slots */
 /*
  * IAMROOT, 2022.01.15:
- * - align에 필요한 offset. align이 할필요가없었다면 0일것이다.
+ * - region이 PAGE_MASK로 masking하여 align했을때 align 된 offset.
  */
 	int			start_offset;	/* the overlap with the previous
 						   region to have a page aligned
@@ -109,7 +114,10 @@ struct pcpu_chunk {
 #ifdef CONFIG_MEMCG_KMEM
 	struct obj_cgroup	**obj_cgroups;	/* vector of object cgroups */
 #endif
-
+/*
+ * IAMROOT, 2022.01.18:
+ * - start_offset, end_offset이 포함된 전체 영역(region)에 대한 page 개수
+ */
 	int			nr_pages;	/* # of pages served by this chunk */
 /*
  * IAMROOT, 2022.01.15:
@@ -163,7 +171,7 @@ static inline int pcpu_chunk_nr_blocks(struct pcpu_chunk *chunk)
  */
 /*
  * IAMROOT, 2022.01.15:
- * - pages를 PCPU_MIN_ALLOC_SIZE로 관리하기위한 bits를 구한다.
+ * @return pages가 속한 alloc_map의 bit index
  */
 static inline int pcpu_nr_pages_to_map_bits(int pages)
 {
@@ -176,6 +184,10 @@ static inline int pcpu_nr_pages_to_map_bits(int pages)
  *
  * This conversion is from the number of physical pages that the chunk
  * serves to the number of bits in the bitmap.
+ */
+/*
+ * IAMROOT, 2022.01.18:
+ * @return pcpu_chunk.alloc_map 의 bits
  */
 static inline int pcpu_chunk_map_bits(struct pcpu_chunk *chunk)
 {

@@ -38,6 +38,7 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
 
 /* IAMROOT, 2021.09.30:
  * NR_CPUS 는 compile time에 정해지고, nr_cpus_ids는 runtime에 정해진다.
+ * kernel/smp.c 에 정의. possible cpu 수
  */
 #if NR_CPUS == 1
 #define nr_cpu_ids		1U
