@@ -1078,6 +1078,16 @@ static void pcpu_chunk_refresh_hint(struct pcpu_chunk *chunk, bool full_scan)
  * 시작하며, 없다면 full scan을 한다.
  * - 직접 bitmap(alloc_map)을 참조하여 free_area(bit clear)을 순회한다.
  * - 즉 가장큰 연속된 공간을 새로 찾아 갱신한다(refresh)
+ *
+ * scan_hint & config_hint의 표현
+ *       |free|      |free 영역    |      |free 영역      |
+ * +------------------------------------------------------------+
+ * |     |xxxx|      |<-scan_hint->|      |<-contig_hint->|     |
+ * +------------------------------------------------------------+
+ *       ^           ^                    ^
+ *       |           |            contig_hint_start
+ *       |     scan_hint_start
+ *   first_free
  */
 static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
 {
@@ -1088,38 +1098,40 @@ static void pcpu_block_refresh_hint(struct pcpu_chunk *chunk, int index)
 	/* promote scan_hint to contig_hint */
 /*
  * IAMROOT, 2022.01.15:
- * 1. scan_hint가 있는경우(중간부터 scan).
- *  - 초기화 : scan_hint를 contig_hint로 바꾸고 scan_hint를 초기화한다.
- *  - bitmap : scan_hint 다음 영역부터 시작한다.
- * 2 scan_hint가 없는경우(full scan)
- *  - 초기화 : contig_hint를 초기화한다.
- *  - bitmap : first_free 부터 시작한다.
+ * 1. scan_hint가 있는 경우
+ *    -> scan_hint를 contig_hint로 promote하고, 
+ *       scan_hint 다음 위치부터 시작하는 scan.
+ * 2. scan_hint가 없는 경우
+ *    -> 기존의 contig_hint도 없애고, 
+ *       first_free부터 시작하는 full scan.
+ *
+ * ex) scan_hint > 0
+ * before)
+ * (scan_hint와 contig_hint가 사이즈가 같은 경우 scan_hint가 우측)
+ * +--------------------------------------------------------------+
+ * |  |0000|         | scan_hint |           |contig_hint|        |
+ * +--------------------------------------------------------------+
+ *
+ * after)
+ * +--------------------------------------------------------------+
+ * |  |0000|         |contig_hint|           |00000000000|        |
+ * +--------------------------------------------------------------+
+ *                               ^
+ *                             start
+ *
+ * ex) scan_hint == 0
+ * +--------------------------------------------------------------+
+ * |  |0000|         |00000000|              |contig_hint|        |
+ * +--------------------------------------------------------------+
+ *
+ * after)
+ * +--------------------------------------------------------------+
+ * |  |0000|         |00000000|              |00000000000|        |
+ * +--------------------------------------------------------------+
+ *    ^
+ *  start
  */
 	if (block->scan_hint) {
-/*
- * IAMROOT, 2022.01.17:
- * ex) scan_hint_start < contig_hint_start
- * before)
- *    |free|      |free 영역      |           |free 영역        |
- * +-----------------------------------------------------------------------+
- * |  |xxxx|      |<- scan_hint ->|           |<- contig_hint ->|          |
- * +-----------------------------------------------------------------------+
- *    ^           ^               ^           ^
- *    first_free  scan_hint_start |            contig_hint_start
- *                                |
- *                     scan_hint_start + scan_hint => start
- *
- * ex) contig_hint_start < scan_hint_start
- * before)
- *    |free|      |free 영역        |    |free 영역      |
- * +----------------------------------------------------------------+
- * |  |xxxx|      |<- contig_hint ->|    |<- scan_hint ->|          |
- * +----------------------------------------------------------------+
- *    ^           ^                      ^               ^
- *    first_free  contig_hint_start      scan_hint_start |
- *                                                       |
- *                                       scan_hint_start + scan_hint => start
- */
 		start = block->scan_hint_start + block->scan_hint;
 		block->contig_hint_start = block->scan_hint_start;
 		block->contig_hint = block->scan_hint;
