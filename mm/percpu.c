@@ -3426,6 +3426,8 @@ early_param("percpu_alloc", percpu_alloc_setup);
  *
  * - upa(unit per allocation)
  *   1번의 alloc으로 관리할수있는 unit 수
+ *
+ * ---
  */
 static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 				size_t reserved_size, size_t dyn_size,
@@ -3818,6 +3820,10 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
  *   @dyn_size PERCPU_DYNAMIC_RESERVE 28k
  *   @atom_size PAGE_SIZE
  *   @cpu_distance_fn pcpu_cpu_distance,
+ *
+ * - alloc info memory map
+ * | ai | groups[0..nr_groups] | cpu_map[0..nr_units] |
+ *               `--`--`--.....----^--^--^........^
  */
 	ai = pcpu_build_alloc_info(reserved_size, dyn_size, atom_size,
 				   cpu_distance_fn);
@@ -3850,6 +3856,11 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 /*
  * IAMROOT, 2022.01.15:
  * - 최초에 cpu가 세팅된 cpu_map을 찾는다.
+ * - unit memory 준비
+ * areas[0]          = | group[0].nr_units * unit_size |
+ * areas[1]          = | group[1].nr_units * unit_size |
+ * ..
+ * areas[nr_groups-1] = | group[nr_groups-1].nr_units * unit_size |
  */
 		for (i = 0; i < gi->nr_units && cpu == NR_CPUS; i++)
 			cpu = gi->cpu_map[i];
@@ -3946,7 +3957,29 @@ int __init pcpu_embed_first_chunk(size_t reserved_size, size_t dyn_size,
 	pr_info("Embedded %zu pages/cpu s%zu r%zu d%zu u%zu\n",
 		PFN_DOWN(size_sum), ai->static_size, ai->reserved_size,
 		ai->dyn_size, ai->unit_size);
-
+/*
+ * IAMROOT, 2022.01.18:
+ * - 여기까지 memory map 정리
+ * -- alloc_info는 cpu_map까지 연속된 memory를 가지며 groups에 각 cpu_map이
+ * 연결되있다.
+ * -- unit memory는 각 group마다 해당 node의 memory에 할당되있있다.
+ *  각 unit 마다 static영역이 복사되었으며 사용하지 않은 영역은 free된상태.
+ * -- group별 memory는base_offset을 통해서 groups에서 접근할수있는 구조이다.
+ *
+ * +--------------------------------------------------+
+ * | ai | groups[nr_groups]    | cpu_map[nr_units]    |
+ * |    | group | cpu ==========> cpu[.]              |
+ * |    |       +-------------------------------------+
+ * |    |       | base_offset  |                      |
+ * +-----------------||--------+----------------------+           
+ *                   ||
+ * base + base_offset||     (nodeX units | unit [0] unit [1]..)  ^   
+ *                   \\     ...                                  |   
+ *                    ``==> (nodeX units | unit [0] unit [1]..)  | max_distance
+ *                          ...                                  |
+ *                          (node0 units | unit [0] unit [1]..)  v
+ *                                                              base
+ */
 	pcpu_setup_first_chunk(ai, base);
 	goto out_free;
 
