@@ -181,6 +181,13 @@ unsigned long find_first_zero_bit(const unsigned long *addr, unsigned long size)
  */
 /* IAMROOT, 2021.09.30:
  * addr bitmap에서 제일 마지막에 set되 있는 bit index를 구한다.
+ * set 된 bit가 없으면 size를 반환한다
+ *
+ * ex) size == 100 일때
+ * 0x1 => return 0
+ * 0x1f => return 4
+ * 0x1f_ffff => return 20
+ * 0x00 => return 100;
  */
 static inline
 unsigned long find_last_bit(const unsigned long *addr, unsigned long size)
