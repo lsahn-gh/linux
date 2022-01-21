@@ -193,10 +193,19 @@ static unsigned int pcpu_high_unit_cpu __ro_after_init;
 void *pcpu_base_addr __ro_after_init;
 
 static const int *pcpu_unit_map __ro_after_init;		/* cpu -> unit */
+/*
+ * IAMROOT, 2022.01.21:
+ * - pcpu_setup_first_chunk 에서 possible cpu개수만큼 초기화된다.
+ * - cpu 번호에 해당하는 unit의 offset주소를 저장한다.
+ */
 const unsigned long *pcpu_unit_offsets __ro_after_init;	/* cpu -> unit offset */
 
 /* group information, used for vm allocation */
 static int pcpu_nr_groups __ro_after_init;
+/*
+ * IAMROOT, 2022.01.21:
+ * - pcpu_base_addr부터 각 그룹별 unit start 까지의 offset
+ */
 static const unsigned long *pcpu_group_offsets __ro_after_init;
 static const size_t *pcpu_group_sizes __ro_after_init;
 
@@ -3750,9 +3759,9 @@ static struct pcpu_alloc_info * __init __flatten pcpu_build_alloc_info(
 
 /*
  * IAMROOT, 2022.01.08: 
- * pcpu_group_info[]->base_offset와 
- * pcpu_group_info[]->cpu_map[]이 가리키는 곳에 cpu 번호를 기록한다.
- *                    즉 unit->cpu map을 완성시칸다.
+ * pcpu_group_info[]->base_offset에 임시로 해당 group의 unit start 주소를 넣고
+ * (후에 고쳐진다) pcpu_group_info[]->cpu_map[]이 가리키는 곳에
+ * cpu 번호를 기록한다. 즉 unit->cpu map을 완성시칸다.
  */
 	for (group = 0, unit = 0; group < nr_groups; group++) {
 		struct pcpu_group_info *gi = &ai->groups[group];
