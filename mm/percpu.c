@@ -322,6 +322,15 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
  */
 static int __pcpu_size_to_slot(int size)
 {
+      
+/*
+ * IAMROOT, 2022.01.22: 
+ * 예) 28K = 0b01100000 00000000의 경우 
+ *           highbit = fls(28K) = 15
+ *           return = 15 - 10 + 2 = 12번 slot
+ *
+ *     -> 16K <= size < 32K에 속하므로 12번 슬롯
+ */
 	int highbit = fls(size);	/* size is in bytes */
 	return max(highbit - PCPU_SLOT_BASE_SHIFT + 2, 1);
 }
@@ -422,6 +431,8 @@ static unsigned long pcpu_block_off_to_off(int index, int off)
  * 할당이 블록의 contig_hint에 적합한지(들어갈수있는지) 여부를 보여준다(return).
  * 청크는 블록과 동일한 힌트를 사용하므로 청크의 contig_hint로 확인할 수 있다.
  *
+ * align까지 고려해서 contig_hint에 할당이 가능한지 체크한다.
+ * 
  * @block: 블럭 단위가 아니라 chunk가 관리하는 hint를 담은 chunk->chunk_md 이다.
  */
 static bool pcpu_check_block_hint(struct pcpu_block_md *block, int bits,
@@ -472,6 +483,21 @@ static int pcpu_next_hint(struct pcpu_block_md *block, int alloc_bits)
  *
  * -> 위의 세 가지 조건이 모두 만족하면 scan_hint가 위치하는 다음 위치를 반환.
  *    그게 아니면 일반적인 처음 free 위치를 반환.
+ *
+ * case a) alloc_bits가 scan_hint 초과 & scan_hint < contig_hint
+ *                    |**alloc_bits**| 
+ *      +-----------------------------------------------------+
+ *      |  |free|     |scan_hint|       |   contig_hint  |    |
+ *      +-----------------------------------------------------+
+ *                              ^
+ *                              +--- return
+ *
+ * case b) 그 외 (scan_hint가 없거나, 등등..) 
+ *      +-----------------------------------------------------+
+ *      |  |free|     |scan_hint|       |   contig_hint  |    |
+ *      +-----------------------------------------------------+
+ *         ^
+ *         +--- return
  */
 	if (block->scan_hint &&
 	    block->contig_hint_start > block->scan_hint_start &&
@@ -550,6 +576,11 @@ static void pcpu_next_md_free_region(struct pcpu_chunk *chunk, int *bit_off,
 static void pcpu_next_fit_region(struct pcpu_chunk *chunk, int alloc_bits,
 				 int align, int *bit_off, int *bits)
 {
+/*
+ * IAMROOT, 2022.01.22: 
+ * i:		@bit_off를 사용하여 블럭 인덱스를 가져온다.
+ * block_off:	@bit_off를 사용하여 해당 블럭에서의 offset를 가져온다.
+ */
 	int i = pcpu_off_to_block_index(*bit_off);
 	int block_off = pcpu_off_to_block_off(*bit_off);
 	struct pcpu_block_md *block;
@@ -558,6 +589,14 @@ static void pcpu_next_fit_region(struct pcpu_chunk *chunk, int alloc_bits,
 	for (block = chunk->md_blocks + i; i < pcpu_chunk_nr_blocks(chunk);
 	     block++, i++) {
 		/* handles contig area across blocks */
+/*
+ * IAMROOT, 2022.01.22: 
+ * 3) 지난 블럭의 가장 우측 free 공간에서 남은 사이즈(bits)를 가져와서
+ *    현재 블럭의 가장 좌측 공간에서 할당을 시도한다.
+ *
+ *    만일 해당 블럭이 통째로 사용되지 않은 블럭인 경우 bits는 누적되고
+ *    다음 블럭에서 이어진다.
+ */
 		if (*bits) {
 			*bits += block->left_free;
 			if (*bits >= alloc_bits)
@@ -567,6 +606,22 @@ static void pcpu_next_fit_region(struct pcpu_chunk *chunk, int alloc_bits,
 		}
 
 		/* check block->contig_hint */
+/*
+ * IAMROOT, 2022.01.22: 
+ * 1) 해당 블럭의 contig_hint 범위안에서 할당을 시도한다.
+ *    반환되는 @bit_off와 @bits는 할당 가능한 위치와 사이즈를 정확히
+ *    반환하지 않고, 대략적인 범위를 포함하여 반환한다. 
+ *         
+ *                                      |alloc_bits|
+ *      +-----------------------------------------------------+
+ *      |  |free|     |scan_hint|       |   contig_hint  |    |
+ *      +-----------------------------------------------------+
+ *         ^                    ^                  ^
+ *         +-------- or --------+		   |
+ *                bit_off 		           |
+ *                   ^                             |
+ *                   |<----------- bits ---------->|
+ */
 		*bits = ALIGN(block->contig_hint_start, align) -
 			block->contig_hint_start;
 		/*
@@ -584,6 +639,10 @@ static void pcpu_next_fit_region(struct pcpu_chunk *chunk, int alloc_bits,
 			return;
 		}
 		/* reset to satisfy the second predicate above */
+/*
+ * IAMROOT, 2022.01.22: 
+ * 2) 블럭의 가장 우측 free 공간에서 할당을 시도한다.
+ */
 		block_off = 0;
 
 		*bit_off = ALIGN(PCPU_BITMAP_BLOCK_BITS - block->right_free,
@@ -653,6 +712,11 @@ static void pcpu_mem_free(void *ptr)
 	kvfree(ptr);
 }
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * reserved용 chunk를 제외한 모든 chunk들은 슬롯 리스트에 연결되어 있다.
+ * 위로 올라간 chunk인 경우 리스트의 front 쪽에 추가한다.(우선 할당될 예정)
+ */
 static void __pcpu_chunk_move(struct pcpu_chunk *chunk, int slot,
 			      bool move_front)
 {
@@ -1563,6 +1627,19 @@ static bool pcpu_is_populated(struct pcpu_chunk *chunk, int bit_off, int bits,
 	page_start = PFN_DOWN(bit_off * PCPU_MIN_ALLOC_SIZE);
 	page_end = PFN_UP((bit_off + bits) * PCPU_MIN_ALLOC_SIZE);
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * page_end가 rs보다 작은 경우 매핑된 경우라는 것을 알 수 있다.
+ *
+ *           page_start    page_end
+ *                V            v
+ *   +--------------------------------------------
+ *   |           1111111111111111111|0000000|111
+ *   +--------------------------------------------
+ *                                   ^       ^
+ *                                   rs      re
+ *                                        (실패시 이 값으로 next_off 산출)
+ */
 	rs = page_start;
 	bitmap_next_clear_region(chunk->populated, &rs, &re, page_end);
 	if (rs >= page_end)
@@ -1605,6 +1682,11 @@ static int pcpu_find_block_fit(struct pcpu_chunk *chunk, int alloc_bits,
 	if (!pcpu_check_block_hint(chunk_md, alloc_bits, align))
 		return -1;
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * bit_off: full scan할 경우 first_free에서 시작, 
+ *          그렇지 않은 경우 scan_hint 다음부터 시작
+ */
 	bit_off = pcpu_next_hint(chunk_md, alloc_bits);
 	bits = 0;
 	pcpu_for_each_fit_region(chunk, alloc_bits, align, bit_off, bits) {
@@ -1832,7 +1914,7 @@ static void pcpu_init_md_blocks(struct pcpu_chunk *chunk)
  */
 /*
  * IAMROOT, 2022.01.15:
- * reserved or dynamic 영역을 초기화한다.
+ * 1st reserved or dynamic chunk를 관리하는 구조체를 할당하고 초기화한다.
  * @tmp_addr 해당 영역의 시작 주소
  * @map_size 해당 영역의 size
  *
@@ -1844,6 +1926,18 @@ static void pcpu_init_md_blocks(struct pcpu_chunk *chunk)
  * bound_map : alloc_map의 경계를 표시하기위해 사용하는 bitmap
  * md_blocks : alloc_map을 PCPU_BITMAP_BLOCK_BITS단위로 관리하는 배열.
  * ---
+ *
+ *   |<-----------------region_size------------------------>|
+ *   |                                                      |
+ *   +------------------------------------------------------+
+ *   |  start_offset |          map_size       | end_offset |
+ *   |111111111111111|0000000000000000000000000|111111111111|  <- alloc_map
+ *   |100000000000000|1000000000000000000000000|100000000000|1 <- bound_map 
+ *   +------------------------------------------------------+
+ *   ^               ^
+ * aligned_addr      +---tmp_addr
+ * chunk->base_addr
+ *
  */
 static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 							 int map_size)
@@ -1880,6 +1974,11 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 	chunk->start_offset = start_offset;
 	chunk->end_offset = region_size - chunk->start_offset - map_size;
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * alloc_map: region_size를 4바이트 단위로 관리하는 할당관리하는 비트맵
+ */
+
 	chunk->nr_pages = region_size >> PAGE_SHIFT;
 	region_bits = pcpu_chunk_map_bits(chunk);
 
@@ -1896,6 +1995,11 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 		panic("%s: Failed to allocate %zu bytes\n", __func__,
 		      alloc_size);
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * arm64에서 pcpu 블럭사이즈는 페이지 단위와 동일하다.
+ * 따라서 pcpu_block_md 구조체를 블럭(페이지) 수만큼 할당한다.
+ */
 	alloc_size = pcpu_chunk_nr_blocks(chunk) * sizeof(chunk->md_blocks[0]);
 	chunk->md_blocks = memblock_alloc(alloc_size, SMP_CACHE_BYTES);
 	if (!chunk->md_blocks)
@@ -1908,6 +2012,13 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 #endif
 	pcpu_init_md_blocks(chunk);
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * embed 방식의 1st chunk 영역은 이미 lowmem 할당이 되었고, 매핑되어 
+ * 실제로 곧바로 사용할 수 있는 영역이다. 
+ * 따라서 imuutable(불변성)을 true로 설정하고, populated 비트들은 1로 fill한다.
+ * 2dn chunk 부터는 매핑하여 사용중인 페이지들만 populate 비트를 설정한다.
+ */
 	/* manage populated page bitmap */
 	chunk->immutable = true;
 	bitmap_fill(chunk->populated, chunk->nr_pages);
@@ -2264,6 +2375,11 @@ static void __percpu *pcpu_alloc(size_t size, size_t align, bool reserved,
 	 * An allocation may have internal fragmentation from rounding up
 	 * of up to PCPU_MIN_ALLOC_SIZE - 1 bytes.
 	 */
+/*
+ * IAMROOT, 2022.01.22: 
+ * @align 요청이 4바이트 보다 작은 경우에는 4바이트로 결정한다.
+ * @size 요청은 항상 4바이트 단위로 자동 정렬하여 사용한다.
+ */
 	if (unlikely(align < PCPU_MIN_ALLOC_SIZE))
 		align = PCPU_MIN_ALLOC_SIZE;
 
@@ -2271,6 +2387,14 @@ static void __percpu *pcpu_alloc(size_t size, size_t align, bool reserved,
 	bits = size >> PCPU_MIN_ALLOC_SHIFT;
 	bit_align = align >> PCPU_MIN_ALLOC_SHIFT;
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * 다음과 같은 요청을 경고 메시지를 출력하고, null을 반환한다.
+ *   - size가 0으로 요청
+ *   - size가 유닛 크기보다 큰 경우
+ *   - align이 페이지 사이즈를 초과하는 경우(예: 4K)
+ *   - align이 2의 승수 요청이 아닌 경우
+ */
 	if (unlikely(!size || size > PCPU_MIN_UNIT_SIZE || align > PAGE_SIZE ||
 		     !is_power_of_2(align))) {
 		WARN(do_warn, "illegal size (%zu) or align (%zu) for percpu allocation\n",
@@ -2278,9 +2402,19 @@ static void __percpu *pcpu_alloc(size_t size, size_t align, bool reserved,
 		return NULL;
 	}
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * cgroup의 memory controller의 제한을 받아 초과한 경우 null을 반환한다.
+ */
 	if (unlikely(!pcpu_memcg_pre_alloc_hook(size, gfp, &objcg)))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * 일반적인 커널 메모리 할당(is_atomic==0)을 사용하는 경우
+ * pcpu_alloc_mutex를 잡고 진입한다. 단 __GFP_NOFAIL 옵션을 사용하지 않는 
+ * 경우 killable(at fatal signal)이 가능한 lock 함수를 사용한다.
+ */
 	if (!is_atomic) {
 		/*
 		 * pcpu_balance_workfn() allocates memory under this mutex,
@@ -2297,6 +2431,11 @@ static void __percpu *pcpu_alloc(size_t size, size_t align, bool reserved,
 
 	spin_lock_irqsave(&pcpu_lock, flags);
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * module(insmod)이 로딩될 때 DEFINE_PER_CPU() 함수를 사용한 영역들이 
+ * reserved 청크에서 할당되고 관리된다.
+ */
 	/* serve reserved allocations from the reserved chunk if available */
 	if (reserved && pcpu_reserved_chunk) {
 		chunk = pcpu_reserved_chunk;
@@ -2338,6 +2477,11 @@ restart:
 
 	spin_unlock_irqrestore(&pcpu_lock, flags);
 
+/*
+ * IAMROOT, 2022.01.22: 
+ * is_atomic이 설정되고, 슬롯을 검색하여 한 번에 찾지 못한 경우 반복하지 않고
+ * fail 레이블로 이동한다.
+ */
 	/*
 	 * No space left.  Create a new chunk.  We don't want multiple
 	 * tasks to create chunks simultaneously.  Serialize and create iff

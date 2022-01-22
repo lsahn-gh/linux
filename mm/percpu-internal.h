@@ -270,6 +270,12 @@ static inline void pcpu_stats_area_dealloc(struct pcpu_chunk *chunk)
 }
 
 /*
+ * IAMROOT, 2022.01.22: 
+ * 청크를 할당하고, 해제할 때 마다 아래 두 함수를 호출하며 관련 청크 수를 
+ * 갱신한다.
+ */
+
+/*
  * pcpu_stats_chunk_alloc - increment chunk stats
  */
 static inline void pcpu_stats_chunk_alloc(void)

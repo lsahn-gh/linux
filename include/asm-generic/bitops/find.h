@@ -97,6 +97,11 @@ unsigned long find_next_and_bit(const unsigned long *addr1,
 /* IAMROOT, 2021.09.30:
  * _find_next_bit가 set bit만을 찾는구조로 되있으므로 ~0UL로 bit들을 invert해서
  * set bit를 찾는식이된다.
+ *           <-search---- (low)
+ * 예) 0b11111110000001111111
+ *                        ^ 
+ *                   ^    +--offset
+ *                   +- return
  */
 static inline
 unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,
