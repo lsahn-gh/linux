@@ -4,6 +4,19 @@
 
 #ifndef __ASSEMBLY__
 
+/*
+ * IAMROOT, 2022.01.23:
+ * - 보통 int *p = ...; 라는 pointer가 있으면 int a = *p와 같은 방법으로
+ *   일반적으로 사용을하지만 kernel에서 이렇게 사용이 불가능한 pointer가
+ *   존재한다.
+ *
+ * ex) percpu
+ * int *p = alloc_percpu(int); -> (X)
+ * int *p __percpu = alloc_percpu(int); -> (O)
+ *
+ * __CHECKER__는 아래 macro들을 통해서 pointer 오용에 대한 부분을 찾아주는
+ * sparse 툴의 기능중하나이다.
+ */
 #ifdef __CHECKER__
 /* address spaces */
 # define __kernel	__attribute__((address_space(0)))

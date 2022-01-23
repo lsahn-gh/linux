@@ -153,6 +153,22 @@ static inline bool in_vfork(struct task_struct *tsk)
  * PF_MEMALLOC_NOFS implies GFP_NOFS
  * PF_MEMALLOC_PIN  implies !GFP_MOVABLE
  */
+/*
+ * IAMROOT, 2022.01.23:
+ * - 아래에서 나오는 PF_XXX.. flag들은 주로 memory가 부족할때 신경써야
+ *   되는 것들이다
+ * - memory가 부족할때 어떻게 동작해야된다는게 current->flags에 설정되있고,
+ *   해당 설정으로 요청된 flags를 고친다는 개념으로 보면된다.
+ *
+ * --- 대략적인 flag 설명
+ * - PF_MEMALLOC_NOIO 존재 -> __GFP_IO, __GFP_FS 제거
+ *   할당을 하면서 어떤 interface를 써야되는 상황이 있는데, 그러한것을
+ *   하지 말라는뜻. 이 '상황'에는 swap memory등이 포함된다고 하며 즉
+ *   NOFS보다 더 넓은 의미(weak)라고 생각하면 되는거같다.
+ * - PF_MEMALLOC_NOFS 존재 -> __GFP_FS제거
+ *   swap영역같은 fs를 쓰면서까지 할당시도를 하지 말라는것.
+ * - PF_MEMALLOC_PIN 존재 -> __GFP_MOVABLE 제거
+ */
 static inline gfp_t current_gfp_context(gfp_t flags)
 {
 	unsigned int pflags = READ_ONCE(current->flags);

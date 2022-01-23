@@ -304,18 +304,17 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
  *   max(17 - 5 + 2, 1) = 14
  *
  * --
- *  - byte단위로 올때 slot 번호
+ * 1) byte단위로 올때 slot 번호
  *
  *  byte |   0 | 16 |  32 |  64 | 128 | 256 | 512 |
  *  slot |   1 |  2 |   3 |   4 |   5 |   6 |   7 |
  *
  *  ex) 17byte면 2번슬롯
  *
- * - Kb, Mb, Gb 단위 이상일때 슬롯 번호
- *  단위|   1 |   2 |   4 |   8 |  16 |  32 |  64 | 128 | 256 | 512 |
- *   Kb |   8 |   9 |  10 |  11 |  12 |  13 |  14 |  15 |  16 |  17 |
- *   Mb |  18 |  19 |  20 |  21 |  22 |  23 |  24 |  25 |  26 |  27 |
- *   Gb |  28 |  29 |  30 |  31 |  32 |  33 |  34 |  35 |  36 |  37 |
+ * 2) kb 단위 이상일때 slot 번호(큰 시스템도 200k를 넘진 않는다고한다.)
+ *   kb  |   1 |   2 |   4 |   8 |  16 |  32 |  64 | 128 | 256 | 512 |
+ *  slot |   8 |   9 |  10 |  11 |  12 |  13 |  14 |  15 |  16 |  17 |
+ *
  * ex) 96k => 14번, 32k => 13번
  *
  * - 0번 slot은 이 수식으로 계산되지 않고 다른방법으로 chunk가 할당된다.
@@ -715,7 +714,8 @@ static void pcpu_mem_free(void *ptr)
 /*
  * IAMROOT, 2022.01.22: 
  * reserved용 chunk를 제외한 모든 chunk들은 슬롯 리스트에 연결되어 있다.
- * 위로 올라간 chunk인 경우 리스트의 front 쪽에 추가한다.(우선 할당될 예정)
+ * 위로 올라간 chunk인 경우(contig size 증가) 리스트의
+ * front 쪽에 추가한다.(우선 할당될 예정)
  */
 static void __pcpu_chunk_move(struct pcpu_chunk *chunk, int slot,
 			      bool move_front)
@@ -2252,6 +2252,14 @@ static struct pcpu_chunk *pcpu_chunk_addr_search(void *addr)
 }
 
 #ifdef CONFIG_MEMCG_KMEM
+
+/*
+ * IAMROOT, 2022.01.23:
+ * - TODO
+ * - cgroup의 memory controller의 제한을 받는지 확인하고 요청된 size를
+ *   cgroup에 더하고 objcgp를 얻어온다.
+ * - pcpu_memcg_post_alloc_hook과 한쌍이된다.
+ */
 static bool pcpu_memcg_pre_alloc_hook(size_t size, gfp_t gfp,
 				      struct obj_cgroup **objcgp)
 {
@@ -2273,6 +2281,15 @@ static bool pcpu_memcg_pre_alloc_hook(size_t size, gfp_t gfp,
 	return true;
 }
 
+
+/*
+ * IAMROOT, 2022.01.23:
+ * - TODO
+ * - @chunk가 null일 경우 실패했다는 의미로 cgroup에 넣었던 size를
+ *   다시 뺀다.
+ * - @chunk가 null이 아닐경우 할당에 성공했다는거고 @chunk의 obj_cgroups에
+ *   @objcg를 넣고 mod_memcg_state를 수행한다.
+ */
 static void pcpu_memcg_post_alloc_hook(struct obj_cgroup *objcg,
 				       struct pcpu_chunk *chunk, int off,
 				       size_t size)
@@ -2363,6 +2380,15 @@ static void __percpu *pcpu_alloc(size_t size, size_t align, bool reserved,
 	void __percpu *ptr;
 	size_t bits, bit_align;
 
+/*
+ * IAMROOT, 2022.01.23:
+ * - 현재 context에 따라 요청 gfp를 한번 수정한후 pcpu_gfp를 추출한다.
+ *   retry 불가(__GFP_NORETRY), 경고메세지 출력해제(__GFP_NOWARN),
+ *   일반적인 flags(GFP_KERNEL)만을 사용하는게 보인다.
+ *
+ * - GFP_KERNEL은 interrupt context에서 해당 api를 호출했는지 안했는지
+ *   에 대한 의미도 포함한다.
+ */
 	gfp = current_gfp_context(gfp);
 	/* whitelisted flags that can be passed to the backing allocators */
 	pcpu_gfp = gfp & (GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN);
@@ -2481,6 +2507,8 @@ restart:
  * IAMROOT, 2022.01.22: 
  * is_atomic이 설정되고, 슬롯을 검색하여 한 번에 찾지 못한 경우 반복하지 않고
  * fail 레이블로 이동한다.
+ * - is_atomic이면 위에서 mutex를 안걸었다. 주석을 보면 chunk를 동시에
+ *   생성하는건 바라지 않는다.
  */
 	/*
 	 * No space left.  Create a new chunk.  We don't want multiple
@@ -3301,6 +3329,14 @@ static void pcpu_dump_alloc_info(const char *lvl,
  * The chunk serving the dynamic region is circulated in the chunk slots
  * and available for dynamic allocation like any other chunk.
  */
+/*
+ * IAMROOT, 2022.01.23:
+ * - group별 cpu 정보를 초기화한다.
+ * - pcpu전역변수들을 초기화한다.
+ * - slot을 생성한다.(pcpu_chunk_lists)
+ * - dynamic, reserved chunk를 생성하고
+ *   pcpu_first_chunk(dynamic)를 slot에 넣는다.
+*/
 void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 				   void *base_addr)
 {

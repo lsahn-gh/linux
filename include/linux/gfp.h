@@ -320,6 +320,11 @@ struct vm_area_struct;
  * version does not attempt reclaim/compaction at all and is by default used
  * in page fault path, while the non-light is used by khugepaged.
  */
+/*
+ * IAMROOT, 2022.01.23:
+ * - GFP_ATOMIC : irq handler에서 사용 가능 (no sleep)
+ * - GFP_KERNEL = irq handler에서 사용 불가능 (sleep)
+ */
 #define GFP_ATOMIC	(__GFP_HIGH|__GFP_ATOMIC|__GFP_KSWAPD_RECLAIM)
 #define GFP_KERNEL	(__GFP_RECLAIM | __GFP_IO | __GFP_FS)
 #define GFP_KERNEL_ACCOUNT (GFP_KERNEL | __GFP_ACCOUNT)
