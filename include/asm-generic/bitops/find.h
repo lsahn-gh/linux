@@ -20,17 +20,24 @@ extern unsigned long _find_last_bit(const unsigned long *addr, unsigned long siz
  * If no bits are set, returns @size.
  */
 /* IAMROOT, 2021.09.30.
- * * addr은 bitmap의 처음 번지, size는 bitmap의 bit 길이, offset은 시작할
- * bit offset이 된다. return값은 offset이상의 bit에서 set된 bit index가 된다.
+ * @addr	bitmap 주소
+ * @size	bitmap 사이즈
+ * @offset	요청한 비트를 포함하여 검색
  *
- * ex)
- * unsigned long addr[2] = {3, 3}; 
+ * return	비트번호(based 0)를 반환, 몿잧은 경우 @size 반환
  *
- * find_next_bit(addr, sizeof(addr) * 8, 0); // 0
- * find_next_bit(addr, sizeof(addr) * 8, 1); // 1
- * find_next_bit(addr, sizeof(addr) * 8, 2); // 64
- * find_next_bit(addr, sizeof(addr) * 8, 65); // 65
- * find_next_bit(addr, sizeof(addr) * 8, 66); // 128
+ * ex) unsigned long addr[2] = {3, 3}; 
+ *
+ * bit0          bit63 bit64      bit127
+ *    v              v v               v
+ *    11000........000 11000........0000
+ *    lowest -----(search)-----> highest
+ *
+ * find_next_bit(bitmap, 128, 0)    ->  0번 부터 검색 -> 0
+ * find_next_bit(bitmap, 128, 1)    ->  1번 부터 검색 -> 1
+ * find_next_bit(bitmap, 128, 2)    ->  2번 부터 검색 -> 64
+ * find_next_bit(bitmap, 128, 65)   -> 65번 부터 검색 -> 65  
+ * find_next_bit(bitmap, 128, 66)   -> 66번 부터 검색 -> 128 (not found)
  */
 static inline
 unsigned long find_next_bit(const unsigned long *addr, unsigned long size,
@@ -95,13 +102,27 @@ unsigned long find_next_and_bit(const unsigned long *addr1,
  * If no bits are zero, returns @size.
  */
 /* IAMROOT, 2021.09.30:
+ * @addr:	비트맵
+ * @size:	비트맵 사이즈
+ * @offset:	검색 시작 비트 위치(자기자신부터 검색)
+ *
  * _find_next_bit가 set bit만을 찾는구조로 되있으므로 ~0UL로 bit들을 invert해서
  * set bit를 찾는식이된다.
- *           <-search---- (low)
- * 예) 0b11111110000001111111
- *                        ^ 
- *                   ^    +--offset
- *                   +- return
+ *
+ * ex) unsigned long addr[] = { 0xff00fff000 }; 
+ *
+ *                 +--(search)----------------> @size 만큼
+ *                 |
+ *     bit0        |                      bit39
+ *     v           |                          v
+ * 예) 0000000000001111111111110000000011111111 (0xff00fff000)
+ *                 ^           ^
+ *                 |           +-return
+ *                 +-@offset 
+ *
+ * find_next_zero_bit(bitmap, 40,  0)   ->   0번 부터 검색 -> 0
+ * find_next_zero_bit(bitmap, 40, 12)   ->  12번 부터 검색 -> 24 (위그림 상황)
+ * find_next_zero_bit(bitmap, 40, 32)   ->  32번 부터 검색 -> 40 (not found)
  */
 static inline
 unsigned long find_next_zero_bit(const unsigned long *addr, unsigned long size,

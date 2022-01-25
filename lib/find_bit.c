@@ -22,6 +22,14 @@
 #if !defined(find_next_bit) || !defined(find_next_zero_bit) ||			\
 	!defined(find_next_bit_le) || !defined(find_next_zero_bit_le) ||	\
 	!defined(find_next_and_bit)
+/*
+ * This is a common helper function for find_next_bit, find_next_zero_bit, and
+ * find_next_and_bit. The differences are:
+ *  - The "invert" argument, which is XORed with each fetched word before
+ *    searching it for one bits.
+ *  - The optional "addr2", which is anded with "addr1" if present.
+ */
+
 /* IAMROOT, 2021.09.29:
  * - addr1 : 실제 수정되는 memory
  * - addr2 : addr1을 masking할 값이 저장되있는 memory
@@ -29,13 +37,32 @@
  *   clear bit를 찾을때는 bit 반전을 하여 clear bit를 set bit로 변환후 찾는다.
  *
  * - little endian이면 swap으로 뒤집는게 확인된다.
- */
-/*
- * This is a common helper function for find_next_bit, find_next_zero_bit, and
- * find_next_and_bit. The differences are:
- *  - The "invert" argument, which is XORed with each fetched word before
- *    searching it for one bits.
- *  - The optional "addr2", which is anded with "addr1" if present.
+
+ * @addr1	bitmap1 주소
+ * @addr2	bitmap2 주소 (& 연산으로 bitmap1을 마스킹)
+ * @nbits	검색할 비트수
+ * @start	요청한 비트를 포함하여 검색
+ * @invert	반전시킬 비트들(모두 0인 경우 1을 검색, 모두 1인 경우 0을 검색)
+ * @le		little endian 검색 여부
+ *
+ * return	비트번호(based 0)를 반환, 몿잧은 경우 @size 반환
+ *
+ * ex) unsigned long addr[2] = {3UL, 3UL}; 
+ *
+ * bit0          bit63 bit64      bit127
+ *    v              v v               v
+ *    11000........000 11000........0000
+ *    lowest -----(search)-----> highest
+ *
+ * _find_next_bit(bitmap1, NULL, 128,  0,  0UL, 0) ->  0번 부터 검색 -> 0
+ * _find_next_bit(bitmap1, NULL, 128,  1,  0UL, 0) ->  1번 부터 검색 -> 1
+ * _find_next_bit(bitmap1, NULL, 128,  2,  0UL, 0) ->  2번 부터 검색 -> 64
+ * _find_next_bit(bitmap1, NULL, 128, 65,  0UL, 0) -> 65번 부터 검색 -> 65  
+ * _find_next_bit(bitmap1, NULL, 128, 66,  0UL, 0) -> 66번 부터 검색 -> 128 (not found)
+ *
+ * _find_next_bit(bitmap1, NULL, 128,  0, ~0UL, 0) ->  0번 부터 검색 -> 2
+ * _find_next_bit(bitmap1, NULL, 128,  3, ~0UL, 0) ->  1번 부터 검색 -> 3
+ * _find_next_bit(bitmap1, NULL, 128, 64, ~0UL, 0) -> 64번 부터 검색 -> 66
  */
 unsigned long _find_next_bit(const unsigned long *addr1,
 		const unsigned long *addr2, unsigned long nbits,
