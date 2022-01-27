@@ -492,6 +492,27 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
  * - 그러나 아래의 __idmap_text_end의 경우처럼 PAGE_SIZE의 배수가 보장되지
  *   않는 경우에는 adr_l 명령어를 사용하여 하위 12 bits까지 가져올 수 있도록
  *   한다.
+ *
+ * - adrp로 불러오는 주소가 현재 물리 주소인 이유.
+ *   adrp명령어는 load pc-relative 라고 하며 현재 pc 기준으로 symbol 위치가
+ *   계산된다.
+ *   예를들어 compile time에 init_pg_dir이 0x8000이고
+ *   "adrp x0, init_pg_dir" 위치가 0x4000 이라면 이 둘의 offset은 0x4000이고
+ *   "adrp x0, init_pg_dir"엔 offset 0x4000이라는 정보로 저장될 것이다.
+ *   (인코딩이 어떻게 될것인지는 무시)
+ *
+ *   그리고 후에 kernel Image가 RAM에 올라가 동작할때는 pc는 실제 RAM에서의
+ *   code 위치인 물리주소가 될것이다.
+ *
+ *   "adrp x0, init_pg_dir"를 실행할때는 offset이 0x4000이라는 정보로
+ *   pc + 0x4000로 init_pg_dir을 load할 것이다.
+ *   즉 현재 pc와 상관없이 offset만으로. 즉 pc와의 상대주소로 sympbol 주소를
+ *   알수 있을것이다.
+ *
+ *   head.S는 이렇게 pc-relative만으로 구성되어 pc가, 즉 첫 시작 주소가
+ *   어디서 시작하든 상대적으로 계산되어 symbol을 불러올수있으므로
+ *   시작 주소가 상관없다는것이고 이게 head.S의 첫 주석에서 말한
+ *   position independent의 의미이다.
  */
 	adrp	x0, init_pg_dir
 	adrp	x1, init_pg_end
@@ -1028,6 +1049,13 @@ EXPORT_SYMBOL(kimage_vaddr)
  * Returns either BOOT_CPU_MODE_EL1 or BOOT_CPU_MODE_EL2 in w0 if
  * booted in EL1 or EL2 respectively.
  */
+
+/*
+ * IAMROOT, 2022.01.27:
+ * - CurrentEL 1 -> EL1
+ * - CurrentEL 2 and nVHE - > EL1
+ * - CurrentEL 2 and VHE - > EL2
+ */
 SYM_FUNC_START(init_kernel_el)
 /*
  * IAMROOT, 2021.07.24:
@@ -1159,8 +1187,23 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
  * IAMROOT, 2021.11.14:
  * - el1로 전환을 한다. elr_el1에서 __cpu_stick_to_vhe를 넣어놧으므로
  *   그쪽으로 branch가 될것이다.
- * - 현재 el2 mode에서, spsr_el2를 el1으로 __init_el2_nvhe_prepare_eret에서
- *   설정해놨으므로 eret을 통해 el1가 된다.
+ *   (현재 el2 mode에서, spsr_el2를 el1으로 __init_el2_nvhe_prepare_eret에서
+ *   설정해놨으므로 eret을 통해 el1가 된다.)
+ * ---
+ *  1) eret 진입전
+ *  Current EL : EL2
+ *  spsr_el1 : INIT_PSTATE_EL2
+ *  spsr_el2 : INIT_PSTATE_EL1 
+ *  elr_el1  : __cpu_stick_to_vhe
+ *  PSTATE   : (아직 초기화안됨)
+ *
+ * 2) eret 진입 직후 (__cpu_stick_to_vhe 진입)
+ * Current EL : EL1 (spsr_el2에 EL1이 되있으므로 EL2 -> EL1)
+ * PSTATE     : INIT_PSATE_EL1
+ *
+ * 3) __cpu_stick_to_vhe 완료후
+ * Current EL : EL2 (hvc를 통해서 EL1 -> EL2)
+ * PSTATE     : INIT_PSATE_EL2
  */
 	eret
 
