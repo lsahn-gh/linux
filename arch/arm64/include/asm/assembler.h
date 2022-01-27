@@ -227,6 +227,14 @@ lr	.req	x30		// link register
 	 * @dst: destination register (64 bit wide)
 	 * @sym: name of the symbol
 	 */
+/*
+ * IAMROOT, 2022.01.26:
+ *  - adrp Xd, label
+ *  +-4GB 범위로 동작 가능하며 label위치의 주소를 4kb단위로 가져온다.
+ *
+ *  adrp를 통해서 4kb 이후만 가져왔으므로 4kb 이하 범위도 가져와서
+ *  add를 시켜 주소를 완성 시키는 개념이다.
+ */
 	.macro	adr_l, dst, sym
 	adrp	\dst, \sym
 	add	\dst, \dst, :lo12:\sym
@@ -336,6 +344,11 @@ alternative_endif
  * __KVM_VHE_HYPERVISOR__이 추가 되면서 else도 생김
  */
 #ifndef __KVM_NVHE_HYPERVISOR__
+/*
+ * IAMROOT, 2022.01.26:
+ * - 일단 ctr_el0를 읽는 동작을 취하고, 나중에 ARM64_MISMATCHED_CACHE_TYPE
+ *   라면 대체 된다.
+ */
 alternative_if_not ARM64_MISMATCHED_CACHE_TYPE
 /* IAMROOT, 2021.07.17:
  * ctr_el0: Cache Type Register
@@ -345,14 +358,26 @@ alternative_if_not ARM64_MISMATCHED_CACHE_TYPE
 	nop
 alternative_else
 /* IAMROOT, 2021.07.17:
- * Cache Type mismatched 라면?
+ * Cache Type mismatched 라면 나중에 alternative될때 이 code로 대체된다.
  */
 	ldr_l	\reg, arm64_ftr_reg_ctrel0 + ARM64_FTR_SYSVAL
 alternative_endif
 #else
+/*
+ * IAMROOT, 2022.01.26:
+ * - 주석 및 Git blame 참고. protected mode 에서는 cpu의 late boot가
+ *   허용되지 않는다.
+ *   ASM_BUG() code가 위치하다가 ARM64_KVM_PROTECTED_MODE 이면 nop로
+ *   채워진다.
+ */
 alternative_if_not ARM64_KVM_PROTECTED_MODE
 	ASM_BUG()
 alternative_else_nop_endif
+/*
+ * IAMROOT, 2022.01.26:
+ * - \reg를 0으로 초기화하는 code가 동작하다가 alternative가 발생하면
+ *   kvm_compute_final_ctr_el0로 대체된다.
+ */
 alternative_cb kvm_compute_final_ctr_el0
 	movz	\reg, #0
 	movk	\reg, #0, lsl #16
@@ -380,6 +405,7 @@ alternative_cb_end
 /* IAMROOT, 2021.07.17:
  * - Cache Type Register에서 최소 데이터 캐시 라인을 바이트로 알아오기.
  *   reg = 4 * 2^(CTR_EL0.DminLine)
+ *       = 4 << CTR_EL0.DminLine
  *   예) reg = 4 * 2^4 = 64 bytes
  */
 	.macro	dcache_line_size, reg, tmp

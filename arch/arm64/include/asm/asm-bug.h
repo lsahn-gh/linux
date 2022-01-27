@@ -38,6 +38,11 @@ _BUGVERBOSE_LOCATION(__FILE__, __LINE__)		\
 	__BUG_ENTRY(flags)				\
 	brk	BUG_BRK_IMM
 
+/*
+ * IAMROOT, 2022.01.26:
+ * - __bug_table section에 code의 file, line등의 정보를 넣어놓는다.
+ *   해당 위치는 brk #BUG_BRK_IMM asm이 된다. (breakpoint)
+ */
 #define ASM_BUG()	ASM_BUG_FLAGS(0)
 
 #endif /* __ASM_ASM_BUG_H */

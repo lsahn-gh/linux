@@ -572,6 +572,10 @@ static void pcpu_next_md_free_region(struct pcpu_chunk *chunk, int *bit_off,
  * within the block to see if the request can be fulfilled prior to the contig
  * hint.
  */
+/*
+ * IAMROOT, 2022.01.25:
+ * chunk의 각 block을 순회하며 free area를 찾는다.
+ */
 static void pcpu_next_fit_region(struct pcpu_chunk *chunk, int alloc_bits,
 				 int align, int *bit_off, int *bits)
 {
@@ -898,6 +902,9 @@ static inline bool pcpu_region_overlap(int a, int b, int x, int y)
  *  갱신되는것은 아니다.
  *  2) scan_hint는 contig_hint의 왼쪽(낮은 주소)에 위치를 주로 하는데
  *  만약 contig_hint보다 오른쪽에 있다면 반드시 contig_hint와 사이즈가 같다.
+ *  왼쪽에 위치한다고 해서 contig_hint의 바로 다음 큰사이즈가 아닐수있다.
+ *  scan_hint와 contig_hint사이에 scan_hint보다 크고 contig_hint보다 작은
+ *  free area가 존재할수있다.
  *  3) scan할때 scan의 시작기준점으로 사용되고 초기화되며,
  *  scan하면서 scan_hint는 다시 갱신된다.
  *
@@ -1668,6 +1675,17 @@ static bool pcpu_is_populated(struct pcpu_chunk *chunk, int bit_off, int bits,
  * The offset in the bitmap to begin searching.
  * -1 if no offset is found.
  */
+/*
+ * IAMROOT, 2022.01.25:
+ * @chunk에서 @alloc_bits 만큼(@align 고려) 할당할수있는 위치를 구한다.
+ * scan hint에 따라가 scan 시작위치가 좁혀질수있어 탐색시간이 짧아질수있다.
+ *
+ * 1) 해당 chunk에서 가장 큰 free 영역인 contig hint에 alloc이 되는지 검사.
+ * 2) scan hint 다음 or fisrt 부터 scan 시작.
+ * 3) pop_only에 따라 populate됬는지 bitmap을 검사하면서 실제 시작
+ * offset을 찾음.
+ * scan 된 영역에따라 scan hint, contig hint가 break될수도있다.
+ */
 static int pcpu_find_block_fit(struct pcpu_chunk *chunk, int alloc_bits,
 			       size_t align, bool pop_only)
 {
@@ -1686,6 +1704,23 @@ static int pcpu_find_block_fit(struct pcpu_chunk *chunk, int alloc_bits,
  * IAMROOT, 2022.01.22: 
  * bit_off: full scan할 경우 first_free에서 시작, 
  *          그렇지 않은 경우 scan_hint 다음부터 시작
+ *
+ * ---
+ * - pcpu_next_hint를 통해 탐색 영역을 좁힌다.
+ * popluate 고려안했을때 다음과 같다.
+ *
+ * 1) alloc_bits가 chunk_md의 scan hint보다 클경우
+ * scan hint end부터 시작해 ~ contig hint start 까지 검색이 될것이다.
+ * 그 사이에 alloc_bits가 할당될수있는 free area가 존재하면 거기에 할당되고
+ * 아니면 contig hint에 할당되고 contig hint는 break될것이다.
+ *
+ * 2) alloc_bits가 chunk_md의 scan hint보다 작은 경은 경우
+ * first_free ~ scan hint start까지 scan을 할 것이다.
+ * 1과 비슷하게 scan hint전까지 alloc이 되는 영역이있으면 거기에 할당되고
+ * 아니면 scan hint에 할당되며 scan hint는 break될것이다.
+ *
+ * populate를 고려한다면, alloc_bits 기준이 아닌 for문에서 구해낸 free area
+ * 전체가 populate를 검색하는것이 확인된다.
  */
 	bit_off = pcpu_next_hint(chunk_md, alloc_bits);
 	bits = 0;

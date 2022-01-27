@@ -102,6 +102,12 @@
  * LORSA_EL1, LOREA_EL1 시작과 끝의 범위를 지정
  * EN [0]
  * Enable 1 , disable 0
+ *
+ * - LoRegion ? (TRF 참고)
+ *   Armv8.1 introduces limited ordering regions (LORegions),
+ *   which allow large systems to perform special load-acquire and store-release
+ *   instructions that provide order between the memory accesses to a region of
+ *   the PA map as observed by a set of observers.
  */
 .macro __init_el2_lor
 	mrs	x1, id_aa64mmfr1_el1
@@ -193,10 +199,12 @@
 .endm
 
 /* IAMROOT, 2021.08.07:
- * 32-bit S/W의 경우 CP15를 접근하는 부분이 있으므로 AARCH32 EL0, EL1이
- * System Register에 접근할 시 EL2로 trap하는 것을 disable.
  * - 5.10 -> 5.15 변경사항
  *   CONFIG_COMPAT일때만 해당코드가 동작했었는데 CONFIG상관없이 그냥 함.
+ *   Git blame 참고 : hstr_el2 can be set even without 32-bit support
+ * 32-bit S/W의 경우 CP15를 접근하는 부분이 있으므로 AARCH32 EL0, EL1이
+ * System Register에 접근할 시 EL2로 trap하는 것을 disable.
+ * - Hypervisor System Trap Register
  */
 .macro __init_el2_hstr
 	msr	hstr_el2, xzr			// Disable CP15 traps to EL2
@@ -205,7 +213,7 @@
 /* Virtual CPU ID registers */
 /*
  * IAMROOT, 2021.11.14:
- * - TODO
+ * - midr_el1, mpidr_el1을 vpidr_el2, vmpidr_el2에서 복사한다.
  */
 .macro __init_el2_nvhe_idregs
 /* IAMROOT, 2021.08.07:
@@ -312,7 +320,9 @@
 /* Disable any fine grained traps */
 /*
  * IAMROOT, 2021.11.14:
- * - TODO
+ * - Git blame 참고
+ *   arm64에서는 feat_fgt Extension이라는 기능이 도입되는 현 linux에서는
+ *   사용하지 않으므로 disable
  */
 .macro __init_el2_fgt
 	mrs	x1, id_aa64mmfr0_el1
@@ -343,9 +353,12 @@
 .endm
 
 /*
- * IAMROOT, 2021.08.14: EL1으로 돌아갈때 DAIF 플래그들을 모두 설정하여
- *   인터럽트나 정렬 exception이 발생하지 않도록 막는다.
- *    - EL1으로 모드 변경 시 사용할 스택은 EL1용 스택이다.
+ * IAMROOT, 2021.08.14:
+ * EL1으로 돌아갈때 DAIF 플래그들을 모두 설정하여 인터럽트나 정렬 exception이
+ * 발생하지 않도록 막는다.
+ * - EL1으로 모드 변경 시 사용할 스택은 EL1용 스택이다.
+ * - 현재(el2) 에서 eret시 el1으로 복귀하기 위해 현재 spsr인 spsr_el2에
+ *   el1으로 설정한것이 보인다.
  */
 .macro __init_el2_nvhe_prepare_eret
 	mov	x0, #INIT_PSTATE_EL1
@@ -363,6 +376,18 @@
 /*
  * IAMROOT, 2021.11.14:
  * - el2 동작을 위한 초기화 작업을 진행한다.
+ * 1) el2 mmu off(__init_el2_sctlr)
+ * 2) el0, el1 physical timers enable(__init_el2_timers)
+ * 3) (__init_el2_debug)
+ * 4) LOregion 제한(__init_el2_lor)
+ * 5) vttbr_el2 disable(__init_el2_stage2)
+ * 6) gic enable(__init_el2_gicv3)
+ * 7) CP15 traps to EL2 (__init_el2_hstr)
+ * 8) vpidr_el2, vmpidr_el2 설정(__init_el2_nvhe_idregs)
+ * 9) coprocessor trap disable(__init_el2_nvhe_cptr)
+ * 10 sve enable(__init_el2_nvhe_sve)
+ * 11) fgt disable (__init_el2_fgt)
+ * 12) spsr_el2 초기화 (__init_el2_nvhe_prepare_eret)
  */
 .macro init_el2_state
 	__init_el2_sctlr

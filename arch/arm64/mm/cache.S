@@ -174,13 +174,13 @@ SYM_FUNC_START_PI(dcache_inval_poc)
   *		int dcache_min_line = dcache_line_size();	// 64로가정 0x40
   *		int mask = dcache_min_line - 1;		// 0x40 - 1 = 0x3f
   *
-  *		if(end & mark) {
-  *			end &= ~(mark);
+  *		if(end & mask) {
+  *			end &= ~(mask);
   *      	clean_invalidated_cache(end); // dc civac, x1
   *     }
   *        
-  *     if(start & mark) {
-  *			start &= ~(mark);
+  *     if(start & mask) {
+  *			start &= ~(mask);
   *			clean_invalidated_cache(start);
   *			start += dcache_min_line;
   *		}

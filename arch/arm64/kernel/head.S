@@ -156,7 +156,7 @@ SYM_CODE_START(primary_entry)
  *   x23에 기록한다.
  *
  * ----
- *   TCR : Table Control Register
+ *  - TCR : Table Control Register
  */
 	adrp	x23, __PHYS_OFFSET
 	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
@@ -177,12 +177,26 @@ SYM_CODE_END(primary_entry)
  */
 /*
  * IAMROOT, 2021.07.17:
+ * - boot arguments를 boot_args로 옮긴다.
  *
  * - SYM_CODE_START_LOCAL() 해석
  *      .align 2;
  *      preserve_boot_args:
  */
 SYM_CODE_START_LOCAL(preserve_boot_args)
+/*
+ * IAMROOT, 2022.01.26:
+ * x0, x1, x2, x3으로 들어온 boot arg들을 x21, boot_args에 옮기는
+ * 작업을 수행한다.
+ * (primary_entry 주석에서 x21은 FDT pointer를 저장하기로 했었다.)
+ *
+ * 일단 x0에 있는 fdt를 x21에 옮겨 놓은 다음에 boot_args주소를 x0에 저장해놓고
+ * stp 명령어를 통해서 x0, x0 + 8, x0 + 16, x0 + 24에 접근하면서
+ * x21(x0), x1, x2, x3을 넣는다.
+ *
+ * 현재 kernel version에서 arm64는 x1, x2, x3인자는 안쓰고 있기 때문에 0으로
+ * 들어와야 될것이다. (setup_arch의 마지막 boot_args 부분 참고)
+ */
 	mov	x21, x0				// x21=FDT
 
 /*
@@ -192,7 +206,6 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
 	adr_l	x0, boot_args			// record the contents of
 /*
  * IAMROOT, 2021.07.17:
- *
  * str x21, boot_args
  * str x1, boot_args + 8 = boot_args[1];
  */
@@ -212,8 +225,8 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
  * sy : Any - Any : ALL (시스템에 있는 모든 코어)
  *
  * - Modern SMP arch에서 발생할 수 있는 문제
- *   stp와 __inval_dcache_area 중 어느 것이 더 먼저 수행될 지 보장하지 못함.
- *   __inval_dcahce_area가 먼저 수행되는것을 방지하고 stp 명령어의 수행 결과를
+ *   stp와 dcache_inval_poc 중 어느 것이 더 먼저 수행될 지 보장하지 못함.
+ *   dcache_inval_poc가 먼저 수행되는것을 방지하고 stp 명령어의 수행 결과를
  *   보장하기 위해 memory barrier 명령어를 이용한다.
  * - 캐시와의 관계성은?
  *   x0 .. x3까지의 모든 데이터를 boot_args에 저장하고 난 뒤 확실하게
@@ -226,7 +239,10 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
  * IAMROOT, 2021.07.17:
  * 0x20: boot_args 배열의 전체 크기, sizeof(boot_args)
  * x0: &boot_args
- * x1: __inval_dcache_area의 size args로 넘어감.
+ * x1: boot_args의 end address
+ *
+ * boot_args의 크기가 20byte이니 사이즈를 계산해 start address, end address를
+ * 넘긴다.
  */
 	add	x1, x0, #0x20			// 4 x 8 bytes
 	b	dcache_inval_poc		// tail call
@@ -1032,7 +1048,10 @@ SYM_FUNC_START(init_kernel_el)
 
 /*
  * IAMROOT, 2021.07.24:
+ * @return x0 BOOT_CPU_MODE_EL1
  * - CurrentEL_EL1 실행되는 코드
+ *   모든 interrupt를 disable하고 boot mode가 el1이라는것을 설정한다.
+ * - spsr_el1에 el1 stack 으로 설정한다.
  */
 SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1044,13 +1063,25 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
 /*
  * IAMROOT, 2021.11.14:
  * - cpu boot 가 EL1이라는것.
+ * - elr_el1
+ *   eret호출시 jump할 주소를 저장하는 register
+ * - eret
+ *   exception이 발생한 ELx의 spsr이 pstate로 복원되며 ELR_ELx에 저장된
+ *   address로 점프하고 pstate가 spsr로 된다.
+ *
+ * - el1 -> el1으로 이동하는 개념인데, 변화가 없는것 같지만 eret을 통해
+ *   pstate가 일관되게 초기화되는 효과가 있다고한다.
+ *   그래서 eret을 한번 써주는것이다.
  */
 	mov	w0, #BOOT_CPU_MODE_EL1
 	eret
 /*
  * IAMROOT, 2021.11.14:
  * - 현재 Exception Level은 EL2
- * - 일단 NVHE 로 hcr_el2를 set한다.
+ * - 일단 NVHE 로 hcr_el2로 시작을하여, el2 관련 초기화를 진행한후
+ *   vhe로 시작할지 nvhe로 시작할지 정해서 해당 mode로 시작한다.
+ * - hcr_el2
+ *   Hypervisor Configuration Register. 가상화 설정 관련 register.
  */
 SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	mov_q	x0, HCR_HOST_NVHE_FLAGS
@@ -1071,6 +1102,8 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 
 /*
  * IAMROOT, 2021.08.14: EL2용 하이퍼 벡터 주소를 vbar_el2 레지스터에 기록
+ * - vbar_el2
+ *   el2에서 exception 발생시 점프할 address 저장
  */
 	/* Hypervisor stub */
 	adr_l	x0, __hyp_stub_vectors
@@ -1084,8 +1117,7 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 */
 /*
  * IAMROOT, 2021.11.14:
- * - hcr : Hypervisor Configuration Register
- *   E2H : EL2 Host. Enables a configuration where a Host Operating System
+ * - E2H : EL2 Host. Enables a configuration where a Host Operating System
  *   is running in EL2, and the Host Operating System's applications are
  *   running in EL0.
  *
@@ -1114,7 +1146,10 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 */
 /*
  * IAMROOT, 2021.11.14:
- * - el2 stack pointer를 설정한다.
+ * - el1에서 eret시 el2로 가기위해 spsr_el1에서 el2로 설정한다.
+ *   el2에서 eret시 el1으로 가는 설정은 init_el2_state의
+ *   __init_el2_nvhe_prepare_eret에서 해놨다.
+ * - PSTATE를 초기화 하기위해 이런 작업을 수행하는거 같다.
  */
 	mov	x0, #INIT_PSTATE_EL2
 	msr	spsr_el1, x0
@@ -1122,14 +1157,19 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	msr	elr_el1, x0
 /*
  * IAMROOT, 2021.11.14:
- * - el2로 전환을 한다. elr_el1에서 __cpu_stick_to_vhe를 넣어놧으므로
+ * - el1로 전환을 한다. elr_el1에서 __cpu_stick_to_vhe를 넣어놧으므로
  *   그쪽으로 branch가 될것이다.
+ * - 현재 el2 mode에서, spsr_el2를 el1으로 __init_el2_nvhe_prepare_eret에서
+ *   설정해놨으므로 eret을 통해 el1가 된다.
  */
 	eret
 
 /*
  * IAMROOT, 2021.11.14:
  * - nvhe로 start할 준비를 한다.
+ * - init_el2_state에서 __init_el2_nvhe_prepare_eret에서 el1으로
+ *   복귀하도록 설정했엇을것이다. w0에 cpu가 el2로 일단 부팅을
+ *   했다는걸 저장하고 실제 eret을 통해 el1으로 mode가 변경될것이다.
  */
 1:
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1147,6 +1187,7 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 __cpu_stick_to_vhe:
 /*
  * IAMROOT, 2021.11.14:
+ * - hvc(Hypervisor Call)
  * - vhe를 지원하며, el2로 전환되는 상황에서 진입한다.
  *   vhe mode로 되고, hvc로 el1->el2로 전환되며 원래 lr로 복귀한다.
  */

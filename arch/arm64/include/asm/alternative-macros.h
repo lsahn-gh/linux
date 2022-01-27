@@ -149,11 +149,92 @@
  * Begin an alternative code sequence.
  */
 /* IAMROOT, 2021.07.17:
- * cap: ARM64_MISMATCHED_CACHE_TYPE     31
- * TODO 숙제
- *
  * - 5.10 -> 5.15 변경점.
  *   arch/arm64/include/asm/alternative.h 에서 위치 변경
+ *-------------------------
+ * - c의 ALTERNATIVE의 assembly version.
+ *   alternative가 일어나기전엔 codeX로 동작하다가
+ *   alternative가 되면 codeA가 codeY로 변경된다.
+ * - codeY는 subsecion이라는 codeX의 근처 section에 위치하고 있다가
+ *   후에 alternative하는 code에 의해 대체되는 방식이다.
+ * - cap에 따라서 alternative하는지를 판단한다.
+ *-------------------------
+ * - example( alternative_if를 다음과 같이 쓴다고 가정)
+ *
+ *.macro example_macro
+ * alternative_if EXAMPLE_CAP
+ *	codeA
+ * alternative_else
+ *  codeB
+ * alternative_endif
+ *
+ * 매크로를 확장하면 다음과 같다
+ * ----------
+ *  1)
+ * .set .Lasm_alt_mode, 1
+ *	.pushsection .altinstructions, "a"
+ *		altinstruction_entry 663f, 661f, \cap, 664f-663f, 662f-661f
+ *	.popsection
+ *  2)
+ *	.subsection 1
+ *	.align 2
+ *	661:
+ * ----------
+ *
+ *	codeA
+ *
+ * ----------
+ * 662:
+ * 3)
+ *	.if .Lasm_alt_mode==0
+ *		.subsection 1
+ *	.else
+ *		.previous
+ *	.endif
+ * 663:
+ * ----------
+ * 4)
+ *
+ * codeB
+ *
+ * ----------
+ * 664:
+ *	.org	. - (664b-663b) + (662b-661b)
+ *	.org	. - (662b-661b) + (664b-663b)
+ *	.if .Lasm_alt_mode==0
+ *	.previous
+ *	.endif
+ * ----------
+ *
+ *	1) 일단 현재 위치의 codeA, codeB의 크기와 위치, capacity를
+ *	altinstructions section에 저장한다. 후에 alternative를 하는 함수에서
+ *	해당 section을 보고 대체할것이다.
+ *	2) 2 ~3 까지. 즉 codeA를 일단 subsection으로 고려한다.
+ *	3) .Lasm_alt_mode가 0이면 subseciont을 해당 위치로 갱신하고 하고 아니면
+ *	3 전까지 subsection으로 쓴다는 얘기가 된다.
+ *	1에서 Lasm_alt_mode가 1이였으므로 codeA위치는 subsection가 될것이다.
+ *	4) codeB가 현재 위치에 들어가있을것이다.
+ *
+ * -----------------------------------
+*  1) 
+ * alternative_if EXAMPLE_CAP
+ *	codeA
+ * alternative_else
+ *  codeB
+ * alternative_endif
+ *
+ * codeB로 동작하다가 alternative에서 EXAMPLE_CAP이 지원되는 시스템인게
+ * 확인되면 codeA로 동작할것이다.
+ *
+ * 2)
+ * alternative_if_not EXAMPLE_CAP
+ *	codeA
+ * alternative_else
+ *  codeB
+ * alternative_endif
+ *
+ * codeA로 동작하다가 alternative에서 EXAMPLE_CAP이 지원되는 시스템인게
+ * 확인되면 codeB로 동작할것이다.
  */
 .macro alternative_if_not cap
 	.set .Lasm_alt_mode, 0
