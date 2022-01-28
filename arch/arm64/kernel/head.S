@@ -464,6 +464,13 @@ SYM_CODE_END(preserve_boot_args)
  *   - first few MB of the kernel linear mapping to jump to once the MMU has
  *     been enabled
  */
+/*
+ * IAMROOT, 2022.01.28:
+ * - idmap_pg_dir, init_pg_dir을 초기화한다.
+ *   idmap은 va == pa 이므로 __idmap_text_start를 pa, va 모두 같게 mapping
+ *   하는게 보이고, init은 pa의 경우 adrp로 불러온 __text, va는
+ *   KIMAGE_VADDR가 되므로 두 값으로 mapping한다.
+ */
 SYM_FUNC_START_LOCAL(__create_page_tables)
 	mov	x28, lr
 
@@ -612,6 +619,8 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
  *   table table을 늘리기만 하는데 PGD table을
  *   PHYS_MASK_SHIFT - PGDIR_SHIFT만큼 늘렸다.
  *   (48 - 39 = 2^9 = 512)
+ * - PGDIR_SHIFT의 주석에 써놓는걸 참조하면 EXTRA_SHIFT가 vabits가 안 맞는
+ *   경우가 있다.(64k page size, vabits 48 인 경우
  */
 #if (VA_BITS < 48)
 #define EXTRA_SHIFT	(PGDIR_SHIFT + PAGE_SHIFT - 3)
@@ -1410,8 +1419,8 @@ SYM_FUNC_START(__enable_mmu)
  *   early startup에서는 H/W debugger 이용하여 status 코드를
  *   확인할 수 있다.
  *
- * -   TGRAN: Translation Granule Size.
- * -  TGRAN4: 4KB TGRAN
+ * - TGRAN  : Translation Granule Size.
+ * - TGRAN4 : 4KB TGRAN
  * - TGRAN16: 16KB TGRAN
  * - TGRAN64: 64KB TGRAN
  */
@@ -1427,6 +1436,8 @@ SYM_FUNC_START(__enable_mmu)
 	phys_to_ttbr x2, x2
 /*
  * IAMROOT, 2021.08.28:
+ * - x1 : init_pg_dir의 ttbr
+ *   x2 : idmap_pg_dir의 ttbr
  * - ttbr0_el1 : user용이지만 부팅중에는 임시로 idmap으로 사용한다.
  *   ttbr1_el1 : kernel용이며 init_pg_dir을 가리킨다.
  */
@@ -1716,7 +1727,7 @@ SYM_FUNC_END(__relocate_kernel)
  * IAMROOT, 2021.08.28:
  * - CONFIG_RELR : 일단 생략
  *
- * x0: __cpu_setup에서 제일 마지막에 SCTRL_EL1_SET 매크로를 이용하여
+ * x0: __cpu_setup에서 제일 마지막에 INIT_SCTLR_EL1_MMU_ON define을 이용하여
  *     sctrl_el1에 설정하려는 bits 값이 들어 있음.
  *     x0 값은 sctrl_el1에서 읽은것이 아니라 bitmask를 통해 하드코딩으로
  *     설정된 값.

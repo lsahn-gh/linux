@@ -423,6 +423,10 @@ SYM_FUNC_END(idmap_kpti_install_ng_mappings)
  *	Return in x0 the value of the SCTLR_EL1 register.
  */
 	.pushsection ".idmap.text", "awx"
+/*
+ * IAMROOT, 2022.01.28:
+ * - mair_el1, tcr_el1을 설정한다.
+ */
 SYM_FUNC_START(__cpu_setup)
 /*
  * IAMROOT, 2021.08.21:
@@ -448,6 +452,11 @@ SYM_FUNC_START(__cpu_setup)
 
 /*
  * IAMROOT, 2021.08.21:
+ * - CPACR(Architectural Feature Access Control Register)
+ *   Controls access to trace, and to Advanced SIMD and floating-point
+ *   functionality from EL0, EL1, and EL3.
+ * - MDSCR(Monitor Debug System Control Register)
+ *   Main control register for the debug implementation.
  * - cpacr.fpen : floating point사용시 trap을 off한다는, 즉 사용하겠다는것.
  * - mdscr.tdcc : EL0가 DCC (Debug Communication Channel) 레지스터 접근시 trap 발생.
  * - enable_dbg : PSTATE의 DAIF에서 D비트를 클리어 (unmask, 즉 exception 허용).
@@ -481,6 +490,10 @@ SYM_FUNC_START(__cpu_setup)
 	 * Default values for VMSA control registers. These will be adjusted
 	 * below depending on detected CPU features.
 	 */
+/*
+ * IAMROOT, 2022.01.28:
+ * - x17을 mair, x16을 tcr이라는 이름로 정의 한다는뜻.
+ */
 	mair	.req	x17
 	tcr	.req	x16
 	mov_q	mair, MAIR_EL1_SET
