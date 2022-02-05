@@ -227,6 +227,11 @@
  * + 0 is required in order to convert the pointer type from a
  * potential array type to a pointer to a single item of the array.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - compile time에 유효성검사를 한다.
+ */
 #define __verify_pcpu_ptr(ptr)						\
 do {									\
 	const void __percpu *__vpp_verify = (typeof((ptr) + 0))NULL;	\
@@ -240,15 +245,32 @@ do {									\
  * to prevent the compiler from making incorrect assumptions about the
  * pointer value.  The weird cast keeps both GCC and sparse happy.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - __p + __offset 와 같은의미.
+ * - percpu 관련 memory는 compile가 잘못된 code를 만들수있으므로
+ *   아래와 같이 계산해서 사용한다.
+ */
 #define SHIFT_PERCPU_PTR(__p, __offset)					\
 	RELOC_HIDE((typeof(*(__p)) __kernel __force *)(__p), (__offset))
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - __perpcu ptr이 가리키는 특정 cpu의 pointer(__kernel)을 가져온다.
+ */
 #define per_cpu_ptr(ptr, cpu)						\
 ({									\
 	__verify_pcpu_ptr(ptr);						\
 	SHIFT_PERCPU_PTR((ptr), per_cpu_offset((cpu)));			\
 })
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - ptr(__percpu) + (my_cpu_offset) = 커널 pointer(__kernel)
+ */
 #define raw_cpu_ptr(ptr)						\
 ({									\
 	__verify_pcpu_ptr(ptr);						\
@@ -285,6 +307,13 @@ do {									\
  * Must be an lvalue. Since @var must be a simple identifier,
  * we force a syntax error here if it isn't.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - l-value 조작.
+ *   get_cpu_var, put_cpu_var가 한 쌍이다.
+ * - __percpu -> *__kernel
+ */
 #define get_cpu_var(var)						\
 (*({									\
 	preempt_disable();						\
@@ -301,6 +330,12 @@ do {									\
 	preempt_enable();						\
 } while (0)
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - l-value 조작.
+ *   get_cpu_ptr, put_cpu_ptr가 한 쌍이다.
+ * - __percpu -> __kernel
+ */
 #define get_cpu_ptr(var)						\
 ({									\
 	preempt_disable();						\

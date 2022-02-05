@@ -580,6 +580,13 @@ __alloc_pages_node(int nid, gfp_t gfp_mask, unsigned int order)
  * prefer the current CPU's closest node. Otherwise node must be valid and
  * online.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - TODO
+ *   nid node에서 order page만큼 할당받아서 그것을 관리하는 page pointer를
+ *   반환한다.
+ */
 static inline struct page *alloc_pages_node(int nid, gfp_t gfp_mask,
 						unsigned int order)
 {

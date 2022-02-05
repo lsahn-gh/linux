@@ -20,8 +20,8 @@
  * - tpidr: Thread ID Information Register
  *   여기서 Thread는 H/W Thread를 의미한다 (Hyper-Threading)
  *
- * - CONFIG_ARM64_VHE가 define되어 있으면 tpidr_el2에 off값을,
- *   그렇지 않으면 tpidr_el1에 off값을 쓴다.
+ * - CONFIG_ARM64_VHE가 define되어 있으면 tpidr_el1에 off값을,
+ *   그렇지 않으면 tpidr_el2에 off값을 쓴다.
  *   참고: arch/arm64/kernel/cpufeature.c 에서 arm64_features.
  */
 static inline void set_my_cpu_offset(unsigned long off)
@@ -41,6 +41,14 @@ static inline unsigned long __hyp_my_cpu_offset(void)
 	return read_sysreg(tpidr_el2);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - VHE 기능이 있으면 el1을 읽어도 자동으로 el2가 읽힌다.
+ * - cpu id(offset)를 return 한다.
+ * - cpu 부팅중에 set_my_cpu_offset에서 자신의 id(offset)를
+ *   set 해놧을것이다.
+ */
 static inline unsigned long __kern_my_cpu_offset(void)
 {
 	unsigned long off;

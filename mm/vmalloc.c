@@ -574,6 +574,12 @@ static int vmap_small_pages_range_noflush(unsigned long addr, unsigned long end,
  *
  * This is an internal function only. Do not use outside mm/.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - TODO
+ *   page에 addr을 mapping한다.
+ */
 int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 		pgprot_t prot, struct page **pages, unsigned int page_shift)
 {

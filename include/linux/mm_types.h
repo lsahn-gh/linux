@@ -90,6 +90,11 @@ struct page {
 			struct list_head lru;
 			/* See page-flags.h for PAGE_MAPPING_FLAGS */
 			struct address_space *mapping;
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - pcpu : 해당 struct page에 대항하는 struct pcpu_chunk가 set된다.
+ */
 			pgoff_t index;		/* Our offset within mapping. */
 			/**
 			 * @private: Mapping-private opaque data.

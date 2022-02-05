@@ -91,6 +91,12 @@ static inline int numa_node_id(void)
 #endif
 
 #ifndef cpu_to_node
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - TODO
+ *   해당 cpu의 node를 구해온다.
+ */
 static inline int cpu_to_node(int cpu)
 {
 	return per_cpu(numa_node, cpu);

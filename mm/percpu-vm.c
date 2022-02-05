@@ -29,6 +29,13 @@ static struct page *pcpu_chunk_page(struct pcpu_chunk *chunk,
  * RETURNS:
  * Pointer to temp pages array on success.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - pcpu chunk에 필요한 전체 unit page수 만큼 page pointer를 할당하고
+ *   return한다.
+ *   (unit 개수 * 1개의 unit에서 사용하는 page 개수 * sizeof(struct page *))
+ */
 static struct page **pcpu_get_pages(void)
 {
 	static struct page **pages;
@@ -79,6 +86,11 @@ static void pcpu_free_pages(struct pcpu_chunk *chunk,
  * The allocation is for @chunk.  Percpu core doesn't care about the
  * content of @pages and will pass it verbatim to pcpu_map_pages().
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 모든 cpu에 대해서 요청한 범위만큼의 page를 할당하고 pages에 저장한다.
+ */
 static int pcpu_alloc_pages(struct pcpu_chunk *chunk,
 			    struct page **pages, int page_start, int page_end,
 			    gfp_t gfp)
@@ -88,6 +100,13 @@ static int pcpu_alloc_pages(struct pcpu_chunk *chunk,
 
 	gfp |= __GFP_HIGHMEM;
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 모든 possible cpu에 대해서 요청한 범위만큼 page를 할당한다.
+ *   이때 각 page는 연속된 영역이 아니라 page allocator에 의한 영역에서 할당되온다.
+ *   나중에 파편화를 방지하기 위해서 일부러 single order page를 받아온것이다.
+ */
 	for_each_possible_cpu(cpu) {
 		for (i = page_start; i < page_end; i++) {
 			struct page **pagep = &pages[pcpu_page_idx(cpu, i)];
@@ -100,6 +119,10 @@ static int pcpu_alloc_pages(struct pcpu_chunk *chunk,
 	return 0;
 
 err:
+/*
+ * IAMROOT, 2022.02.05:
+ * - 실패했다면 실패한지점부터 역으로 돌면서 정리를 하고 빠져나간다.
+ */
 	while (--i >= page_start)
 		__free_page(pages[pcpu_page_idx(cpu, i)]);
 
@@ -190,6 +213,11 @@ static void pcpu_post_unmap_tlb_flush(struct pcpu_chunk *chunk,
 		pcpu_chunk_addr(chunk, pcpu_high_unit_cpu, page_end));
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - page에 addr을 mapping한다.
+ */
 static int __pcpu_map_pages(unsigned long addr, struct page **pages,
 			    int nr_pages)
 {
@@ -210,6 +238,12 @@ static int __pcpu_map_pages(unsigned long addr, struct page **pages,
  *
  * This function is responsible for setting up whatever is necessary for
  * reverse lookup (addr -> chunk).
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - struct page에 memory를 mapping한다. struct page의 index에
+ *   pcpu_chunk를 set한다.
  */
 static int pcpu_map_pages(struct pcpu_chunk *chunk,
 			  struct page **pages, int page_start, int page_end)
@@ -252,6 +286,11 @@ err:
  * As with pcpu_pre_unmap_flush(), TLB flushing also is done at once
  * for the whole region.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - TODO
+ */
 static void pcpu_post_map_flush(struct pcpu_chunk *chunk,
 				int page_start, int page_end)
 {
@@ -272,6 +311,12 @@ static void pcpu_post_map_flush(struct pcpu_chunk *chunk,
  *
  * CONTEXT:
  * pcpu_alloc_mutex, does GFP_KERNEL allocation.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 요청된 page 범위만큼 struct page를 할당해서 해당 memory에
+ *   mapping하고 각 struct page의 index에 pcpu_chunk를 set한다.
  */
 static int pcpu_populate_chunk(struct pcpu_chunk *chunk,
 			       int page_start, int page_end, gfp_t gfp)
@@ -309,6 +354,11 @@ static int pcpu_populate_chunk(struct pcpu_chunk *chunk,
  * CONTEXT:
  * pcpu_alloc_mutex.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - struct page을 unmapping하고 free시킨다.
+ */
 static void pcpu_depopulate_chunk(struct pcpu_chunk *chunk,
 				  int page_start, int page_end)
 {
@@ -330,6 +380,11 @@ static void pcpu_depopulate_chunk(struct pcpu_chunk *chunk,
 	pcpu_free_pages(chunk, pages, page_start, page_end);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk를 만들고 mapping한다.
+ */
 static struct pcpu_chunk *pcpu_create_chunk(gfp_t gfp)
 {
 	struct pcpu_chunk *chunk;
@@ -355,6 +410,11 @@ static struct pcpu_chunk *pcpu_create_chunk(gfp_t gfp)
 	return chunk;
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk에 대한 메모리 해제
+ */
 static void pcpu_destroy_chunk(struct pcpu_chunk *chunk)
 {
 	if (!chunk)
@@ -368,6 +428,11 @@ static void pcpu_destroy_chunk(struct pcpu_chunk *chunk)
 	pcpu_free_chunk(chunk);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 해당 addr의 struct page를 가져온다.
+ */
 static struct page *pcpu_addr_to_page(void *addr)
 {
 	return vmalloc_to_page(addr);
@@ -390,6 +455,13 @@ static int __init pcpu_verify_alloc_info(const struct pcpu_alloc_info *ai)
  * they are on this list.  Once depopulated, they are moved onto the sidelined
  * list which enables them to be pulled back in for allocation if no other chunk
  * can suffice the allocation.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * 1) isolate이면서 empty populate page가 있는경우
+ * 2) 전체 시스템에서 empty poplate page가 일정범위 이상이면서
+ * chunk의 empty populate page도 일정범위 이상인경우
  */
 static bool pcpu_should_reclaim_chunk(struct pcpu_chunk *chunk)
 {

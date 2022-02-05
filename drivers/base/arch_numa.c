@@ -170,6 +170,12 @@ void __init early_map_cpu_to_node(unsigned int cpu, int nid)
 }
 
 #ifdef CONFIG_HAVE_SETUP_PER_CPU_AREA
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - delta = pcpu_base_addr - __per_cpu_start;
+ *   __per_cpu_offset[cpu] = delta + pcpu_unit_offsets[cpu];
+ */
 unsigned long __per_cpu_offset[NR_CPUS] __read_mostly;
 EXPORT_SYMBOL(__per_cpu_offset);
 

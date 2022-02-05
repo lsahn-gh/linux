@@ -103,16 +103,54 @@
  * The slots are sorted by the size of the biggest continuous free area.
  * 1-31 bytes share the same slot.
  */
+/*
+ * IAMROOT, 2022.02.05:
+ * - 32byte 미만의 size는 1개의 slot에서 관리하겠다는 의미이다.
+ */
 #define PCPU_SLOT_BASE_SHIFT		5
 /* chunks in slots below this are subject to being sidelined on failed alloc */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 할당실패를 한 chunk가 PCPU_SLOT_FAIL_THRESHOLD미만이면 0번으로
+ *   밀어 넣겠다는것이다.
+ *   메모리 파편화가 너무 되있다고 예상이 되어 일반 slot에서 빼버리는 의미.
+ */
 #define PCPU_SLOT_FAIL_THRESHOLD	3
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - 전체 empty populate page가 아래범위보다 적거나 크면 balacne work를 수행하겠다는것.
+ */
 #define PCPU_EMPTY_POP_PAGES_LOW	2
 #define PCPU_EMPTY_POP_PAGES_HIGH	4
 
 #ifdef CONFIG_SMP
 /* default addr <-> pcpu_ptr mapping, override in asm/percpu.h if necessary */
 #ifndef __addr_to_pcpu_ptr
+
+/*
+ * IAMROOT, 2022.02.05:
+ * __addr_to_pcpu_ptr : addr - (pcpu_base_addr - __per_cpu_start)
+ *
+ *                      +--------+
+ *                      |dynamic |-- <- addr
+ *                      |        | ^
+ *                      |reserved| |
+ *                      |static  | | delta
+ * pcpu_base_addr  -> --+--------+ | 
+ *                    ^            |
+ *                    | +--------+ v 
+ *                    | |dynamic |-- <- __addr_to_pcpu_ptr(addr)
+ *                    | |        |
+ *              delta | |reserved|
+ *                    v |static  |
+ * __per_cpu_start -> --+--------+
+ *
+ * cpu마다 똑같은 macro로 addr을 접근하기 위해서 아래 변형식을 사용한다.
+ * addr의 __per_cpu_start의 static을 기준으로 변환을 하다가,
+ * read/write할때 macro를 사용해 실제 memory 영역을 사용하는 방식이다.
+*/
 #define __addr_to_pcpu_ptr(addr)					\
 	(void __percpu *)((unsigned long)(addr) -			\
 			  (unsigned long)pcpu_base_addr	+		\
@@ -174,6 +212,7 @@ int pcpu_sidelined_slot __ro_after_init;
 /*
  * IAMROOT, 2022.01.15:
  * - pcpu_free_slot + 1에 위치한다.
+ * - isolate한 chunk가 일반 slot에서 분리되어 위치하는 slot.
  */
 int pcpu_to_depopulate_slot __ro_after_init;
 static size_t pcpu_chunk_struct_size __ro_after_init;
@@ -192,6 +231,13 @@ static unsigned int pcpu_high_unit_cpu __ro_after_init;
 /* the address of the first chunk which starts with the kernel static area */
 void *pcpu_base_addr __ro_after_init;
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - cpu에 해당하는 unit 번호를 저장.
+ * ex) 0번 cpu가 unit 10개를 가지고 있다면
+ * pcpu_unit_map[0] = 0
+ * pcpu_unit_map[1] = 10
+ */
 static const int *pcpu_unit_map __ro_after_init;		/* cpu -> unit */
 /*
  * IAMROOT, 2022.01.21:
@@ -266,8 +312,21 @@ static unsigned long pcpu_nr_populated;
 static void pcpu_balance_workfn(struct work_struct *work);
 static DECLARE_WORK(pcpu_balance_work, pcpu_balance_workfn);
 static bool pcpu_async_enabled __read_mostly;
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - atomic alloc에서 실패를 하게되면 true가 되고, Balance work때
+ *   해당 flag를 바라본다.
+ */
 static bool pcpu_atomic_alloc_failed;
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - pcpu_balance_work를 동작시킨다.
+ *   nr_empty_pop_pages가 적은경우 동작을 할 수 있으며
+ *   empty chunk를 미리 준비해준다.
+ */
 static void pcpu_schedule_balance_work(void)
 {
 	if (pcpu_async_enabled)
@@ -281,6 +340,11 @@ static void pcpu_schedule_balance_work(void)
  *
  * RETURNS:
  * True if the address is served from this chunk.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk가 관리하는 영역이 addr을 포함하는지 확인한다.
  */
 static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
 {
@@ -316,8 +380,6 @@ static bool pcpu_addr_in_chunk(struct pcpu_chunk *chunk, void *addr)
  *  slot |   8 |   9 |  10 |  11 |  12 |  13 |  14 |  15 |  16 |  17 |
  *
  * ex) 96k => 14번, 32k => 13번
- *
- * - 0번 slot은 이 수식으로 계산되지 않고 다른방법으로 chunk가 할당된다.
  */
 static int __pcpu_size_to_slot(int size)
 {
@@ -341,6 +403,12 @@ static int pcpu_size_to_slot(int size)
 	return __pcpu_size_to_slot(size);
 }
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - 0번 slot은 이 수식으로 계산되지 않고 할당 실패시 해당 chunk가
+ *   PCPU_SLOT_FAIL_THRESHOLD 미만의 slot번호거나
+ *   size가 없거나 free_bytes가 PCPU_MIN_ALLOC_SIZE미만인것이 위치한다.
+ */
 static int pcpu_chunk_slot(const struct pcpu_chunk *chunk)
 {
 	const struct pcpu_block_md *chunk_md = &chunk->chunk_md;
@@ -352,28 +420,70 @@ static int pcpu_chunk_slot(const struct pcpu_chunk *chunk)
 	return pcpu_size_to_slot(chunk_md->contig_hint * PCPU_MIN_ALLOC_SIZE);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - struct page의 index member에 pcpu chunk구조체를 넣어놓는다.
+ */
 /* set the pointer to a chunk in a page struct */
 static void pcpu_set_page_chunk(struct page *page, struct pcpu_chunk *pcpu)
 {
 	page->index = (unsigned long)pcpu;
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - populate할때 struct page의 index에 pcpu_chunk를 저장했었다.
+ *   해당 page에서 pcpu_chunk를 가져온다.
+ */
 /* obtain pointer to a chunk from a page struct */
 static struct pcpu_chunk *pcpu_get_page_chunk(struct page *page)
 {
 	return (struct pcpu_chunk *)page->index;
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - cpu에 해당하는 unit공간에서 page idx에 해당하는 offset page
+ *   위치를 구해온다.
+ * - pcpu_unit_pages가 80개라고 가정, cpu = 1, page_idx = 1
+ * +---------+
+ * |         |
+ * |         |
+ * | unit 1  |
+ * | (cpu 1) |
+ * |         | pcpu_unit_map[1] * pcpu_unit_pages + 1 = 81
+ * +---------+
+ * |         |
+ * |         |
+ * | unit 0  |
+ * | (cpu 0) |
+ * |         |
+ * +---------+
+ */
 static int __maybe_unused pcpu_page_idx(unsigned int cpu, int page_idx)
 {
 	return pcpu_unit_map[cpu] * pcpu_unit_pages + page_idx;
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - cpu의 unit의 page_idx에 해당하는 offset주소를 return한다.
+ */
 static unsigned long pcpu_unit_page_offset(unsigned int cpu, int page_idx)
 {
 	return pcpu_unit_offsets[cpu] + (page_idx << PAGE_SHIFT);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - base_addr로부터의 cpu의 unit page_idx에 해당하는 offset주소를
+ *   return 한다.
+ */
 static unsigned long pcpu_chunk_addr(struct pcpu_chunk *chunk,
 				     unsigned int cpu, int page_idx)
 {
@@ -762,6 +872,11 @@ static void pcpu_chunk_relocate(struct pcpu_chunk *chunk, int oslot)
 		__pcpu_chunk_move(chunk, nslot, oslot < nslot);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 일반 slot에서 depopulate slot으로 isolate하여 옮긴다.
+ */
 static void pcpu_isolate_chunk(struct pcpu_chunk *chunk)
 {
 	lockdep_assert_held(&pcpu_lock);
@@ -773,6 +888,13 @@ static void pcpu_isolate_chunk(struct pcpu_chunk *chunk)
 	list_move(&chunk->list, &pcpu_chunk_lists[pcpu_to_depopulate_slot]);
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk가 isolated되있다면 isolated를 풀어버리고
+ *   slot에 재할당한다.
+ * - system empty popluate를 증가시키게된다.
+ */
 static void pcpu_reintegrate_chunk(struct pcpu_chunk *chunk)
 {
 	lockdep_assert_held(&pcpu_lock);
@@ -792,6 +914,11 @@ static void pcpu_reintegrate_chunk(struct pcpu_chunk *chunk)
  * This is used to keep track of the empty pages now based on the premise
  * a md_block covers a page.  The hint update functions recognize if a block
  * is made full or broken to calculate deltas for keeping track of free pages.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - nr_empty_pop_pages를 갱신한다.
  */
 static inline void pcpu_update_empty_pages(struct pcpu_chunk *chunk, int nr)
 {
@@ -1121,6 +1248,11 @@ static void pcpu_block_update(struct pcpu_block_md *block, int start, int end)
  * This takes a given free area hole and updates a block as it may change the
  * scan_hint.  We need to scan backwards to ensure we don't miss free bits
  * from alignment.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - bit_off부터 bits만큼의 clear bits 영역으로 hint update를 시도한다.
  */
 static void pcpu_block_update_scan(struct pcpu_chunk *chunk, int bit_off,
 				   int bits)
@@ -1759,6 +1891,13 @@ static int pcpu_find_block_fit(struct pcpu_chunk *chunk, int alloc_bits,
  * lost to alignment.  While this can cause scanning to miss earlier possible
  * free areas, smaller allocations will eventually fill those holes.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - start부터 nr만큼의 clear bits영역을 찾는다.
+ *   찾는 도중에 nr보다 작은 영역을 skip하는 경우 largest에
+ *   저장한다.
+ */
 static unsigned long pcpu_find_zero_area(unsigned long *map,
 					 unsigned long size,
 					 unsigned long start,
@@ -1769,6 +1908,13 @@ static unsigned long pcpu_find_zero_area(unsigned long *map,
 {
 	unsigned long index, end, i, area_off, area_bits;
 again:
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - start bit 이후에 clear bit를 찾는다.
+ * ex) 11110000000001111
+ *         ^index
+ */
 	index = find_next_zero_bit(map, size, start);
 
 	/* Align allocation */
@@ -1776,8 +1922,36 @@ again:
 	area_off = index;
 
 	end = index + nr;
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - map의 크기보다 end가 커지면 결국 검색 실패.
+ */
 	if (end > size)
 		return end;
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - index의후의 set bit를 찾는다.
+ * ex) nr보다 작은 범위로 검색된경우
+ *        (area_bits)
+ *         |-------|   vend
+ *     11110000000001111111100000000000000000000111
+ *         ^index   ^i      ^index`
+ * i < end가 되어 if문으로 진입한다. 검색된 범위(area_bits)는
+ * 요구한 nr보다 작은 크기이므로 skip하는데, 이전에 skip했던 영역들중에
+ * 제일 큰것을 저장한다. 만약 largest랑 크기 같다면 area_off가 0으로
+ * 시작하거나 정렬이 더 잘된것을 우선으로 취급한다.
+ *
+ * ex) nr보다 큰범위로 검색된경우
+ *         | nr  |vend
+ *     11110000000001111
+ *         ^index   ^i
+ *         |-------|
+ *          area_bits
+ * 검색된 범위 (area_bits)가 nr보다 크므로 검색이 성공되고 시작 index로
+ * return 한다.
+ */
 	i = find_next_bit(map, end, index);
 	if (i < end) {
 		area_bits = i - area_off;
@@ -1814,6 +1988,13 @@ again:
  * Allocated addr offset in @chunk on success.
  * -1 if no matching area is found.
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk에서 alloc_bits만큼의 free area를 찾는다.
+ *   찾는데 성공하면 실제 alloc_map, bound_map이 할당되고,
+ *   기타 관련 값 및 hint가 update 된다.
+ */
 static int pcpu_alloc_area(struct pcpu_chunk *chunk, int alloc_bits,
 			   size_t align, int start)
 {
@@ -1836,9 +2017,19 @@ static int pcpu_alloc_area(struct pcpu_chunk *chunk, int alloc_bits,
 	if (bit_off >= end)
 		return -1;
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - skip했던 bits중에 가장 큰영역으로 scan hint update를 시도한다.
+ */
 	if (area_bits)
 		pcpu_block_update_scan(chunk, area_off, area_bits);
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - alloc_map과 bound_map, free_bytes, first_free을 찾아낸 범위로 update한다.
+ */
 	/* update alloc map */
 	bitmap_set(chunk->alloc_map, bit_off, alloc_bits);
 
@@ -1873,6 +2064,11 @@ static int pcpu_alloc_area(struct pcpu_chunk *chunk, int alloc_bits,
  *
  * RETURNS:
  * Number of freed bytes.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - bound_map을 참고해 free한다.
  */
 static int pcpu_free_area(struct pcpu_chunk *chunk, int off)
 {
@@ -2102,6 +2298,11 @@ static struct pcpu_chunk * __init pcpu_alloc_first_chunk(unsigned long tmp_addr,
 	return chunk;
 }
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk 생성.
+ */
 static struct pcpu_chunk *pcpu_alloc_chunk(gfp_t gfp)
 {
 	struct pcpu_chunk *chunk;
@@ -2161,6 +2362,10 @@ alloc_map_fail:
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - chunk를 관리하는 memory를 전부 free한다.
+ */
 static void pcpu_free_chunk(struct pcpu_chunk *chunk)
 {
 	if (!chunk)
@@ -2183,6 +2388,11 @@ static void pcpu_free_chunk(struct pcpu_chunk *chunk)
  * Pages in [@page_start,@page_end) have been populated to @chunk.  Update
  * the bookkeeping information accordingly.  Must be called after each
  * successful population.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - populate가 된 page 영역을 chunk에 기록한다.
  */
 static void pcpu_chunk_populated(struct pcpu_chunk *chunk, int page_start,
 				 int page_end)
@@ -2207,6 +2417,12 @@ static void pcpu_chunk_populated(struct pcpu_chunk *chunk, int page_start,
  * Pages in [@page_start,@page_end) have been depopulated from @chunk.
  * Update the bookkeeping information accordingly.  Must be called after
  * each successful depopulation.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - depopulate 시킨다. populate page가 아에 없어지는것이므로
+ *   pcpu_nr_populated, pcpu_nr_empty_pop_pages 둘다 감소시키는게 보인다.
  */
 static void pcpu_chunk_depopulated(struct pcpu_chunk *chunk,
 				   int page_start, int page_end)
@@ -2264,6 +2480,11 @@ static int __init pcpu_verify_alloc_info(const struct pcpu_alloc_info *ai);
  *
  * RETURNS:
  * The address of the found chunk.
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - addr을 관리하는 pcpu_chunk를 구해온다.
  */
 static struct pcpu_chunk *pcpu_chunk_addr_search(void *addr)
 {
@@ -2574,6 +2795,14 @@ area_found:
 	pcpu_stats_area_alloc(chunk, size);
 	spin_unlock_irqrestore(&pcpu_lock, flags);
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - atomic 인 경우 pcpu_find_block_fit 에서 populate된 공간만을
+ *   찾았기때문에 populate를 할필요가 없다. 하지만 none atomic인
+ *   경우 pcpu_find_block_fit에서 first fit으로 바로 찾았기 때문에
+ *   해당 공간이 populate안되있다면 populate를 해줘야된다.
+ */
 	/* populate if not all pages are already there */
 	if (!is_atomic) {
 		unsigned int page_start, page_end, rs, re;
@@ -2603,10 +2832,20 @@ area_found:
 	if (pcpu_nr_empty_pop_pages < PCPU_EMPTY_POP_PAGES_LOW)
 		pcpu_schedule_balance_work();
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 할당이 끝난 영역에 대해서 모든 cpu마다 memory를 초기화한다.
+ */
 	/* clear the areas and return address relative to base address */
 	for_each_possible_cpu(cpu)
 		memset((void *)pcpu_chunk_addr(chunk, cpu, 0) + off, 0, size);
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - pcpu pointer로 변환한다. unit 0을 기준으로 변환을 한다.
+ */
 	ptr = __addr_to_pcpu_ptr(chunk->base_addr + off);
 	kmemleak_alloc_percpu(ptr, size, gfp);
 
@@ -2708,6 +2947,13 @@ void __percpu *__alloc_reserved_percpu(size_t size, size_t align)
  * CONTEXT:
  * pcpu_lock (can be dropped temporarily)
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - free_slot에서 한개 chunk를 제외하곤 empty_only에 따라 free를 한다.
+ * - empty_only가 false인 경우엔 무조건 free.
+ *   true인 경우엔 epmpty popuate page가 안남은 경우만 free시킨다.
+ */
 static void pcpu_balance_free(bool empty_only)
 {
 	LIST_HEAD(to_free);
@@ -2720,6 +2966,13 @@ static void pcpu_balance_free(bool empty_only)
 	 * There's no reason to keep around multiple unused chunks and VM
 	 * areas can be scarce.  Destroy all free chunks except for one.
 	 */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 한개는 무조건 남겨놓고 empty_only에 따라 free시킨다.
+ * - empty_only가 false인 경우엔 무조건 free.
+ *   true인 경우엔 epmpty popuate page가 안남은 경우만 free시킨다.
+ */
 	list_for_each_entry_safe(chunk, next, free_head, list) {
 		WARN_ON(chunk->immutable);
 
@@ -2763,6 +3016,14 @@ static void pcpu_balance_free(bool empty_only)
  * CONTEXT:
  * pcpu_lock (can be dropped temporarily)
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - atomic alloc을 실패했거나 system에 empty populate page가
+ *   부족하면 page를 populate한다. populate도 못했으면 chunk를
+ *   새로 만들고 다시 populate를 시도한다.
+ * - 적정개수는 4개(PCPU_EMPTY_POP_PAGES_HIGH)
+ */
 static void pcpu_balance_populated(void)
 {
 	/* gfp flags passed to underlying allocators */
@@ -2783,6 +3044,12 @@ static void pcpu_balance_populated(void)
 	 * inefficient.
 	 */
 retry_pop:
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - aotmic alloc에서 실패를 한경우 무조건 4개를 추가로 populate하고,
+ *   그게 아니라면 system empty populate를 4개로 유지한다.
+ */
 	if (pcpu_atomic_alloc_failed) {
 		nr_to_pop = PCPU_EMPTY_POP_PAGES_HIGH;
 		/* best effort anyway, don't worry about synchronization */
@@ -2799,6 +3066,10 @@ retry_pop:
 		if (!nr_to_pop)
 			break;
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - popluate를 안한 page가 있는 chunk를 찾는다.
+ */
 		list_for_each_entry(chunk, &pcpu_chunk_lists[slot], list) {
 			nr_unpop = chunk->nr_pages - chunk->nr_populated;
 			if (nr_unpop)
@@ -2808,6 +3079,10 @@ retry_pop:
 		if (!nr_unpop)
 			continue;
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - popluate되지 않은 영역을 찾아 최대 nr_to_pop만큼 popluate시킨다.
+ */
 		/* @chunk can't go away while pcpu_alloc_mutex is held */
 		bitmap_for_each_clear_region(chunk->populated, rs, re, 0,
 					     chunk->nr_pages) {
@@ -2829,6 +3104,10 @@ retry_pop:
 		}
 	}
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - 결국 popluate를 못했으면 chunk를 하나 새로 만든다.
+ */
 	if (nr_to_pop) {
 		/* ran out of chunks to populate, create a new one and retry */
 		spin_unlock_irq(&pcpu_lock);
@@ -2856,6 +3135,11 @@ retry_pop:
  * CONTEXT:
  * pcpu_lock (can be dropped temporarily)
  *
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - depopulate slot에 존재하는 chunk에서 사용하지 않는 영역을 depopulate한다.
  */
 static void pcpu_reclaim_populated(void)
 {
@@ -2885,11 +3169,22 @@ static void pcpu_reclaim_populated(void)
 		freed_page_start = chunk->nr_pages;
 		freed_page_end = 0;
 		reintegrate = false;
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - page를 끝에서부터 iterator를 한다.
+ */
 		for (i = chunk->nr_pages - 1, end = -1; i >= 0; i--) {
 			/* no more work to do */
 			if (chunk->nr_empty_pop_pages == 0)
 				break;
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - system에서 비어있는 page가 별로 없는거 같으니 depopulate를 안하고
+ *   reintegrate 한다.
+ */
 			/* reintegrate chunk to prevent atomic alloc failures */
 			if (pcpu_nr_empty_pop_pages < PCPU_EMPTY_POP_PAGES_HIGH) {
 				reintegrate = true;
@@ -2903,6 +3198,12 @@ static void pcpu_reclaim_populated(void)
 			 * (first) page in the chunk.
 			 */
 			block = chunk->md_blocks + i;
+/*
+ * IAMROOT, 2022.02.05:
+ * - 빈 block이면서 popluate 되있으면 처음에 한해 end를 결정한다.
+ *   i가 0보다 크면 연속되있으므로 이전 page로 continue하고
+ *   i가 0이면 마무리를 위해서 i--를 한후 진행한다.
+ */
 			if (block->contig_hint == PCPU_BITMAP_BLOCK_BITS &&
 			    test_bit(i, chunk->populated)) {
 				if (end == -1)
@@ -2912,11 +3213,25 @@ static void pcpu_reclaim_populated(void)
 				i--;
 			}
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - 이 전 block에서 end를 못찾고, 이미 사용중인 block은 skip을 한다.
+ */
 			/* depopulate if there is an active range */
 			if (end == -1)
 				continue;
 
 			spin_unlock_irq(&pcpu_lock);
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - i + 1 ~ end 까지를 depopulate 하고, end를 초기화한다.
+ * - i는 사용중일수 있다는 전제(contig_hint != PCPU_BITMAP_BLOCK_BITS)가 있고,
+ *   이 code에 온것이 최소 i + 1이상이 end가 되어 depopulate를 해야되는 영역이므로
+ *   i + 1이후부터 end을 영역으로 잡는다.
+ * - end + 1을 한 이유가 i + 1 <= X < end + 1로 pcpu_depopulate_chunk에서 처리되기
+ *   때문이다.
+ */
 			pcpu_depopulate_chunk(chunk, i + 1, end + 1);
 			cond_resched();
 			spin_lock_irq(&pcpu_lock);
@@ -2930,6 +3245,11 @@ static void pcpu_reclaim_populated(void)
 		}
 
 end_chunk:
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - depopulate한 영역이 존재하면 unmmap까지 한번에 한다.
+ */
 		/* batch tlb flush per chunk to amortize cost */
 		if (freed_page_start < freed_page_end) {
 			spin_unlock_irq(&pcpu_lock);
@@ -2940,6 +3260,16 @@ end_chunk:
 			spin_lock_irq(&pcpu_lock);
 		}
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - system에 empty popluate page가 부족하거나 chunk전체가 free size인 경우
+ *   reintegrate한다.
+ *   chunk전체가 free size인 경우 free slot으로 옮겨지는데 후에 pcpu_balance_free에서
+ *   free slot을 검사할때 해당 chunk가 nr_empty_pop_pages가 없으면 해제될것이다.
+ * - 그게 아니면 sidelined에 무조건 옮긴다. pcpu_alloc같은 곳에서 for문으로
+ *   slot을 조회할때 free slot 바로 직전에 sidelined slot이 조회될것이다.
+ */
 		if (reintegrate || chunk->free_bytes == pcpu_unit_size)
 			pcpu_reintegrate_chunk(chunk);
 		else
@@ -2956,6 +3286,10 @@ end_chunk:
  * populated pages.  An important thing to consider is when pages are freed and
  * how they contribute to the global counts.
  */
+/*
+ * IAMROOT, 2022.02.05:
+ * - pcpu balance work를 수행한다.
+ */
 static void pcpu_balance_workfn(struct work_struct *work)
 {
 	/*
@@ -2968,9 +3302,18 @@ static void pcpu_balance_workfn(struct work_struct *work)
 	mutex_lock(&pcpu_alloc_mutex);
 	spin_lock_irq(&pcpu_lock);
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - 일단 free_slot에 있는건 한개빼구 전부 free한다.
+ */
 	pcpu_balance_free(false);
 	pcpu_reclaim_populated();
 	pcpu_balance_populated();
+/*
+ * IAMROOT, 2022.02.05:
+ * - reclaim, balance를 하면서 free_slot에 chunk가 생겼을수도
+ *   있는데 해당 chunk가 empty populated가 없다면 다시 해제해버린다.
+ */
 	pcpu_balance_free(true);
 
 	spin_unlock_irq(&pcpu_lock);
@@ -2999,6 +3342,11 @@ void free_percpu(void __percpu *ptr)
 
 	kmemleak_free_percpu(ptr);
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - 받아온 pcpu pointer를 addr로 변환한다.
+ */
 	addr = __pcpu_ptr_to_addr(ptr);
 
 	spin_lock_irqsave(&pcpu_lock, flags);
@@ -3018,6 +3366,11 @@ void free_percpu(void __percpu *ptr)
 	if (!chunk->isolated && chunk->free_bytes == pcpu_unit_size) {
 		struct pcpu_chunk *pos;
 
+/*
+ * IAMROOT, 2022.02.05:
+ * - free chunk가 isolated가 아니고 완전히 빈 chunk일때,
+ *   free_slot의 첫번째 chunk가 아니면 need_balance를 요청한다.
+ */
 		list_for_each_entry(pos, &pcpu_chunk_lists[pcpu_free_slot], list)
 			if (pos != chunk) {
 				need_balance = true;
@@ -3605,6 +3958,11 @@ const char * const pcpu_fc_names[PCPU_FC_NR] __initconst = {
 
 enum pcpu_fc pcpu_chosen_fc __initdata = PCPU_FC_AUTO;
 
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - early param으로 embed, page를 고를수있다.
+ */
 static int __init percpu_alloc_setup(char *str)
 {
 	if (!str)

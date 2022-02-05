@@ -15,6 +15,11 @@
  * Most arches use the __per_cpu_offset array for those offsets but
  * some arches have their own ways of determining the offset (x86_64, s390).
  */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - mm/percpu.c에 존재한다.
+ */
 #ifndef __per_cpu_offset
 extern unsigned long __per_cpu_offset[NR_CPUS];
 
@@ -39,6 +44,11 @@ extern unsigned long __per_cpu_offset[NR_CPUS];
 /*
  * Arch may define arch_raw_cpu_ptr() to provide more efficient address
  * translations for raw_cpu_ptr().
+ */
+
+/*
+ * IAMROOT, 2022.02.05:
+ * - ptr + __my_cpu_offset
  */
 #ifndef arch_raw_cpu_ptr
 #define arch_raw_cpu_ptr(ptr) SHIFT_PERCPU_PTR(ptr, __my_cpu_offset)
