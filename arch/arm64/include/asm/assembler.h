@@ -294,6 +294,10 @@ alternative_else
 alternative_endif
 	.endm
 
+/*
+ * IAMROOT, 2022.02.07:
+ * - set_my_cpu_offset 랑 같은기능을 수행한다.
+ */
 	.macro	set_this_cpu_offset, src
 alternative_if_not ARM64_HAS_VIRT_HOST_EXTN
 	msr	tpidr_el1, \src

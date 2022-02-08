@@ -17,10 +17,11 @@
 #define CurrentEL_EL2		(2 << 2)
 
 /*
- * IAMROOT, 2021.08.14: EL1으로 돌아갈때 DAIF 플래그들을 모두 설정하여
- *   인터럽트나 정렬 exception이 발생하지 않도록 막는다.
- *    - EL1으로 모드 변경 시 사용할 스택은 EL1용 스택이다.
- *    (EL2는 EL2용 스택)
+ * IAMROOT, 2021.08.14:
+ * - spsr_elx 설정값.
+ * - ELx으로 돌아갈때 DAIF 플래그들을 모두 설정하여 인터럽트나 정렬 exception이
+ * 발생하지 않도록 막는다. 또한 변경할 mode + stack을 선택한다.
+ * - eret을 할시 현재 mode의 spsr_el값이 pstate로 update된다.
  */
 #define INIT_PSTATE_EL1 \
 	(PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1h)

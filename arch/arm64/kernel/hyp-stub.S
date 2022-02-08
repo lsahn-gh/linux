@@ -23,6 +23,11 @@
 /*
  * IAMROOT, 2021.08.20: 
  * http://egloos.zum.com/rousalome/v/10024114
+ *
+ * - exception
+ *   https://developer.arm.com/documentation/100933/0100/Exception-handling
+ * - exception vector table
+ *   https://developer.arm.com/documentation/100933/0100/AArch64-exception-vector-table
  */
 SYM_CODE_START(__hyp_stub_vectors)
 	ventry	el2_sync_invalid		// Synchronous EL2t
@@ -48,6 +53,10 @@ SYM_CODE_END(__hyp_stub_vectors)
 
 	.align 11
 
+/*
+ * IAMROOT, 2022.02.08:
+ * - hvc (el1->el2 요청)시 진입한다.(Synchronous exception)
+ */
 SYM_CODE_START_LOCAL(elx_sync)
 	cmp	x0, #HVC_SET_VECTORS
 	b.ne	1f
@@ -76,8 +85,16 @@ SYM_CODE_START_LOCAL(elx_sync)
 	eret
 SYM_CODE_END(elx_sync)
 
+/*
+ * IAMROOT, 2022.02.08:
+ * - vhe 전환.
+ */
 // nVHE? No way! Give me the real thing!
 SYM_CODE_START_LOCAL(mutate_to_vhe)
+/*
+ * IAMROOT, 2022.02.08:
+ * - mmu가 꺼져있는지, system에서 vhe를 지원하는지 확인한다.
+ */
 	// Sanity check: MMU *must* be off
 	mrs	x1, sctlr_el2
 	tbnz	x1, #0, 1f
@@ -101,6 +118,10 @@ SYM_CODE_START_LOCAL(mutate_to_vhe)
 1:	mov_q	x0, HVC_STUB_ERR
 	eret
 2:
+/*
+ * IAMROOT, 2022.02.08:
+ * - VHE 활성화 관련 작업을 수행한다.
+ */
 	// Engage the VHE magic!
 	mov_q	x0, HCR_HOST_VHE_FLAGS
 	msr	hcr_el2, x0
@@ -135,6 +156,10 @@ SYM_CODE_START_LOCAL(mutate_to_vhe)
 	msr	mair_el1, x0
 	isb
 
+/*
+ * IAMROOT, 2022.02.08:
+ * - el1에서 mode를 제외하곤 기존대로 쓴다. 모드만 el2로 변환한다.
+ */
 	// Hack the exception return to stay at EL2
 	mrs	x0, spsr_el1
 	and	x0, x0, #~PSR_MODE_MASK
@@ -152,6 +177,12 @@ SYM_CODE_END(mutate_to_vhe)
 
 	.pushsection	.idmap.text, "ax"
 
+/*
+ * IAMROOT, 2022.02.08:
+ * - vhe 진입.
+ * - x0를 다쓰고 초기화하는게 보인다.
+ * - eret을 통해 원래 hvc가 call했던 주소로 복귀한다.
+ */
 SYM_CODE_START_LOCAL(enter_vhe)
 	// Invalidate TLBs before enabling the MMU
 	tlbi	vmalle1
@@ -226,6 +257,21 @@ SYM_FUNC_END(__hyp_reset_vectors)
 
 /*
  * Entry point to switch to VHE if deemed capable
+ */
+/*
+ * IAMROOT, 2022.02.07:
+ * - el1 -> el2
+ * - boot를 EL2로 했으면서 current도 el1인경우 hvc mode가 된다.
+ *   boot EL2, current el1인 상태면 현재는 nvhe로 동작중이지만 vhe로 동작할수있는
+ *   상태일것이다. (init_el2에서 그렇게 동작시켰다.)
+ *   커널은 vhe를 지원해도 일단 이 함수 직전까지와 같이 nvhe로 동작을 하다가
+ *   start_kernel 진입직전에 vhe로 전환한다.
+ * ---
+ * - 옛날에는 Config로 VHE를 config에 따라 막을수있었지만
+ *   지금은 default 로 무조건 하드웨어에서 vhe를 지원한다면 vhe로 동작하는게
+ *   기본 정책이다. 만약 vhe 하드웨어에서 nvhe로 동작시킬려면 
+ *   'kvm-arm.mode=nvhe' command-line option 을 사용해야된다고 한다.
+ *   (참고 git log -p 2d726d0db6ac479d91bf74490455badd34af6b1d)
  */
 SYM_FUNC_START(switch_to_vhe)
 	// Need to have booted at EL2

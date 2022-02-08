@@ -846,6 +846,9 @@ SYM_FUNC_END(__create_page_tables)
  *   커널모드 스택은 sp 니모닉으로 바로 접근하며 이때 sp는 sp_el1이다.
  *
  * - get_current 함수 참고
+ *
+ * scs(Shadow Call Stack)
+ * - 함수반환주소 overflow를 방지하는 기능.
  */
 	msr	sp_el0, \tsk
 
@@ -858,6 +861,10 @@ SYM_FUNC_END(__create_page_tables)
 
 	scs_load \tsk
 
+/*
+ * IAMROOT, 2022.02.07:
+ * - 현재 cpu번호를 tpidr register에 저장한다.
+ */
 	adr_l	\tmp1, __per_cpu_offset
 	ldr	w\tmp2, [\tsk, #TSK_CPU]
 	ldr	\tmp1, [\tmp1, \tmp2, lsl #3]
@@ -901,6 +908,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 /*
  * IAMROOT, 2021.09.04:
  * - kernel용 vector table 주소 설정.
+ * - vectors 위치 : kernel/entry.S
  */
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
@@ -1064,6 +1072,10 @@ EXPORT_SYMBOL(kimage_vaddr)
  * - CurrentEL 1 -> EL1
  * - CurrentEL 2 and nVHE - > EL1
  * - CurrentEL 2 and VHE - > EL2
+ *   EL2로 부팅을하여 VHE를 지원시 원래는 EL1 NVHE로 동작을 해야되는데
+ *   아래 주석에 있다 시피 일부 Fruity cpu (ex M1. Git blame 참고)에서
+ *   EL1에서 nVHE로 동작을 못하는 현상이 있다. 그래서 EL2 VHE로
+ *   여기서 초기화를 시킨다.
  */
 SYM_FUNC_START(init_kernel_el)
 /*
@@ -1115,8 +1127,7 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
 /*
  * IAMROOT, 2021.11.14:
  * - 현재 Exception Level은 EL2
- * - 일단 NVHE 로 hcr_el2로 시작을하여, el2 관련 초기화를 진행한후
- *   vhe로 시작할지 nvhe로 시작할지 정해서 해당 mode로 시작한다.
+ * - 일단 NVHE 로 hcr_el2로 시작을하여, el2 관련 초기화를 진행한다.
  * - hcr_el2
  *   Hypervisor Configuration Register. 가상화 설정 관련 register.
  */
@@ -1158,19 +1169,22 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
  *   is running in EL2, and the Host Operating System's applications are
  *   running in EL0.
  *
- * - vhe mode로 start를 해야될지 말아야될지를 결정하는데 HCR_E2H로
- * 판단한다.
- *   el2에서 호스트 운영 체제를 지원하는 기능이 비활성화되있으면 1f로
- *   branch 한다.
+ * - HCR_E2H이 clear됬는지 확인한다. 원래 대로라면 위에 HCR_HOST_NVHE_FLAGS
+ *   로 설정하면서 clear됬어야됬는데 몇몇 cpu에서 이게 안된다고 한다.
+ *   HCR_E2H가 clear됬으면 일반 동작(1f)로 이동하고 그게 아니면 stub로 동작한다.
  */
 	mrs	x0, hcr_el2
 	and	x0, x0, #HCR_E2H
 	cbz	x0, 1f
 /*
  * IAMROOT, 2021.11.14:
- * - vhe로 start할 준비를 한다.
- *   el1에서 설정한 값이 el2에서도 똑같이 동작가능하도록
- *   SYS_SCTLR_EL12에 설정하는것이 보인다.
+ * - 원래는 vhe mode로 나중에 전환 하지만 HCR_E2H가 clear안되는 cpu들은
+ *   바로 vhe mode로 전환할 준비를 한다. HCR_E2H가 set되있으면 el1 관련
+ *   register에 접근해도 el2 register에 접근하는 것처럼 되기 때문에
+ *   문제가 발생하기 때문이다.
+ * - el1에서 설정한 값이 el2에서도 똑같이 동작가능하도록
+ *   SYS_SCTLR_EL12에 설정하는것이 보인다. 일단 vhe를 하기전에 무조건
+ *   해당 register를 초기화해준다. hvc 동작시 해당 register를 사용한다.
  */
 	/* Switching to VHE requires a sane SCTLR_EL1 as a start */
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1183,10 +1197,12 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 */
 /*
  * IAMROOT, 2021.11.14:
- * - el1에서 eret시 el2로 가기위해 spsr_el1에서 el2로 설정한다.
- *   el2에서 eret시 el1으로 가는 설정은 init_el2_state의
- *   __init_el2_nvhe_prepare_eret에서 해놨다.
- * - PSTATE를 초기화 하기위해 이런 작업을 수행하는거 같다.
+ * - 원래는 EL2 mode에서 eret을 하면 elr_el2로 접근을 하는데
+ *   HCR_E2H가 set되있으므로 elr_el1을 설정해도 elr_el2가
+ *   elr_el1처럼 동작할것이다.
+ * - spsr_el2에는 el1 복귀로 넣어놨으므로 eret시 el1이 되면서 __cpu_stick_to_vhe
+ *   로 진입할것이다.
+ * - PSTATE 초기화를 위해 spsr_el1에도 초기값을 넣어둔다.
  */
 	mov	x0, #INIT_PSTATE_EL2
 	msr	spsr_el1, x0
@@ -1218,10 +1234,8 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 
 /*
  * IAMROOT, 2021.11.14:
- * - nvhe로 start할 준비를 한다.
- * - init_el2_state에서 __init_el2_nvhe_prepare_eret에서 el1으로
- *   복귀하도록 설정했엇을것이다. w0에 cpu가 el2로 일단 부팅을
- *   했다는걸 저장하고 실제 eret을 통해 el1으로 mode가 변경될것이다.
+ * - el1(nvhe)로 start할 준비를 한다.
+ *   후에 switch_to_vhe에서 el2로 전환될것이다.
  */
 1:
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1231,7 +1245,9 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	mov	w0, #BOOT_CPU_MODE_EL2
 /*
  * IAMROOT, 2021.11.14:
- * - nvhe mode인 채로 el2 mode로 전환한다.
+ * - init_el2_state에서 __init_el2_nvhe_prepare_eret에서 el1으로
+ *   복귀하도록 설정했엇을것이다. w0에 cpu가 el2로 일단 부팅을
+ *   했다는걸 저장하고 실제 eret을 통해 el1으로 mode가 변경될것이다.
  *   elr_el2에 lr을 넣어놨으므로 lr로 바로 가게 될것이다.
  */
 	eret
@@ -1239,9 +1255,24 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 __cpu_stick_to_vhe:
 /*
  * IAMROOT, 2021.11.14:
- * - hvc(Hypervisor Call)
- * - vhe를 지원하며, el2로 전환되는 상황에서 진입한다.
- *   vhe mode로 되고, hvc로 el1->el2로 전환되며 원래 lr로 복귀한다.
+ * - 원래는 vhe를 지원해도 el1으로 동작하다가 switch_to_vhe을 했어야 됬는데
+ *   일부 cpu의 문제로 여기서 el2로 전환시킨다.
+ *
+ * --- hvc(Hypervisor Call)
+ *
+ * - el1 -> el2을 하기위해 Synchronous exception을 발생시킨다.
+ *   __hyp_stub_vectors의 (vbar_el2에 set했었다.) elx_sync가 호출된다.
+ *   (hvc의 #0는 system에서 무시되는것처럼 보이는데 필요에 따라 인자로
+ *   쓸수있는 듯하다)
+ *   PSTATE는 hvc가 발생한(el2에서 발생하면 el2->el2가 되는거같다.)
+ *   spsr_elx에 저장을 해놓고, pc도 elr_elx에 저장을 해놓고 hvc가 끝나면
+ *   다시 복귀시킨다.
+ *   
+ *   1. hvc 실행 : pc -> elr_el1, PSTATE -> spsr_el1
+ *   2. hvc(sync vector 동작)
+ *   3. hvc 종료(vector에서 eret을 통해 동작) : elr_el1 -> pc, spsr_el1 -> PSTATE
+ *
+ * - x0를 hvc 특별 인자로 사용한다. HVC_SET_VECTORS의 주석 참고
  */
 	mov	x0, #HVC_VHE_RESTART
 	hvc	#0
@@ -1787,6 +1818,10 @@ SYM_FUNC_START_LOCAL(__primary_switch)
  */
 	bl	__create_page_tables		// recreate kernel mapping
 
+/*
+ * IAMROOT, 2022.02.07:
+ * - tlbi(TLB Invalidate)
+ */
 	tlbi	vmalle1				// Remove any stale TLB entries
 	dsb	nsh
 	isb

@@ -35,6 +35,12 @@
 	.endr
 	.endm
 
+/*
+ * IAMROOT, 2022.02.08:
+ * 인자로 만들어지는 branch 함수들은 entry_handler macro에 의해 만들어지는
+ * 함수들이며 결국 해당 함수에서 _handler가 붙은 함수를 호출한다.
+ * ex) el1h_64_sync -> el1h_64_sync_handler
+ */
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
@@ -489,6 +495,11 @@ tsk	.req	x28		// current thread_info
  */
 	.pushsection ".entry.text", "ax"
 
+/*
+ * IAMROOT, 2022.02.08:
+ * - exception 함수들은 include/asm/exception.h에 위치
+ *   ex) el1h_64_sync_handler
+ */
 	.align	11
 SYM_CODE_START(vectors)
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
@@ -542,7 +553,10 @@ SYM_CODE_START_LOCAL(__bad_stack)
 SYM_CODE_END(__bad_stack)
 #endif /* CONFIG_VMAP_STACK */
 
-
+/*
+ * IAMROOT, 2022.02.08:
+ * ex) el1h_64_sync_handler
+ */
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize

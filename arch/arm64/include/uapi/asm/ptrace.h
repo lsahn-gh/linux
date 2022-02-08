@@ -29,6 +29,11 @@
 /*
  * PSR bits
  */
+/*
+ * IAMROOT, 2022.02.08:
+ * - ELXt : ELx mode(PSTATE.EL)
+ *   ELXh : ELx mode(PSTATE.EL) + ELx sp(PSTATE.SP)
+ */ 
 #define PSR_MODE_EL0t	0x00000000
 #define PSR_MODE_EL1t	0x00000004
 #define PSR_MODE_EL1h	0x00000005
