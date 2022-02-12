@@ -6324,6 +6324,11 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
  * This results in maximum locality--normal zone overflows into local
  * DMA zone, if any--but risks exhausting DMA zone.
  */
+/*
+ * IAMROOT, 2022.02.12: 
+ * node_order[]는 현재 노드를 포함한 가장 가까운 노드 번호가 담겨 있으므로
+ * 현재 노드부터 시작한다.
+ */
 static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 		unsigned nr_nodes)
 {
@@ -6340,6 +6345,10 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 		nr_zones = build_zonerefs_node(node, zonerefs);
 		zonerefs += nr_zones;
 	}
+/*
+ * IAMROOT, 2022.02.12: 
+ * 가장 마지막은 0으로 끝낸다.
+ */
 	zonerefs->zone = NULL;
 	zonerefs->zone_idx = 0;
 }
@@ -6364,6 +6373,39 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
  * This results in conserving DMA zone[s] until all Normal memory is
  * exhausted, but results in overflowing to remote node while memory
  * may still exist in local DMA zone.
+ */
+
+/*
+ * IAMROOT, 2022.02.12: 
+ * 
+ *  +--------+           +--------+
+ *  | node 0 |-----20----| node 2 |
+ *  +--------+           +--------+
+ *      |       \      /     |
+ *      30         40        30
+ *      |       /      \     | 
+ *  +--------+           +--------+
+ *  | node 1 |-----20----| node 3 |
+ *  +--------+           +--------+
+ *
+ * 예) 요청 노드: 0번
+ * 
+ * best 노드 이터레이션 순서
+ * - 현재 노드 0번 노드에서 출발
+ *   -> best 0번 노드 -> best 2번 노드 -> best 1번 노드 -> best 3번 노드
+ *
+ * 다음과 같이 로컬 노드를 포함하지 않고 가장 가까운 노드인덱스부터 로드 값이 
+ * 1씩 감소된다. (전역 배열)
+ * node_load[0] = 0 <- skip
+ * node_load[2] = 3
+ * node_load[1] = 2
+ * node_load[3] = 1
+ *
+ * 다음과 같이 로컬 노드를 포함하여 가장 가까운 노드순으로 값이 대입된다.
+ * node_order[0] = 0
+ * node_order[1] = 2
+ * node_order[2] = 1
+ * node_order[3] = 3
  */
 
 static void build_zonelists(pg_data_t *pgdat)
@@ -6504,6 +6546,11 @@ static void __build_all_zonelists(void *data)
 	 * This node is hotadded and no memory is yet present.   So just
 	 * building zonelists is fine - no need to touch other nodes.
 	 */
+/*
+ * IAMROOT, 2022.02.12: 
+ * 처음 부팅시 진입한 경우는 null로 진입했으므로 모든 노드의 존리스트를 구성,
+ * 그 외의 경우 요청한 노드만 존리스트를 구성한다.
+ */
 	if (self && !node_online(self->node_id)) {
 		build_zonelists(self);
 	} else {

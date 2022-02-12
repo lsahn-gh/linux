@@ -162,6 +162,11 @@ extern unsigned int mempolicy_slab_node(void);
 
 extern enum zone_type policy_zone;
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * policy_zone: 
+ *	movable을 제외한 최상위 zone 타입을 갱신한다.
+ */
 static inline void check_highest_zone(enum zone_type k)
 {
 	if (k > policy_zone && k != ZONE_MOVABLE)

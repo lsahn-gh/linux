@@ -30,6 +30,11 @@ struct vm_area_struct;
  */
 
 /* Plain integer GFP bitmasks. Do not use this directly. */
+/*
+ * IAMROOT, 2022.02.12: 
+ * - 밑줄3개(___)로 시작하는 gfp 플래그는 사용자가 직접 사용할 수 없다.
+ *   또한 각 기능들이 하나의 비트에 대응한다.
+ */
 #define ___GFP_DMA		0x01u
 #define ___GFP_HIGHMEM		0x02u
 #define ___GFP_DMA32		0x04u
@@ -68,6 +73,10 @@ struct vm_area_struct;
  * Do not put any conditional on these. If necessary modify the definitions
  * without the underscores and use them consistently. The definitions here may
  * be used in bit comparisons.
+ */
+/*
+ * IAMROOT, 2022.02.12: 
+ * 존과 관련한 gfp 플래그들은 하위 4비트를 사용한다.
  */
 #define __GFP_DMA	((__force gfp_t)___GFP_DMA)
 #define __GFP_HIGHMEM	((__force gfp_t)___GFP_HIGHMEM)
@@ -439,6 +448,12 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
  * GFP_ZONES_SHIFT must be <= 2 on 32 bit platforms.
  */
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * - 32비트 시스템의 경우 최대 4개의 존 조합을 사용할 수 있다.
+ * - 존 정보의 저장은 2비트를 사용하여 page 구조체의 플래그에 저장된다.
+ */
+
 #if defined(CONFIG_ZONE_DEVICE) && (MAX_NR_ZONES-1) <= 4
 /* ZONE_DEVICE is not a valid GFP zone specifier */
 #define GFP_ZONES_SHIFT 2
@@ -446,10 +461,39 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 #define GFP_ZONES_SHIFT ZONES_SHIFT
 #endif
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * - 32비트 시스템의 경우 GFP_ZONES_SHIFT가 2를 초과하는 경우 에러
+ * - 64비트 시스템의 경우 GFP_ZONES_SHIFT가 4를 초과하는 경우 에러
+ *   (현재 존타입 수가 최대 6개 이므로 GFP_ZONES_SHIFT는 3비트를 사용한다)
+ */
 #if 16 * GFP_ZONES_SHIFT > BITS_PER_LONG
 #error GFP_ZONES_SHIFT too large to create GFP_ZONE_TABLE integer
 #endif
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * 존과 관련된 gfp 플래그를 사용해서 zone 타입을 알아내기 위해 사용하는 테이블
+ * 예) DMA(0)+DMA32(1)+NORMAL(2)+MOVABLE(3)
+ *     아래를 순서대로 숫자를 계산해보면
+ *               2
+ *     |         0
+ *     |            (highmem 무시)
+ *     |     0x100  (1 << 4 * 2)
+ *     |   0x20000  (2 << 8 * 2)
+ *     |         0
+ *     |  0x300000  (3 << (8 | 2) * 2)
+ *     | 0x1000000  (1 << (8 | 4) * 2)
+ *   -----------------------------------
+ *       0x1320102 
+ *       위의 값중 하위 GFP_ZONES_SHIFT(2)비트 만큼만 사용하면 
+ *      ->       2
+ *
+ * 다음과 같이 요청 시 찾은 존 타입:
+ * - GFP_KERNEL: normal.
+ * - GFP_DMA:    dma
+ * - GFP_DMA32:  dma32
+ */
 #define GFP_ZONE_TABLE ( \
 	(ZONE_NORMAL << 0 * GFP_ZONES_SHIFT)				       \
 	| (OPT_ZONE_DMA << ___GFP_DMA * GFP_ZONES_SHIFT)		       \
@@ -467,6 +511,10 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
  * entry starting with bit 0. Bit is set if the combination is not
  * allowed.
  */
+/*
+ * IAMROOT, 2022.02.12: 
+ * 적합하지 않은 존 구성을 알아내기 위해 사용한다. (빌드 경우)
+ */
 #define GFP_ZONE_BAD ( \
 	1 << (___GFP_DMA | ___GFP_HIGHMEM)				      \
 	| 1 << (___GFP_DMA | ___GFP_DMA32)				      \
@@ -478,6 +526,14 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 	| 1 << (___GFP_MOVABLE | ___GFP_DMA32 | ___GFP_DMA | ___GFP_HIGHMEM)  \
 )
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * 존과 연관된 gfp 플래그를 사용하여 해당 존타입을 알아온다.
+ * - GFP_ZONEMASK: dma, dma32, highmem, movable
+ * - 위의 플래그가 지정되지 않은 경우 최상위 을 사용한다.
+ * 
+ * 반환되는 값은 존 타입이므로 0~5까지의 존 타입이 반환된다.
+ */
 static inline enum zone_type gfp_zone(gfp_t flags)
 {
 	enum zone_type z;
@@ -496,6 +552,11 @@ static inline enum zone_type gfp_zone(gfp_t flags)
  * virtual kernel addresses to the allocated page(s).
  */
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * NUMA 커널에서 __GFP_THISNODE로 요청한 경우에만 ZONELIST_NOFALLBACK(1)을 
+ * 선택하고 그 외의 경우 ZONELIST_FALLBACK(0)을 선택한다. 
+ */
 static inline int gfp_zonelist(gfp_t flags)
 {
 #ifdef CONFIG_NUMA
@@ -513,6 +574,12 @@ static inline int gfp_zonelist(gfp_t flags)
  *
  * For the case of non-NUMA systems the NODE_DATA() gets optimized to
  * &contig_page_data at compile-time.
+ */
+/*
+ * IAMROOT, 2022.02.12: 
+ * NUMA 커널에서 __GFP_THISNODE로 요청한 경우에 따라 적절한 node_zonelists[]를 
+ * 선택한다.
+ * -> NODE->node_zonelists[0 or 1]을 선택한다.
  */
 static inline struct zonelist *node_zonelist(int nid, gfp_t flags)
 {

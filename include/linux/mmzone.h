@@ -746,6 +746,11 @@ enum zone_flags {
 	ZONE_RECLAIM_ACTIVE,		/* kswapd may be scanning the zone. */
 };
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * 부트업중 reserved 페이지를 제외하고, 버디 시스템이 관리하는 페이지가
+ * 존재하면 해당 페이지 수를 반환한다.
+ */
 static inline unsigned long zone_managed_pages(struct zone *zone)
 {
 	return (unsigned long)atomic_long_read(&zone->managed_pages);
@@ -803,9 +808,23 @@ static inline bool zone_intersects(struct zone *zone,
  */
 #define DEF_PRIORITY 12
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * ARM64 디폴트 설정 시: 16개 노드 * 4개 존 사용(dma, dma32, normal, movable)
+ */
+
 /* Maximum number of zones on a zonelist */
 #define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
 
+/*
+ * IAMROOT, 2022.02.12: 
+ * 메모리 할당 시 빠른 fallback 선택을 위해 미리 구성하는 존리스트이며, 
+ * 다음과 같이 2개의 fallback용 zonelist를 만들어서 사용한다.
+ *
+ * - 1) ZONELIST_FALLBACK은 모든 노드와 존을 포함한 존리스트이다. (default)
+ * - 2) ZONELIST_NOFALLBACK은 현재 노드의 존에서만 fallback 존을 찾아 
+ *      사용하도록 구성한 존리스트이다. (메모리 할당 요구시 __GFP_THISNODE)
+ */
 enum {
 	ZONELIST_FALLBACK,	/* zonelist with fallback */
 #ifdef CONFIG_NUMA
@@ -1082,6 +1101,17 @@ static inline int local_memory_node(int node_id) { return node_id; };
 /*
  * zone_idx() returns 0 for the ZONE_DMA zone, 1 for the ZONE_NORMAL zone, etc.
  */
+/*
+ * IAMROOT, 2022.02.12: 
+ * 요청한 zone 구조체 포인터 주소를 사용하여 존 인덱스를 구한다.
+ *
+ * 해당 존 배열에서 0번 존을 뺴면 존에 대한 인덱스가 구해진다.
+ *	(node)->node_zones[대상존] - (node)->node_zones[0]
+ *
+ * 예) dma+dma32+normal+movable이 있는 시스템에서 
+ *     -> dma32의 인덱스는 1
+ */
+
 #define zone_idx(zone)		((zone) - (zone)->zone_pgdat->node_zones)
 
 #ifdef CONFIG_ZONE_DEVICE
@@ -1101,6 +1131,11 @@ static inline bool zone_is_zone_device(struct zone *zone)
  * All the reclaim decisions have to use this function rather than
  * populated_zone(). If the whole zone is reserved then we can easily
  * end up with populated_zone() && !managed_zone().
+ */
+/*
+ * IAMROOT, 2022.02.12: 
+ * 부트업중 reserved 페이지를 제외하고, 버디 시스템이 관리하는 페이지가
+ * 존재하면 true를 반환한다.
  */
 static inline bool managed_zone(struct zone *zone)
 {
