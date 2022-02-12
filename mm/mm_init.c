@@ -20,6 +20,19 @@
 int __meminitdata mminit_loglevel;
 
 /* The zonelists are simply reported, validation is manual. */
+/*
+ * IAMROOT, 2022.02.12:
+ * - debug on시 zonelist 정보를 출력한다.
+ *   ex)
+ *   mminit::zonelist general 0:DMA = 0:DMA
+ *   mminit::zonelist general 0:DMA32 = 0:DMA32 0:DMA
+ *   mminit::zonelist general 0:Normal = 0:Normal 0:DMA32 0:DMA 1:Normal
+ *   mminit::zonelist thisnode 0:DMA = 0:DMA
+ *   mminit::zonelist thisnode 0:DMA32 = 0:DMA32 0:DMA
+ *   mminit::zonelist thisnode 0:Normal = 0:Normal 0:DMA32 0:DMA
+ *   mminit::zonelist general 1:Normal = 1:Normal 0:Normal 0:DMA32 0:DMA
+ *   mminit::zonelist thisnode 1:Normal = 1:Normal
+ */
 void __init mminit_verify_zonelist(void)
 {
 	int nid;

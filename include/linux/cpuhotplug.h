@@ -319,6 +319,11 @@ static inline int cpuhp_setup_state_cpuslocked(enum cpuhp_state state,
  * Same as cpuhp_setup_state() except that the @startup callback is not
  * invoked during installation. NOP if SMP=n or HOTPLUG_CPU=n.
  */
+/*
+ * IAMROOT, 2022.02.12:
+ * - cpu state 변화시 state 순번에 호출되는 startup, teardown 함수를 등록한다.
+ *   startup 함수를 등록만하고 호출은 안한다.(nocalls)
+ */
 static inline int cpuhp_setup_state_nocalls(enum cpuhp_state state,
 					    const char *name,
 					    int (*startup)(unsigned int cpu),

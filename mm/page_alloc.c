@@ -189,6 +189,10 @@ EXPORT_SYMBOL(_totalram_pages);
 unsigned long totalreserve_pages __read_mostly;
 unsigned long totalcma_pages __read_mostly;
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - 초기값 0. sysctl로 control한다.
+ */
 int percpu_pagelist_high_fraction;
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 DEFINE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_ALLOC_DEFAULT_ON, init_on_alloc);
@@ -6196,6 +6200,11 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
 	show_swap_cache_info();
 }
 
+
+/*
+ * IAMROOT, 2022.02.12:
+ * - zone pointer와 idx를 저장한다.
+ */
 static void zoneref_set_zone(struct zone *zone, struct zoneref *zoneref)
 {
 	zoneref->zone = zone;
@@ -6206,6 +6215,22 @@ static void zoneref_set_zone(struct zone *zone, struct zoneref *zoneref)
  * Builds allocation fallback zone lists.
  *
  * Add all populated zones of a node to the zonelist.
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - zone type을 역순으로 돌면서 zonerefs 자료구조를 쌓아올린다.
+ *   policy_zone을 갱신한다.
+ * - ex) zonerefs가 n번 index부터 시작한다고 했을때
+ *   (예를 위해서 managed_zone은 무조건 true라고 가정)
+ *
+ *   ..
+ *   zonerefs[n] : zone_type = MAX_NR_ZONES - 1
+ *   zonerefs[n + 1] = MAX_NR_ZONES - 2 ..
+ *   ..
+ *
+ *   위와 같이 zonerefs[n]으로 오는 상황이 있을수 있고 zoneref의 index는
+ *   증가하고 해당 zoneref에 들어가는 zone_type은 역으로 감소하는 형식으로
+ *   초기화된다.
  */
 static int build_zonerefs_node(pg_data_t *pgdat, struct zoneref *zonerefs)
 {
@@ -6227,6 +6252,10 @@ static int build_zonerefs_node(pg_data_t *pgdat, struct zoneref *zonerefs)
 
 #ifdef CONFIG_NUMA
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - zone order는 막아뒀다. node order만 지원한다.
+ */
 static int __parse_numa_zonelist_order(char *s)
 {
 	/*
@@ -6328,6 +6357,24 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
  * IAMROOT, 2022.02.12: 
  * node_order[]는 현재 노드를 포함한 가장 가까운 노드 번호가 담겨 있으므로
  * 현재 노드부터 시작한다.
+ *
+ * - 각 node마다 해당 함수가 호출되며, 해당 함수에서는 best node순으로 순회를 한다.
+ *   식으로 되있다.
+ * - 시작은 this node가 된다.
+ * - nr_nodes가 0인 this node를 기준으로 가장 가까운순으로 node_order에 지정되있다.
+ *   그러므로 zonrefs가 멀수록 먼 node가 될것이다.
+ *
+ * - ex) nr_nodes는 3개, 내부에서 nr_zones가 3개씩 초기화된다고 가정할때
+ *   zonerefs[0] : nr_nodes 0의 시작 zonerefs
+ *   zonerefs[1]
+ *   zonerefs[2]
+ *   zonerefs[3] : nr_nodes 1의 시작 zonerefs
+ *   zonerefs[4]
+ *   zonerefs[5]
+ *   zonerefs[6] : nr_nodes 2의 시작 zonerefs
+ *   zonerefs[7]
+ *   zonerefs[8]
+ *   zonerefs[9] : 마지막은 NULL이 들어간다.
  */
 static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 		unsigned nr_nodes)
@@ -6355,6 +6402,10 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 
 /*
  * Build gfp_thisnode zonelists
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 호출한 node에 대해서만 zonelist를 만든다.
  */
 static void build_thisnode_zonelists(pg_data_t *pgdat)
 {
@@ -6407,7 +6458,6 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
  * node_order[2] = 1
  * node_order[3] = 3
  */
-
 static void build_zonelists(pg_data_t *pgdat)
 {
 	static int node_order[MAX_NUMNODES];
@@ -6446,6 +6496,12 @@ static void build_zonelists(pg_data_t *pgdat)
  * I.e., first node id of first zone in arg node's generic zonelist.
  * Used for initializing percpu 'numa_mem', which is used primarily
  * for kernel allocations, so use GFP_KERNEL flags to locate zonelist.
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 @node이 속한 zonelist의 first zoneref를 찾는다.
+ * - 만약 @node가 memoryless인 경우 zonelist에 해당 node로 설정이 안되있을것이다.
+ *   그럴 경우 가장 인접한 node를 알아온다.
  */
 int local_memory_node(int node)
 {
@@ -6518,8 +6574,16 @@ static void build_zonelists(pg_data_t *pgdat)
  */
 static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonestat *pzstats);
 /* These effectively disable the pcplists in the boot pageset completely */
+/*
+ * IAMROOT, 2022.02.12:
+ * - boot 시점에서는 사용안하게 막아두는 개념
+ */
 #define BOOT_PAGESET_HIGH	0
 #define BOOT_PAGESET_BATCH	1
+/*
+ * IAMROOT, 2022.02.12:
+ * - per_cpu_pages_init에서 초기화된다.
+ */
 static DEFINE_PER_CPU(struct per_cpu_pages, boot_pageset);
 static DEFINE_PER_CPU(struct per_cpu_zonestat, boot_zonestats);
 /*
@@ -6529,6 +6593,11 @@ static DEFINE_PER_CPU(struct per_cpu_zonestat, boot_zonestats);
  */
 static DEFINE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - @data == NULL일 경우 모든 node에 대해서 zonelist를 초기화하고
+ *   pcpu 변수(_numa_mem_)에 local memory를 기록한다.
+ */
 static void __build_all_zonelists(void *data)
 {
 	int nid;
@@ -6569,6 +6638,12 @@ static void __build_all_zonelists(void *data)
 		 * secondary cpus' numa_mem as they come on-line.  During
 		 * node/memory hotplug, we'll fixup all on-line cpus.
 		 */
+
+/*
+ * IAMROOT, 2022.02.12:
+ * - memory가 있는 node인 경우 자신의 memory, 없는 경우 가장 인접한 memory의
+ *   node를 가지고 set_cpu_numa_mem이 수행된다.
+ */
 		for_each_online_cpu(cpu)
 			set_cpu_numa_mem(cpu, local_memory_node(cpu_to_node(cpu)));
 #endif
@@ -6577,6 +6652,13 @@ static void __build_all_zonelists(void *data)
 	spin_unlock(&lock);
 }
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - in node order 방식으로 모든 node에 대해 zonelist를 초기화하고
+ *   pcpu의 boot_pageset을 초기화한다.
+ * ---
+ *  in zone order도 존재했지만 kernel 4.14부터 아에 삭제가 됬다.
+ */
 static noinline void __init
 build_all_zonelists_init(void)
 {
@@ -7088,6 +7170,11 @@ static int zone_batchsize(struct zone *zone)
 #endif
 }
 
+
+/*
+ * IAMROOT, 2022.02.12:
+ * - cpu 개수에 따라 zone memory를 나누고 batch * 4를 기준으로 highsize를 구한다.
+ */
 static int zone_highsize(struct zone *zone, int batch, int cpu_online)
 {
 #ifdef CONFIG_MMU
@@ -7095,6 +7182,13 @@ static int zone_highsize(struct zone *zone, int batch, int cpu_online)
 	int nr_split_cpus;
 	unsigned long total_pages;
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - sysctl로 조정한 percpu_pagelist_high_fraction값으로 zone 전체에 대해서
+ *   page를 나누거나, 아니면 default로 low watermark + boost를 사용해서
+ *   total_pages를 계산한다.
+ * - total_pages를 cpu수로 나누어 사용하되 최소 batch 4배이상으로 high를 결정한다.
+ */
 	if (!percpu_pagelist_high_fraction) {
 		/*
 		 * By default, the high value of the pcp is based on the zone
@@ -7119,6 +7213,10 @@ static int zone_highsize(struct zone *zone, int batch, int cpu_online)
 	 * all online CPUs to mitigate the risk that reclaim is triggered
 	 * prematurely due to pages stored on pcp lists.
 	 */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 node를 사용하는 cpu 개수 + 전체 online cpu수
+ */
 	nr_split_cpus = cpumask_weight(cpumask_of_node(zone_to_nid(zone))) + cpu_online;
 	if (!nr_split_cpus)
 		nr_split_cpus = num_online_cpus();
@@ -7159,6 +7257,10 @@ static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
 	WRITE_ONCE(pcp->high, high);
 }
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - per_cpu_pages를 초기화한다. boot 시점에는 일단 disable한다.
+ */
 static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonestat *pzstats)
 {
 	int pindex;
@@ -7195,6 +7297,10 @@ static void __zone_set_pageset_high_and_batch(struct zone *zone, unsigned long h
 /*
  * Calculate and set new high and batch values for all per-cpu pagesets of a
  * zone based on the zone's size.
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - batch, high값을 memory 크기에 따라서 zone에 설정하고
  */
 static void zone_set_pageset_high_and_batch(struct zone *zone, int cpu_online)
 {
@@ -8897,6 +9003,10 @@ static int page_alloc_cpu_dead(unsigned int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 cpu에 대한 각 zone을 pcp값을 update한다.
+ */
 static int page_alloc_cpu_online(unsigned int cpu)
 {
 	struct zone *zone;
@@ -8907,6 +9017,11 @@ static int page_alloc_cpu_online(unsigned int cpu)
 }
 
 #ifdef CONFIG_NUMA
+/*
+ * IAMROOT, 2022.02.12:
+ * - 64bit 초기값은 1인데 booting시 memory node가 한개밖에 없으면
+ *   0으로 초기화된다.
+ */
 int hashdist = HASHDIST_DEFAULT;
 
 static int __init set_hashdist(char *str)
@@ -8919,6 +9034,10 @@ static int __init set_hashdist(char *str)
 __setup("hashdist=", set_hashdist);
 #endif
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - CPUHP_PAGE_ALLOC state때 startup, teardown 함수등록
+ */
 void __init page_alloc_init(void)
 {
 	int ret;
@@ -9927,6 +10046,10 @@ EXPORT_SYMBOL(free_contig_range);
 /*
  * The zone indicated has a new number of managed_pages; batch sizes and percpu
  * page high values need to be recalculated.
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 zone에 pcp를 update한다.
  */
 void zone_pcp_update(struct zone *zone, int cpu_online)
 {

@@ -3417,6 +3417,10 @@ bool cpuset_cpus_allowed_fallback(struct task_struct *tsk)
 	return changed;
 }
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - init task는 모든 node에 대한 memory 할당을 허용한다.
+ */
 void __init cpuset_init_current_mems_allowed(void)
 {
 	nodes_setall(current->mems_allowed);

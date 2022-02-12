@@ -117,6 +117,10 @@ static struct kmem_cache *sn_cache;
 
 /* Highest zone. An specific allocation for a zone below that is not
    policied. */
+/*
+ * IAMROOT, 2022.02.12:
+ * - movable zone을 제외한 zone중에 최상위 zone을 저장한다.
+ */
 enum zone_type policy_zone = 0;
 
 /*

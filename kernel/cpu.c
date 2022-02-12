@@ -2073,6 +2073,10 @@ out:
 }
 EXPORT_SYMBOL(__cpuhp_setup_state_cpuslocked);
 
+/*
+ * IAMROOT, 2022.02.12:
+ * @invoke true일 경우 startup 함수등록시 바로 실행한다.
+ */
 int __cpuhp_setup_state(enum cpuhp_state state,
 			const char *name, bool invoke,
 			int (*startup)(unsigned int cpu),

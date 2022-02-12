@@ -1194,6 +1194,10 @@ struct task_struct {
 #endif
 #ifdef CONFIG_CPUSETS
 	/* Protected by ->alloc_lock: */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 task가 할당할수있는 node들을 표시.
+ */
 	nodemask_t			mems_allowed;
 	/* Sequence number to catch updates: */
 	seqcount_spinlock_t		mems_allowed_seq;

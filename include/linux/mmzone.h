@@ -42,6 +42,10 @@
  * coalesce naturally under reasonable reclaim pressure and those which
  * will not.
  */
+/*
+ * IAMROOT, 2022.02.12:
+ * - buddy system의 단편화 문제를 어느정도 타협하기 위한 order 범위(8 pages)
+ */
 #define PAGE_ALLOC_COSTLY_ORDER 3
 
 /*
@@ -377,6 +381,11 @@ enum zone_watermarks {
 #else
 #define NR_PCP_THP 0
 #endif
+
+/*
+ * IAMROOT, 2022.02.12:
+ * - 3 * (3 + 1 + (1)) = 15
+ */
 #define NR_PCP_LISTS (MIGRATE_PCPTYPES * (PAGE_ALLOC_COSTLY_ORDER + 1 + NR_PCP_THP))
 
 /*
@@ -386,6 +395,10 @@ enum zone_watermarks {
 #define NR_PCP_ORDER_WIDTH 8
 #define NR_PCP_ORDER_MASK ((1<<NR_PCP_ORDER_WIDTH) - 1)
 
+/*
+ * IAMROOT, 2022.02.12:
+ * - /proc/zoneinfo 의 zone 정보에서 min, low, high에 + boost 값
+ */
 #define min_wmark_pages(z) (z->_watermark[WMARK_MIN] + z->watermark_boost)
 #define low_wmark_pages(z) (z->_watermark[WMARK_LOW] + z->watermark_boost)
 #define high_wmark_pages(z) (z->_watermark[WMARK_HIGH] + z->watermark_boost)
@@ -393,6 +406,13 @@ enum zone_watermarks {
 
 /* Fields and list protected by pagesets local_lock in page_alloc.c */
 struct per_cpu_pages {
+/*
+ * IAMROOT, 2022.02.12:
+ * - count : 현재 가지고 있는 cache pages. 이 page는 lock이 필요없이
+ *   가져올수있다. 소진되면 batch만큼 buddy system에 요청한다.
+ * - high : 최대 가지고 있을수있는 cache page size
+ * - batch : 한번에 buddy system에 add, remove하는 양
+ */
 	int count;		/* number of pages in the list */
 	int high;		/* high watermark, emptying needed */
 	int batch;		/* chunk size for buddy add/remove */
@@ -535,6 +555,10 @@ struct zone {
 	/* Read-mostly fields */
 
 	/* zone watermarks, access with *_wmark_pages(zone) macros */
+/*
+ * IAMROOT, 2022.02.12:
+ * - /proc/zoneinfo 의 zone 정보에서 min, low, high
+ */
 	unsigned long _watermark[NR_WMARK];
 	unsigned long watermark_boost;
 
@@ -1302,6 +1326,16 @@ struct zoneref *__next_zones_zonelist(struct zoneref *z,
  * Return: the next zone at or below highest_zoneidx within the allowed
  * nodemask using a cursor within a zonelist as a starting point
  */
+/*
+ * IAMROOT, 2022.02.12:
+ * @z 시작 zoneref
+ * @highest_zoneidx zoneidx 검색범위
+ * @nodes 요청 node의 bitmap 예를들어 0b1100 인경우 2, 3node에 대해서만 검색을
+ * 수행한다. null일 경우 모든 node에 대해 검색을 수행한다.
+ *
+ * - 모든 node에 대한 검색일 경우 zone idx만을 먼저 검사해 first zoneref을
+ *   return 하거나(fast path) 조건에 맞는 zone을 찾는다.
+ */
 static __always_inline struct zoneref *next_zones_zonelist(struct zoneref *z,
 					enum zone_type highest_zoneidx,
 					nodemask_t *nodes)
@@ -1327,6 +1361,10 @@ static __always_inline struct zoneref *next_zones_zonelist(struct zoneref *z,
  * update due to cpuset modification.
  *
  * Return: Zoneref pointer for the first suitable zone found
+ */
+/*
+ * IAMROOT, 2022.02.12:
+ * - zonelist에서 highest_zoneidx, nodes에 맞는 가장 처음의 zoneref를 검색한다.
  */
 static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 					enum zone_type highest_zoneidx,

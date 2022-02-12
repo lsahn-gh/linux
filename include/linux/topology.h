@@ -136,6 +136,11 @@ static inline int numa_node_id(void)
  * It will not be defined when CONFIG_HAVE_MEMORYLESS_NODES is not defined.
  * Use the accessor functions set_numa_mem(), numa_mem_id() and cpu_to_mem().
  */
+/*
+ * IAMROOT, 2022.02.12:
+ * - __build_all_zonelists에서 설정된다. pcpu가 속한 nid나 memory less인 경우
+ *   인접 nid가 set된다.
+ */
 DECLARE_PER_CPU(int, _numa_mem_);
 
 #ifndef set_numa_mem
@@ -161,6 +166,10 @@ static inline int cpu_to_mem(int cpu)
 #endif
 
 #ifndef set_cpu_numa_mem
+/*
+ * IAMROOT, 2022.02.12:
+ * - 해당 cpu의 node or 인접 node가 set된다.(local memory)
+ */
 static inline void set_cpu_numa_mem(int cpu, int node)
 {
 	per_cpu(_numa_mem_, cpu) = node;

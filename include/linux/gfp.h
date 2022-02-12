@@ -554,8 +554,10 @@ static inline enum zone_type gfp_zone(gfp_t flags)
 
 /*
  * IAMROOT, 2022.02.12: 
- * NUMA 커널에서 __GFP_THISNODE로 요청한 경우에만 ZONELIST_NOFALLBACK(1)을 
+ * - NUMA 커널에서 __GFP_THISNODE로 요청한 경우에만 ZONELIST_NOFALLBACK(1)을 
  * 선택하고 그 외의 경우 ZONELIST_FALLBACK(0)을 선택한다. 
+ * - GFP_KERNEL은 __GFP_THISNODE와 관계없는 flag지만 명시적으로 그냥 사용한다.
+ *   그래서 ZONELIST_FALLBACK를 가져올것이다.
  */
 static inline int gfp_zonelist(gfp_t flags)
 {

@@ -53,6 +53,11 @@ static inline int zref_in_nodemask(struct zoneref *zref, nodemask_t *nodes)
 }
 
 /* Returns the next zone at or below highest_zoneidx in a zonelist */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 현재 zone을 포함하여 highest_zoneidx 범위 이내인지,
+ *   nodes에 속한 zone중 최초의 zoneref를 return한다.
+ */
 struct zoneref *__next_zones_zonelist(struct zoneref *z,
 					enum zone_type highest_zoneidx,
 					nodemask_t *nodes)
@@ -61,6 +66,12 @@ struct zoneref *__next_zones_zonelist(struct zoneref *z,
 	 * Find the next suitable zone to use for the allocation.
 	 * Only filter based on nodemask if it's set
 	 */
+/*
+ * IAMROOT, 2022.02.12:
+ * - 모든 nodes에 대한 요청(nodes == NULL)일 경우 highest_zoneidx 범위내인것을
+ *   찾아 return 한다.
+ * - 그게 아니면 요청 nodes에 속한 zone인지까지 검사한다.
+ */
 	if (unlikely(nodes == NULL))
 		while (zonelist_zone_idx(z) > highest_zoneidx)
 			z++;
