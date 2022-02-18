@@ -21,6 +21,18 @@
 #define CTR_CACHE_MINLINE_MASK	\
 	(0xf << CTR_DMINLINE_SHIFT | CTR_IMINLINE_MASK << CTR_IMINLINE_SHIFT)
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/CTR-EL0--Cache-Type-Register
+ * - Level 1 instruction cache policy. Indicates the indexing and
+ *   tagging policy for the L1 instruction cache.
+ *   Possible values of this field are.
+ * - 아래 ICACHE_XX.. 로 시작하는 2bit가 읽힌다.
+ *   ICACHEF_VPIPT : VMID aware Physical Index, Physical tag (VPIPT).
+ *   ICACHE_POLICY_RESERVED : ASID-tagged Virtual Index, Virtual Tag (AIVIVT).
+ *   ICACHE_POLICY_VIPT : Virtual Index, Physical Tag (VIPT).
+ *   ICACHE_POLICY_PIPT : Physical Index, Physical Tag (PIPT).
+ */
 #define CTR_L1IP(ctr)		(((ctr) >> CTR_L1IP_SHIFT) & CTR_L1IP_MASK)
 
 #define ICACHE_POLICY_VPIPT	0

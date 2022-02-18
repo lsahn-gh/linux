@@ -13,10 +13,12 @@
 
 /*
  * IAMROOT, 2021.09.11:
- * - .word 661b - . : oldinstr 시작주소에서 이 위치까지의 offset
- * - .word 663f - . : newinstr 시작주소에서 이 위치까지의 offset
- * - .byte 662b-bb1b : oldinstr의 크기
- * - .byte 664f-663f : newinstr의 크기
+ * - struct alt_instr 의 형태로 저장한다.
+ * - .word 661b - . : oldinstr 시작주소에서 이 위치까지의 offset(orig_offset)
+ * - .word 663f - . : newinstr 시작주소에서 이 위치까지의 offset(alt_offset)
+ * - .hword #feature : (cpufeature)
+ * - .byte 662b-bb1b : oldinstr의 크기(orig_len)
+ * - .byte 664f-663f : newinstr의 크기(alt_len)
  *
  * - 5.10 -> 5.15 변경점.
  *   arch/arm64/include/asm/alternative.h 에서 위치 변경
@@ -28,6 +30,10 @@
 	" .byte 662b-661b\n"				/* source len      */ \
 	" .byte 664f-663f\n"				/* replacement len */
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - alternative때 cb를 호출하게 한다.
+ */
 #define ALTINSTR_ENTRY_CB(feature, cb)					      \
 	" .word 661b - .\n"				/* label           */ \
 	" .word " __stringify(cb) "- .\n"		/* callback */	      \

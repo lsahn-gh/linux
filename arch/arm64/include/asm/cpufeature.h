@@ -90,11 +90,34 @@ struct arm64_ftr_override {
  * @strict_mask		Bits which should match across all CPUs for sanity.
  * @sys_val		Safe value across the CPUs (system view)
  */
+/*
+ * IAMROOT, 2022.02.17:
+ * - 하나의 register에 대해서 각 field들의 기능에 나눠서 관리한다.
+ */
 struct arm64_ftr_reg {
 	const char			*name;
+/*
+ * IAMROOT, 2022.02.17:
+ * - init_cpu_ftr_reg에서 초기화된다.
+ * - ftr_bits에서 strict false인것의 mask를 한번 거친 bit는 clear, 아닌 bit는 set.
+ */
 	u64				strict_mask;
+/*
+ * IAMROOT, 2022.02.17:
+ * - init_cpu_ftr_reg에서 초기화된다.
+ * - ftr_bits에서 visible true인 것들의 mask가 합쳐진것.
+ */
 	u64				user_mask;
+/*
+ * IAMROOT, 2022.02.17:
+ * - init_cpu_ftr_reg에서 초기화된다.
+ * - ftr_bits를 순환하며 최종적으로 완성된 sys_val.
+ */
 	u64				sys_val;
+/*
+ * IAMROOT, 2022.02.17:
+ * - ftr_bits에서 visible이 false인 것들의 safe_value의 총집합.
+ */
 	u64				user_val;
 	struct arm64_ftr_override	*override;
 	const struct arm64_ftr_bits	*ftr_bits;
@@ -447,6 +470,10 @@ static __always_inline bool system_capabilities_finalized(void)
  *
  * Before the capability is detected, this returns false.
  */
+/*
+ * IAMROOT, 2022.02.17:
+ * - 해당 caps @num이 설정되었는지를 확인한다.
+ */
 static inline bool cpus_have_cap(unsigned int num)
 {
 	if (num >= ARM64_NCAPS)
@@ -506,6 +533,10 @@ static __always_inline bool cpus_have_const_cap(int num)
 		return cpus_have_cap(num);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - cpu_hwcaps의 num bit를 set한다.
+ */
 static inline void cpus_set_cap(unsigned int num)
 {
 	if (num >= ARM64_NCAPS) {
@@ -516,24 +547,64 @@ static inline void cpus_set_cap(unsigned int num)
 	}
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - field bit를 시작으로 width만큼 추출한다.
+ * - cpuid_feature_extract_unsigned_field_width 와 같은 동작을 하는데
+ * << 연산 결과 값이 -값(last bit set)이면 -값으로 나온다.
+ */
 static inline int __attribute_const__
 cpuid_feature_extract_signed_field_width(u64 features, int field, int width)
 {
 	return (s64)(features << (64 - width - field)) >> (64 - width);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - field bit를 시작으로 4bits만큼 추출한다.
+ *   -값이면 -값 으로 나온다.
+ * ex) features = 0x1234
+ * field = 12 => return 0x1, field = 8 => return 0x2
+ * field = 4 => return 0x3, field = 0 => return 0x4
+ *
+ * ex) features = 0xffff_ffff_ffff_f3e4
+ * field = 4 => 0xfffffffe
+ * field = 8 => 0x3
+ */
 static inline int __attribute_const__
 cpuid_feature_extract_signed_field(u64 features, int field)
 {
 	return cpuid_feature_extract_signed_field_width(features, field, 4);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * @field 추출할 start bit
+ * @width 추출할 bit width
+ * @return features에서 @field를 시작하여 bit width만큼의 bits를 0번지로
+ * 옮겨 추출한다.
+ * 
+ *                vfield
+ * |......| width |....|
+ * <------>       <----> (64 - width에 의해 삭제되면서 width field가 0번으로 위치
+ *    ^(<< 64 - width -filed에 의해 삭제)
+ */
 static __always_inline unsigned int __attribute_const__
 cpuid_feature_extract_unsigned_field_width(u64 features, int field, int width)
 {
 	return (u64)(features << (64 - width - field)) >> (64 - width);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - field bit를 시작으로 4bits만큼 추출한다.
+ * ex) features = 0x1234
+ * field = 12 => return 0x1, field = 8 => return 0x2
+ * field = 4 => return 0x3, field = 0 => return 0x4
+ *
+ * ex) features = 0xffff_ffff_ffff_ffe4
+ * field = 4 => 0xe
+ */
 static __always_inline unsigned int __attribute_const__
 cpuid_feature_extract_unsigned_field(u64 features, int field)
 {
@@ -563,6 +634,13 @@ cpuid_feature_cap_perfmon_field(u64 features, int field, u64 cap)
 	return features;
 }
 
+/*
+ * IAMROOT, 2022.02.15:
+ *
+ * - mask를 생성한다.
+ * 111...1111100.....0000
+ * <--width--><--shift-->
+ */
 static inline u64 arm64_ftr_mask(const struct arm64_ftr_bits *ftrp)
 {
 	return (u64)GENMASK(ftrp->shift + ftrp->width - 1, ftrp->shift);
@@ -573,6 +651,10 @@ static inline u64 arm64_ftr_reg_user_value(const struct arm64_ftr_reg *reg)
 	return (reg->user_val | (reg->sys_val & reg->user_mask));
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - 부호 고려여부를 확인하여 field width 추출.
+ */
 static inline int __attribute_const__
 cpuid_feature_extract_field_width(u64 features, int field, int width, bool sign)
 {
@@ -587,6 +669,10 @@ cpuid_feature_extract_field(u64 features, int field, bool sign)
 	return cpuid_feature_extract_field_width(features, field, 4, sign);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - @val의 값에서 @ftrp에서 의미하는 shift, width로 추출하는 작업을 수행한다.
+ */
 static inline s64 arm64_ftr_value(const struct arm64_ftr_bits *ftrp, u64 val)
 {
 	return (s64)cpuid_feature_extract_field_width(val, ftrp->shift, ftrp->width, ftrp->sign);
@@ -605,6 +691,10 @@ static inline bool id_aa64pfr0_32bit_el1(u64 pfr0)
 	return val == ID_AA64PFR0_ELx_32BIT_64BIT;
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - ID_AA64PFR0_ELx_32BIT_64BIT 지원을 확인한다.
+ */
 static inline bool id_aa64pfr0_32bit_el0(u64 pfr0)
 {
 	u32 val = cpuid_feature_extract_unsigned_field(pfr0, ID_AA64PFR0_EL0_SHIFT);
@@ -612,6 +702,10 @@ static inline bool id_aa64pfr0_32bit_el0(u64 pfr0)
 	return val == ID_AA64PFR0_ELx_32BIT_64BIT;
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - ID_AA64PFR0_SVE_SHIFT 지원을 확인한다.
+ */
 static inline bool id_aa64pfr0_sve(u64 pfr0)
 {
 	u32 val = cpuid_feature_extract_unsigned_field(pfr0, ID_AA64PFR0_SVE_SHIFT);
@@ -619,6 +713,10 @@ static inline bool id_aa64pfr0_sve(u64 pfr0)
 	return val > 0;
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - MTE 지원 여부를 확인한다.
+ */
 static inline bool id_aa64pfr1_mte(u64 pfr1)
 {
 	u32 val = cpuid_feature_extract_unsigned_field(pfr1, ID_AA64PFR1_MTE_SHIFT);

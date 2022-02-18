@@ -145,6 +145,23 @@
 .endm
 
 /* RDVL X\nx, #\imm */
+/*
+ * IAMROOT, 2022.02.14:
+ * @nx 값을 불러올 register 번호
+ * @imm VL * @imm으로 계산하기 위한것.
+ * @return X[xn] = VL * @imm
+ *
+ * - RDVL(Read Vector Length)
+ *   https://developer.arm.com/documentation/ddi0602/2021-12/SVE-Instructions/RDVL--Read-multiple-of-vector-register-size-to-scalar-register-?lang=en
+ *   31	30	29	28	27	26	25	24	23	22	21	20	19	18	17	16
+ *   0	0	0	0	0	1	0	0	1	0	1	1	1	1	1	1
+ *  | 0x0        | 0x4             | 0xb           | 0xf         |
+ *   15	14	13	12	11	10	9	8	7	6	5	4	3	2	1	0
+ *   0	1	0	1	0   | imm6                |	Rd                |
+ *  | 0x5        | 
+
+ * - rvdl 관련 test code : ls tools/testing/selftests/arm64/fp/rvdl*
+ */
 .macro _sve_rdvl nx, imm
 	_check_general_reg \nx
 	_check_num (\imm), -0x20, 0x1f

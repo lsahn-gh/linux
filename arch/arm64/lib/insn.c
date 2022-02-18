@@ -68,6 +68,10 @@ bool __kprobes aarch64_insn_is_steppable_hint(u32 insn)
 	}
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - insn이 branch + imm 류인지 확인한다.
+ */
 bool aarch64_insn_is_branch_imm(u32 insn)
 {
 	return (aarch64_insn_is_b(insn) || aarch64_insn_is_bl(insn) ||
@@ -76,6 +80,14 @@ bool aarch64_insn_is_branch_imm(u32 insn)
 		aarch64_insn_is_bcond(insn));
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * insn이 iteral load 류인지 확인한다.
+ * - 상수등을 사용할때 해당 명령어에 다 못들어가는 상수는 iteral pool에 저장하고
+ *   해당 주소를 사용해서 상수를 불러오는 식으로 사용한다.
+ * - ldr 참고
+ *   https://developer.arm.com/documentation/dui0041/c/Babbfdih
+ */
 bool __kprobes aarch64_insn_uses_literal(u32 insn)
 {
 	/* ldr/ldrsw (literal), prfm */
@@ -105,6 +117,10 @@ bool __kprobes aarch64_insn_is_branch(u32 insn)
 		aarch64_insn_is_bcond(insn);
 }
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @type(inst 종류)에 따른 imm의 shift 및 mask값을 구한다.
+ */
 static int __kprobes aarch64_get_imm_shift_mask(enum aarch64_insn_imm_type type,
 						u32 *maskp, int *shiftp)
 {
@@ -170,6 +186,10 @@ static int __kprobes aarch64_get_imm_shift_mask(enum aarch64_insn_imm_type type,
 #define ADR_IMM_LOSHIFT		29
 #define ADR_IMM_HISHIFT		5
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @inst에서 offset 값을 추출한다.
+ */
 u64 aarch64_insn_decode_immediate(enum aarch64_insn_imm_type type, u32 insn)
 {
 	u32 immlo, immhi, mask;
@@ -194,6 +214,10 @@ u64 aarch64_insn_decode_immediate(enum aarch64_insn_imm_type type, u32 insn)
 	return (insn >> shift) & mask;
 }
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @inst에 offset 값을 넣는다.
+ */
 u32 __kprobes aarch64_insn_encode_immediate(enum aarch64_insn_imm_type type,
 				  u32 insn, u64 imm)
 {
@@ -1242,12 +1266,22 @@ u32 aarch64_set_branch_offset(u32 insn, s32 offset)
 	BUG();
 }
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @inst는 반드시 adrp 명령어야 한다
+ * - adrp에서 offset을 추출한다.
+ */
 s32 aarch64_insn_adrp_get_offset(u32 insn)
 {
 	BUG_ON(!aarch64_insn_is_adrp(insn));
 	return aarch64_insn_decode_immediate(AARCH64_INSN_IMM_ADR, insn) << 12;
 }
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @inst는 반드시 adrp 명령이어야 한다.
+ * - @#inst에 @offset을 set한다.
+ */
 u32 aarch64_insn_adrp_set_offset(u32 insn, s32 offset)
 {
 	BUG_ON(!aarch64_insn_is_adrp(insn));

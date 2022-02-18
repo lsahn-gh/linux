@@ -99,12 +99,26 @@ static unsigned long elf_hwcap __read_mostly;
 unsigned int compat_elf_hwcap __read_mostly = COMPAT_ELF_HWCAP_DEFAULT;
 unsigned int compat_elf_hwcap2 __read_mostly;
 #endif
-
+/*
+ * IAMROOT, 2022.02.17:
+ * - cpus_set_cap에서 초기화된다. 설정된 cap bit가 set된다.
+ */
 DECLARE_BITMAP(cpu_hwcaps, ARM64_NCAPS);
 EXPORT_SYMBOL(cpu_hwcaps);
+/*
+ * IAMROOT, 2022.02.17:
+ * - init_cpu_hwcaps_indirect_list_from_array 에서 초기화된다.
+ * - arm64_features, arm64_errata의 값들이 들어간다.
+ */
 static struct arm64_cpu_capabilities const __ro_after_init *cpu_hwcaps_ptrs[ARM64_NCAPS];
 
 /* Need also bit for ARM64_CB_PATCH */
+/*
+ * IAMROOT, 2022.02.17:
+ * - update_cpu_capabilities에서 초기화된다.
+ * - cpu_hwcaps_ptrs에서 scope와 cap이 SCOPE_BOOT_CPU인 경우
+ *   해당 cap(ARM64_NCAPS측 file에 위치한 define들) bit가 set된다.
+ */
 DECLARE_BITMAP(boot_capabilities, ARM64_NPATCHABLE);
 
 /*
@@ -593,6 +607,10 @@ struct arm64_ftr_override __ro_after_init id_aa64mmfr1_override;
 struct arm64_ftr_override __ro_after_init id_aa64pfr1_override;
 struct arm64_ftr_override __ro_after_init id_aa64isar1_override;
 
+/*
+ * IAMROOT, 2022.02.15:
+ * - sys_id는 bin search가 가능한 순서로 정렬되어 정의되있다.
+ */
 static const struct __ftr_reg_entry {
 	u32			sys_id;
 	struct arm64_ftr_reg 	*reg;
@@ -675,6 +693,10 @@ static int search_cmp_ftr_reg(const void *id, const void *regp)
  *         - NULL on failure. It is upto the caller to decide
  *	     the impact of a failure.
  */
+/*
+ * IAMROOT, 2022.02.14:
+ * - arm64_ftr_regs을 sys_id로 bin search를 수행한다.
+ */
 static struct arm64_ftr_reg *get_arm64_ftr_reg_nowarn(u32 sys_id)
 {
 	const struct __ftr_reg_entry *ret;
@@ -696,6 +718,10 @@ static struct arm64_ftr_reg *get_arm64_ftr_reg_nowarn(u32 sys_id)
  * returns - Upon success,  matching ftr_reg entry for id.
  *         - NULL on failure but with an WARN_ON().
  */
+/*
+ * IAMROOT, 2022.02.14:
+ * - arm64_ftr_reg에 @sys_id가 존재하는지 확인하고 존재하면 regs을 출력한다.
+ */
 static struct arm64_ftr_reg *get_arm64_ftr_reg(u32 sys_id)
 {
 	struct arm64_ftr_reg *reg;
@@ -710,6 +736,10 @@ static struct arm64_ftr_reg *get_arm64_ftr_reg(u32 sys_id)
 	return reg;
 }
 
+/*
+ * IAMROOT, 2022.02.15:
+ * - reg에 ftrp의 width, shift위치에 ftp_val값을 set한다.
+ */
 static u64 arm64_ftr_set_value(const struct arm64_ftr_bits *ftrp, s64 reg,
 			       s64 ftr_val)
 {
@@ -720,6 +750,10 @@ static u64 arm64_ftr_set_value(const struct arm64_ftr_bits *ftrp, s64 reg,
 	return reg;
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - type에 따라서 new값을 비교해 실제 update하는 값을 return한다.
+ */
 static s64 arm64_ftr_safe_value(const struct arm64_ftr_bits *ftrp, s64 new,
 				s64 cur)
 {
@@ -746,6 +780,11 @@ static s64 arm64_ftr_safe_value(const struct arm64_ftr_bits *ftrp, s64 new,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - sys_id와 shift가 정렬이 되있는지 확인한다.
+ * - sys_id를 기준으로 bin search 탐색을 해야된다.
+ */
 static void __init sort_ftr_regs(void)
 {
 	unsigned int i;
@@ -802,6 +841,15 @@ static void __init sort_ftr_regs(void)
  * Any bits that are not covered by an arm64_ftr_bits entry are considered
  * RES0 for the system-wide value, and must strictly match.
  */
+/*
+ * IAMROOT, 2022.02.17:
+ * - struct arm64_ftr_reg의 인자들을 ftr_bits을 순환하며 완성 시킨다.
+ * - override가 없다면 new값 자체는 별일 없이 sys_val에 완성될것이다.
+ * - override가 존재하면 결국 나중에 register값을 사용할때 override값을
+ *   사용해야되는데 만약 new값이 override 영역이나 값과 겹친다면 해당
+ *   처리를 해야될것이다. new값을 우선시하며 override값을 ignore하는 식으로
+ *   진행한다.
+ */
 static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 {
 	u64 val = 0;
@@ -816,14 +864,31 @@ static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 		return;
 
 	for (ftrp = reg->ftr_bits; ftrp->width; ftrp++) {
+/*
+ * IAMROOT, 2022.02.17:
+ * - ftr_mask : ftrp의 shift, width로 만든 mask
+ *   ftr_new  : ftrp의 shift, width로 new에서 추출한 값
+ *   ftr_ovr  : ftrp의 shift, width로 override에서 추출한 값
+ */
 		u64 ftr_mask = arm64_ftr_mask(ftrp);
 		s64 ftr_new = arm64_ftr_value(ftrp, new);
 		s64 ftr_ovr = arm64_ftr_value(ftrp, reg->override->val);
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - ftr_mask가 override mask보다 작은지(override mask에 전부 포함되는지)
+ *   를 확인한다.
+ */
 		if ((ftr_mask & reg->override->mask) == ftr_mask) {
 			s64 tmp = arm64_ftr_safe_value(ftrp, ftr_ovr, ftr_new);
 			char *str = NULL;
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - overrid값과 new값을 비교해 나온 safe_value(tmp)값이
+ *   override와 일치하는지 확인한다. 일치하지 않으면 override를 ftr_mask와
+ *   겹치지 않은 부분은 무시한다.
+ */
 			if (ftr_ovr != tmp) {
 				/* Unsafe, remove the override */
 				reg->override->mask &= ~ftr_mask;
@@ -831,6 +896,12 @@ static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 				tmp = ftr_ovr;
 				str = "ignoring override";
 			} else if (ftr_new != tmp) {
+/*
+ * IAMROOT, 2022.02.17:
+ * - safe_value로 얻은값은 override값과 일치했는데 new값이 불일치라면
+ *   safe_value값을 사용한다.
+ * - safe_value와 new값도 일치해야된다.
+ */
 				/* Override was valid */
 				ftr_new = tmp;
 				str = "forced";
@@ -844,6 +915,11 @@ static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 					reg->name,
 					ftrp->shift + ftrp->width - 1,
 					ftrp->shift, str, tmp);
+/*
+ * IAMROOT, 2022.02.17:
+ * - ftr_mask가 override value보다 적은 범위라고 생각되는 경우 mask가
+ *   안되는 부분을 warn print한다.
+ */
 		} else if ((ftr_mask & reg->override->val) == ftr_mask) {
 			reg->override->val &= ~ftr_mask;
 			pr_warn("%s[%d:%d]: impossible override, ignored\n",
@@ -852,6 +928,11 @@ static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 				ftrp->shift);
 		}
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - val는 처음엔 0이였다가 for로 순환하면서 해당 ftr의 width, shift의 값들이
+ *   차례대로 완성될것이다.
+ */
 		val = arm64_ftr_set_value(ftrp, val, ftr_new);
 
 		valid_mask |= ftr_mask;
@@ -875,6 +956,10 @@ static void init_cpu_ftr_reg(u32 sys_reg, u64 new)
 extern const struct arm64_cpu_capabilities arm64_errata[];
 static const struct arm64_cpu_capabilities arm64_features[];
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - @caps에 값이 제대로 설정되있느지 검사하고 cpu_hwcaps_ptrs에 caps를 넣는다.
+ */
 static void __init
 init_cpu_hwcaps_indirect_list_from_array(const struct arm64_cpu_capabilities *caps)
 {
@@ -890,6 +975,10 @@ init_cpu_hwcaps_indirect_list_from_array(const struct arm64_cpu_capabilities *ca
 	}
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - cpu_hwcaps_ptrs에 arm64_features, arm64_errata를 넣는다.
+ */
 static void __init init_cpu_hwcaps_indirect_list(void)
 {
 	init_cpu_hwcaps_indirect_list_from_array(arm64_features);
@@ -923,6 +1012,12 @@ static void init_32bit_cpu_features(struct cpuinfo_32bit *info)
 	init_cpu_ftr_reg(SYS_MVFR2_EL1, info->reg_mvfr2);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - register에서 읽어온 정보(info->reg_xxx.)를 ftr_reg에 초기화한다.
+ * - caps관련 정보들을 초기화하고 현재 scope에 맞는 caps들의
+ *   static_key를 enable한다.
+ */
 void __init init_cpu_features(struct cpuinfo_arm64 *info)
 {
 	/* Before we start using the tables, make sure it is sorted */
@@ -966,6 +1061,10 @@ void __init init_cpu_features(struct cpuinfo_arm64 *info)
 	setup_boot_cpu_capabilities();
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - new 값으로 table들을 업데이트 한다. width가 0면 ARM64_FTR_END이니 종료된다.
+ */
 static void update_cpu_ftr_reg(struct arm64_ftr_reg *reg, u64 new)
 {
 	const struct arm64_ftr_bits *ftrp;
@@ -983,6 +1082,11 @@ static void update_cpu_ftr_reg(struct arm64_ftr_reg *reg, u64 new)
 
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - boot 가 이미 설정되있을 경우 현재값과 비교하여 boot때와 일치하지 않으면
+ *   warnning을 출력한다.
+ */
 static int check_update_ftr_reg(u32 sys_id, int cpu, u64 val, u64 boot)
 {
 	struct arm64_ftr_reg *regp = get_arm64_ftr_reg(sys_id);
@@ -2557,6 +2661,10 @@ static void setup_elf_hwcaps(const struct arm64_cpu_capabilities *hwcaps)
 			cap_set_elf_hwcap(hwcaps);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - cpu_hwcaps, boot_capabilities등에 조건에 맞는 cap에 대한 bit를 set한다.
+ */
 static void update_cpu_capabilities(u16 scope_mask)
 {
 	int i;
@@ -2565,6 +2673,11 @@ static void update_cpu_capabilities(u16 scope_mask)
 	scope_mask &= ARM64_CPUCAP_SCOPE_MASK;
 	for (i = 0; i < ARM64_NCAPS; i++) {
 		caps = cpu_hwcaps_ptrs[i];
+/*
+ * IAMROOT, 2022.02.17:
+ * - scope_mask에 포함되는지, 중복되서 설정을 하는게 아닌지(cpus_have_cap),
+ *   caps의 matchese 등을 검사한다.
+ */
 		if (!caps || !(caps->type & scope_mask) ||
 		    cpus_have_cap(caps->capability) ||
 		    !caps->matches(caps, cpucap_default_scope(caps)))
@@ -2582,6 +2695,10 @@ static void update_cpu_capabilities(u16 scope_mask)
 /*
  * Enable all the available capabilities on this CPU. The capabilities
  * with BOOT_CPU scope are handled separately and hence skipped here.
+ */
+/*
+ * IAMROOT, 2022.02.17:
+ * - SCOPE_BOOT_CPU를 제외한 cap에 대해서 enable을 한다.
  */
 static int cpu_enable_non_boot_scope_capabilities(void *__unused)
 {
@@ -2606,6 +2723,12 @@ static int cpu_enable_non_boot_scope_capabilities(void *__unused)
 /*
  * Run through the enabled capabilities and enable() it on all active
  * CPUs
+ */
+/*
+ * IAMROOT, 2022.02.17:
+ * - scope_mask에 포함되는 cap에 대해 static_key를 enable로 전환한다.
+ * - boot_scope가 있을경우 cpu_enable을 한다.
+ * - boot_scope가 없을경우 stop_machine을 하고 cap enable을 한다.
  */
 static void __init enable_cpu_capabilities(u16 scope_mask)
 {
@@ -2835,6 +2958,11 @@ void check_local_cpu_capabilities(void)
 		verify_local_cpu_capabilities();
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - SCOPE_BOOT_CPU, SCOPE_LOCAL_CPU에 대한 caps들을
+ *   cpu_hwcaps, boot_capabilities에 update하고 관련 static_key를 enable을 한다.
+ */
 static void __init setup_boot_cpu_capabilities(void)
 {
 	/* Detect capabilities with either SCOPE_BOOT_CPU or SCOPE_LOCAL_CPU */

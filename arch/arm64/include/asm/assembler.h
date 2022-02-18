@@ -379,8 +379,8 @@ alternative_if_not ARM64_KVM_PROTECTED_MODE
 alternative_else_nop_endif
 /*
  * IAMROOT, 2022.01.26:
- * - \reg를 0으로 초기화하는 code가 동작하다가 alternative가 발생하면
- *   kvm_compute_final_ctr_el0로 대체된다.
+ * - \reg를 0으로 초기화하는 code가 동작하다가 alternative가 발생시
+ *   kvm_compute_final_ctr_el0이 호출된다.
  */
 alternative_cb kvm_compute_final_ctr_el0
 	movz	\reg, #0

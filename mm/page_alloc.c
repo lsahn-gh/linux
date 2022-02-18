@@ -6692,6 +6692,11 @@ build_all_zonelists_init(void)
  * __ref due to call of __init annotated helper build_all_zonelists_init
  * [protected by SYSTEM_BOOTING].
  */
+/*
+ * IAMROOT, 2022.02.18:
+ * - 메모리가 추가되고 삭제될때마다 존에 대한 영역이 바뀌는데, 그때마다
+ *   이 함수가 호출된다.
+ */
 void __ref build_all_zonelists(pg_data_t *pgdat)
 {
 	unsigned long vm_total_pages;

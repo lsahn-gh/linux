@@ -19,7 +19,7 @@
  *
  * - e == 0
  *   int:(-!!(e)) -> int:(-0) -> int:0
- *   sizeof(struct {int:0}) => 0
+ *   sizeof(struct {int:0}) => 0. 실제 macro 결과값.
  *
  * - e == 1
  *   int:(-!!(e)) -> int:(-1) -> int:-1

@@ -19,6 +19,7 @@
 /*
  * IAMROOT, 2022.02.05:
  * - mm/percpu.c에 존재한다.
+ *   각 cpu의 __per_cpu_start부터의 delta가 저장되있다.
  */
 #ifndef __per_cpu_offset
 extern unsigned long __per_cpu_offset[NR_CPUS];

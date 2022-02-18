@@ -84,6 +84,10 @@ static DEFINE_PER_CPU(struct cpuhp_cpu_state, cpuhp_state) = {
 };
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2022.02.18:
+ * - boot된 cpu 번호 bit가 set 된다.
+ */
 cpumask_t cpus_booted_once_mask;
 #endif
 

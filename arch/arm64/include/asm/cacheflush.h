@@ -135,6 +135,10 @@ extern void copy_to_user_page(struct vm_area_struct *, struct page *,
 #define ARCH_IMPLEMENTS_FLUSH_DCACHE_PAGE 1
 extern void flush_dcache_page(struct page *);
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - inst cache invalidate all pou
+ */
 static __always_inline void icache_inval_all_pou(void)
 {
 	if (cpus_have_const_cap(ARM64_HAS_CACHE_DIC))

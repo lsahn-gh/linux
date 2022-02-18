@@ -56,6 +56,11 @@ SYM_FUNC_START(sve_load_state)
 	ret
 SYM_FUNC_END(sve_load_state)
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - vl(Vector Length)
+ * - x0에 vl값 1배수(즉 있는 그대로의 값)을 담고 return한다.
+ */
 SYM_FUNC_START(sve_get_vl)
 	_sve_rdvl	0, 1
 	ret

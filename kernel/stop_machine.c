@@ -621,6 +621,10 @@ int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 	return stop_cpus(cpu_online_mask, multi_cpu_stop, &msdata);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - @cpus들을 멈추고 @fn을 workqueue로 실행후 완료될때까지 기다린다.
+ */
 int stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
 {
 	int ret;

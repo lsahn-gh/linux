@@ -540,7 +540,10 @@ extern bool ____wrong_branch_error(void);
 /*
  * Normal usage; boolean enable/disable.
  */
-
+/*
+ * IAMROOT, 2022.02.17:
+ * - x를 enable로 전환한다.
+ */
 #define static_branch_enable(x)			static_key_enable(&(x)->key)
 #define static_branch_disable(x)		static_key_disable(&(x)->key)
 #define static_branch_enable_cpuslocked(x)	static_key_enable_cpuslocked(&(x)->key)

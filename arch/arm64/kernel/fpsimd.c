@@ -144,6 +144,11 @@ int __ro_after_init sve_max_virtualisable_vl = SVE_VL_MIN;
  * Set of available vector lengths,
  * where length vq encoded as bit __vq_to_bit(vq):
  */
+/*
+ * IAMROOT, 2022.02.17:
+ * - sve_init_vq_map 에서 초기화된다.
+ * - sve_vq_partial_map는 sve_vq_map에서 copy된 값으로 초기화된다.
+ */
 __ro_after_init DECLARE_BITMAP(sve_vq_map, SVE_VQ_MAX);
 /* Set of vector lengths present on at least one cpu: */
 static __ro_after_init DECLARE_BITMAP(sve_vq_partial_map, SVE_VQ_MAX);
@@ -694,6 +699,13 @@ int sve_get_current_vl(void)
 	return sve_prctl_status(0);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - @map에 vq에 해당하는 bit들을 set한다.
+ * - MAX값부터 zcr을 설정한다. zcr에서는 MAX값에 가장 가까운 길이로 vl이
+ *   구해질것이다. 구해진 vl로 @map에 bit를 set하고 vq - 1부터 계속 세팅하여
+ *   지원하는 vq들을 @map에 기록한다.
+ */
 static void sve_probe_vqs(DECLARE_BITMAP(map, SVE_VQ_MAX))
 {
 	unsigned int vq, vl;
@@ -715,6 +727,10 @@ static void sve_probe_vqs(DECLARE_BITMAP(map, SVE_VQ_MAX))
 /*
  * Initialise the set of known supported VQs for the boot CPU.
  * This is called during kernel boot, before secondary CPUs are brought up.
+ */
+/*
+ * IAMROOT, 2022.02.17:
+ * - sve_vq_map, sve_vq_partial_map을 초기화한다.
  */
 void __init sve_init_vq_map(void)
 {
@@ -814,6 +830,10 @@ fail:
  * Enable SVE for EL1.
  * Intended for use by the cpufeatures code during CPU boot.
  */
+/*
+ * IAMROOT, 2022.02.14:
+ * - EL1에서 ZCR_EL1의 접근을 허용한다.
+ */
 void sve_kernel_enable(const struct arm64_cpu_capabilities *__always_unused p)
 {
 	write_sysreg(read_sysreg(CPACR_EL1) | CPACR_EL1_ZEN_EL1EN, CPACR_EL1);
@@ -826,6 +846,14 @@ void sve_kernel_enable(const struct arm64_cpu_capabilities *__always_unused p)
  *
  * Use only if SVE is present.
  * This function clobbers the SVE vector length.
+ */
+/*
+ * IAMROOT, 2022.02.14:
+ * - pfr0 register의 ID_AA64PFR0_SVE_SHIFT 지원 및 CONFIG_ARM64_SVE 
+ *   enable시 접근한다.
+ * - ZCR_EL1접근을 허용 및 초기화.
+ * - vl값으로 vq(vector quardword. 16byte로 나눈값.)을 구하고 해당값으로 
+ *   length를 사용한다.
  */
 u64 read_zcr_features(void)
 {

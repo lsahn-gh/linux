@@ -259,6 +259,10 @@ do {									\
 /*
  * IAMROOT, 2022.02.05:
  * - __perpcu ptr이 가리키는 특정 cpu의 pointer(__kernel)을 가져온다.
+ * - ptr은 pcpu의 base가 되는 주소(__per_cpu_start ~)일 것이다.
+ *   base주소에 해당 cpu의 pcpu offset을 더 함으로써 실제 ptr에 해당하는
+ *   per cpu memory address를 가져온다.
+ * - ptr + per_cpu_offset(cpu)
  */
 #define per_cpu_ptr(ptr, cpu)						\
 ({									\
@@ -301,6 +305,14 @@ do {									\
 
 #endif	/* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2022.02.10:
+ * - cpu의 per cpu var값을 가져온다.
+ * - cpu를 고려 안한 일반 memory로 따지면 *(&var)랑 같은 의미.
+ * - memory 접근으로 떠지면
+ *   *((typeof(var) *)((uint8_t *)&var + per_cpu_offset((cpu))))
+ *   
+ */
 #define per_cpu(var, cpu)	(*per_cpu_ptr(&(var), cpu))
 
 /*

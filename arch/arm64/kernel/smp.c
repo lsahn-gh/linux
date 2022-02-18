@@ -448,6 +448,12 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	mark_linear_text_alias_ro();
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - tpidr에 현재 cpu의 offset 설정.
+ * - cpu 관련 정보(register, capabilities) 초기화 및 boot시의 static_key enable
+ * - boot_capabilities에 대해서 alternative를 진행한다.
+ */
 void __init smp_prepare_boot_cpu(void)
 {
 	/*

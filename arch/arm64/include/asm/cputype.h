@@ -245,6 +245,11 @@ static inline unsigned int __attribute_const__ read_cpuid_part_number(void)
 	return MIDR_PARTNUM(read_cpuid_id());
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - CTR(Cache Type Register)
+ * https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/CTR-EL0--Cache-Type-Register
+ */
 static inline u32 __attribute_const__ read_cpuid_cachetype(void)
 {
 	return read_cpuid(CTR_EL0);

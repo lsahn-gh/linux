@@ -1117,6 +1117,8 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
  * - eret
  *   exception이 발생한 ELx의 spsr이 pstate로 복원되며 ELR_ELx에 저장된
  *   address로 점프하고 pstate가 spsr로 된다.
+ *   ex) currentEL == 1 이면 spsr_el1, elr_el1 접근
+ *       currentEL == 2, nVHE이면 spsr_el2, elr_el2 접근
  *
  * - el1 -> el1으로 이동하는 개념인데, 변화가 없는것 같지만 eret을 통해
  *   pstate가 일관되게 초기화되는 효과가 있다고한다.

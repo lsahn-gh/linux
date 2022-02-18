@@ -40,6 +40,10 @@ static const char *icache_policy_str[] = {
 	[ICACHE_POLICY_PIPT]		= "PIPT",
 };
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - cpuinfo_detect_icache_policy에서 설정된다.
+ */
 unsigned long __icache_flags;
 
 static const char *const hwcap_str[] = {
@@ -323,6 +327,10 @@ static int __init cpuinfo_regs_init(void)
 }
 device_initcall(cpuinfo_regs_init);
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - 읽었던 ctr 값에서 l1Ip를 확인해 __icache_flags에 저장한다.
+ */
 static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 {
 	unsigned int cpu = smp_processor_id();
@@ -344,6 +352,11 @@ static void cpuinfo_detect_icache_policy(struct cpuinfo_arm64 *info)
 	pr_info("Detected %s I-cache on CPU%d\n", icache_policy_str[l1ip], cpu);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - ID_AA64PFR0_ELx_32BIT_64BIT 지원인 cpu인경우 cpuinfo_32bit까지 
+ *   초기화를 한다.
+ */
 static void __cpuinfo_store_cpu_32bit(struct cpuinfo_32bit *info)
 {
 	info->reg_id_dfr0 = read_cpuid(ID_DFR0_EL1);
@@ -370,6 +383,10 @@ static void __cpuinfo_store_cpu_32bit(struct cpuinfo_32bit *info)
 	info->reg_mvfr2 = read_cpuid(MVFR2_EL1);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - register를 읽어 @info를 완성시킨다.
+ */
 static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 {
 	info->reg_cntfrq = arch_timer_get_cntfrq();
@@ -410,6 +427,10 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 	cpuinfo_detect_icache_policy(info);
 }
 
+/*
+ * IAMROOT, 2022.02.14:
+ * - 현재 cpu에 대한 struct cpuinfo_arm64 pointer를 가져와서 초기화한다.
+ */
 void cpuinfo_store_cpu(void)
 {
 	struct cpuinfo_arm64 *info = this_cpu_ptr(&cpu_data);
@@ -417,6 +438,12 @@ void cpuinfo_store_cpu(void)
 	update_cpu_features(smp_processor_id(), info, &boot_cpu_data);
 }
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - registers를 읽어 arm64_ftr_regs를 완성시킨다.
+ * - SCOPE_BOOT_CPU, SCOPE_LOCAL_CPU에 대한 capability들을 초기화하고
+ *   SCOPE_BOOT_CPU에 대한 caps들의 static_key를 enable한다.
+ */
 void __init cpuinfo_store_boot_cpu(void)
 {
 	struct cpuinfo_arm64 *info = &per_cpu(cpu_data, 0);

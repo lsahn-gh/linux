@@ -10,6 +10,10 @@
 #include <linux/types.h>
 #include <linux/stddef.h>
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - ALTINSTR_ENTRY 참고. 해당 구조체 형태로 장보를 만드는것이 보인다.
+ */
 struct alt_instr {
 	s32 orig_offset;	/* offset to original instruction */
 	s32 alt_offset;		/* offset to replacement instruction */

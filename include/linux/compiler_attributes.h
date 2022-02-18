@@ -84,6 +84,12 @@
  *
  *   gcc: https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html#index-const-function-attribute
  */
+/*
+ * IAMROOT, 2022.02.14:
+ * - 상위 언어등에서의 const 함수 속성을 의미한다.
+ *   전역 메모리를 읽거나 수정하지 않는다는것을 컴파일러한테 알려 최적화를
+ *   도모한다.
+ */
 #define __attribute_const__             __attribute__((__const__))
 
 /*

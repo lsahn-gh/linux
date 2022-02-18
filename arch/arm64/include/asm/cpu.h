@@ -40,6 +40,10 @@ struct cpuinfo_32bit {
 struct cpuinfo_arm64 {
 	struct cpu	cpu;
 	struct kobject	kobj;
+/*
+ * IAMROOT, 2022.02.14:
+ * - read_cpuid_effective_cachetype
+ */
 	u64		reg_ctr;
 	u64		reg_cntfrq;
 	u64		reg_dczid;
@@ -61,6 +65,10 @@ struct cpuinfo_arm64 {
 	struct cpuinfo_32bit	aarch32;
 
 	/* pseudo-ZCR for recording maximum ZCR_EL1 LEN value: */
+/*
+ * IAMROOT, 2022.02.14:
+ * - read_zcr_features
+ */
 	u64		reg_zcr;
 };
 

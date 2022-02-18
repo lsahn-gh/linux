@@ -280,6 +280,15 @@ enum aarch64_insn_adr_type {
 	AARCH64_INSN_ADR_TYPE_ADR,
 };
 
+/*
+ * IAMROOT, 2022.02.17:
+ * - aarch64_insn_is_adr_adrp 등의 함수가 만들어진다.
+ * ex)
+ * aarch64_insn_is_ldr_lit
+ * aarch64_insn_is_ldrsw_lit
+ * aarch64_insn_is_adr_adrp
+ * aarch64_insn_is_prfm_lit
+ */
 #define	__AARCH64_INSN_FUNCS(abbr, mask, val)				\
 static __always_inline bool aarch64_insn_is_##abbr(u32 code)		\
 {									\
