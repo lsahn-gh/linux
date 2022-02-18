@@ -846,6 +846,7 @@ static inline bool zone_intersects(struct zone *zone,
  * 다음과 같이 2개의 fallback용 zonelist를 만들어서 사용한다.
  *
  * - 1) ZONELIST_FALLBACK은 모든 노드와 존을 포함한 존리스트이다. (default)
+ *   가장가까운 node 순으로 만들어진다.
  * - 2) ZONELIST_NOFALLBACK은 현재 노드의 존에서만 fallback 존을 찾아 
  *      사용하도록 구성한 존리스트이다. (메모리 할당 요구시 __GFP_THISNODE)
  */
@@ -928,6 +929,12 @@ typedef struct pglist_data {
 	 * Generally the first zones will be references to this node's
 	 * node_zones.
 	 */
+/*
+ * IAMROOT, 2022.02.18:
+ * build_zonelists_in_node_order 에서 초기화된다.
+ * - ZONELIST_FALLBACK : node in order로 zone의 역순으로 구성된다.
+ * - ZONELIST_NOFALLBACK : 해당 node에 대해서만 zone의 역순으로 구성된다.
+ */
 	struct zonelist node_zonelists[MAX_ZONELISTS];
 
 	int nr_zones; /* number of populated zones in this node */

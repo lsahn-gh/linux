@@ -77,11 +77,16 @@ struct vm_area_struct;
 /*
  * IAMROOT, 2022.02.12: 
  * 존과 관련한 gfp 플래그들은 하위 4비트를 사용한다.
+ * - 밑줄2개(___)로 시작하는건 두개이상의 기능을 담당할수있다.
  */
 #define __GFP_DMA	((__force gfp_t)___GFP_DMA)
 #define __GFP_HIGHMEM	((__force gfp_t)___GFP_HIGHMEM)
 #define __GFP_DMA32	((__force gfp_t)___GFP_DMA32)
 #define __GFP_MOVABLE	((__force gfp_t)___GFP_MOVABLE)  /* ZONE_MOVABLE allowed */
+/*
+ * IAMROOT, 2022.02.18:
+ * - gfp flag에서 zone에 대한것은 순서대로 0 ~ 3bit까지로 되있다. 즉 0xf가된다.
+ */
 #define GFP_ZONEMASK	(__GFP_DMA|__GFP_HIGHMEM|__GFP_DMA32|__GFP_MOVABLE)
 
 /**
@@ -333,6 +338,7 @@ struct vm_area_struct;
  * IAMROOT, 2022.01.23:
  * - GFP_ATOMIC : irq handler에서 사용 가능 (no sleep)
  * - GFP_KERNEL = irq handler에서 사용 불가능 (sleep)
+ * - 밑줄(_)이 없는 gfp flag는 2개이상의 기능을 담당한다.
  */
 #define GFP_ATOMIC	(__GFP_HIGH|__GFP_ATOMIC|__GFP_KSWAPD_RECLAIM)
 #define GFP_KERNEL	(__GFP_RECLAIM | __GFP_IO | __GFP_FS)
@@ -416,6 +422,10 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 #endif
 
 /*
+ * IAMROOT, 2022.02.18:
+ * - GFP_ZONE_BAD macro로 bad처리를 한다.
+ */
+/*
  * GFP_ZONE_TABLE is a word size bitstring that is used for looking up the
  * zone to use given the lowest 4 bits of gfp_t. Entries are GFP_ZONES_SHIFT
  * bits long and there are 16 of them to cover all possible combinations of
@@ -493,6 +503,15 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
  * - GFP_KERNEL: normal.
  * - GFP_DMA:    dma
  * - GFP_DMA32:  dma32
+ *
+ * ---
+ *  유효한 gfp flag 조합은 정해져있다. 각각의 유효한 gfp flag들에 대해
+ *  GFP_ZONES_SHIFT * gfp flags로 mask영역을 옮겨서 mask table을 만든다.
+ *
+ *  |               GFP_ZONE_TABLE bits                           ....
+ *  | gfp flags1의 zone1| gfp flags2의 zone2| gfp flags3의 zone3|
+ *  | 유효한 gfp flags1 | 유효한 gfp flags2 | 유효한 gfp flags3 | ..
+ *  |<-GFP_ZONES_SHIFT->|<-GFP_ZONES_SHIFT->|<-GFP_ZONES_SHIFT-><..
  */
 #define GFP_ZONE_TABLE ( \
 	(ZONE_NORMAL << 0 * GFP_ZONES_SHIFT)				       \
@@ -514,6 +533,10 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 /*
  * IAMROOT, 2022.02.12: 
  * 적합하지 않은 존 구성을 알아내기 위해 사용한다. (빌드 경우)
+ * - GFP_ZONES_SHIFT위 긴주석 참고
+ * - 잘못된 gfp flags를 bit num으로 사용하여 해당 bit들을 set해놨다.
+ *   후에 gfp flags가 잘못된지 검사를 할때에는 GFP_ZONE_BAD를 gfp flags만큼
+ *   밀었을때 0번 bit가 1로 set되있다면 잘못된 gfp flag로 확인될것이다.
  */
 #define GFP_ZONE_BAD ( \
 	1 << (___GFP_DMA | ___GFP_HIGHMEM)				      \
@@ -528,6 +551,11 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 
 /*
  * IAMROOT, 2022.02.12: 
+ *
+ * - GFP_KERNEL등 GFP_ZONEMASK영역이 clear인 flag들: normal.
+ * - GFP_DMA:    dma or normal
+ * - GFP_DMA32:  dma32 or normal
+ *
  * 존과 연관된 gfp 플래그를 사용하여 해당 존타입을 알아온다.
  * - GFP_ZONEMASK: dma, dma32, highmem, movable
  * - 위의 플래그가 지정되지 않은 경우 최상위 을 사용한다.
@@ -537,8 +565,17 @@ static inline bool gfpflags_normal_context(const gfp_t gfp_flags)
 static inline enum zone_type gfp_zone(gfp_t flags)
 {
 	enum zone_type z;
+/*
+ * IAMROOT, 2022.02.18:
+ * - flags에서 zone bits를 추출 한다.
+ */
 	int bit = (__force int) (flags & GFP_ZONEMASK);
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - bit * GFP_ZONES_SHIFT에 bit에서 사용할수 있는 zone이 들어 있다. 해당
+ *   zone을 추출한다.
+ */
 	z = (GFP_ZONE_TABLE >> (bit * GFP_ZONES_SHIFT)) &
 					 ((1 << GFP_ZONES_SHIFT) - 1);
 	VM_BUG_ON((GFP_ZONE_BAD >> bit) & 1);

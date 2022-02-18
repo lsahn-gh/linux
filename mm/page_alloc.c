@@ -143,6 +143,11 @@ DEFINE_STATIC_KEY_TRUE(vm_numa_stat_key);
  * Use the accessor functions set_numa_mem(), numa_mem_id() and cpu_to_mem()
  * defined in <linux/topology.h>.
  */
+/*
+ * IAMROOT, 2022.02.18:
+ * - build_zonelists_in_node_order 에서 초기화된다.
+ *   해당 cpu의 node or 가장 가까운 node번호가 set된다.
+ */
 DEFINE_PER_CPU(int, _numa_mem_);		/* Kernel "local memory" node */
 EXPORT_PER_CPU_SYMBOL(_numa_mem_);
 #endif
@@ -6286,6 +6291,10 @@ int numa_zonelist_order_handler(struct ctl_table *table, int write,
 
 
 #define MAX_NODE_LOAD (nr_online_nodes)
+/*
+ * IAMROOT, 2022.02.18:
+ * - node_load[best node] = load 순서
+ */
 static int node_load[MAX_NUMNODES];
 
 /**
@@ -6303,27 +6312,51 @@ static int node_load[MAX_NUMNODES];
  *
  * Return: node id of the found node or %NUMA_NO_NODE if no node is found.
  */
+/*
+ * IAMROOT, 2022.02.18:
+ * - @node에 대한 best node를 찾고 @used_node_mask에 기록한다.
+ * - best node 조건
+ *   1. distance가 낮은것
+ *   2. node 번호가 낮은것.
+ *   3. 사용중인 node인것.
+ *   4. node의 load숫자가 적은것.
+ */
 int find_next_best_node(int node, nodemask_t *used_node_mask)
 {
 	int n, val;
 	int min_val = INT_MAX;
 	int best_node = NUMA_NO_NODE;
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - @node를 사용적이 없다면 @node를 best node로 사용한다.
+ */
 	/* Use the local node if we haven't already */
 	if (!node_isset(node, *used_node_mask)) {
 		node_set(node, *used_node_mask);
 		return node;
 	}
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - memory가 존재하는 node 순회
+ */
 	for_each_node_state(n, N_MEMORY) {
 
 		/* Don't want a node to appear more than once */
+/*
+ * IAMROOT, 2022.02.18:
+ * - 중복 처리 제외
+ */
 		if (node_isset(n, *used_node_mask))
 			continue;
 
 		/* Use the distance array to find the distance */
 		val = node_distance(node, n);
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - 현재 node보다 높은 번호면 패널티를 준다.*/
 		/* Penalize nodes under us ("prefer the next node") */
 		val += (n < node);
 
@@ -6331,6 +6364,11 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 		if (!cpumask_empty(cpumask_of_node(n)))
 			val += PENALTY_FOR_NODE_WITH_CPUS;
 
+/*
+ * IAMROOT, 2022.02.18:
+ * - 적당한 N배를 곱하여(이전 값들이 더 영향을 많이 받게)
+ *   , n의 load에 대해 가중치를 더한다.
+ */
 		/* Slight preference for less loaded node */
 		val *= (MAX_NODE_LOAD*MAX_NUMNODES);
 		val += node_load[n];
@@ -6359,7 +6397,6 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
  * 현재 노드부터 시작한다.
  *
  * - 각 node마다 해당 함수가 호출되며, 해당 함수에서는 best node순으로 순회를 한다.
- *   식으로 되있다.
  * - 시작은 this node가 된다.
  * - nr_nodes가 0인 this node를 기준으로 가장 가까운순으로 node_order에 지정되있다.
  *   그러므로 zonrefs가 멀수록 먼 node가 될것이다.
@@ -6457,6 +6494,29 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
  * node_order[1] = 2
  * node_order[2] = 1
  * node_order[3] = 3
+ *
+ * ex) bset node 0 -> 2 -> 1 -> 3
+ * 1) best node 0, load = 4.
+ * idx        0 1 2 3
+ * node_load  0 0 0 0
+ * node_order 0 0 0 0
+ *
+ * 2) best node 2, load = 3
+ * idx        0 1 2 3
+ * node_load  0 0 3 0
+ * node_order 0 2 0 0
+ *
+ * 3) best node 1, load = 2
+ * idx        0 1 2 3
+ * node_load  0 2 3 0
+ * node_order 0 2 1 0
+ *
+ * 4) best node 3, load = 1
+ * idx        0 1 2 3
+ * node_load  0 2 3 1
+ * node_order 0 2 1 3
+ *
+ * ---
  */
 static void build_zonelists(pg_data_t *pgdat)
 {
@@ -6471,6 +6531,11 @@ static void build_zonelists(pg_data_t *pgdat)
 	prev_node = local_node;
 
 	memset(node_order, 0, sizeof(node_order));
+/*
+ * IAMROOT, 2022.02.18:
+ * - best node는 used_mask에 계속 기록되고, 기록된 node를 제외한 node를 가지고
+ *   best node를 계속 찾아갈 것이다.
+ */
 	while ((node = find_next_best_node(local_node, &used_mask)) >= 0) {
 		/*
 		 * We don't want to pressure a particular node.
