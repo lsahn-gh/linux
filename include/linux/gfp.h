@@ -34,6 +34,8 @@ struct vm_area_struct;
  * IAMROOT, 2022.02.12: 
  * - 밑줄3개(___)로 시작하는 gfp 플래그는 사용자가 직접 사용할 수 없다.
  *   또한 각 기능들이 하나의 비트에 대응한다.
+ * - __GFP_DMA ~ __GFP_MOVABLE은 GFP_ZONEMASK로도 접근하며, zone을 의미한다.
+ *   (GFP_ZONEMASK & gfp == 0 이면 NORMAL ZONE)
  */
 #define ___GFP_DMA		0x01u
 #define ___GFP_HIGHMEM		0x02u
