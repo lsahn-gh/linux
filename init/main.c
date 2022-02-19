@@ -253,6 +253,14 @@ static int __init set_reset_devices(char *str)
 
 __setup("reset_devices", set_reset_devices);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - argv_init : 아에 등록이 안된 value가 없는 param.
+ *               cmdline의 "--" 뒤에 있는 param들.
+ *               bootconfig에 init.로 시작했던 param들.
+ * - envp_init : 아에 등록이 안된 value가 있는 param
+ * - kernel이 아닌 module등에서 사용될수있는 param들을 저장해 두는것.
+ */
 static const char *argv_init[MAX_INIT_ARGS+2] = { "init", NULL, };
 const char *envp_init[MAX_INIT_ENVS+2] = { "HOME=/", "TERM=linux", NULL, };
 static const char *panic_later, *panic_param;
@@ -264,6 +272,11 @@ static const char *panic_later, *panic_param;
  */
 extern const struct obs_kernel_param __setup_start[], __setup_end[];
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - old param(__setup_start)에서 @line을 찾는다.
+ *   ealry가 아닌 param이고 setup_func가 있는경우 seteup_func를 실행시킨다.
+ */
 static bool __init obsolete_checksetup(char *line)
 {
 	const struct obs_kernel_param *p;
@@ -657,6 +670,10 @@ static int __init warn_bootconfig(char *str)
 early_param("bootconfig", warn_bootconfig);
 
 /* Change NUL term back to "=", to make "param" the whole string. */
+/*
+ * IAMROOT, 2022.02.19:
+ * - param, value string의 관계가 무조건 param=value 형태로 오게 고쳐준다.
+ */
 static void __init repair_env_string(char *param, char *val)
 {
 	if (val) {
@@ -672,6 +689,11 @@ static void __init repair_env_string(char *param, char *val)
 }
 
 /* Anything after -- gets handed straight to init. */
+/*
+ * IAMROOT, 2022.02.19:
+ * - cmdline을 parse하면서 "--"이후의 params를 처리한다. argv_init에 넣는다.
+ * - bootconfig의 init.으로 시작했던 param들도 argv_init에 넣는다.
+ */
 static int __init set_init_arg(char *param, char *val,
 			       const char *unused, void *arg)
 {
@@ -697,6 +719,12 @@ static int __init set_init_arg(char *param, char *val,
  * Unknown boot options get handed to init, unless they look like
  * unused parameters (modprobe will find them in /proc/cmdline).
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - @param obs param에 존재하면서 ealry인 경우 무시, ealry가 아니면서 setup_func
+ *   가 존재하면 setup_func를 실행한다.
+ *   obs_param에 없으면 value 존재 여부에 따라 envp_init이나 argv_init에 등록한다.
+ */
 static int __init unknown_bootoption(char *param, char *val,
 				     const char *unused, void *arg)
 {
@@ -718,6 +746,12 @@ static int __init unknown_bootoption(char *param, char *val,
 	if (val) {
 		/* Environment option */
 		unsigned int i;
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - value가 있는 param은 envp_init에 넣는다. 만약 envp_init에 똑같은 param이
+ *   존재하면 나중껄로 대체하고, envp_init이 가득 찬경우 panic_later를 설정한다.
+ */
 		for (i = 0; envp_init[i]; i++) {
 			if (i == MAX_INIT_ENVS) {
 				panic_later = "env";
@@ -730,6 +764,12 @@ static int __init unknown_bootoption(char *param, char *val,
 	} else {
 		/* Command line option */
 		unsigned int i;
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - value가 없는 param은 argv_init에 넣는다. arg_init이 가득 찬 경우엔
+ *   panic_later를 설정한다.
+ */
 		for (i = 0; argv_init[i]; i++) {
 			if (i == MAX_INIT_ARGS) {
 				panic_later = "init";
@@ -965,6 +1005,8 @@ noinline void __ref rest_init(void)
  * IAMROOT, 2021.10.16:
  * - memory 할당기등이 초기화되기전에 먼저 초기화될 earlycon같은
  *   early driver들을 찾아서 초기화한다.
+ * - __setup등으로 등록된 old parameter관련(obs_kernel_param)을 처리하기위해
+ *   진입한다.
  */
 /* Check for early params. */
 static int __init do_early_param(char *param, char *val,
@@ -1064,6 +1106,11 @@ static inline void initcall_debug_enable(void)
 #endif
 
 /* Report memory auto-initialization states for this boot. */
+/*
+ * IAMROOT, 2022.02.19:
+ * - config에 따라서 현재 memory debug 상태를 출력한다.
+ * ex) mem auto-init: stack:off, heap alloc:on, heap free:off
+ */
 static void __init report_meminit(void)
 {
 	const char *stack;
@@ -1145,6 +1192,11 @@ void __init __weak arch_call_rest_init(void)
 	rest_init();
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - argv_init, envp_init이 고쳐졌을경우(unknown bootoption이 존재) 한번에 묶어서
+ *   print한다.
+ */
 static void __init print_unknown_bootoptions(void)
 {
 	char *unknown_options;
@@ -1230,18 +1282,41 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	build_all_zonelists(NULL);
 	page_alloc_init();
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - ex) ubuntu 20.04 64bit
+ *   Kernel command line: BOOT_IMAGE=/vmlinuz-5.13.0-28-generic
+ *   root=UUID=1dc50bb4-e6ef-410a-be8e-d71e554def1d ro quiet splash
+ */
 	pr_notice("Kernel command line: %s\n", saved_command_line);
 	/* parameters may set static keys */
 	jump_label_init();
 	parse_early_param();
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - static_command_line에서 -1 level(core_param, module_param_cb등)으로 등록된
+ *   param을 처리한다. 아에 검색을 못한것은 unknown_bootoption로 실행된다.
+ */
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
 				  __stop___param - __start___param,
 				  -1, -1, NULL, &unknown_bootoption);
 	print_unknown_bootoptions();
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - static_command_line에서 "--"이 존재하는경우 이후 string을 parse해
+ *   argv_init에 넣는다.
+ */
 	if (!IS_ERR_OR_NULL(after_dashes))
 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
 			   NULL, set_init_arg);
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - bootconfig의 init.으로 시작하는 param을 argv_init에 넣는다.
+ */
 	if (extra_init_args)
 		parse_args("Setting extra init args", extra_init_args,
 			   NULL, 0, -1, -1, NULL, set_init_arg);

@@ -451,6 +451,10 @@ static inline bool should_skip_kasan_poison(struct page *page, fpi_t fpi_flags)
 }
 
 /* Returns true if the struct page for the pfn is uninitialised */
+/*
+ * IAMROOT, 2022.02.19:
+ * - defer가 된 pfn인지 확인한다.
+ */
 static inline bool __meminit early_page_uninitialised(unsigned long pfn)
 {
 	int nid = early_pfn_to_nid(pfn);
@@ -936,6 +940,10 @@ static inline void clear_page_guard(struct zone *zone, struct page *page,
  * order of appearance. So we need to first gather the full picture of what was
  * enabled, and then make decisions.
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - memory debug관련 동작 여부를 확인해 static key를 설정한다.
+ */
 void init_mem_debugging_and_hardening(void)
 {
 	bool page_poisoning_requested = false;
@@ -945,6 +953,11 @@ void init_mem_debugging_and_hardening(void)
 	 * Page poisoning is debug page alloc for some arches. If
 	 * either of those options are enabled, enable poisoning.
 	 */
+/*
+ * IAMROOT, 2022.02.19:
+ * - Debug page alloc을 설정하면 자동으로 page poisoning을 지원한다.
+ * - _page_poisoning_enabled관련 static branch를 enable한다.
+ */
 	if (page_poisoning_enabled() ||
 	     (!IS_ENABLED(CONFIG_ARCH_SUPPORTS_DEBUG_PAGEALLOC) &&
 	      debug_pagealloc_enabled())) {
@@ -953,6 +966,12 @@ void init_mem_debugging_and_hardening(void)
 	}
 #endif
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - poisoning 기능이 동작중에는 init_on_alloc, init_on_free가 기능을 못한다.
+ * - init_on_alloc : Fill newly allocated pages and heap objects with zeroes.
+ * - init_on_free  : Fill freed pages and heap objects with zeroes.
+ */
 	if ((_init_on_alloc_enabled_early || _init_on_free_enabled_early) &&
 	    page_poisoning_requested) {
 		pr_info("mem auto-init: CONFIG_PAGE_POISONING is on, "
@@ -961,6 +980,10 @@ void init_mem_debugging_and_hardening(void)
 		_init_on_free_enabled_early = false;
 	}
 
+/*
+ * IAMROOT, 2022.02.19:
+ * -_init_on_alloc, _init_on_free에 대한 static key를 enable/disable해준다.
+ */
 	if (_init_on_alloc_enabled_early)
 		static_branch_enable(&init_on_alloc);
 	else
@@ -1702,17 +1725,31 @@ static void __meminit __init_single_page(struct page *page, unsigned long pfn,
 }
 
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
+/*
+ * IAMROOT, 2022.02.19:
+ * - @pfn은 reserved로 검색됬을 것이고,
+ *   defer된 reserved @pfn의 struct page를 초기화한다.
+ */
 static void __meminit init_reserved_page(unsigned long pfn)
 {
 	pg_data_t *pgdat;
 	int nid, zid;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - defer가 안됬으면 이미 초기화됬으므로 수행을안하고 defer된 @pfn이면
+ *   초기화를 수행한다.
+ */
 	if (!early_page_uninitialised(pfn))
 		return;
 
 	nid = early_pfn_to_nid(pfn);
 	pgdat = NODE_DATA(nid);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - @pfn이 속한 zone id를 찾는다.
+ */
 	for (zid = 0; zid < MAX_NR_ZONES; zid++) {
 		struct zone *zone = &pgdat->node_zones[zid];
 
@@ -1732,6 +1769,10 @@ static inline void init_reserved_page(unsigned long pfn)
  * called for each range allocated by the bootmem allocator and
  * marks the pages PageReserved. The remaining valid pages are later
  * sent to the buddy page allocator.
+ */
+/*
+ * IAMROOT, 2022.02.19:
+ * - reserved region인 @start, @end에서 defer된 pfn을 찾아 초기화를 한다.
  */
 void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
 {
@@ -7244,6 +7285,9 @@ static int zone_batchsize(struct zone *zone)
 /*
  * IAMROOT, 2022.02.12:
  * - cpu 개수에 따라 zone memory를 나누고 batch * 4를 기준으로 highsize를 구한다.
+ * - @cpu_online으로 cpu가 online되면 nr_split_cpus가 커지는 개념이되 각
+ *   cpu마다 memory분배량이 적어질것이고 cpu가 offline이 되면 nr_split_cpus가
+ *   작아지므로 각 cpu마다 memory분배량이 커질것이다.
  */
 static int zone_highsize(struct zone *zone, int batch, int cpu_online)
 {
@@ -7285,7 +7329,7 @@ static int zone_highsize(struct zone *zone, int batch, int cpu_online)
 	 */
 /*
  * IAMROOT, 2022.02.12:
- * - 해당 node를 사용하는 cpu 개수 + 전체 online cpu수
+ * - 해당 node를 사용하는 cpu 개수 +  online 여부 flag
  */
 	nr_split_cpus = cpumask_weight(cpumask_of_node(zone_to_nid(zone))) + cpu_online;
 	if (!nr_split_cpus)
@@ -7320,6 +7364,10 @@ static int zone_highsize(struct zone *zone, int batch, int cpu_online)
  * outside of boot time (or some other assurance that no concurrent updaters
  * exist).
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - pcp에 batch, high를 update한다.
+ */
 static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
 		unsigned long batch)
 {
@@ -7352,6 +7400,11 @@ static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonesta
 	pcp->free_factor = 0;
 }
 
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - 모든 possible cpu에 대해서 @#high, @batch를 pcp에 update한다.
+ */
 static void __zone_set_pageset_high_and_batch(struct zone *zone, unsigned long high,
 		unsigned long batch)
 {
@@ -7370,7 +7423,8 @@ static void __zone_set_pageset_high_and_batch(struct zone *zone, unsigned long h
  */
 /*
  * IAMROOT, 2022.02.12:
- * - batch, high값을 memory 크기에 따라서 zone에 설정하고
+ * - batch, high값을 memory 크기에 따라서 zone에 설정하고 각 pcp에 high, batch
+ *   값을 update한다.
  */
 static void zone_set_pageset_high_and_batch(struct zone *zone, int cpu_online)
 {
@@ -9043,6 +9097,11 @@ void __init set_dma_reserve(unsigned long new_dma_reserve)
 	dma_reserve = new_dma_reserve;
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - TODO
+ * - cpu offline에 따른 pcp 조정을 한다.
+ */
 static int page_alloc_cpu_dead(unsigned int cpu)
 {
 	struct zone *zone;
@@ -9520,6 +9579,10 @@ static unsigned long __init arch_reserved_kernel_pages(void)
 #if __BITS_PER_LONG > 32
 #define ADAPT_SCALE_BASE	(64ul << 30)
 #define ADAPT_SCALE_SHIFT	2
+/*
+ * IAMROOT, 2022.02.19:
+ * - 64GB
+ */
 #define ADAPT_SCALE_NPAGES	(ADAPT_SCALE_BASE >> PAGE_SHIFT)
 #endif
 
@@ -9528,6 +9591,17 @@ static unsigned long __init arch_reserved_kernel_pages(void)
  * - it is assumed that the hash table must contain an exact power-of-2
  *   quantity of entries
  * - limit is the number of hash buckets, not the total allocation size
+ */
+/*
+ * IAMROOT, 2022.02.19:
+ * @tablename print할때 출력해주는용도
+ * @bucketsize 구조체 size
+ * @numentries 0일경우 memory를 기준으로, 아닐 경우 @numentries 개수만큼으로
+ *		시도한다.
+ * @scale scale order(2^scacle)마다 1개의 bucket이 생성되는 숫자.
+ * @flags HASH_EARLY, HASH_ZERO, HASH_SMALL등의 flag
+ * @_hash_shift [in/out] HASH_SMALL flag가 있을경우 최소크기, 만들어진 hash의 크기결과
+ * @_hash_mask [out] hash 범위의 bits mask
  */
 void *__init alloc_large_system_hash(const char *tablename,
 				     unsigned long bucketsize,
@@ -9560,18 +9634,36 @@ void *__init alloc_large_system_hash(const char *tablename,
 		if (!high_limit) {
 			unsigned long adapt;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - numentries가 nr_kernel_pages로 추정했을때, nr_kernel_pages가
+ *   ADAPT_SCALE_NPAGES이상일 경우 adapt를 4배를 하며 scale을 증가시킨다
+ */
 			for (adapt = ADAPT_SCALE_NPAGES; adapt < numentries;
 			     adapt <<= ADAPT_SCALE_SHIFT)
 				scale++;
 		}
 #endif
 
+/*
+ * IAMROOT, 2022.02.19:
+ * ex) memory = 1GB -> 256kb pages
+ * scale = 13 -> numentries = 128kb
+ * scale = 20 -> numentries = 1kb
+ *
+ * 1GB를 scale(2^scale)로 나눠서 entry수를 정한다.
+ */
 		/* limit to 1 bucket per 2^scale bytes of low memory */
 		if (scale > PAGE_SHIFT)
 			numentries >>= (scale - PAGE_SHIFT);
 		else
 			numentries <<= (PAGE_SHIFT - scale);
-
+/*
+ * IAMROOT, 2022.02.19:
+ * - HASH_SMALL은 최소 numentries를 _hash_shift만큼으로 정하는 개념이다.
+ *   numentries 를 _hash_shift만큼 밀어서 0이 아니면 이미 최소값을 넘었으므로
+ *   처리를 안하고 그게아니면 min값을 _hash_shift로 정해주게 된다.
+ */
 		/* Make sure we've got at least a 0-order allocation.. */
 		if (unlikely(flags & HASH_SMALL)) {
 			/* Makes no sense without HASH_EARLY */
@@ -9580,18 +9672,35 @@ void *__init alloc_large_system_hash(const char *tablename,
 				numentries = 1UL << *_hash_shift;
 				BUG_ON(!numentries);
 			}
+/*
+ * IAMROOT, 2022.02.19:
+ * - 1page 미만이면 1page 까지 개수를 늘린다.
+ */
 		} else if (unlikely((numentries * bucketsize) < PAGE_SIZE))
 			numentries = PAGE_SIZE / bucketsize;
 	}
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - numentries를 2^n으로 fixup한다.
+ */
 	numentries = roundup_pow_of_two(numentries);
 
 	/* limit allocation size to 1/16 total memory by default */
 	if (max == 0) {
+/*
+ * IAMROOT, 2022.02.19:
+ * - system의 1/16로 max값을 정한다.
+ */
 		max = ((unsigned long long)nr_all_pages << PAGE_SHIFT) >> 4;
 		do_div(max, bucketsize);
 	}
 	max = min(max, 0x80000000ULL);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - low_limit와 max로 numentries값을 조절한다.
+ */
 	if (numentries < low_limit)
 		numentries = low_limit;
 	if (numentries > max)
@@ -9604,11 +9713,20 @@ void *__init alloc_large_system_hash(const char *tablename,
 		virt = false;
 		size = bucketsize << log2qty;
 		if (flags & HASH_EARLY) {
+/*
+ * IAMROOT, 2022.02.19:
+ * - HASH_ZERO flag가 있으면 할당후 0으로 초기화를 해달라는것.
+ */
 			if (flags & HASH_ZERO)
 				table = memblock_alloc(size, SMP_CACHE_BYTES);
 			else
 				table = memblock_alloc_raw(size,
 							   SMP_CACHE_BYTES);
+/*
+ * IAMROOT, 2022.02.19:
+ * - buddsy system할당한계가 넘어가거나 hashdist면__vmalloc. 그게 아니면 buddy
+ *   system에서 할당한다.
+ */
 		} else if (get_order(size) >= MAX_ORDER || hashdist) {
 			table = __vmalloc(size, gfp_flags);
 			virt = true;
@@ -9622,6 +9740,10 @@ void *__init alloc_large_system_hash(const char *tablename,
 			table = alloc_pages_exact(size, gfp_flags);
 			kmemleak_alloc(table, size, 1, gfp_flags);
 		}
+/*
+ * IAMROOT, 2022.02.19:
+ * - 할당에 실패를 하고 최소 1page 초과가 남아있으면 반절로 줄여서 다시 시도한다.
+ */
 	} while (!table && size > PAGE_SIZE && --log2qty);
 
 	if (!table)
@@ -10120,6 +10242,7 @@ EXPORT_SYMBOL(free_contig_range);
 /*
  * IAMROOT, 2022.02.12:
  * - 해당 zone에 pcp를 update한다.
+ * - cpu online시 @cpu_online = 1, cpu offline(dead)시 @cpu_online = 0
  */
 void zone_pcp_update(struct zone *zone, int cpu_online)
 {

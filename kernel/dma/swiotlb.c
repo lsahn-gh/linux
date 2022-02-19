@@ -68,6 +68,12 @@
 
 #define INVALID_PHYS_ADDR (~(phys_addr_t)0)
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - 일반적으로 DMA는 direct나 iommu의 도움이 필요하지만 그것도 사용하지
+ *   못하는 환경에서 bounce memory라는 개념을 두어 device에 사용하게
+ *   하는 방법
+ */
 enum swiotlb_force swiotlb_force;
 
 struct io_tlb_mem io_tlb_default_mem;
@@ -78,8 +84,16 @@ struct io_tlb_mem io_tlb_default_mem;
  */
 static unsigned int max_segment;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - default는 64mb
+ */
 static unsigned long default_nslabs = IO_TLB_DEFAULT_SIZE >> IO_TLB_SHIFT;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * ex) swiotlb=64kb,force
+ */
 static int __init
 setup_io_tlb_npages(char *str)
 {

@@ -49,6 +49,10 @@ void init_mm_internals(void);
 #ifndef CONFIG_NUMA		/* Don't use mapnrs, do it properly */
 extern unsigned long max_mapnr;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - system span size를 max_mapnr에 설정한다.
+ */
 static inline void set_max_mapnr(unsigned long limit)
 {
 	max_mapnr = limit;

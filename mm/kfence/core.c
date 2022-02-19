@@ -44,6 +44,11 @@
 
 static bool kfence_enabled __read_mostly;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - default는 100(ms)
+ * - module_param_cb으로 설정이 가능하게 되있다.
+ */
 static unsigned long kfence_sample_interval __read_mostly = CONFIG_KFENCE_SAMPLE_INTERVAL;
 
 #ifdef MODULE_PARAM_PREFIX
@@ -83,6 +88,10 @@ static const struct kernel_param_ops sample_interval_param_ops = {
 module_param_cb(sample_interval, &sample_interval_param_ops, &kfence_sample_interval, 0600);
 
 /* The pool of pages used for guard pages and objects. */
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_KFENCE=y이고 kfence_sample_interval이 존재시 memblock을 통해서 할당된다.
+ */
 char *__kfence_pool __ro_after_init;
 EXPORT_SYMBOL(__kfence_pool); /* Export for test modules. */
 
@@ -646,6 +655,11 @@ static DECLARE_DELAYED_WORK(kfence_timer, toggle_allocation_gate);
 
 /* === Public interface ===================================================== */
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_KFENCE=y일시 진입한다. kfence_sample_interval은 default값으로 100이
+ *   되있으며 module_param_cb등을 통해서 설정이 가능하다.
+ */
 void __init kfence_alloc_pool(void)
 {
 	if (!kfence_sample_interval)

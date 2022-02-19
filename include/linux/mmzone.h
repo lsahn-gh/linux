@@ -1026,7 +1026,10 @@ typedef struct pglist_data {
 	 */
 /*
  * IAMROOT, 2021.12.04:
- * - pgdat_set_deferred_range에서 ULONG_MAX로 초기화된다.
+ * - struct page 초기화를 언제 하는지에 대한 판단.
+ * - pgdat_set_deferred_range에서 ULONG_MAX로 초기화된다. 즉 defer를 안한다는뜻.
+ * - defer_init에서 init 개수 많고 크기가 128MB이상(PAGES_PER_SECTION)일 경우
+ *   값이 고쳐진다. 즉 defer후 초기화한다는뜻.
  */
 	unsigned long first_deferred_pfn;
 #endif /* CONFIG_DEFERRED_STRUCT_PAGE_INIT */

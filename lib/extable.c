@@ -48,6 +48,10 @@ static void swap_ex(void *a, void *b, int size)
  * This is used both for the kernel exception table and for
  * the exception tables of modules that get loaded.
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - insn 기준으로 정렬을 한다.
+ */
 static int cmp_ex_sort(const void *a, const void *b)
 {
 	const struct exception_table_entry *x = a, *y = b;
@@ -60,6 +64,10 @@ static int cmp_ex_sort(const void *a, const void *b)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - __ex_table을 정렬한다.
+ */
 void sort_extable(struct exception_table_entry *start,
 		  struct exception_table_entry *finish)
 {

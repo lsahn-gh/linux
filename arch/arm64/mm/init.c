@@ -738,6 +738,12 @@ void __init bootmem_init(void)
  */
 void __init mem_init(void)
 {
+/*
+ * IAMROOT, 2022.02.19:
+ * - swiotlb_force 위치 : kernel/dma/swiotlb.c
+ *   default는 SWIOTLB_NORMAL. early param으로 SWIOTLB_FORCE등이 설정된다.
+ * - 특정 device의 dma size에 memory보다 작을 경우 swiotlb_init이 될수있다.
+ */
 	if (swiotlb_force == SWIOTLB_FORCE ||
 	    max_pfn > PFN_DOWN(arm64_dma_phys_limit))
 		swiotlb_init(1);

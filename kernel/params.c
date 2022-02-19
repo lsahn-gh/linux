@@ -116,6 +116,12 @@ static bool param_check_unsafe(const struct kernel_param *kp)
  * IAMROOT, 2021.10.16:
  * - early에서 진입한경우 num_params는 전부 0이되어 무조건 handle_unknown을 호출한다.
  *   (do_early_param)
+ * @param commandline에서 parse된 param
+ * @val @param의 value값 (commandline : param1=value1, param2=value2 ..)
+ *			 (이런 형식을 key value pair라고 부른다.)
+ * @params struct kernel_param block들. __setup_param으로 등록된다.
+ *
+ * @params에서 @param이 있는지 검색한다.
  */
 static int parse_one(char *param,
 		     char *val,
@@ -133,7 +139,16 @@ static int parse_one(char *param,
 
 	/* Find parameter */
 	for (i = 0; i < num_params; i++) {
+/*
+ * IAMROOT, 2022.02.19:
+ * - @param이 @params[i].name에 있는지 확인한다.
+ */
 		if (parameq(param, params[i].name)) {
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - 요청범위(@min_level, @max_level)을 벗어나면 skip
+ */
 			if (params[i].level < min_level
 			    || params[i].level > max_level)
 				return 0;
@@ -144,6 +159,10 @@ static int parse_one(char *param,
 			pr_debug("handling %s with %p\n", param,
 				params[i].ops->set);
 			kernel_param_lock(params[i].mod);
+/*
+ * IAMROOT, 2022.02.19:
+ * - @param이 @params에서 발견된경우 @params에 등록된 set 함수가 호출된다.
+ */
 			if (param_check_unsafe(&params[i]))
 				err = params[i].ops->set(val, &params[i]);
 			else
@@ -153,6 +172,11 @@ static int parse_one(char *param,
 		}
 	}
 
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - @param을 @params에서 발견을 못한 경우 handle_unknown으로 실행한다.
+ */
 	if (handle_unknown) {
 		pr_debug("doing %s: %s='%s'\n", doing, param, val);
 		return handle_unknown(param, val, doing, arg);
@@ -165,7 +189,65 @@ static int parse_one(char *param,
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
 /*
  * IAMROOT, 2022.01.04:
- * -
+ * 1) parse_early_options (early)
+ * parse_args("early options", cmdline, NULL, 0, 0, 0, NULL, do_early_param);
+ *
+ * - obs_kernel_param을 처리하기 위해 진입한다. kernel_param은 여기서 처리안할
+ *   것이므로 관련 인자를 null로 처리하고, cmdline에서 parse한 param은 전부
+ *   do_early_param으로 넘겨 __setup_start에서 ealry로 등록된 param이 있는지 찾는다.
+ *
+ * 2) setup_boot_config (boot config)
+ * parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL, bootconfig_params);
+ *
+ * - bootconfig라는 parameter가 있는지 없는지에 대해서만 tmp_cmdline에서 검색한다.
+ *
+ * 3) normal
+ * parse_args("Booting kernel", static_command_line, __start___param,
+ * __stop___param - __start___param, -1, -1, NULL, &unknown_bootoption);
+ *
+ * - __start__param은 module_param, core_param등의 macro로 만들어진
+ *   __param(kernel_param)으로 정의된 parameter block.
+ * - static_command_line에서 param을 추출해 __start___param에서 param을 검색한다.
+ *   param이 존재하면 __start___param에서 찾은 것들 중에
+ *   -1 level로 등록된(core_param, module_param_cb등)것들은 set함수 호출, 아니면
+ *   무시가 되며 만약 param을 아에 못찾았다면 unknown_bootoption을 호출한다.
+ *   unknown_options에서는 old param으로 등록됬는지 한번 더 검사하고 아닌 경우
+ *
+ * 4) set_init_arg(init argument)
+ * parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
+ * NULL, set_init_arg);
+ * - 
+ *
+ * 5) set_init_arg(extra init argument)
+ * parse_args("Setting extra init args", extra_init_args,
+ * NULL, 0, -1, -1, NULL, set_init_arg);
+ *
+ * --- macro, struct, level 정리
+ * - module_param : kernel_param, -1
+ *   ex) module_param(debug, ushort, 0644);
+ * - early_param : obs_kernel_param -> old parameter
+ *   ex)
+ * - core_param : kernel_param, -1 -> new parameter
+ *   ex)
+ * - __setup : obs_kernel_param
+ * - module level 별 macro : kernel_param
+ *   level marco
+ *   1     core_param_cb
+ *   2     postcore_param_cb
+ *   3     arch_param_cb
+ *   4     subsys_param_cb
+ *   5     fs_param_cb
+ *   6     device_param_cb
+ *   7     late_param_cb
+ *
+ * --- struct, section 정리
+ * - obs_kernel_param : .init.setup
+ * - kernel_param : __param
+ *
+ * --- @return
+ *  NULL : 성공
+ *  err : error string
+ *  args : args에서 "--"뒤의 parameters. 즉 init args
  */
 char *parse_args(const char *doing,
 		 char *args,

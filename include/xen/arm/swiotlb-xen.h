@@ -5,6 +5,10 @@
 #include <xen/features.h>
 #include <xen/xen.h>
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - xen의 swiotlb를 확인한다.
+ */
 static inline int xen_swiotlb_detect(void)
 {
 	if (!xen_domain())
