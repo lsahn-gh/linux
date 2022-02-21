@@ -14,6 +14,10 @@ EXPORT_SYMBOL(_page_poisoning_enabled_early);
 DEFINE_STATIC_KEY_FALSE(_page_poisoning_enabled);
 EXPORT_SYMBOL(_page_poisoning_enabled);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_PAGE_POISONING=on시 boot option에 early param으로 해석한다.
+ */
 static int __init early_page_poison_param(char *buf)
 {
 	return kstrtobool(buf, &_page_poisoning_enabled_early);

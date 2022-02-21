@@ -400,6 +400,10 @@ static struct latched_seq clear_seq = {
 
 /* record buffer */
 #define LOG_ALIGN __alignof__(unsigned long)
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_LOG_BUF_SHIFT default는 17. 2^17 = 128kb
+ */
 #define __LOG_BUF_LEN (1 << CONFIG_LOG_BUF_SHIFT)
 #define LOG_BUF_LEN_MAX (u32)(1 << 31)
 static char __log_buf[__LOG_BUF_LEN] __aligned(LOG_ALIGN);
@@ -427,6 +431,11 @@ static struct printk_ringbuffer *prb = &printk_rb_static;
  * We cannot access per-CPU data (e.g. per-CPU flush irq_work) before
  * per_cpu_areas are initialised. This variable is set to true when
  * it's safe to access per-CPU data.
+ */
+/*
+ * IAMROOT, 2022.02.19:
+ * - log_buf준비시 set_percpu_data_ready에서 true가 된다.
+ *   pcpu를 쓸준비가 있는 상태에서 true가 될것이다.(not early)
  */
 static bool __printk_percpu_data_ready __read_mostly;
 
@@ -958,9 +967,20 @@ void log_buf_vmcoreinfo_setup(void)
 #endif
 
 /* requested log_buf_len from kernel cmdline */
+/*
+ * IAMROOT, 2022.02.19:
+ * - log_buf_len early param으로 설정이 되있을수 있다. 그게 아니면
+ *   possible cpu개수를 기준으로 log_buf_add_cpu에서 크기가 정해져 초기화된다.
+ */
 static unsigned long __initdata new_log_buf_len;
 
 /* we practice scaling the ring buffer by powers of 2 */
+/*
+ * IAMROOT, 2022.02.19:
+ * - early param으로 입력된값을 2^n으로 고치고 기존 log_buf_len보다 클경우에만
+ *   new_log_buf_len을 update한다.
+ * - 
+ */
 static void __init log_buf_len_update(u64 size)
 {
 	if (size > (u64)LOG_BUF_LEN_MAX) {
@@ -975,6 +995,10 @@ static void __init log_buf_len_update(u64 size)
 }
 
 /* save requested log_buf_len since it's too early to process it */
+/*
+ * IAMROOT, 2022.02.19:
+ * - new_log_buf size를 early param으로 설정한다.
+ */
 static int __init log_buf_len_setup(char *str)
 {
 	u64 size;
@@ -990,9 +1014,19 @@ static int __init log_buf_len_setup(char *str)
 }
 early_param("log_buf_len", log_buf_len_setup);
 
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_LOG_CPU_MAX_BUF_SHIFT : init/Kconfig 에 위치한다.
+ *   default는 12(4KB) 최대 21(2MB)
+ */
 #ifdef CONFIG_SMP
 #define __LOG_CPU_MAX_BUF_LEN (1 << CONFIG_LOG_CPU_MAX_BUF_SHIFT)
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - possible cpu개수를 기준으로 new_log_buf_len을 계산한다.
+ */
 static void __init log_buf_add_cpu(void)
 {
 	unsigned int cpu_extra;
@@ -1005,9 +1039,18 @@ static void __init log_buf_add_cpu(void)
 	if (num_possible_cpus() == 1)
 		return;
 
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - 현재 cpu를 제외한 cpu 개수만큼 __LOG_CPU_MAX_BUF_LEN를 준비한다.
+ */
 	cpu_extra = (num_possible_cpus() - 1) * __LOG_CPU_MAX_BUF_LEN;
 
 	/* by default this will only continue through for large > 64 CPUs */
+/*
+ * IAMROOT, 2022.02.19:
+ * - default(128kb)보다 cpu_extra가 작을경우 생성을 안한다.
+ */
 	if (cpu_extra <= __LOG_BUF_LEN / 2)
 		return;
 
@@ -1055,6 +1098,13 @@ static unsigned int __init add_to_rb(struct printk_ringbuffer *rb,
 
 static char setup_text_buf[LOG_LINE_MAX] __initdata;
 
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - arch에따라 setup_arch에서도 호출될수있다. arm64는 안했엇다.
+ * - prb(pinrk ring buffer)를 초기화한다.
+ *   default(128kb)가 변경되지 아니면 빠져나게 된다.
+ */
 void __init setup_log_buf(int early)
 {
 	struct printk_info *new_infos;
@@ -1078,21 +1128,41 @@ void __init setup_log_buf(int early)
 	if (!early)
 		set_percpu_data_ready();
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - 이미 한번 설정되있는지 확인한다.
+ */
 	if (log_buf != __log_buf)
 		return;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - early로 new_log_buf_len이 설정이 안됬을 경우 new_log_buf_len을 설정한다.
+ */
 	if (!early && !new_log_buf_len)
 		log_buf_add_cpu();
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - log len을 다시 설정할 필요가 없으면 안한다.
+ */
 	if (!new_log_buf_len)
 		return;
 
 	new_descs_count = new_log_buf_len >> PRB_AVGBITS;
+/*
+ * IAMROOT, 2022.02.19:
+ * - early param에서 사용자가 값을 너무 작게 입력했을경우에 대한 처리.
+ */
 	if (new_descs_count == 0) {
 		pr_err("new_log_buf_len: %lu too small\n", new_log_buf_len);
 		return;
 	}
 
+/*
+ * IAMROOT, 2022.02.19:
+ * new_log_buf, new_descs_size, new_infos를 준비한다.
+ */
 	new_log_buf = memblock_alloc(new_log_buf_len, LOG_ALIGN);
 	if (unlikely(!new_log_buf)) {
 		pr_err("log_buf_len: %lu text bytes not available\n",

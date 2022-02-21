@@ -32,6 +32,11 @@ extern struct exception_table_entry __stop___ex_table[];
 u32 __initdata __visible main_extable_sort_needed = 1;
 
 /* Sort the kernel's built-in exception table */
+/*
+ * IAMROOT, 2022.02.19:
+ * - __ex_table section에 있는것들을 정렬한다.
+ * ex) _ASM_EXTABLE(get_user)
+ */
 void __init sort_main_extable(void)
 {
 	if (main_extable_sort_needed &&

@@ -2031,6 +2031,10 @@ u64 prb_next_seq(struct printk_ringbuffer *rb)
  *
  * Context: Any context.
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - @rb를 초기화한다.
+ */
 void prb_init(struct printk_ringbuffer *rb,
 	      char *text_buf, unsigned int textbits,
 	      struct prb_desc *descs, unsigned int descbits,

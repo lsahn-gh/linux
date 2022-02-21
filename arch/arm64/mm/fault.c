@@ -843,6 +843,11 @@ int __init early_brk64(unsigned long addr, unsigned int esr,
  * clobbered at arch_initcall time.
  * See traps.c and debug-monitors.c:debug_traps_init().
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - DBG_ESR_EVT_HWBP, DBG_ESR_EVT_HWSS, DBG_ESR_EVT_HWWP, DBG_ESR_EVT_BRK
+ *   등의 index로 접근한다.
+ */
 static struct fault_info __refdata debug_fault_info[] = {
 	{ do_bad,	SIGTRAP,	TRAP_HWBKPT,	"hardware breakpoint"	},
 	{ do_bad,	SIGTRAP,	TRAP_HWBKPT,	"hardware single-step"	},
@@ -854,6 +859,10 @@ static struct fault_info __refdata debug_fault_info[] = {
 	{ do_bad,	SIGKILL,	SI_KERNEL,	"unknown 7"		},
 };
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - debug_fault_info의 nr idx를 인자로 설정한다.
+ */
 void __init hook_debug_fault_code(int nr,
 				  int (*fn)(unsigned long, unsigned int, struct pt_regs *),
 				  int sig, int code, const char *name)

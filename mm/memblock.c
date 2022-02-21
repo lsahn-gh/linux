@@ -1296,6 +1296,10 @@ int __init_memblock memblock_mark_hotplug(phys_addr_t base, phys_addr_t size)
  *
  * Return: 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - base ~ size까지 MEMINIT_HOTPLUG flag를 clear준다.
+ */
 int __init_memblock memblock_clear_hotplug(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_setclr_flag(base, size, 0, MEMBLOCK_HOTPLUG);
@@ -2592,7 +2596,10 @@ static void __init free_unused_memmap(void)
 {
 	unsigned long start, end, prev_end = 0;
 	int i;
-
+/*
+ * IAMROOT, 2022.02.19:
+ * - 이미 memmap에서 사용하지 않은것은 free시켰었다.
+ */
 	if (!IS_ENABLED(CONFIG_HAVE_ARCH_PFN_VALID) ||
 	    IS_ENABLED(CONFIG_SPARSEMEM_VMEMMAP))
 		return;
@@ -2639,11 +2646,31 @@ static void __init free_unused_memmap(void)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * @start start pfn
+ * @end end pfn
+ */
 static void __init __free_pages_memory(unsigned long start, unsigned long end)
 {
 	int order;
 
 	while (start < end) {
+/*
+ * IAMROOT, 2022.02.19:
+ * - start에 맞는 order를 구한다.
+ * ex) start = 0x123 , end = 0x223, size = 1mb
+ *    __ffs  order--횟수   start 변화
+ * 1: 0     | 0          | 0x124
+ * 2: 2     | 0          | 0x128
+ * 3: 3     | 0          | 0x130
+ * 4: 4     | 0          | 0x140
+ * 5: 6     | 0          | 0x180
+ * 6: 7     | 0          | 0x200
+ * 7: 9     | 3(9->6)    | 0x220
+ * 8: 5     | 4(5->1)    | 0x222
+ * 9: 1     | 1(1->0)    | 0x223
+ */
 		order = min(MAX_ORDER - 1UL, __ffs(start));
 
 		while (start + (1UL << order) > end)
@@ -2670,17 +2697,29 @@ static unsigned long __init __free_memory_core(phys_addr_t start,
 	return end_pfn - start_pfn;
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - defer된 reserved 영역의 page를 초기화한다.
+ */
 static void __init memmap_init_reserved_pages(void)
 {
 	struct memblock_region *region;
 	phys_addr_t start, end;
 	u64 i;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - mapping된 reserved 영역에 대해서 defer된 page를 찾아 초기화 해준다.
+ */
 	/* initialize struct pages for the reserved regions */
 	for_each_reserved_mem_range(i, &start, &end)
 		reserve_bootmem_region(start, end);
 
 	/* and also treat struct pages for the NOMAP regions as PageReserved */
+/*
+ * IAMROOT, 2022.02.19:
+ * - mapping이 안된 reserved 영역에 대해서 defer된 page를 찾아 초기화를 해준다.
+ */
 	for_each_mem_region(region) {
 		if (memblock_is_nomap(region)) {
 			start = region->base;
@@ -2696,6 +2735,10 @@ static unsigned long __init free_low_memory_core_early(void)
 	phys_addr_t start, end;
 	u64 i;
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - 모든 memblock의 MEMBLOCK_HOTPLUG를 clear해준다.
+ */
 	memblock_clear_hotplug(0, -1);
 
 	memmap_init_reserved_pages();
@@ -2705,6 +2748,11 @@ static unsigned long __init free_low_memory_core_early(void)
 	 *  because in some case like Node0 doesn't have RAM installed
 	 *  low ram will be on Node1
 	 */
+/*
+ * IAMROOT, 2022.02.19:
+ * - 모든 reserved되 있지 않은 free memblock memory에 대해서 __free_memory_core를
+ *   실행한다.
+ */
 	for_each_free_mem_range(i, NUMA_NO_NODE, MEMBLOCK_NONE, &start, &end,
 				NULL)
 		count += __free_memory_core(start, end);
@@ -2722,6 +2770,10 @@ void reset_node_managed_pages(pg_data_t *pgdat)
 		atomic_long_set(&z->managed_pages, 0);
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - 모든 online node의 각 zone에 대해서 managed_pages를 0으로 초기화해준다.
+ */
 void __init reset_all_zones_managed_pages(void)
 {
 	struct pglist_data *pgdat;

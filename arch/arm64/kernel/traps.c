@@ -1062,6 +1062,11 @@ int __init early_brk64(unsigned long addr, unsigned int esr,
 	return bug_handler(regs, esr) != DBG_HOOK_HANDLED;
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - bug_break_hook, fault_break_hook에 kernel_break_hook을 등록하고,
+ *   debug_fault_info의 DBG_ESR_EVT_HWSS, DBG_ESR_EVT_BRK index를 초기화한다.
+ */
 void __init trap_init(void)
 {
 	register_kernel_break_hook(&bug_break_hook);

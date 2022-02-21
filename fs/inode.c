@@ -2076,6 +2076,10 @@ __setup("ihash_entries=", set_ihash_entries);
 /*
  * Initialize the waitqueues and inode hash table.
  */
+/*
+ * IAMROOT, 2022.02.19:
+ * - inode_hashtable을 생성한다.
+ */
 void __init inode_init_early(void)
 {
 	/* If hashes are distributed across NUMA nodes, defer

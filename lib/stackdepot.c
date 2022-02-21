@@ -146,6 +146,10 @@ static struct stack_record *depot_alloc_stack(unsigned long *entries, int size,
 #define STACK_HASH_MASK (STACK_HASH_SIZE - 1)
 #define STACK_HASH_SEED 0x9747b28c
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - CONFIG_STACKDEPOT=y이면 default는 enable. early param으로 끌수있다.
+ */
 static bool stack_depot_disable;
 static struct stack_record **stack_table;
 
@@ -162,6 +166,10 @@ static int __init is_stack_depot_disabled(char *str)
 }
 early_param("stack_depot_disable", is_stack_depot_disabled);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - stack_table을 생성한다.
+ */
 int __init stack_depot_init(void)
 {
 	if (!stack_depot_disable) {

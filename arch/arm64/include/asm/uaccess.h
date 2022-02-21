@@ -70,6 +70,10 @@ static inline unsigned long __range_ok(const void __user *addr, unsigned long si
 
 #define access_ok(addr, size)	__range_ok(addr, size)
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - struct exception_table_entry
+ */
 #define _ASM_EXTABLE(from, to)						\
 	"	.pushsection	__ex_table, \"a\"\n"			\
 	"	.align		3\n"					\

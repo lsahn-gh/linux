@@ -37,6 +37,8 @@ extern unsigned long long max_possible_pfn;
 /*
  * IAMROOT, 2021.10.23:
  * - NOMAP으로 요청한것들은 paging_init에서는 mapping을 안한다.
+ * - NOMAP은 mapping이 안된 memory. dtb에서 특정 영역을 mapping하지 말라고
+ *   지정해준다.
  */
 enum memblock_flags {
 	MEMBLOCK_NONE		= 0x0,	/* No special request */

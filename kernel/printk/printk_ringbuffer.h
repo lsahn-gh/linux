@@ -56,6 +56,10 @@ struct prb_data_blk_lpos {
  * @state_var: A bitwise combination of descriptor ID and descriptor state.
  */
 struct prb_desc {
+/*
+ * IAMROOT, 2022.02.19:
+ * - desc_state 값이 위치한다 마지막 desc에 desc_reusable로 초기화된다.
+ */
 	atomic_long_t			state_var;
 	struct prb_data_blk_lpos	text_blk_lpos;
 };
@@ -64,15 +68,29 @@ struct prb_desc {
 struct prb_data_ring {
 	unsigned int	size_bits;
 	char		*data;
+
+/*
+ * IAMROOT, 2022.02.19:
+ * - BLK0_LPOS(size_bits)로 초기값을 설정한다.
+ */
 	atomic_long_t	head_lpos;
 	atomic_long_t	tail_lpos;
 };
 
 /* A ringbuffer of "struct prb_desc" elements. */
 struct prb_desc_ring {
+/*
+ * IAMROOT, 2022.02.19:
+ * - desc 개수
+ */
 	unsigned int		count_bits;
 	struct prb_desc		*descs;
 	struct printk_info	*infos;
+/*
+ * IAMROOT, 2022.02.19:
+ * - 초기값으로 head_id, tail_id는 DESC0_ID(count_bits)로 만든다.
+ *   ring buffer위치를 의미한다.
+ */
 	atomic_long_t		head_id;
 	atomic_long_t		tail_id;
 };
@@ -118,6 +136,10 @@ enum desc_state {
 };
 
 #define _DATA_SIZE(sz_bits)	(1UL << (sz_bits))
+/*
+ * IAMROOT, 2022.02.19:
+ * - desc count를 계산한다.
+ */
 #define _DESCS_COUNT(ct_bits)	(1U << (ct_bits))
 #define DESC_SV_BITS		(sizeof(unsigned long) * 8)
 #define DESC_FLAGS_SHIFT	(DESC_SV_BITS - 2)
@@ -326,6 +348,10 @@ unsigned int prb_record_text_space(struct prb_reserved_entry *e);
  * Initialize all the fields that a reader is interested in. All arguments
  * (except @r) are optional. Only record data for arguments that are
  * non-NULL or non-zero will be read.
+ */
+/*
+ * IAMROOT, 2022.02.19:
+ * @r을 초기화한다.
  */
 static inline void prb_rec_init_rd(struct printk_record *r,
 				   struct printk_info *info,

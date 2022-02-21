@@ -96,6 +96,14 @@ EXPORT_SYMBOL(dotdot_name);
  * information, yet avoid using a prime hash-size or similar.
  */
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - 32에서 dhash shift를 뺀 크기.
+ * ex) hash shift = 10
+ * bit | 31 30 29 ... 22 21 .... 5 4 3 2 1 0
+ *     | hash           | 32 - hash shift   |
+ *                        ^-- d_hash_shift
+ */
 static unsigned int d_hash_shift __read_mostly;
 
 static struct hlist_bl_head *dentry_hashtable __read_mostly;
@@ -3193,6 +3201,10 @@ static int __init set_dhash_entries(char *str)
 }
 __setup("dhash_entries=", set_dhash_entries);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - dentry_hashtable을 생성한다.
+ */
 static void __init dcache_init_early(void)
 {
 	/* If hashes are distributed across NUMA nodes, defer
@@ -3200,7 +3212,10 @@ static void __init dcache_init_early(void)
 	 */
 	if (hashdist)
 		return;
-
+/*
+ * IAMROOT, 2022.02.19:
+ * - memory를 2^13으로 나눈 만큼의 크기의 hash size를 가진 table을 생성한다.
+ */
 	dentry_hashtable =
 		alloc_large_system_hash("Dentry cache",
 					sizeof(struct hlist_bl_head),
@@ -3246,6 +3261,10 @@ static void __init dcache_init(void)
 struct kmem_cache *names_cachep __read_mostly;
 EXPORT_SYMBOL(names_cachep);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - dentry_hashtable, inode_hashtable을 생성한다.
+ */
 void __init vfs_caches_init_early(void)
 {
 	int i;

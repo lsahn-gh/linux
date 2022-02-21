@@ -160,6 +160,10 @@ static DEFINE_SPINLOCK(debug_hook_lock);
 static LIST_HEAD(user_step_hook);
 static LIST_HEAD(kernel_step_hook);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - node에 list를 등록한다.
+ */
 static void register_debug_hook(struct list_head *node, struct list_head *list)
 {
 	spin_lock(&debug_hook_lock);
@@ -289,6 +293,10 @@ void unregister_user_break_hook(struct break_hook *hook)
 	unregister_debug_hook(&hook->node);
 }
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - kernel_break_hook을 hook에 등록한다.
+ */
 void register_kernel_break_hook(struct break_hook *hook)
 {
 	register_debug_hook(&hook->node, &kernel_break_hook);
@@ -378,6 +386,11 @@ int aarch32_break_handler(struct pt_regs *regs)
 }
 NOKPROBE_SYMBOL(aarch32_break_handler);
 
+/*
+ * IAMROOT, 2022.02.19:
+ * - debug_fault_info의 DBG_ESR_EVT_HWSS, DBG_ESR_EVT_BRK index에 hook함수등을
+ *   등록한다.
+ */
 void __init debug_traps_init(void)
 {
 	hook_debug_fault_code(DBG_ESR_EVT_HWSS, single_step_handler, SIGTRAP,
