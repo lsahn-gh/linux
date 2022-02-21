@@ -5818,6 +5818,10 @@ EXPORT_SYMBOL(free_pages_exact);
  *
  * Return: number of pages beyond high watermark.
  */
+/*
+ * IAMROOT, 2022.02.18:
+ * - first zone ~ @offset zone까지 총 free size를 구한다.
+ */
 static unsigned long nr_free_zone_pages(int offset)
 {
 	struct zoneref *z;
