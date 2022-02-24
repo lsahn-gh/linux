@@ -537,6 +537,85 @@ extern bool ____wrong_branch_error(void);
  *   false | likely   | nop | likely(true)
  *   false | unlikely | br  | unlikely(true)
  */
+/*
+ * IAMROOT, 2022.02.24:
+ * //<-- 로 되있는 asm code부분이 key변경시 nop<->b #l_yes로 바뀔수있다.
+ * -----------------
+ * - c 
+ *   if (static_branch_likely(static_key_true))
+ *   {
+ *		code..
+ *   }
+ *
+ * - asm
+ *   nop //<--
+ *   ..
+ *   code
+ *   ..
+ * l_yes:
+ *
+ * if문 실행
+ * -----------------
+ *  -c 
+ *   if (static_branch_likely(static_key_false))
+ *   {
+ *		code..
+ *   }
+ *
+ * - asm
+ *   1: b #l_yes //<--
+ *   ..
+ *   code
+ *   ..
+ * l_yes:
+ *
+ * if문 skip.
+ * -----------------
+ *   if (static_branch_unlikely(static_key_true))
+ *   {
+ *		code..
+ *   }
+ *
+ * - asm
+ *   1: b #l_yes //<--- 
+ *   b skip
+ * l_yes:
+ * ..
+ * code
+ * ..
+ * skip:
+ * ..
+ *   
+ * if문 수행.
+ * -----------------
+ *   if (static_branch_unlikely(static_key_false))
+ *   {
+ *		code..
+ *   }
+ *
+ * - asm
+ * 1: nop //<--
+ * b #skip 
+ * l_yes:
+ * ..
+ * code
+ * ..
+ * skip:
+ * ..
+ *
+ * if문 skip.
+ *
+ * - static_key의 true false
+ *   즉 static_key가 true면 if문 실행, 아니면 skip
+ * - static branch의 like, unlike의 의미
+ *   여지껏 봐왔던 likely, unlikely는 진짜 그 시점에서 조건분기를 하는 code지만,
+ *   static key는 이미 nop나 b명령어로 정해져 있다. 
+ *   결국 요점이되는건 nop, b의 사용 유무이다.
+ *   like(true) : nop를 사용해 if문 진입.
+ *   like(false) : b를 사용해 if문 skip
+ *   unlike(true) : b를 사용해 if문 진입
+ *   unlike(false) : nop + b를 사용해 if문 skip
+ */
 #define static_branch_likely(x)							\
 ({										\
 	bool branch;								\
