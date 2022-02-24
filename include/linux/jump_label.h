@@ -100,7 +100,17 @@ struct static_key {
  *	    0 if points to struct jump_entry
  */
 	union {
+/*
+ * IAMROOT, 2022.02.24:
+ * - true로 define되 있었으면 type = JUMP_TYPE_TRUE, 아니면 JUMP_TYPE_FALSE
+ */
 		unsigned long type;
+/*
+ * IAMROOT, 2022.02.24:
+ * - static_key를 가리키고 있는 entries.
+ *   static_key가 정의 당시 type에 JUMP_TYPE값이 있는데, 후에 entries가
+ *   set될때 orr된다.(static_key_set_entries 참고)
+ */
 		struct jump_entry *entries;
 		struct static_key_mod *next;
 	};
@@ -122,6 +132,13 @@ struct static_key {
 struct jump_entry {
 	s32 code;
 	s32 target;
+/*
+ * IAMROOT, 2022.02.24:
+ * - 0번 bit
+ *   code가 branch인 상황이면 set, 아니면(nop) clear.
+ * - 1번 bit
+ *   code가 init section에 존재하면 set.
+ */
 	long key;	// key may be far away from the core kernel under KASLR
 };
 
@@ -135,6 +152,17 @@ static inline unsigned long jump_entry_target(const struct jump_entry *entry)
 	return (unsigned long)&entry->target + entry->target;
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - key의 0, 1번 bit는 flag로 쓰니 걸러준다
+ *   (static_key 주석, jump_entry_is_branch, jump_entry_is_init,
+ *   jump_entry_set_init 참고)
+ * - DEFINE_STATIC_KEY_TRUE / DEFINE_STATIC_KEY_FALSE로 정의한 static_key 주소를
+ *   불러온다.
+ *   static_key - (entry->key address) = entry->key
+ *   => static_key = (entry->key address) + entry->key
+ *                 = &entry->key + entry->key
+ */
 static inline struct static_key *jump_entry_key(const struct jump_entry *entry)
 {
 	long offset = entry->key & ~3L;
@@ -161,6 +189,12 @@ static inline struct static_key *jump_entry_key(const struct jump_entry *entry)
 
 #endif
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - arch_static_branch 함수등에서 branch가 true일 경우 key member의 0번
+ *   bit는 set되었을 것이다.
+ *   즉 static_key가 branch(true)로 정의 됬는지 nop(false)로 정의 됬는지 확인한다.
+ */
 static inline bool jump_entry_is_branch(const struct jump_entry *entry)
 {
 	return (unsigned long)entry->key & 1UL;
@@ -171,6 +205,11 @@ static inline bool jump_entry_is_init(const struct jump_entry *entry)
 	return (unsigned long)entry->key & 2UL;
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - @entry가 init setction에 포함되었는지 여부(@set)에 따라 1번 bit를 
+ *   set/clear한다.
+ */
 static inline void jump_entry_set_init(struct jump_entry *entry, bool set)
 {
 	if (set)
@@ -411,6 +450,11 @@ struct static_key_false {
 
 extern bool ____wrong_branch_error(void);
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - x가 정해진 type인지 compile type에 검사를 수행한다.
+ * - enable == 0 이면 false, 0이 아니면 true
+ */
 #define static_key_enabled(x)							\
 ({										\
 	if (!__builtin_types_compatible_p(typeof(*x), struct static_key) &&	\
@@ -485,13 +529,13 @@ extern bool ____wrong_branch_error(void);
  *   true  | likely   | nop  | likely(true)
  *   true  | unlikely | br   | unlikely(true)
  *   false | likely   | br   | likely(false)
- *   false | unlikely | nop  | unliely(false)
+ *   false | unlikely | nop  | unlikely(false)
  *
  * change
  *   true  | likely   | br  | likely(false)
  *   true  | unlikely | nop | unlikely(false)
  *   false | likely   | nop | likely(true)
- *   false | unlikely | br  | unliely(true)
+ *   false | unlikely | br  | unlikely(true)
  */
 #define static_branch_likely(x)							\
 ({										\

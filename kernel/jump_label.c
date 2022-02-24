@@ -32,6 +32,10 @@ void jump_label_unlock(void)
 	mutex_unlock(&jump_label_mutex);
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - static_key 주소을 1차, code 주소를 2차로 해서 정렬을 한다.
+ */
 static int jump_label_cmp(const void *a, const void *b)
 {
 	const struct jump_entry *jea = a;
@@ -60,6 +64,12 @@ static int jump_label_cmp(const void *a, const void *b)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - jump_entry를 만들 당시 해당 address를 기준으로 offset이 정해졌으므로
+ *   swap된후에도 기준이되는 address의 변화량 만큼 증감을 시켜줘야되기때문에
+ *   관련 작업을 수행하는것이다.
+ */
 static void jump_label_swap(void *a, void *b, int size)
 {
 	long delta = (unsigned long)a - (unsigned long)b;
@@ -76,6 +86,11 @@ static void jump_label_swap(void *a, void *b, int size)
 	jeb->key	= tmp.key + delta;
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - start ~ stop까지 jump_entry에 등록된 static_key의 주소와 code를 기준으로
+ *   정렬을 수행한다.
+ */
 static void
 jump_label_sort_entries(struct jump_entry *start, struct jump_entry *stop)
 {
@@ -100,6 +115,12 @@ static void jump_label_update(struct static_key *key);
  * to have it be a function here. Similarly, for 'static_key_enable()' and
  * 'static_key_disable()', which require bug.h. This should allow jump_label.h
  * to be included from most/all places for CONFIG_JUMP_LABEL.
+ */
+/*
+ * IAMROOT, 2022.02.24:
+ * - header include 관련 문제로 이렇게 해놓은거 같다.
+ * - enabled가 -1이면 inc중이기 때문에 true의 의미인 1을 return 한다.
+ *   (static_key_slow_inc_cpuslocked 참고)
  */
 int static_key_count(struct static_key *key)
 {
@@ -379,6 +400,10 @@ static inline void static_key_set_linked(struct static_key *key)
  * type is in use and to store the initial branch direction, we use an access
  * function which preserves these bits.
  */
+/*
+ * IAMROOT, 2022.02.24:
+ * - key의 기존 type에 entries을 or한 값으로 key entries를 set한다.
+ */
 static void static_key_set_entries(struct static_key *key,
 				   struct jump_entry *entries)
 {
@@ -390,6 +415,25 @@ static void static_key_set_entries(struct static_key *key,
 	key->type |= type;
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - dynamic: instruction = enabled ^ branch
+ *  - enabled
+ *  DEFINE_STATIC_KEY_TRUE, DEFINE_STATIC_KEY_FALSE를 살펴보면 다음과 같다.
+ *  true define : enabled = 1, 
+ *  false define : enabled = 0
+ *
+ *  - branch
+ *  static_branch_likely, static_branch_unlikely 에따라서 branch의 값이 달라진다.
+ *  static_branch_likely = 1(branch)
+ *  static_branch_unlikely = 0(nop)
+ *
+ * - static key의 초기값 관점에서의 enabled ^ branch의 관계
+ *   enabled ^ branch = 0이면 jump_label_type에서 JUMP_LABEL_NOP이다.
+ *   이럴경우 arch_static_branch로 정의됬을 것이다.
+ *   enabled ^ branch = 1이면 jump_label_type에서 JUMP_LABEL_JMP이다.
+ *   이럴경우 arch_static_branch_jump로 정의됬을 것이다.
+ */
 static enum jump_label_type jump_label_type(struct jump_entry *entry)
 {
 	struct static_key *key = jump_entry_key(entry);
@@ -462,7 +506,8 @@ static void __jump_label_update(struct static_key *key,
 
 /*
  * IAMROOT, 2021.10.16:
- * - TODO
+ * - static_key를 정렬하고 static_key가 init section에 위치하는지 판단해
+ *   flag를 set한다. 또한 static_key와 jump_entry끼리 mapping 한다.
  */
 void __init jump_label_init(void)
 {

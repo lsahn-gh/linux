@@ -125,6 +125,12 @@
  *
  * (asm goto is automatically volatile - the naming reflects this.)
  */
+/*
+ * IAMROOT, 2022.02.24:
+ * - asm goto ("..." : : : : lable)
+ *   이런 형식으로 이루어지며 runtime시 lable로 이동할수있다는것을 compiler한테
+ *   알린다.
+ */
 #define asm_volatile_goto(x...)	do { asm goto(x); asm (""); } while (0)
 
 #if defined(CONFIG_ARCH_USE_BUILTIN_BSWAP)

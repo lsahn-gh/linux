@@ -165,6 +165,10 @@ static inline bool memory_intersects(void *begin, void *end, void *virt,
  * Returns: true if the object specified by @virt and @size is entirely
  * contained within the init section, false otherwise.
  */
+/*
+ * IAMROOT, 2022.02.24:
+ * - @vert 가 init section에 포함되있는지 확인힌다.
+ */
 static inline bool init_section_contains(void *virt, size_t size)
 {
 	return memory_contains(__init_begin, __init_end, virt, size);

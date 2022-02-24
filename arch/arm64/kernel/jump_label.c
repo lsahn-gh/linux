@@ -27,6 +27,11 @@ void arch_jump_label_transform(struct jump_entry *entry,
 	aarch64_insn_patch_text_nosync(addr, insn);
 }
 
+/*
+ * IAMROOT, 2022.02.24:
+ * - 해당 함수를 진입했을때 arch_static_branch 사용한 함수였을테니
+ *   그대로 놔둔다.
+ */
 void arch_jump_label_transform_static(struct jump_entry *entry,
 				      enum jump_label_type type)
 {
