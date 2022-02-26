@@ -188,3 +188,7 @@
 - 2022.02.19, Zoom 온라인(12명 참석)
 - mm_init()->mem_init() 진행중
 
+### 40주차
+- 2022.02.26, Zoom 온라인(7명 참석)
+- alloc_page() 진행중 ... alloc_flags_nofragment()
+

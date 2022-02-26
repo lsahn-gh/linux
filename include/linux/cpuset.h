@@ -61,6 +61,11 @@ extern void cpuset_read_unlock(void);
 extern void cpuset_cpus_allowed(struct task_struct *p, struct cpumask *mask);
 extern bool cpuset_cpus_allowed_fallback(struct task_struct *p);
 extern nodemask_t cpuset_mems_allowed(struct task_struct *p);
+/*
+ * IAMROOT, 2022.02.26: 
+ * 현재 태스크에 설정해둔 메모리 할당 가능한 노드 비트마스크
+ * numactl 명령을 사용하여 특정 태스크에 노드 제한을 둘 수 있다. 
+ */
 #define cpuset_current_mems_allowed (current->mems_allowed)
 void cpuset_init_current_mems_allowed(void);
 int cpuset_nodemask_valid_mems_allowed(nodemask_t *nodemask);

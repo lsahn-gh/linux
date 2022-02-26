@@ -34,8 +34,14 @@ struct vm_area_struct;
  * IAMROOT, 2022.02.12: 
  * - 밑줄3개(___)로 시작하는 gfp 플래그는 사용자가 직접 사용할 수 없다.
  *   또한 각 기능들이 하나의 비트에 대응한다.
- * - __GFP_DMA ~ __GFP_MOVABLE은 GFP_ZONEMASK로도 접근하며, zone을 의미한다.
- *   (GFP_ZONEMASK & gfp == 0 이면 NORMAL ZONE)
+ *
+ * - zone을 결정하는 gfp 플래그는 다음과 같다.
+ *   ___GFP_DMA, ___GFP_HIGHMEM, ___GFP_DMA32, ___GFP_MOVABLE
+ *   플래그를 지정하지 않으면 NORMAL ZONE
+ *
+ * - migratetype을 결정하는 gfp 플래그는 다음과 같다.
+ *   ___GFP_MOVABLE, ___GFP_RECLAIMABLE
+ *   (___GFP_MOVABLE의 경우 zone과 migratetype 모두에 영향을 끼친다.)
  */
 #define ___GFP_DMA		0x01u
 #define ___GFP_HIGHMEM		0x02u
@@ -346,6 +352,13 @@ struct vm_area_struct;
 #define GFP_KERNEL	(__GFP_RECLAIM | __GFP_IO | __GFP_FS)
 #define GFP_KERNEL_ACCOUNT (GFP_KERNEL | __GFP_ACCOUNT)
 #define GFP_NOWAIT	(__GFP_KSWAPD_RECLAIM)
+
+/*
+ * IAMROOT, 2022.02.26: 
+ * reclaim과 관련하여 
+ * -GFP_NOIO: 회수시 io, fs를 사용하지 못하도록 한다.
+ * -GFP_NOFS: 회수시 fs만을 사용하지 못하도록 한다.
+ */
 #define GFP_NOIO	(__GFP_RECLAIM)
 #define GFP_NOFS	(__GFP_RECLAIM | __GFP_IO)
 #define GFP_USER	(__GFP_RECLAIM | __GFP_IO | __GFP_FS | __GFP_HARDWALL)
@@ -370,6 +383,15 @@ struct vm_area_struct;
 #define GFP_MOVABLE_MASK (__GFP_RECLAIMABLE|__GFP_MOVABLE)
 #define GFP_MOVABLE_SHIFT 3
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 요청한 gfp 플래그로 migratetype을 결정하여 반환한다.
+ * - __GFP_MOVABLE, __GFP_RECLAIMABLE 두 플래그를 사용하여 판단한다.
+ * 
+ * 예) GFP_KERNEL, GFP_ATOMIC
+ *     -> migratetype과 관련한 플래그를 가지지 않는다.
+ *        따라서 커널 메모리의 할당은 MIGRATE_UNMOVABLE로 선택된다.
+ */
 static inline int gfp_migratetype(const gfp_t gfp_flags)
 {
 	VM_WARN_ON((gfp_flags & GFP_MOVABLE_MASK) == GFP_MOVABLE_MASK);
@@ -380,6 +402,14 @@ static inline int gfp_migratetype(const gfp_t gfp_flags)
 		return MIGRATE_UNMOVABLE;
 
 	/* Group based on mobility */
+/*
+ * IAMROOT, 2022.02.26: 
+ * migratetype은 두 플래그만을 가지고 0~2까지 타입을 결정한다.
+ * no flag:				-> MIGRATE_UNMOVABLE
+ * __GFP_MOVABLE:			-> MIGRATE_MOVABLE
+ * __GFP_RECLAIMABLE:			-> MIGRATE_RECLAIMABLE
+ * __GFP_MOVABLE, __GFP_RECLAIMABLE	-> error!!!
+ */
 	return (gfp_flags & GFP_MOVABLE_MASK) >> GFP_MOVABLE_SHIFT;
 }
 #undef GFP_MOVABLE_MASK

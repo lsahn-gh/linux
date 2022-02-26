@@ -207,6 +207,12 @@ static __always_inline int PageTail(struct page *page)
 	return READ_ONCE(page->compound_head) & 1;
 }
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * compound 페이지 여부를 체크한다.
+ * compound 페이지의 경우 head 페이지의 플래그에 PG_head가 존재하고,
+ *                        나머지 페이지의 플래그에는 PG_tail이 존재한다.
+ */
 static __always_inline int PageCompound(struct page *page)
 {
 	return test_bit(PG_head, &page->flags) || PageTail(page);

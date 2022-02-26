@@ -2650,6 +2650,9 @@ static void __init free_unused_memmap(void)
  * IAMROOT, 2022.02.19:
  * @start start pfn
  * @end end pfn
+ *
+ * memblock의 free 영역(@start ~ @end)을 order 단위의 align에 맞춰 
+ * 각 order의 freelist[]로 등록한다.
  */
 static void __init __free_pages_memory(unsigned long start, unsigned long end)
 {
@@ -2682,6 +2685,10 @@ static void __init __free_pages_memory(unsigned long start, unsigned long end)
 	}
 }
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * @start ~ @end 까지의 주소 범위를 모두 buddy 시스템으로 등록한다.
+ */
 static unsigned long __init __free_memory_core(phys_addr_t start,
 				 phys_addr_t end)
 {
@@ -2762,6 +2769,10 @@ static unsigned long __init free_low_memory_core_early(void)
 
 static int reset_managed_pages_done __initdata;
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 요청한 노드에 소속한 모든 존의 managed_paged 값을 0으로 리셋한다.
+ */
 void reset_node_managed_pages(pg_data_t *pgdat)
 {
 	struct zone *z;
@@ -2789,6 +2800,10 @@ void __init reset_all_zones_managed_pages(void)
 
 /**
  * memblock_free_all - release free pages to the buddy allocator
+ */
+/*
+ * IAMROOT, 2022.02.26: 
+ * memblock의 reserved 영역을 제외한 free 페이지들을 모두 버디시스템에 등록한다.
  */
 void __init memblock_free_all(void)
 {

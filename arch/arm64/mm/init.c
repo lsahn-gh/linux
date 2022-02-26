@@ -752,6 +752,10 @@ void __init mem_init(void)
 
 	set_max_mapnr(max_pfn - PHYS_PFN_OFFSET);
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * reserved meblock을 제외한 free 영역들을 모두 buddy 시스템으로 옮긴다.
+ */
 	/* this will put all unused low memory onto the freelists */
 	memblock_free_all();
 

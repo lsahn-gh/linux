@@ -120,6 +120,11 @@ static inline bool is_migrate_movable(int mt)
 	for (order = 0; order < MAX_ORDER; order++) \
 		for (type = 0; type < MIGRATE_TYPES; type++)
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 버디 시스템이 각 order에 대한 리스트를 migratetype별로 관리하지만,
+ * 메모리가 작은 시스템에서는 disable하여 메모리를 절약해야 한다.
+ */
 extern int page_group_by_mobility_disabled;
 
 #define MIGRATETYPE_MASK ((1UL << PB_migratetype_bits) - 1)

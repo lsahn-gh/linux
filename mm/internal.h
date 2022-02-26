@@ -23,6 +23,13 @@
 			__GFP_NORETRY|__GFP_MEMALLOC|__GFP_NOMEMALLOC|\
 			__GFP_ATOMIC)
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 부트 타임에 사용가능한 gfp 플래그들이다. 
+ * reclaim 루틴이 동작할 수 없으므로,
+ * 전체 gfp 플래그들중 다음 3가지 플래그는 제외시킨다.
+ * __GFP_RECLAIM, __GFP_IO, __GFP_FS
+ */
 /* The GFP flags allowed during early boot */
 #define GFP_BOOT_MASK (__GFP_BITS_MASK & ~(__GFP_RECLAIM|__GFP_IO|__GFP_FS))
 
@@ -136,6 +143,11 @@ extern bool cgroup_memory_nokmem;
  * __alloc_pages() for the fast path, and might be later changed
  * in __alloc_pages_slowpath(). All other functions pass the whole structure
  * by a const pointer.
+ */
+/*
+ * IAMROOT, 2022.02.26: 
+ * page 할당자에서 연속된 함수들 호출간에 인자 전달을 용이하기 위해
+ * 내부 목적으로 사용된다.
  */
 struct alloc_context {
 	struct zonelist *zonelist;

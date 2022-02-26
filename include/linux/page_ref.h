@@ -72,6 +72,10 @@ static inline int page_count(const struct page *page)
 	return atomic_read(&compound_head(page)->_refcount);
 }
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 참조카운터를 v로 변경한다.
+ */
 static inline void set_page_count(struct page *page, int v)
 {
 	atomic_set(&page->_refcount, v);

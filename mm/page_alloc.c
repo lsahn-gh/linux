@@ -129,6 +129,10 @@ static DEFINE_PER_CPU(struct pagesets, pagesets) = {
 	.lock = INIT_LOCAL_LOCK(lock),
 };
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * cpu가 소속한 numa id가 저장되어  있다.
+ */
 #ifdef CONFIG_USE_PERCPU_NUMA_NODE_ID
 DEFINE_PER_CPU(int, numa_node);
 EXPORT_PER_CPU_SYMBOL(numa_node);
@@ -1822,6 +1826,12 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	__count_vm_events(PGFREE, 1 << order);
 }
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 버디시스템에 2^@order 만큼 @page 부터 해지하여 회수한다.
+ * Reserved 플래그를 0으로 변경하고, 참조카운터도 0으로 클리어한다.
+ * 아울러 해당 zone의 managed_mapges를 2^order 만큼 증가시킨다.
+ */
 void __free_pages_core(struct page *page, unsigned int order)
 {
 	unsigned int nr_pages = 1 << order;
@@ -1848,6 +1858,11 @@ void __free_pages_core(struct page *page, unsigned int order)
 	 * Bypass PCP and place fresh pages right to the tail, primarily
 	 * relevant for memory onlining.
 	 */
+/*
+ * IAMROOT, 2022.02.26: 
+ * PCP(버디 캐시)에 집어 넣지 말고, 버디 시스템의 freelist[]에 추가하도록 
+ * 요청한다. 또한 freelist에 집어 넣을 때에는 tail 부분에 추가하도록 한다.
+ */
 	__free_pages_ok(page, order, FPI_TO_TAIL | FPI_SKIP_KASAN_POISON);
 }
 
@@ -1913,6 +1928,14 @@ int __meminit early_pfn_to_nid(unsigned long pfn)
 }
 #endif /* CONFIG_NUMA */
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * @page	시작 page 디스크립터
+ * @pfn		시작 pfn
+ * @order	버디시스템으로 돌려주기 위한 2^order 페이지
+ *
+ * 버디시스템에 memblock의 free 페이지들을 order 쪽 리스트에 추가한다.
+ */
 void __init memblock_free_pages(struct page *page, unsigned long pfn,
 							unsigned int order)
 {
@@ -4173,9 +4196,20 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 	 * __GFP_KSWAPD_RECLAIM is assumed to be the same as ALLOC_KSWAPD
 	 * to save a branch.
 	 */
+/*
+ * IAMROOT, 2022.02.26: 
+ * GFP_KERNEL 및 GFP_ATOMIC은 __GFP_KSWPAD_RECLAIM을 포함하고 있다.
+ * 
+ * __GFP_KSWAPD_RECLAIM이 요청된 경우 ALLOC_KSWAPD 플래그를 추가한다.
+ * 두 플래그는 같은 값을 사용하고 있다.
+ */
 	alloc_flags = (__force int) (gfp_mask & __GFP_KSWAPD_RECLAIM);
 
 #ifdef CONFIG_ZONE_DMA32
+/*
+ * IAMROOT, 2022.02.26: 
+ * zone이 지정되지 않은 경우 그만 빠져나간다.
+ */
 	if (!zone)
 		return alloc_flags;
 
@@ -4197,6 +4231,10 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 }
 
 /* Must be called after current_gfp_context() which can change gfp_mask */
+/*
+ * IAMROOT, 2022.02.26: 
+ * gfp 플래그에 movable 페이지를 요청한 경우 cma 영역을 사용할 수 있도록 한다.
+ */
 static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
 						  unsigned int alloc_flags)
 {
@@ -4696,6 +4734,15 @@ should_compact_retry(struct alloc_context *ac, unsigned int order, int alloc_fla
 static struct lockdep_map __fs_reclaim_map =
 	STATIC_LOCKDEP_MAP_INIT("fs_reclaim", &__fs_reclaim_map);
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 다음과 같은 경우에는 false를 반환한다.
+ * 1) gfp 플래그에 direct 회수 플래그가 주어지지 않은 경우
+ * 2) 메모리 회수와 관련한 태스크(스레드)인 경우
+ *    -> 메모리 회수 시스템은 보통 메모리 회수 과정에서 일부 추가 페이지 할당을 
+ *       수행하는데, 동일한 할당 함수를 호출한다. 재귀되지 않도록 하기 위함.
+ * 3) nolockdep 플래그를 사용한 경우
+ */
 static bool __need_reclaim(gfp_t gfp_mask)
 {
 	/* no reclaim without waiting on it */
@@ -5309,7 +5356,19 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		struct alloc_context *ac, gfp_t *alloc_gfp,
 		unsigned int *alloc_flags)
 {
+/*
+ * IAMROOT, 2022.02.26: 
+ * @gfp_mask에서 요청한 플래그들 중 zone과 관련되어 요청한 플래그가 있으면
+ * 해당 존이 결정되고, 그렇지 않은 경우 normal 존을 사용한다.
+ */
 	ac->highest_zoneidx = gfp_zone(gfp_mask);
+/*
+ * IAMROOT, 2022.02.26: 
+ * zonelist의 결정은 노드 id와, __GFP_THISNODE의 유무로 0, 1을 판별하여 노드마다
+ * 2개(일반 fallback, this fallback)를 만든 zonelist를 선택한다.
+ * 결국 ac->zonlist를 설정하는 것으로 노드와 zone에 대한 fall-back list를 
+ * 선택한다.
+ */
 	ac->zonelist = node_zonelist(preferred_nid, gfp_mask);
 	ac->nodemask = nodemask;
 	ac->migratetype = gfp_migratetype(gfp_mask);
@@ -5320,23 +5379,48 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		 * When we are in the interrupt context, it is irrelevant
 		 * to the current task context. It means that any node ok.
 		 */
+/*
+ * IAMROOT, 2022.02.26: 
+ * 1) 태스크(kernel thread)에서 요청한 페이지 할당의 경우
+ *    태스크에 지정된 노드들을 알아온다. (default: 모든노드)
+ * 2) 인터럽트 context에서 할당 요청하거나 또는 이미 ac->nodemask가 지정된 경우
+ *    인터럽트 context들은 모든 노드들에서 할당 가능한 상태이고,
+ *    alloc_flags에 cpuset을 사용하도록 플래그를 추가한다.
+ */
 		if (in_task() && !ac->nodemask)
 			ac->nodemask = &cpuset_current_mems_allowed;
 		else
 			*alloc_flags |= ALLOC_CPUSET;
 	}
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 아래 두 줄은 lockdep에서 운영한다.
+ */
 	fs_reclaim_acquire(gfp_mask);
 	fs_reclaim_release(gfp_mask);
 
 	might_sleep_if(gfp_mask & __GFP_DIRECT_RECLAIM);
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * fault-injection을 사용하여 강제로 할당에 대한 실패를 만들어낸다.
+ */
 	if (should_fail_alloc_page(gfp_mask, order))
 		return false;
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * gfp 플래그에 movable 페이지를 요청한 경우 cma 영역을 사용할 수 있도록 한다.
+ */
 	*alloc_flags = gfp_to_alloc_flags_cma(gfp_mask, *alloc_flags);
 
 	/* Dirty zone balancing only done in the fast path */
+/*
+ * IAMROOT, 2022.02.26: 
+ * 쓰기용 페이지를 할당받는 경우 fast-path 할당에서만 dirty zone balancing을
+ * 수행할 수 있다.
+ */
 	ac->spread_dirty_pages = (gfp_mask & __GFP_WRITE);
 
 	/*
@@ -5344,6 +5428,10 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 	 * also used as the starting point for the zonelist iterator. It
 	 * may get reset for allocations that ignore memory policies.
 	 */
+/*
+ * IAMROOT, 2022.02.26: 
+ * 선호 존을 위해 zonelist 엔트리중 조건에 맞는 가장 위의 엔트리를 가져온다.
+ */
 	ac->preferred_zoneref = first_zones_zonelist(ac->zonelist,
 					ac->highest_zoneidx, ac->nodemask);
 
@@ -5533,6 +5621,10 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 		return NULL;
 	}
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * 부트타임서는 회수 관련한 플래그들을 제외시킨다. (reclaim, io, fs)
+ */
 	gfp &= gfp_allowed_mask;
 	/*
 	 * Apply scoped allocation constraints. This is mainly about GFP_NOFS
@@ -5541,8 +5633,19 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	 * memalloc_no{fs,io}_{save,restore}. And PF_MEMALLOC_PIN which ensures
 	 * movable zones are not used during allocation.
 	 */
+/*
+ * IAMROOT, 2022.02.26: 
+ * 태스크의 gfp 요구사항에 맞춰 특정 플래그를 더 제외시킬 수 있다.
+ * 예) 태스크가 nofs를 요청한 경우 등..
+ */
 	gfp = current_gfp_context(gfp);
 	alloc_gfp = gfp;
+/*
+ * IAMROOT, 2022.02.26: 
+ * 1) alloc_context인 ac를 구성한다.
+ * 2) alloc_gfp는 cpuset이 사용되는 경우 __GFP_HARDWALL이 추가되었다.
+ * 3) alloc_flags도 상황에 따라 ALLOC_CPUSET, ALLOC_CMA가 추가될 수 있다.
+ */
 	if (!prepare_alloc_pages(gfp, order, preferred_nid, nodemask, &ac,
 			&alloc_gfp, &alloc_flags))
 		return NULL;
@@ -9062,6 +9165,10 @@ void __init mem_init_print_info(void)
 	adj_init_size(_stext, _etext, codesize, __start_rodata, rosize);
 	adj_init_size(_sdata, _edata, datasize, __start_rodata, rosize);
 
+/*
+ * IAMROOT, 2022.02.26: 
+ * rpi4 예) Memory: 1638760K/2019328K available (9660K kernel code, 1126K rwdata, 2964K rodata, 1024K init, 869K bss, 118424K reserved, 262144K cma-reserved)
+ */
 #undef	adj_init_size
 
 	pr_info("Memory: %luK/%luK available (%luK kernel code, %luK rwdata, %luK rodata, %luK init, %luK bss, %luK reserved, %luK cma-reserved"
