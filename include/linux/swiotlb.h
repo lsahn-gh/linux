@@ -89,8 +89,16 @@ extern enum swiotlb_force swiotlb_force;
  * @for_alloc:  %true if the pool is used for memory allocation
  */
 struct io_tlb_mem {
+/*
+ * IAMROOT, 2022.03.04:
+ * - tlb의 시작과 끝 주소가 저장된다..
+ */
 	phys_addr_t start;
 	phys_addr_t end;
+/*
+ * IAMROOT, 2022.03.04:
+ * - slots의 개수가 저장된다.
+ */
 	unsigned long nslabs;
 	unsigned long used;
 	unsigned int index;
@@ -99,6 +107,10 @@ struct io_tlb_mem {
 	bool late_alloc;
 	bool force_bounce;
 	bool for_alloc;
+/*
+ * IAMROOT, 2022.03.04:
+ * - default_nslabs(2^9(512))개만큼 생성된다.
+ */
 	struct io_tlb_slot {
 		phys_addr_t orig_addr;
 		size_t alloc_size;

@@ -544,77 +544,103 @@ extern bool ____wrong_branch_error(void);
  * - c 
  *   if (static_branch_likely(static_key_true))
  *   {
- *		code..
+ *		codeA
+ *   } else
+ *   {
+ *		codeB
  *   }
+ *   codeC
  *
  * - asm
  *   nop //<--
- *   ..
- *   code
- *   ..
+ *   codeA
+ *   codeC
+ *   b next
  * l_yes:
+ *   codeB
+ *   b codeC
+ * next:
  *
- * if문 실행
+ * if문 실행. codeB가 멀리 위치. codeC보다 뒤에 위치하는게 보인다.
  * -----------------
  *  -c 
  *   if (static_branch_likely(static_key_false))
  *   {
- *		code..
+ *		codeA
+ *   } else
+ *   {
+ *		codeB
  *   }
+ *   codeC
  *
  * - asm
  *   1: b #l_yes //<--
- *   ..
- *   code
- *   ..
+ *   codeA
+ *   codeC
+ *   b next
  * l_yes:
+ *   codeB
+ *   b codeC
+ * next:
  *
- * if문 skip.
+ * if문 else 실행. codeB가 멀리 위치. codeC보다 뒤에 위치하는게 보인다.
  * -----------------
  *   if (static_branch_unlikely(static_key_true))
  *   {
- *		code..
+ *		codeA
+ *   }else
+ *   {
+ *		codeB
  *   }
+ *   codeC
  *
  * - asm
- *   1: b #l_yes //<--- 
+ *  1: b #l_yes //<--- 
  *   b skip
  * l_yes:
- * ..
- * code
- * ..
+ *   codeA
+ *   b next
  * skip:
+ *   codeB
+ * next:
+ *   codeC
+ * next:
  * ..
  *   
- * if문 수행.
+ * if문 수행. codeB가 codeC보다 가깝게 위치하는게 보인다.
  * -----------------
  *   if (static_branch_unlikely(static_key_false))
  *   {
- *		code..
+ *		codeA
+ *   } else
+ *   {
+ *		codeB
  *   }
+ *   codeC
  *
  * - asm
  * 1: nop //<--
- * b #skip 
+ *   b skip
  * l_yes:
- * ..
- * code
- * ..
+ *   codeA
+ *   b next
  * skip:
+ *   codeB
+ * next:
+ *   codeC
+ * next:
  * ..
  *
- * if문 skip.
+ * if문 else 수행. codeB가 codeC보다 가깝게 위치하는게 보인다.
  *
  * - static_key의 true false
- *   즉 static_key가 true면 if문 실행, 아니면 skip
+ *   true : if문 실행. like인경우 nop로 진입,
+ *                     unlike인 경우 branch로 진입.
+ *   false : else실행. like, unlike 둘다 branch로 진입하는데 like인 경우엔
+ *                     code가 멀리 위치하고 있을수있다.
  * - static branch의 like, unlike의 의미
- *   여지껏 봐왔던 likely, unlikely는 진짜 그 시점에서 조건분기를 하는 code지만,
- *   static key는 이미 nop나 b명령어로 정해져 있다. 
- *   결국 요점이되는건 nop, b의 사용 유무이다.
- *   like(true) : nop를 사용해 if문 진입.
- *   like(false) : b를 사용해 if문 skip
- *   unlike(true) : b를 사용해 if문 진입
- *   unlike(false) : nop + b를 사용해 if문 skip
+ *   like인경우 : else인 code들이 뒤쪽에 위치한다.
+ *   unlike인 경우 : else code들이 if code 바로 뒤에 위치한다.
  */
 #define static_branch_likely(x)							\
 ({										\

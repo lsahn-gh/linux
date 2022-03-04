@@ -24,6 +24,10 @@
 #else
 #define __bitwise__
 #endif
+/*
+ * IAMROOT, 2022.03.04:
+ * - sparse 검사 관련
+ */
 #define __bitwise __bitwise__
 
 typedef __u16 __bitwise __le16;

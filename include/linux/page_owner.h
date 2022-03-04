@@ -18,6 +18,10 @@ extern void __dump_page_owner(const struct page *page);
 extern void pagetypeinfo_showmixedcount_print(struct seq_file *m,
 					pg_data_t *pgdat, struct zone *zone);
 
+/*
+ * IAMROOT, 2022.03.04:
+ * - page추적에 대한 값들을 reset 한다.
+ */
 static inline void reset_page_owner(struct page *page, unsigned int order)
 {
 	if (static_branch_unlikely(&page_owner_inited))

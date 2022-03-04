@@ -2664,15 +2664,15 @@ static void __init __free_pages_memory(unsigned long start, unsigned long end)
  * - start에 맞는 order를 구한다.
  * ex) start = 0x123 , end = 0x223, size = 1mb
  *    __ffs  order--횟수   start 변화
- * 1: 0     | 0          | 0x124
- * 2: 2     | 0          | 0x128
- * 3: 3     | 0          | 0x130
- * 4: 4     | 0          | 0x140
- * 5: 6     | 0          | 0x180
- * 6: 7     | 0          | 0x200
- * 7: 9     | 3(9->6)    | 0x220
- * 8: 5     | 4(5->1)    | 0x222
- * 9: 1     | 1(1->0)    | 0x223
+ * 1: 0     | 0          | 0x124      | 4k
+ * 2: 2     | 0          | 0x128      | 16k
+ * 3: 3     | 0          | 0x130      | 32k
+ * 4: 4     | 0          | 0x140      | 64k
+ * 5: 6     | 0          | 0x180      | 256k
+ * 6: 7     | 0          | 0x200      | 512k
+ * 7: 9     | 4(9->5)    | 0x220      | 128k
+ * 8: 5     | 4(5->1)    | 0x222      | 8k
+ * 9: 1     | 1(1->0)    | 0x223      | 4k
  */
 		order = min(MAX_ORDER - 1UL, __ffs(start));
 

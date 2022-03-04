@@ -76,11 +76,19 @@
  */
 enum swiotlb_force swiotlb_force;
 
+/*
+ * IAMROOT, 2022.03.04:
+ * - swiotlb_init_with_tbl에서 초기화 한다.
+ */
 struct io_tlb_mem io_tlb_default_mem;
 
 /*
  * Max segment that we can provide which (if pages are contingous) will
  * not be bounced (unless SWIOTLB_FORCE is set).
+ */
+/*
+ * IAMROOT, 2022.03.04:
+ * - swiotlb_init_with_tbl에서 초기화된다.
  */
 static unsigned int max_segment;
 
@@ -189,6 +197,10 @@ void __init swiotlb_update_mem_attributes(void)
 	memset(vaddr, 0, bytes);
 }
 
+/*
+ * IAMROOT, 2022.03.04:
+ * - @mem과 @mem->slot을 초기화 해준다.
+ */
 static void swiotlb_init_io_tlb_mem(struct io_tlb_mem *mem, phys_addr_t start,
 				    unsigned long nslabs, bool late_alloc)
 {
@@ -213,6 +225,10 @@ static void swiotlb_init_io_tlb_mem(struct io_tlb_mem *mem, phys_addr_t start,
 	memset(vaddr, 0, bytes);
 }
 
+/*
+ * IAMROOT, 2022.03.04:
+ * - io_tlb_default_mem에 slot을 nslabs개수의 배열로 생성한다.
+ */
 int __init swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose)
 {
 	struct io_tlb_mem *mem = &io_tlb_default_mem;
@@ -242,6 +258,10 @@ int __init swiotlb_init_with_tbl(char *tlb, unsigned long nslabs, int verbose)
 /*
  * Statically reserve bounce buffer space and initialize bounce buffer data
  * structures for the software IO TLB used to implement the DMA API.
+ */
+/*
+ * IAMROOT, 2022.03.04:
+ * - 연속된 물리메모리를 할당해와서 tlb buffer로 사용한다.,
  */
 void  __init
 swiotlb_init(int verbose)

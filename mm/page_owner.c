@@ -125,6 +125,10 @@ static noinline depot_stack_handle_t save_stack(gfp_t flags)
 	return handle;
 }
 
+/*
+ * IAMROOT, 2022.03.04:
+ * - page 추적(owner) 에대한 값들을 reset 한다.
+ */
 void __reset_page_owner(struct page *page, unsigned int order)
 {
 	int i;

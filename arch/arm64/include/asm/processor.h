@@ -281,6 +281,10 @@ static inline void prefetch(const void *ptr)
 }
 
 #define ARCH_HAS_PREFETCHW
+/*
+ * IAMROOT, 2022.03.04:
+ * - @ptr을 미리 cache에 올려 놓는다.
+ */
 static inline void prefetchw(const void *ptr)
 {
 	asm volatile("prfm pstl1keep, %a0\n" : : "p" (ptr));

@@ -446,6 +446,10 @@ static DEFINE_STATIC_KEY_TRUE(deferred_pages);
  * on-demand allocation and then freed again before the deferred pages
  * initialization is done, but this is not likely to happen.
  */
+/*
+ * IAMROOT, 2022.03.04:
+ * - kasan poison skip여부를 확인한다.
+ */
 static inline bool should_skip_kasan_poison(struct page *page, fpi_t fpi_flags)
 {
 	return static_branch_unlikely(&deferred_pages) ||
@@ -1449,6 +1453,7 @@ static __always_inline bool free_pages_prepare(struct page *page,
 	 * avoid checking PageCompound for order-0 pages.
 	 */
 	if (unlikely(order)) {
+
 		bool compound = PageCompound(page);
 		int i;
 
@@ -1845,6 +1850,11 @@ void __free_pages_core(struct page *page, unsigned int order)
 	 */
 	prefetchw(p);
 	for (loop = 0; loop < (nr_pages - 1); loop++, p++) {
+/*
+ * IAMROOT, 2022.03.04:
+ * - 앞 memory를 미리 cache에 올리도록 요청을 한다.
+ *   그동안 아래 동작이 수행될것
+ */
 		prefetchw(p + 1);
 		__ClearPageReserved(p);
 		set_page_count(p, 0);

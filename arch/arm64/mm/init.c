@@ -743,6 +743,15 @@ void __init mem_init(void)
  * - swiotlb_force 위치 : kernel/dma/swiotlb.c
  *   default는 SWIOTLB_NORMAL. early param으로 SWIOTLB_FORCE등이 설정된다.
  * - 특정 device의 dma size에 memory보다 작을 경우 swiotlb_init이 될수있다.
+ *
+ * --- swiotlb(software io tlb, 혹은 iommu)
+ * - 보통 device는 연속된 memory를 요구한다. 하지만 kernel은 연속된 memory를
+ *   할당하는데 제한이 있어 보통 조각난 memory를 한대 묶어서 iommu에 mmapping을
+ *   요청해 마치 연속된 memory인것처럼 device가 인식하도록 한다.
+ * - 하지만 만약 device가 dma limit이 걸려 있어 특정 address이상을 사용하지
+ *   못할 경우 위 방법을 하기가 불가능한데, 이 경우 bounce buffer를 둬서
+ *   device가 해당 bounce buffer에 접근하게 하고 bound buffer의 값을 직접
+ *   main memory에 cpu가 옮기는 방식으로 사용한다.
  */
 	if (swiotlb_force == SWIOTLB_FORCE ||
 	    max_pfn > PFN_DOWN(arm64_dma_phys_limit))
