@@ -4218,11 +4218,18 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 #ifdef CONFIG_ZONE_DMA32
 /*
  * IAMROOT, 2022.02.26: 
- * zone이 지정되지 않은 경우 그만 빠져나간다.
+ * 인자로 zone이 지정되지 않은 경우 그만 빠져나간다.
  */
 	if (!zone)
 		return alloc_flags;
 
+/*
+ * IAMROOT, 2022.03.05: 
+ * 다음과 같은 상황에서 더 이상 alloc_flags의 변경 없이 빠져나간다.
+ * - 해당 zone이 normal이 아닌 경우
+ * - 해당 zone normal이지만, 2개 이상의 NUMA 시스템에서 normal 존의 
+ *   앞(dma32 or dma) 존에 페이지들이 없는 경우
+ */
 	if (zone_idx(zone) != ZONE_NORMAL)
 		return alloc_flags;
 
@@ -4234,6 +4241,12 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 	BUILD_BUG_ON(ZONE_NORMAL - ZONE_DMA32 != 1);
 	if (nr_online_nodes > 1 && !populated_zone(--zone))
 		return alloc_flags;
+
+/*
+ * IAMROOT, 2022.03.05: 
+ * - dma 존을 사용할 수 있는 상황에서는 먼저 fragement되지 않도록, 
+ *   ALLOC_NOGRAGMENT 플래그를 추가하여 반환한다.
+ */
 
 	alloc_flags |= ALLOC_NOFRAGMENT;
 #endif /* CONFIG_ZONE_DMA32 */
@@ -5664,6 +5677,10 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	 * Forbid the first pass from falling back to types that fragment
 	 * memory until all local zones are considered.
 	 */
+/*
+ * IAMROOT, 2022.03.05: 
+ * 상황에 따라 ALLOC_KSWAPD 또는 ALLOC_NOFRAGMENT 플래그를 추가하여 올 수 있다.
+ */
 	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp);
 
 	/* First allocation attempt */
