@@ -204,6 +204,10 @@ static inline unsigned long global_node_page_state(enum node_stat_item item)
 	return global_node_page_state_pages(item);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 러프한 @item의 zone 통계값을 return.
+ */
 static inline unsigned long zone_page_state(struct zone *zone,
 					enum zone_stat_item item)
 {
@@ -220,6 +224,11 @@ static inline unsigned long zone_page_state(struct zone *zone,
  * deltas. For that we need to loop over all cpus to find the current
  * deltas. There is no synchronization so the result cannot be
  * exactly accurate either.
+ */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @item에 해당하는 per_cpu_zonestat + vm_stat 을 전부 더해서 정확한
+ *   통계값을 return한다.
  */
 static inline unsigned long zone_page_state_snapshot(struct zone *zone,
 					enum zone_stat_item item)

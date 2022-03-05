@@ -311,6 +311,10 @@ void set_pgdat_percpu_threshold(pg_data_t *pgdat,
  * or when we know that preemption is disabled and that
  * particular counter cannot be updated from interrupt context.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @delta값을 @item 통계에 추가한다.
+ */
 void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 			   long delta)
 {
@@ -333,6 +337,10 @@ void __mod_zone_page_state(struct zone *zone, enum zone_stat_item item,
 
 	t = __this_cpu_read(pcp->stat_threshold);
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - x의 절대값이 threshold값보다 커졌으면 zone vm_stat에 적용한다.
+ */
 	if (unlikely(abs(x) > t)) {
 		zone_page_state_add(x, zone, item);
 		x = 0;

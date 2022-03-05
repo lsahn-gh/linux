@@ -188,6 +188,11 @@ static inline void __kunmap_local(void *addr)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - arm64에서는 highmem을 사용안하기 때문에 lowmem으로 @page에 해당하는
+ *   va를 @return한다
+ */
 static inline void *kmap_atomic(struct page *page)
 {
 	if (IS_ENABLED(CONFIG_PREEMPT_RT))

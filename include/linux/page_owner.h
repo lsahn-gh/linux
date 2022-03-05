@@ -28,6 +28,10 @@ static inline void reset_page_owner(struct page *page, unsigned int order)
 		__reset_page_owner(page, order);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - debug환경등에서 @page에 debug정보를 기록한다.
+ */
 static inline void set_page_owner(struct page *page,
 			unsigned int order, gfp_t gfp_mask)
 {

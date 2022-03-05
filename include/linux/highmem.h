@@ -175,6 +175,11 @@ alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
 }
 #endif
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page의 va를 memset한다.
+ * - arm32에서는 highmem page인 경우 mapping후 clear후 mapping해제 한다.
+ */
 static inline void clear_highpage(struct page *page)
 {
 	void *kaddr = kmap_atomic(page);

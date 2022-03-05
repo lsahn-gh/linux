@@ -4343,6 +4343,11 @@ kswapd_try_sleep:
  * has failed or is not needed, still wake up kcompactd if only compaction is
  * needed.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - TODO
+ * - kswapd를 wakeup 한다.
+ */
 void wakeup_kswapd(struct zone *zone, gfp_t gfp_flags, int order,
 		   enum zone_type highest_zoneidx)
 {

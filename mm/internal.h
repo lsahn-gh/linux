@@ -96,6 +96,10 @@ static inline bool page_evictable(struct page *page)
  * Turn a non-refcounted page (->_refcount == 0) into refcounted with
  * a count of one.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 할당이 완료된 @page의 refcount를 1로 한다.
+ */
 static inline void set_page_refcounted(struct page *page)
 {
 	VM_BUG_ON_PAGE(PageTail(page), page);

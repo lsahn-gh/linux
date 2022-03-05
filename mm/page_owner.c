@@ -173,6 +173,10 @@ static inline void __set_page_owner_handle(struct page_ext *page_ext,
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - debug 환경에서 page_ext가 생길수있고 거기에 owner등을 기록하는것.
+ */
 noinline void __set_page_owner(struct page *page, unsigned int order,
 					gfp_t gfp_mask)
 {

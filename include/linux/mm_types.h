@@ -93,7 +93,8 @@ struct page {
 
 /*
  * IAMROOT, 2022.02.05:
- * - pcpu : 해당 struct page에 대항하는 struct pcpu_chunk가 set된다.
+ * - pcpu에서 사용하는 경우 : 해당 struct page에 대항하는 struct pcpu_chunk가 set된다.
+ * - buddy에서 사용하는경우 : migratetype
  */
 			pgoff_t index;		/* Our offset within mapping. */
 			/**
@@ -102,6 +103,11 @@ struct page {
 			 * Used for swp_entry_t if PageSwapCache.
 			 * Indicates order in the buddy system if PageBuddy.
 			 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy에서는 order로 사용한다. 다른걸로 사용할때 이
+ *   위치가 order가 될것이다.
+ */
 			unsigned long private;
 		};
 		struct {	/* page_pool used by netstack */
@@ -209,7 +215,7 @@ struct page {
 		 */
 /*
  * IAMROOT, 2021.12.11:
- * - -1 부터 시작을한다.
+ * - -1 부터 시작을한다. buddy system에 있을때는(free page) -1이다.
  */
 		atomic_t _mapcount;
 

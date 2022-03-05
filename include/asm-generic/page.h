@@ -25,6 +25,10 @@
 
 #ifndef __ASSEMBLY__
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - page가 가리키는 memory를 memset한다.
+ */
 #define clear_page(page)	memset((page), 0, PAGE_SIZE)
 #define copy_page(to,from)	memcpy((to), (from), PAGE_SIZE)
 

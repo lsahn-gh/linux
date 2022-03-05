@@ -950,6 +950,10 @@ enum compound_dtor_id {
 };
 extern compound_page_dtor * const compound_page_dtors[NR_COMPOUND_DTORS];
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - compound page에(@page[1]) compound destructor id를 설정한다.
+ */
 static inline void set_compound_page_dtor(struct page *page,
 		enum compound_dtor_id compound_dtor)
 {
@@ -970,6 +974,10 @@ static inline unsigned int compound_order(struct page *page)
 	return page[1].compound_order;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page가 compound page인데 order가 2이상인경우 hpage로 생각한다.
+ */
 static inline bool hpage_pincount_available(struct page *page)
 {
 	/*
@@ -977,7 +985,16 @@ static inline bool hpage_pincount_available(struct page *page)
 	 * the 3rd page of the compound page, so the smallest (2-page) compound
 	 * pages cannot support it.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - page가 compund가 아니면 자기자신이 오고, compound면 head를 가져온다.
+ */
 	page = compound_head(page);
+/*
+ * IAMROOT, 2022.03.05:
+ * - head이거나 tail이고, compoud order가 2이상일경우 hpage_pincount_available
+ *   를 true로 return한다.
+ */
 	return PageCompound(page) && compound_order(page) > 1;
 }
 
@@ -993,6 +1010,10 @@ static inline int compound_pincount(struct page *page)
 	return head_compound_pincount(page);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - compound_page에 order를 기록한다.
+ */
 static inline void set_compound_order(struct page *page, unsigned int order)
 {
 	page[1].compound_order = order;
@@ -1643,6 +1664,10 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
  */
 #include <linux/vmstat.h>
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - lowmem일 경우에만 사용할수있다. @page가 가리키는 va를 가져온다.
+ */
 static __always_inline void *lowmem_page_address(const struct page *page)
 {
 	return page_to_virt(page);
@@ -3018,6 +3043,11 @@ static inline void kernel_poison_pages(struct page *page, int numpages) { }
 static inline void kernel_unpoison_pages(struct page *page, int numpages) { }
 #endif
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - kernel command line에 "init_on_alloc=1"로하면 enable된다.
+ *   할당후에 0으로 초기화한다.
+ */
 DECLARE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_ALLOC_DEFAULT_ON, init_on_alloc);
 static inline bool want_init_on_alloc(gfp_t flags)
 {
@@ -3027,6 +3057,11 @@ static inline bool want_init_on_alloc(gfp_t flags)
 	return flags & __GFP_ZERO;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - kernel command line에 "init_on_free=1"로하면 enable된다.
+ *   free후에 0으로 초기화한다.
+ */
 DECLARE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_FREE_DEFAULT_ON, init_on_free);
 static inline bool want_init_on_free(void)
 {

@@ -711,6 +711,12 @@ static struct page_address_slot *page_slot(const struct page *page)
  *
  * Returns the page's virtual address.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 32bit system일 경우 lowmem만 linear mampping이 되어있어
+ *   lowmem은 바로 가져올수있고, highmem은 mapping이 되있는
+ *   경우에만 가져올수있다.
+ */
 void *page_address(const struct page *page)
 {
 	unsigned long flags;

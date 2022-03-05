@@ -745,6 +745,10 @@ static inline int __maybe_unused bad_range(struct zone *zone, struct page *page)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - kernel log에 출력한다. 적당히 출력하기 위해 nr_shown등을 사용한다.
+ */
 static void bad_page(struct page *page, const char *reason)
 {
 	static unsigned long resume;
@@ -783,10 +787,21 @@ out:
 	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
 }
 
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - struct per_cpu_pages의 lists index를 구한다.
+ * - NR_PCP_LISTS로 order 0,1,2,3,9에 대한 MIGRATE_PCPTYPES list가 만들어졌었다.
+ *   @order의 @migratetype에 대한 list index를 반환한다.
+ */
 static inline unsigned int order_to_pindex(int migratetype, int order)
 {
 	int base = order;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - huge(order 9)에 대한것은 index 4취급을 하기떄문에 +1을 해준다.
+ */
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	if (order > PAGE_ALLOC_COSTLY_ORDER) {
 		VM_BUG_ON(order != pageblock_order);
@@ -815,6 +830,10 @@ static inline int pindex_to_order(unsigned int pindex)
 	return order;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcp가 처리를 할수있는 order인지 확인한다.(0, 1, 2, 3, 9)
+ */
 static inline bool pcp_allowed_order(unsigned int order)
 {
 	if (order <= PAGE_ALLOC_COSTLY_ORDER)
@@ -855,6 +874,10 @@ void free_compound_page(struct page *page)
 	free_the_page(page, compound_order(page));
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * compound page에 @order등의 정보를 기록한다.
+ */
 void prep_compound_page(struct page *page, unsigned int order)
 {
 	int i;
@@ -868,6 +891,11 @@ void prep_compound_page(struct page *page, unsigned int order)
 	}
 
 	set_compound_page_dtor(page, COMPOUND_PAGE_DTOR);
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy system에서는 struct page의 private에 order를 기록했었는데 할당후에는
+ *   compound order를 기록한다
+ */
 	set_compound_order(page, order);
 	atomic_set(compound_mapcount_ptr(page), -1);
 	if (hpage_pincount_available(page))
@@ -1015,6 +1043,10 @@ void init_mem_debugging_and_hardening(void)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page의 private에 order를 기록하고 buddy로 set한다.
+ */
 static inline void set_buddy_order(struct page *page, unsigned int order)
 {
 	set_page_private(page, order);
@@ -1106,6 +1138,10 @@ compaction_capture(struct capture_control *capc, struct page *page,
 #endif /* CONFIG_COMPACTION */
 
 /* Used for pages not on another list */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page를 @order의 @migratetyp free_area list의 head에 넣는다.
+ */
 static inline void add_to_free_list(struct page *page, struct zone *zone,
 				    unsigned int order, int migratetype)
 {
@@ -1138,6 +1174,16 @@ static inline void move_to_free_list(struct page *page, struct zone *zone,
 	list_move_tail(&page->lru, &area->free_list[migratetype]);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 1. reported flag를 지운다.
+ *   2. list에서 page를 삭제한다.
+ *   3. page에서 buddy flag를 지운다.
+ *   4. private를 0으로 바꾼다.
+ *   5. free_area에서 entry수를 1개 감소시킨다.
+ *
+ * - 이렇게 함으로써 buddy lru list에서 free page를 제거하게된다.
+ */
 static inline void del_page_from_free_list(struct page *page, struct zone *zone,
 					   unsigned int order)
 {
@@ -1300,6 +1346,13 @@ done_merging:
  * try and check multiple fields with one check. The caller must do a detailed
  * check if necessary.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy system에서 가져온 직후이므로 할당에 대한 값들이 없어야되니
+ *   해당 값들을 확인한다.
+ *   추가로 @check_flags에 대해서 flags를 확인하고, 확인되면 비정상이다.
+ *   비정상시 false return.
+ */
 static inline bool page_expected_state(struct page *page,
 					unsigned long check_flags)
 {
@@ -1317,6 +1370,10 @@ static inline bool page_expected_state(struct page *page,
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page가 bad인 이유에 대한 string 반환.
+ */
 static const char *page_bad_reason(struct page *page, unsigned long flags)
 {
 	const char *bad_reason = NULL;
@@ -1406,6 +1463,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @numapges 만큼 @page가 가리키는 va를 0로 초기화한다.
+ */
 static void kernel_init_free_pages(struct page *page, int numpages, bool zero_tags)
 {
 	int i;
@@ -2336,6 +2397,10 @@ zone_empty:
  * it is called from a __ref function _deferred_grow_zone. This way we are
  * making sure that it is not inlined into permanent text section.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @zone의 deferred page들을 초기화중인지 확인한다.
+ */
 static noinline bool __init
 deferred_grow_zone(struct zone *zone, unsigned int order)
 {
@@ -2356,11 +2421,19 @@ deferred_grow_zone(struct zone *zone, unsigned int order)
 	 * If someone grew this zone while we were waiting for spinlock, return
 	 * true, as there might be enough pages already.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - spinlock을 건사이에 변경이 됬다면 초기화중인것이므로 true return
+ */
 	if (first_deferred_pfn != pgdat->first_deferred_pfn) {
 		pgdat_resize_unlock(pgdat, &flags);
 		return true;
 	}
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - TODO
+ */
 	/* If the zone is empty somebody else may have cleared out the zone */
 	if (!deferred_init_mem_pfn_range_in_zone(&i, zone, &spfn, &epfn,
 						 first_deferred_pfn)) {
@@ -2402,6 +2475,10 @@ deferred_grow_zone(struct zone *zone, unsigned int order)
  * get_page_from_freelist() during early boot until deferred_pages permanently
  * disables this call. This is why we have refdata wrapper to avoid warning,
  * and to ensure that the function body gets unloaded.
+ */
+/*
+ * IAMROOT, 2022.03.05:
+ * - deferred page들을 초기화 중인지 확인한다.
  */
 static bool __ref
 _deferred_grow_zone(struct zone *zone, unsigned int order)
@@ -2495,6 +2572,34 @@ void __init init_cma_reserved_pageblock(struct page *page)
  *
  * -- nyc
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @high order부터 @low order까지 반절씩 잘라서 각 order list로 반환한다.
+ * - @low는 최초에 요청된 order, @high는 page할당이 성공된 order.
+ *   같다면 아무것도 안한다.
+ * - @high가 @low가 될때까지 감소시키면서 하나씩 free area로 등록한다.
+ * - ex) high == 3, low = 1
+ *
+ *   1. size = 1 << 3 => 8
+ *      size >>= 1 => 4
+ * +--+          -
+ * |  |          ^ 
+ * +--+ page[7]  | 첫번째 분할에 4, 5, 6, 7이 order2 의 free area에
+ * |  |          | 넣어진다.
+ * +--+ page[6]  |
+ * |  |          |
+ * +--+ page[5]  |
+ * |  |          v
+ * +--+ page[4] --- 첫번째 분할(order 2)
+ * |  |          ^
+ * +--+ page[3]  |  두번째 분할에 2, 3이 order 1 의 free area에
+ * |  |          v  넣어진다.
+ * +--+ page[2] --- 두번째 분할(order 1)
+ * |  |          ^
+ * +--+ page[1]  | 0, 1번 실제 free area에서 벗어나서 할당되는 page
+ * |  |          v 
+ * +--+ page[0] --- 최초의 high(order 3)
+ */
 static inline void expand(struct zone *zone, struct page *page,
 	int low, int high, int migratetype)
 {
@@ -2503,6 +2608,11 @@ static inline void expand(struct zone *zone, struct page *page,
 	while (high > low) {
 		high--;
 		size >>= 1;
+/*
+ * IAMROOT, 2022.03.05:
+ * - &page[size]
+ *   @page의 중간 index에 해당하는 page. 즉 절반을 나눈다.
+ */
 		VM_BUG_ON_PAGE(bad_range(zone, &page[size]), &page[size]);
 
 		/*
@@ -2519,6 +2629,11 @@ static inline void expand(struct zone *zone, struct page *page,
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page invald 값이 들어있는 상태. @page가 bad인 이유에 대해
+ *   kernel log를 출력해준다.
+ */
 static void check_new_page_bad(struct page *page)
 {
 	if (unlikely(page->flags & __PG_HWPOISON)) {
@@ -2533,6 +2648,11 @@ static void check_new_page_bad(struct page *page)
 
 /*
  * This page is about to be returned from the page allocator
+ */
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy에 잇었던 new page가 정상적인지 검사한다.
+ * - 0이면 정상. 1이면 비정상
  */
 static inline int check_new_page(struct page *page)
 {
@@ -2568,6 +2688,11 @@ static inline bool check_new_pcp(struct page *page)
  * when pcp lists are being refilled from the free lists. With debug_pagealloc
  * enabled, they are also checked when being allocated from the pcp lists.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcp refill전에 @page가 정상인지 확인하고 비정상일 경우 kernel log를
+ *   출력한다.
+ */
 static inline bool check_pcp_refill(struct page *page)
 {
 	return check_new_page(page);
@@ -2581,6 +2706,10 @@ static inline bool check_new_pcp(struct page *page)
 }
 #endif /* CONFIG_DEBUG_VM */
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @order 만큼 @page를 확인한다.
+ */
 static bool check_new_pages(struct page *page, unsigned int order)
 {
 	int i;
@@ -2594,6 +2723,10 @@ static bool check_new_pages(struct page *page, unsigned int order)
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 할당직후의 @page의 값들을 설정한다.
+ */
 inline void post_alloc_hook(struct page *page, unsigned int order,
 				gfp_t gfp_flags)
 {
@@ -2618,6 +2751,10 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	if (kasan_has_integrated_init()) {
 		kasan_alloc_pages(page, order, gfp_flags);
 	} else {
+/*
+ * IAMROOT, 2022.03.05:
+ * - alloc후 0초기화를 해야되는지 확인후 0로 초기화한다.
+ */
 		bool init = !want_init_on_free() && want_init_on_alloc(gfp_flags);
 
 		kasan_unpoison_pages(page, order, init);
@@ -2629,6 +2766,10 @@ inline void post_alloc_hook(struct page *page, unsigned int order,
 	set_page_owner(page, order, gfp_flags);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - prepare new page
+ */
 static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
 							unsigned int alloc_flags)
 {
@@ -2652,6 +2793,16 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 /*
  * Go through the free lists for the given migratetype and remove
  * the smallest available page from the freelists
+ */
+/*
+ * IAMROOT, 2022.03.05:
+ * - smallest
+ *   요청한 작은 @order부터 큰 order순으로 할당시도를 한다는것.
+ * - rmqueue
+ *   buddy system
+ * - @order에서 시작하여 frea area에서 page를 할당 받는다.
+ *   만약에 @order보다 상위 order에서 page를 할당받았을 경우 절반씩 나누며
+ *   반환한다.
  */
 static __always_inline
 struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
@@ -2694,6 +2845,10 @@ static int fallbacks[MIGRATE_TYPES][3] = {
 };
 
 #ifdef CONFIG_CMA
+/*
+ * IAMROOT, 2022.03.05:
+ * - migratetype을 MIGRATE_CMA로 해서 해당 free area에서 할당 요청을 한다.
+ */
 static __always_inline struct page *__rmqueue_cma_fallback(struct zone *zone,
 					unsigned int order)
 {
@@ -3180,6 +3335,11 @@ do_steal:
  * Do the hard work of removing an element from the buddy allocator.
  * Call me with the zone->lock already held.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @order @migratetype frea area list(buddy system)에서 할당요청을 수행한다.
+ * - cma를 고려한다.
+ */
 static __always_inline struct page *
 __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 						unsigned int alloc_flags)
@@ -3192,6 +3352,13 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 		 * allocating from CMA when over half of the zone's free memory
 		 * is in the CMA area.
 		 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - cma에 대한 요청이 있고, cma memory가 남은 memory의 절반 이상일때 cma에서
+ *   미리 시도를 한다.
+ * - 보통 device가 사용해야되는 cma영역은 잘 사용을 안하지만 normal memory가
+ *   적어져 결국 아래와 같은 조건이 됬을때 cma에서 먼저 할당요청을 한다.
+ */
 		if (alloc_flags & ALLOC_CMA &&
 		    zone_page_state(zone, NR_FREE_CMA_PAGES) >
 		    zone_page_state(zone, NR_FREE_PAGES) / 2) {
@@ -3202,6 +3369,12 @@ __rmqueue(struct zone *zone, unsigned int order, int migratetype,
 	}
 retry:
 	page = __rmqueue_smallest(zone, order, migratetype);
+/*
+ * IAMROOT, 2022.03.05:
+ * - 할당을 실패했고, ALLOC_CMA요청이 있는 경우 cma에서 할당 시도를 한다.
+ * - cma요청이 없거나 cma에서도 할당실패를 했을꼉우 __rmqueue_fallback을 해서
+ *   성공을 하면 __rmqueue_smallest를 다시 시도한다.
+ */
 	if (unlikely(!page)) {
 		if (alloc_flags & ALLOC_CMA)
 			page = __rmqueue_cma_fallback(zone, order);
@@ -3221,6 +3394,10 @@ out:
  * a single hold of the lock, for efficiency.  Add them to the supplied list.
  * Returns the number of new pages which were placed at *list.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @order page를 @count 만큼 할당받고 @list에 추가한다.
+ */
 static int rmqueue_bulk(struct zone *zone, unsigned int order,
 			unsigned long count, struct list_head *list,
 			int migratetype, unsigned int alloc_flags)
@@ -3233,11 +3410,18 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 	 */
 	spin_lock(&zone->lock);
 	for (i = 0; i < count; ++i) {
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy system에서 @order만큼 page를 할당 받는다.
+ */
 		struct page *page = __rmqueue(zone, order, migratetype,
 								alloc_flags);
 		if (unlikely(page == NULL))
 			break;
-
+/*
+ * IAMROOT, 2022.03.05:
+ * - page가 정상인지 확인한다.
+ */
 		if (unlikely(check_pcp_refill(page)))
 			continue;
 
@@ -3251,8 +3435,16 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 		 * for IO devices that can merge IO requests if the physical
 		 * pages are ordered properly.
 		 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @list의 tail에 page를 넣는다.
+ */
 		list_add_tail(&page->lru, list);
 		allocated++;
+/*
+ * IAMROOT, 2022.03.05:
+ * - page의 migratetype이 cma일 경우 stat을 갱신한다.
+ */
 		if (is_migrate_cma(get_pcppage_migratetype(page)))
 			__mod_zone_page_state(zone, NR_FREE_CMA_PAGES,
 					      -(1 << order));
@@ -3264,6 +3456,10 @@ static int rmqueue_bulk(struct zone *zone, unsigned int order,
 	 * on i. Do not confuse with 'allocated' which is the number of
 	 * pages added to the pcp list.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 해당 zone에서 free page stat을 갱신한다.
+ */
 	__mod_zone_page_state(zone, NR_FREE_PAGES, -(i << order));
 	spin_unlock(&zone->lock);
 	return allocated;
@@ -3783,6 +3979,11 @@ void __putback_isolated_page(struct page *page, unsigned int order, int mt)
  *
  * Must be called with interrupts disabled.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @z의 numa 통계를 갱신한다. @z가 NUMA_MISS일 경우 @preferred_zone에
+ *   NUMA_FOREIGN 통계도 갱신한다.
+ */
 static inline void zone_statistics(struct zone *preferred_zone, struct zone *z,
 				   long nr_account)
 {
@@ -3793,9 +3994,18 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z,
 	if (!static_branch_likely(&vm_numa_stat_key))
 		return;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 현재 cpu의 nid와 @z의 nid 일치하면 NUMA_LOCAL, 아니면 NUMA_OTHER
+ */
 	if (zone_to_nid(z) != numa_node_id())
 		local_stat = NUMA_OTHER;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @preferred_zone과 @z의 nid가 같으면 NUMA_HIT로, 아니면 NUMA_MISS로
+ *   기록한다.
+ */
 	if (zone_to_nid(z) == zone_to_nid(preferred_zone))
 		__count_numa_events(z, NUMA_HIT, nr_account);
 	else {
@@ -3808,6 +4018,12 @@ static inline void zone_statistics(struct zone *preferred_zone, struct zone *z,
 
 /* Remove page from the per-cpu list, caller must protect the list */
 static inline
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcplist(@list)에서 @order page를 할당받는다.
+ *   pcplist(@list)에서 모자랄 경우 buddy system(rmqueue_bulk)에서 page를 추가로
+ *   가져온다.
+ */
 struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 			int migratetype,
 			unsigned int alloc_flags,
@@ -3828,6 +4044,11 @@ struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 			 * should never store free pages as the pages may
 			 * belong to arbitrary zones.
 			 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - batch를 order단위로 요청할거기 때문에 order 단위로 고친다.
+ * - ex) batch == 64, order == 3, 2^(6 - 3) => 2^3 => 8
+ */
 			if (batch > 1)
 				batch = max(batch >> order, 2);
 			alloced = rmqueue_bulk(zone, order,
@@ -3848,6 +4069,10 @@ struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 }
 
 /* Lock and remove page from the per-cpu list */
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcplist에서 @order page를 할당받는다.
+ */
 static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
 			gfp_t gfp_flags, int migratetype,
@@ -3880,6 +4105,10 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 /*
  * Allocate a page from the given zone. Use pcplists for order-0 allocations.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @order page를 할당 받는다.
+ */
 static inline
 struct page *rmqueue(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
@@ -3889,6 +4118,14 @@ struct page *rmqueue(struct zone *preferred_zone,
 	unsigned long flags;
 	struct page *page;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcp가 처리할수있는 order인지 확인한다. 맞다면 pcplist에서 먼저
+ *   할당 요청을 한다.
+ * - kernel page, page cache, cma등은 pcplist를 먼저 사용한다.
+ * - GFP_ATOMIC같은 경우도 pcp_allowed_order에 맞는 @order라면 먼저 pcplist
+ *   에서 할당 요청을 한다.
+ */
 	if (likely(pcp_allowed_order(order))) {
 		/*
 		 * MIGRATE_MOVABLE pcplist could have the pages on CMA area and
@@ -3902,6 +4139,10 @@ struct page *rmqueue(struct zone *preferred_zone,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 그게 아니면 buddy system에 직접 할당 요청을 한다.
+ */
 	/*
 	 * We most definitely don't want callers attempting to
 	 * allocate greater than order-1 page units with __GFP_NOFAIL.
@@ -3917,11 +4158,24 @@ struct page *rmqueue(struct zone *preferred_zone,
 		 * reserved for high-order atomic allocation, so order-0
 		 * request should skip it.
 		 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - order가 0보다 크고, GFP_ATOMIC이 예상되는 상태에서는 pcp_allowed_order에
+ *   해당하지 않은 @order에 대해서(즉 굉장히 큰 @order) MIGRATE_HIGHATOMIC에서
+ *   요청을 해본다. 즉 interrupt와 같은 상황에서 많은양의 memory 할당
+ *   요청이 있을경우 MIGRATE_HIGHATOMIC에서 할당요청을 받는것이 확인된다.
+ */
 		if (order > 0 && alloc_flags & ALLOC_HARDER) {
 			page = __rmqueue_smallest(zone, order, MIGRATE_HIGHATOMIC);
 			if (page)
 				trace_mm_page_alloc_zone_locked(page, order, migratetype);
 		}
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - order 0이거나 바로위의 조건이 아니거나, 위 조건에서(HIGHATOMIC) 할당 실패
+ *   한 경우 @migratetype에 대해서 할당 요청한다.
+ */
 		if (!page)
 			page = __rmqueue(zone, order, migratetype, alloc_flags);
 	} while (page && check_new_pages(page, order));
@@ -3937,6 +4191,10 @@ struct page *rmqueue(struct zone *preferred_zone,
 
 out:
 	/* Separate test+clear to avoid unnecessary atomics */
+/*
+ * IAMROOT, 2022.03.05:
+ * - @zoen이 boosted가 되있으면 kswapd를 깨운다.
+ */
 	if (test_bit(ZONE_BOOSTED_WATERMARK, &zone->flags)) {
 		clear_bit(ZONE_BOOSTED_WATERMARK, &zone->flags);
 		wakeup_kswapd(zone, 0, 0, zone_idx(zone));
@@ -4024,10 +4282,20 @@ noinline bool should_fail_alloc_page(gfp_t gfp_mask, unsigned int order)
 }
 ALLOW_ERROR_INJECTION(should_fail_alloc_page, TRUE);
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - free page중에서 해당 상황일때 일정 부분을 unusable free를 해야되는
+ *   개수를 return한다.
+ * - cma, highatomic, 요청 page - 1에 대한 unsuable page를 고려한다.
+ */
 static inline long __zone_watermark_unusable_free(struct zone *z,
 				unsigned int order, unsigned int alloc_flags)
 {
 	const bool alloc_harder = (alloc_flags & (ALLOC_HARDER|ALLOC_OOM));
+/*
+ * IAMROOT, 2022.03.05:
+ * - 현재 요청한 order page -1 만큼도 unusable_free로 고려한것이다.
+ */
 	long unusable_free = (1 << order) - 1;
 
 	/*
@@ -4035,9 +4303,20 @@ static inline long __zone_watermark_unusable_free(struct zone *z,
 	 * the high-atomic reserves. This will over-estimate the size of the
 	 * atomic reserve but it avoids a search.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - GFP_ATOMIC이나 OOM상황이 아닐때는 해당 영역을 사용하지 말아야되므로
+ *   해당 공간들을 unusable free에 추가한다.
+ */
 	if (likely(!alloc_harder))
 		unusable_free += z->nr_reserved_highatomic;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - kernel memory요청일때는 CMA 요청이 없을것이고(못쓰므로) user memory요청일때는
+ *   flag가 있을것이다. 그러므로 kernel memory요청일때는 CMA를 못쓰므로
+ *   해당 공간을 사용하지 말아야 하므로 unusable_free로 해두는것이다.
+ */
 #ifdef CONFIG_CMA
 	/* If allocation can't use CMA areas don't use free CMA pages */
 	if (!(alloc_flags & ALLOC_CMA))
@@ -4053,6 +4332,11 @@ static inline long __zone_watermark_unusable_free(struct zone *z,
  * one free page of a suitable size. Checking now avoids taking the zone lock
  * to check in the allocation paths if no pages are free.
  */
+/*
+ * IAMROOT, 2022.03.05:
+ * - signle order까지는 watermark비교만으로 빨리 끝낸다.
+ * - single order가 아닌경우는 실제 buddy에 free page가 있는지 확인한다.
+ */
 bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 			 int highest_zoneidx, unsigned int alloc_flags,
 			 long free_pages)
@@ -4062,11 +4346,25 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 	const bool alloc_harder = (alloc_flags & (ALLOC_HARDER|ALLOC_OOM));
 
 	/* free_pages may go negative - that's OK */
+/*
+ * IAMROOT, 2022.03.05:
+ * - cma, order page -1, highatomic을 고려한다.
+ */
 	free_pages -= __zone_watermark_unusable_free(z, order, alloc_flags);
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - GFP_ATOMIC으로 요청된경우 ALLOC_HIGH가 있다. 이경우 mark min을 반으로 줄인다.
+ *   즉 할당을 더 쉽게 한다.
+ */
 	if (alloc_flags & ALLOC_HIGH)
 		min -= min / 2;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - alloc_harder가 있다면 정말 가능한한 할당을 해야되므로 min을 더욱 줄여준다.
+ *   ALLOC_OOM일경우 1/2, ALLOC_HARDER일 경우 1/4를 더 줄여준다.
+ */
 	if (unlikely(alloc_harder)) {
 		/*
 		 * OOM victims can try even harder than normal ALLOC_HARDER
@@ -4085,13 +4383,27 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 	 * are not met, then a high-order request also cannot go ahead
 	 * even if a suitable page happened to be free.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - lowmem reserved까지 고려했을때 free_pages가 부족하면 false return.
+ * - memory가 정말 부족한 상황이라 buddy system을 확인할 필요도 없다.
+ */
 	if (free_pages <= min + z->lowmem_reserve[highest_zoneidx])
 		return false;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - single order인 경우 watermark가 충분하단것을 확인한 시점에서 어딘가에 무조건 
+ *   free page가 있을 것이므로 바로 true로 return한다.
+ */
 	/* If this is an order-0 request then the watermark is fine */
 	if (!order)
 		return true;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - order 0가 아닌 경우 실제 free_area list를 조사한다.
+ */
 	/* For a high-order request, check at least one suitable page is free */
 	for (o = order; o < MAX_ORDER; o++) {
 		struct free_area *area = &z->free_area[o];
@@ -4100,23 +4412,44 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		if (!area->nr_free)
 			continue;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - MIGRATE_UNMOVABLE -> MIGRATE_MOVABLE -> MIGRATE_RECLAIMABLE순으로
+ *   free_area가 있는지 확인하여 page가 존재하면 true로 한다.
+ */
 		for (mt = 0; mt < MIGRATE_PCPTYPES; mt++) {
 			if (!free_area_empty(area, mt))
 				return true;
 		}
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 여기까지 오면 MIGRATE_PCPTYPES에서는 할당을 못하는 상태.
+ * - __GFP_MOVABLE로 요청이 왔다면(alloc_flags에 ALLOC_CMA가 있는 경우)
+ *   CMA에서 할당을 할수 있는지 확인한다.
+ */
 #ifdef CONFIG_CMA
 		if ((alloc_flags & ALLOC_CMA) &&
 		    !free_area_empty(area, MIGRATE_CMA)) {
 			return true;
 		}
 #endif
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - GFP_ATOMIC등의 상황에서는 MIGRATE_HIGHATOMIC까지 확인한다.
+ */
 		if (alloc_harder && !free_area_empty(area, MIGRATE_HIGHATOMIC))
 			return true;
 	}
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 가장 기본 형태의 free page 확인 함수.
+ *   러프한 값을 가지고 free page를 확인한다.
+ */
 bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		      int highest_zoneidx, unsigned int alloc_flags)
 {
@@ -4124,6 +4457,14 @@ bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 					zone_page_state(z, NR_FREE_PAGES));
 }
 
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - watermark의 공간을 비교할때는 unsable page(cma, lowmem reseved,
+ *   highatomic등)을 제외하고 고려를 해야된다.
+ * - __zone_watermark_ok에 비해서 order 0를 먼저 러프하게 검사해서 order 0에 대해
+ *   좀더 빠른 처리를 도모한다.
+ */
 static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 				unsigned long mark, int highest_zoneidx,
 				unsigned int alloc_flags, gfp_t gfp_mask)
@@ -4140,11 +4481,29 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 		long fast_free;
 
 		fast_free = free_pages;
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - cma, highatomic, 요청 page - 1(0)에 대한 unsuable page를 고려한다.
+ */
 		fast_free -= __zone_watermark_unusable_free(z, 0, alloc_flags);
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - unusable free page를 제외한 free_page에서 watermark + lowmem reserve 를
+ *   고려한다.
+ *   free page가 watermark보다 여유로운 상황이면 true로 return한다.
+ * - 즉 위에까지 합치면 cma, HighAtomic, lowmem까지 다 고려하게 된다.
+ * - 이와 같이 sigle page요청일 경우에는 간단히 watermark 기준으로 검사한다.
+ */
 		if (fast_free > mark + z->lowmem_reserve[highest_zoneidx])
 			return true;
 	}
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 정확한 free page계산을 한다.
+ */
 	if (__zone_watermark_ok(z, order, mark, highest_zoneidx, alloc_flags,
 					free_pages))
 		return true;
@@ -4154,6 +4513,11 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 	 * point where boosting is ignored so that kswapd is woken up
 	 * when below the low watermark.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - order 0이며 atomic, boost가 있으며 watermark가 min인 경우 min에 대해서
+ *   다시한번 __zone_watermark_ok를 시도한다.
+ */
 	if (unlikely(!order && (gfp_mask & __GFP_ATOMIC) && z->watermark_boost
 		&& ((alloc_flags & ALLOC_WMARK_MASK) == WMARK_MIN))) {
 		mark = z->_watermark[WMARK_MIN];
@@ -4164,6 +4528,15 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - zone_watermark_ok 시리즈중에 더 정확하게 확인한다. drift_mark가 존재하고
+ *   drift_mark보다 frr_pages가 작으면 vm_stat +
+ *   pcpu stat까지 전부 더해 정확한 free_pages를 산출해서 고려한다.
+ * - drift_mark는 watermark 기준값보다 좀 더 높은 값이라 snapshot을 보통은
+ *   안하고 러프하게만 검사하지만 free_pages가 drift_mark 근처에 있게될 경우
+ *   snapshot을 사용해 정확하게 계산 하겠다는 의미이다.
+ */
 bool zone_watermark_ok_safe(struct zone *z, unsigned int order,
 			unsigned long mark, int highest_zoneidx)
 {
@@ -4238,6 +4611,14 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 	 * the pointer is within zone->zone_pgdat->node_zones[]. Also assume
 	 * on UMA that if Normal is populated then so is DMA32.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - numa이지만 zone DMA나 zone DMA32가 없는경우 그냥 빠져 나간다.
+ * - single node인 경우 normal, dma or dma32 zone이 있는 상황에서, dma에
+ *   가급적이면 할당을 안하도록 if문에 진입을 안하고 nofragment가 남겨질것이다.
+ * - !populated_zone(--zone)
+ *  같은 node에서, 이전 zone(dma or dma32)에 대해 memory 존재하는지를 확인한다.
+ */
 	BUILD_BUG_ON(ZONE_NORMAL - ZONE_DMA32 != 1);
 	if (nr_online_nodes > 1 && !populated_zone(--zone))
 		return alloc_flags;
@@ -4246,6 +4627,8 @@ alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
  * IAMROOT, 2022.03.05: 
  * - dma 존을 사용할 수 있는 상황에서는 먼저 fragement되지 않도록, 
  *   ALLOC_NOGRAGMENT 플래그를 추가하여 반환한다.
+ * - dma는 driver등에서 사용을 해야되기떄문에 용량이 적으므로 가급적 사용을
+ *   안해야 된다.
  */
 
 	alloc_flags |= ALLOC_NOFRAGMENT;
@@ -4286,6 +4669,11 @@ retry:
 	 * Scan zonelist, looking for a zone with enough free.
 	 * See also __cpuset_node_allowed() comment in kernel/cpuset.c.
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - nofragment 요청은 preferred zone에서 가능한한 할당을 하라는 요청이고
+ *   만약 실패할경우 다른 zone에서 할당하게될것이다.
+ */
 	no_fallback = alloc_flags & ALLOC_NOFRAGMENT;
 	z = ac->preferred_zoneref;
 	for_next_zone_zonelist_nodemask(zone, z, ac->highest_zoneidx,
@@ -4293,6 +4681,12 @@ retry:
 		struct page *page;
 		unsigned long mark;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - cgroup의 cpuset이 켜져있고, cpuset으로 요청이 왔는데 zone이 cpuset을
+ *   허락하고 있지않으면 다음 zone으로 넘어간다.
+ *   즉 cgroup에서 해당 zone을 limit해놓은것.
+ */
 		if (cpusets_enabled() &&
 			(alloc_flags & ALLOC_CPUSET) &&
 			!__cpuset_zone_allowed(zone, gfp_mask))
@@ -4316,6 +4710,21 @@ retry:
 		 * will require awareness of nodes in the
 		 * dirty-throttling and the flusher threads.
 		 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 페이지 캐시 페이지를 쓰기 위해 할당할 때 더티 제한 내에 있는 노드에서
+ *   가져오기를 원하므로 단일 노드가 전역적으로 허용되는 더티 페이지의
+ *   비례적 공유를 초과해서는 안 됩니다.
+ *   더티 제한은 kswapd가 LRU 목록에서 페이지를 쓸 필요 없이
+ *   균형을 맞출 수 있도록 노드의 낮은 메모리 저장량과 높은 워터마크를 고려한다.
+ *
+ *   XXX: 지금은 회수하기 전에 할당이 저속 경로의 노드당 더티 제한
+ *   (스프레드_더티_페이지 설정 해제)을 초과할 수 있도록 하십시오.
+ *   NUMA 설정에서 허용된 노드가 함께 모여 글로벌 제한에 도달할 수 없을 때
+ *   중요합니다.
+ *   이러한 상황을 적절히 해결하려면 지저분한 스레딩과 플러셔 스레드의
+ *   노드를 인식해야 합니다. 
+ */
 		if (ac->spread_dirty_pages) {
 			if (last_pgdat_dirty_limit == zone->zone_pgdat)
 				continue;
@@ -4326,6 +4735,14 @@ retry:
 			}
 		}
 
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - DMA나 DMA32 zone이 존재하는 상태에서, normal zone으로 요청한 상태.
+ *   그리고 ALLOC_NOFRAGMENT 요청이 됫으며 numa system인 상황이다.
+ *   이 경우 preferred_zone 아닌 zone일때, remote node인 경우에만
+ *   ALLOC_NOFRAGMENT flag 를 제거해한후 retry를 한다.
+ */
 		if (no_fallback && nr_online_nodes > 1 &&
 		    zone != ac->preferred_zoneref->zone) {
 			int local_nid;
@@ -4342,6 +4759,12 @@ retry:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - alloc_flags에 해당하는 watermark(ALLOC_WMARK_LOW)에 대한 page개수를 가져온다.
+ * - watermark로 할당 실패할 경우, 실패한 상황일때 할당할수있는 상황에
+ *   대해서 검사를 한후 할당을 시도한다.
+ */
 		mark = wmark_pages(zone, alloc_flags & ALLOC_WMARK_MASK);
 		if (!zone_watermark_fast(zone, order, mark,
 				       ac->highest_zoneidx, alloc_flags,
@@ -4353,20 +4776,43 @@ retry:
 			 * Watermark failed for this zone, but see if we can
 			 * grow this zone if it contains deferred pages.
 			 */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 현재 시스템이 deferred page를 초기화중인지 확인한다.
+ */
 			if (static_branch_unlikely(&deferred_pages)) {
+/*
+ * IAMROOT, 2022.03.05:
+ * - deferred를 시킨 경우로, backgroud로 deferred된 page가 초기화중이라면
+ *   바로 할당요청을 시도한다.
+ * - zone이 defrred page를 초기화중이라면 할당 요청.
+ */
 				if (_deferred_grow_zone(zone, order))
 					goto try_this_zone;
 			}
 #endif
 			/* Checked here to keep the fast path fast */
 			BUILD_BUG_ON(ALLOC_NO_WATERMARKS < NR_WMARK);
+/*
+ * IAMROOT, 2022.03.05:
+ * - page 회수자가 동작할때 ALLOC_NO_WATERMARKS를 달고 들어온다. watermark로
+ *   할당을 확인을 실패해도 할당을 시도하러 간다.
+ */
 			if (alloc_flags & ALLOC_NO_WATERMARKS)
 				goto try_this_zone;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - reclaim을 할수없는 상황이면 fallback zone을 사용하도록 skip한다.
+ */
 			if (!node_reclaim_enabled() ||
 			    !zone_allows_reclaim(ac->preferred_zoneref->zone, zone))
 				continue;
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - TODO
+ */
 			ret = node_reclaim(zone->zone_pgdat, gfp_mask, order);
 			switch (ret) {
 			case NODE_RECLAIM_NOSCAN:
@@ -4386,6 +4832,10 @@ retry:
 		}
 
 try_this_zone:
+/*
+ * IAMROOT, 2022.03.05:
+ * - pcplist or buddy system에서 order page를 할당 받아온다.
+ */
 		page = rmqueue(ac->preferred_zoneref->zone, zone, order,
 				gfp_mask, alloc_flags, ac->migratetype);
 		if (page) {

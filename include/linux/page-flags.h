@@ -191,6 +191,10 @@ enum pageflags {
 
 #ifndef __GENERATING_BOUNDS_H
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - compound head 설정을 했을때 head + 1을 했었다.
+ */
 static inline unsigned long _compound_head(const struct page *page)
 {
 	unsigned long head = READ_ONCE(page->compound_head);
@@ -669,6 +673,10 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 
 __PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @page의 compound head가 @head를 가리키도록 한다. flag개념으로 +1을 한다.
+ */
 static __always_inline void set_compound_head(struct page *page, struct page *head)
 {
 	WRITE_ONCE(page->compound_head, (unsigned long)head + 1);

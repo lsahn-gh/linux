@@ -10,11 +10,19 @@
 #include <linux/pgtable.h>
 #include <linux/scatterlist.h>
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - 누군가에게(such as a hypervisor) reporting하는 기능
+ */
 #ifdef CONFIG_PAGE_REPORTING
 DECLARE_STATIC_KEY_FALSE(page_reporting_enabled);
 extern unsigned int page_reporting_order;
 void __page_reporting_notify(void);
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - page_reporting_enabled이 on인 경우 page reported를 한다.
+ */
 static inline bool page_reported(struct page *page)
 {
 	return static_branch_unlikely(&page_reporting_enabled) &&

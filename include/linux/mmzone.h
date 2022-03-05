@@ -58,6 +58,11 @@
  *   MIGRATE_MOVABLE : 보통 hotplug로 추가 되는 memory들.
  *   MIGRATE_RECLAIMABLE : 회수가 가능한 memory. disk를 불러올때 
  *                         많은 memory를 load하는 상황등의 memory
+ * - MIGRATE_HIGHATOMIC
+ *   각 zone마다 예비로 atomic요청에 응답을 빠르게 할수 있도록 하는 공간.
+ *   order 0나 1로 오면 대부분 성공하지만, order가 큰 경우 실패를 할수있는데,
+ *   이 경우 MIGRATE_HIGHATOMIC 공간에서 할당 요청을 할것이다.
+ *
  * - MIGRATE_CMA
  *   kernel에서 연속된 공간을 할당하기엔 매우 어려움이 있는데,
  *   이를 해결하기 위한 공간. driver등(application)에서만 사용하며
@@ -143,6 +148,10 @@ struct free_area {
 	unsigned long		nr_free;
 };
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - order free area의 @migratetype free_list에서 page를 얻어온다.
+ */
 static inline struct page *get_page_from_free_area(struct free_area *area,
 					    int migratetype)
 {
@@ -150,6 +159,10 @@ static inline struct page *get_page_from_free_area(struct free_area *area,
 					struct page, lru);
 }
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - @migratetype에 대해서 free_area가 없다면 true, 아니면 false
+ */
 static inline bool free_area_empty(struct free_area *area, int migratetype)
 {
 	return list_empty(&area->free_list[migratetype]);
@@ -173,6 +186,15 @@ struct zone_padding {
 
 #ifdef CONFIG_NUMA
 enum numa_stat_item {
+/*
+ * IAMROOT, 2022.03.05:
+ * - zone_statistics 참고
+ * - NUMA_HIT : 원하는 node에서 할당 받은 경우, 할당된 node에 기록
+ *   NUMA_MISS : 원하지 않은 node에서 할당 받은 경우, 할당된 node에 기록
+ *   NUMA_FOREIGN : 원하지 않은 zone에서 할당 받은 경우, 원래 원하던 node에 기록
+ *   NUMA_LOCAL : 요청한 cpu의 numa와 일치한 node에 할당한경우.(local node)
+ *   NUMA_OTHER : remote node에 할당한경우.
+ */
 	NUMA_HIT,		/* allocated in intended node */
 	NUMA_MISS,		/* allocated in non intended node */
 	NUMA_FOREIGN,		/* was intended here, hit elsewhere */
@@ -185,8 +207,16 @@ enum numa_stat_item {
 #define NR_VM_NUMA_EVENT_ITEMS 0
 #endif
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - zone에서 관리하는 counter stat
+ */
 enum zone_stat_item {
 	/* First 128 byte cacheline (assuming 64 bit words) */
+/*
+ * IAMROOT, 2022.03.05:
+ * - buddy system에서 할당가능한 잔여 page
+ */
 	NR_FREE_PAGES,
 	NR_ZONE_LRU_BASE, /* Used only for compaction and reclaim retry */
 	NR_ZONE_INACTIVE_ANON = NR_ZONE_LRU_BASE,
@@ -204,6 +234,11 @@ enum zone_stat_item {
 	NR_FREE_CMA_PAGES,
 	NR_VM_ZONE_STAT_ITEMS };
 
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - node에서 관리하는 conter stat
+ */
 enum node_stat_item {
 	NR_LRU_BASE,
 	NR_INACTIVE_ANON = NR_LRU_BASE, /* must match order of LRU_[IN]ACTIVE */
@@ -390,6 +425,8 @@ enum zone_watermarks {
 /*
  * IAMROOT, 2022.02.12:
  * - 3 * (3 + 1 + (1)) = 15
+ * - order 0, 1, 2, 3, 9에 대한 각 MIGRATE_PCPTYPES의 list수
+ * - index구하는 함수는 order_to_pindex참고
  */
 #define NR_PCP_LISTS (MIGRATE_PCPTYPES * (PAGE_ALLOC_COSTLY_ORDER + 1 + NR_PCP_THP))
 
@@ -407,6 +444,11 @@ enum zone_watermarks {
 #define min_wmark_pages(z) (z->_watermark[WMARK_MIN] + z->watermark_boost)
 #define low_wmark_pages(z) (z->_watermark[WMARK_LOW] + z->watermark_boost)
 #define high_wmark_pages(z) (z->_watermark[WMARK_HIGH] + z->watermark_boost)
+
+/*
+ * IAMROOT, 2022.03.05:
+ * - @i mark에 대한 page(+ watermark_boost) 개수를 가져온다.
+ */
 #define wmark_pages(z, i) (z->_watermark[i] + z->watermark_boost)
 
 /* Fields and list protected by pagesets local_lock in page_alloc.c */
@@ -430,9 +472,17 @@ struct per_cpu_pages {
 	struct list_head lists[NR_PCP_LISTS];
 };
 
+/*
+ * IAMROOT, 2022.03.05:
+ * - vm_stat에 합산전인 값들이 들어가있다.
+ */
 struct per_cpu_zonestat {
 #ifdef CONFIG_SMP
 	s8 vm_stat_diff[NR_VM_ZONE_STAT_ITEMS];
+/*
+ * IAMROOT, 2022.03.05:
+ * - vm_stat에 vm_stat_diff를 반영할때 한계값으로 사용한다.
+ */
 	s8 stat_threshold;
 #endif
 #ifdef CONFIG_NUMA
@@ -589,6 +639,11 @@ struct zone {
    */
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
+/*
+ * IAMROOT, 2022.03.05:
+ * - lock을 걸지 않고 stat을 관리한다. 특정 값 이상이 vm_stat과 차이나면
+ *   vm_stat에 적용한다.(threshold 방식)
+ */
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 	/*
 	 * the high and batch values are copied to individual pagesets for
@@ -721,6 +776,15 @@ struct zone {
 	 * when reading the number of free pages to avoid per-cpu counter
 	 * drift allowing watermarks to be breached
 	 */
+/*
+ * IAMROOT, 2022.03.05:
+ * 커널 메모리 관리 시 남은 free 페이지 수를 읽어 워터마크와 비교하는 것으로
+ * 메모리 부족을 판단하는 루틴들이 많이 사용된다. 그런데 정확한 free 페이지 값을
+ * 읽어내려면 존 카운터와 per-cpu 카운터를 모두 읽어 더해야하는데, 이렇게 매번
+ * 계산을 하는 경우 성능을 떨어뜨리므로, 존 카운터 값만 읽어 high 워터마크보다
+ * 일정 기준 더 큰 크기로 설정된 percpu_drift_mark 값과 비교하여 이 값 이하일
+ * 때에만 보다 정확한 연산을 하도록 유도하는 방법을 사용하여 성능을 유지시킨다.
+ */
 	unsigned long percpu_drift_mark;
 
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
@@ -753,6 +817,11 @@ struct zone {
 
 	ZONE_PADDING(_pad3_)
 	/* Zone statistics */
+/*
+ * IAMROOT, 2022.03.05:
+ * - 대략적인 값. atomic lock을 걸고 사용한다. per_cpu_zonestat값을 고려해야
+ *   정확한 값을 얻을수 있다.
+ */
 	atomic_long_t		vm_stat[NR_VM_ZONE_STAT_ITEMS];
 	atomic_long_t		vm_numa_event[NR_VM_NUMA_EVENT_ITEMS];
 } ____cacheline_internodealigned_in_smp;

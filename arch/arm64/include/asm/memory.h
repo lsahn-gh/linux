@@ -588,6 +588,11 @@ static inline void *phys_to_virt(phys_addr_t x)
 })
 #define virt_to_page(x)		pfn_to_page(virt_to_pfn(x))
 #else
+/*
+ * IAMROOT, 2022.03.05:
+ * - kernel memory에 대해서만 사용가능하다.
+ *   page가 가리키는 linear 가상주소를 return한다.
+ */
 #define page_to_virt(x)	({						\
 	__typeof__(x) __page = x;					\
 	u64 __idx = ((u64)__page - VMEMMAP_START) / sizeof(struct page);\
