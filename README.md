@@ -192,3 +192,7 @@
 - 2022.02.26, Zoom 온라인(7명 참석)
 - alloc_page() 진행중 ... alloc_flags_nofragment()
 
+### 41주차
+- 2022.03.05, Zoom 온라인(12명 참석)
+- alloc_page() 진행중 ... get_page_from_freelist()
+
