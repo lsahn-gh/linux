@@ -206,6 +206,11 @@ static inline unsigned long _compound_head(const struct page *page)
 
 #define compound_head(page)	((typeof(page))_compound_head(page))
 
+/*
+ * IAMROOT, 2022.03.11:
+ * tail page의 경우엔 compound_head에 head 주소 + 1이 설정되었을 것이므로
+ * 0번 bit가 set되어 있을것이다.
+ */
 static __always_inline int PageTail(struct page *page)
 {
 	return READ_ONCE(page->compound_head) & 1;
@@ -215,7 +220,11 @@ static __always_inline int PageTail(struct page *page)
  * IAMROOT, 2022.02.26: 
  * compound 페이지 여부를 체크한다.
  * compound 페이지의 경우 head 페이지의 플래그에 PG_head가 존재하고,
- *                        나머지 페이지의 플래그에는 PG_tail이 존재한다.
+ * 나머지 페이지의 플래그에는 PG_tail이 존재한다.
+ *
+ * - compound page일 경우, head는 prep_compound_page함수에서 __SetPageHead 함수를
+ *   통해 flags에 PG_HEAD가 set됫을 것이고, tail page의 경우엔 compound_head에
+ *   head 주소 + 1이 설정되었을 것이므로 0번 bit가 set되어 있을것이다.
  */
 static __always_inline int PageCompound(struct page *page)
 {
@@ -670,7 +679,14 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 {
 	test_set_page_writeback_keepwrite(page);
 }
-
+/*
+ * IAMROOT, 2022.03.11:
+ * ex) __SetPageHead => page->flags |= PG_head
+ *   __SetPageHead(struct page *page)
+ *   {
+ *		__set_bit(PG_head, &PF_ANY(page, 1)->flags);
+ *   }
+ */
 __PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
 
 /*

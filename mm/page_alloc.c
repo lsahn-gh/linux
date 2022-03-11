@@ -877,19 +877,43 @@ void free_compound_page(struct page *page)
 /*
  * IAMROOT, 2022.03.05:
  * compound page에 @order등의 정보를 기록한다.
+ * - compund page는 시작 page의 +1 page를 가리키고 compund page의 정보를 저장한다.
+ *
+ * - __SetPageHead
+ *   __PAGEFLAG(Head, head, PF_ANY) define으로 생성
  */
 void prep_compound_page(struct page *page, unsigned int order)
 {
 	int i;
 	int nr_pages = 1 << order;
 
+/*
+ * IAMROOT, 2022.03.11:
+ * - page[0].flags = PG_Head;
+ *			.lru == .compund_head = 0
+ *			        .compound_dtor = 0
+ *          .mapping = NULL;
+ */
 	__SetPageHead(page);
+/*
+ * IAMROOT, 2022.03.11:
+ * - page[0]이후의 page들을 설정한다.
+ *   page[1].flags = 0;
+ *			.lru == .compund_head = (unsigned long)&page[0] + 1
+ *			        .compound_dtor = 0
+ *          .mapping = TAIL_MAPPING;
+ * ...
+ *	page[2..nr_pages-1] = page[1]과 동일
+ */
 	for (i = 1; i < nr_pages; i++) {
 		struct page *p = page + i;
 		p->mapping = TAIL_MAPPING;
 		set_compound_head(p, page);
 	}
-
+/*
+ * IAMROOT, 2022.03.11:
+ * - page[1]인 곳에 .compound_dtor 을 COMPOUND_PAGE_DTOR로 설정한다.
+ */
 	set_compound_page_dtor(page, COMPOUND_PAGE_DTOR);
 /*
  * IAMROOT, 2022.03.05:
@@ -4286,7 +4310,7 @@ ALLOW_ERROR_INJECTION(should_fail_alloc_page, TRUE);
  * IAMROOT, 2022.03.05:
  * - free page중에서 해당 상황일때 일정 부분을 unusable free를 해야되는
  *   개수를 return한다.
- * - cma, highatomic, 요청 page - 1에 대한 unsuable page를 고려한다.
+ * - cma, highatomic, 요청 page - 1에 대한 unusable page를 고려한다.
  */
 static inline long __zone_watermark_unusable_free(struct zone *z,
 				unsigned int order, unsigned int alloc_flags)
@@ -4460,7 +4484,7 @@ bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 
 /*
  * IAMROOT, 2022.03.05:
- * - watermark의 공간을 비교할때는 unsable page(cma, lowmem reseved,
+ * - watermark의 공간을 비교할때는 unusable page(cma, lowmem reseved,
  *   highatomic등)을 제외하고 고려를 해야된다.
  * - __zone_watermark_ok에 비해서 order 0를 먼저 러프하게 검사해서 order 0에 대해
  *   좀더 빠른 처리를 도모한다.
@@ -4484,7 +4508,7 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 
 /*
  * IAMROOT, 2022.03.05:
- * - cma, highatomic, 요청 page - 1(0)에 대한 unsuable page를 고려한다.
+ * - cma, highatomic, 요청 page - 1(0)에 대한 unusable page를 고려한다.
  */
 		fast_free -= __zone_watermark_unusable_free(z, 0, alloc_flags);
 

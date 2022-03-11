@@ -72,6 +72,10 @@ struct mem_cgroup;
  * - struct page default size는 64byte.
  */
 struct page {
+/*
+ * IAMROOT, 2022.03.11:
+ * - enum pageflags값들이 위치한다.
+ */
 	unsigned long flags;		/* Atomic flags, some possibly
 					 * updated asynchronously */
 	/*
@@ -159,6 +163,41 @@ struct page {
 				};
 			};
 		};
+/*
+ * IAMROOT, 2022.03.11:
+ * - lru와 compound_head, compound_dtor, compund_order
+ *   compound_head, compound_dtor는 위에 lru field와 겹친다.,
+ *   head는 이 lru를 쓸것이고, 그 다음 page는 lru를 안쓸것이니 lru page를
+ *   이렇게 compound_head, compound_dtor등의 공간으로 사용하는것이다.
+ *
+ * - compound page, huge page(hpage)
+ *   order가 2이상인 page를 huge pages로 부른다.
+ *   compound page는 head + 1의 page에 compound정보를, hpage는 head + 2의 page
+ *   에 hpage 정보를 기록한다.
+ *
+ * - compound_head : 모든 compound tail page들에
+ *   compound head page 의 주소 + 1(flag) 값이 저장된다.
+ *   + 1값은 해당 member의 값이 head값임을 의미하는 일종의 flag.
+ *   (_compound_head 참고)
+ *
+ * - compound_dtor : compound head page + 1의 page일 경우 COMPOUND_PAGE_DTOR이
+ *   설정된다.
+ *
+ * - compound_order : compound head page + 1의 page일 경우
+ *
+ * - compund page마다 설정되는 member
+ * page[0] | page[1]           | page[2]       | .. page[nr_pages]
+ * lru     | compound_head     | compound_head,| compound_head
+ *         | compound_dtor     | hpage일경우   |
+ *         | compound_order    | hpage_pinned_ |
+ *         |                   | refcount      |
+ * --------+-------------------+---------------+-----------
+ *         | mapping           | mapping       | mapping
+ *         | compound_mapcount |               |
+ *         +-------------------+---------------+----------
+ *         | compound_nr       |
+ * --------+-------------------+---------------------------
+ */
 		struct {	/* Tail pages of compound page */
 			unsigned long compound_head;	/* Bit zero is set */
 
@@ -169,6 +208,12 @@ struct page {
 			unsigned int compound_nr; /* 1 << compound_order */
 		};
 		struct {	/* Second tail page of compound page */
+/*
+ * IAMROOT, 2022.03.11:
+ * - hpage 일경우 첫번째 long field는 compound_head로 쓰기위해 _compound_pad_1
+ *   로 남겨 놓는게 보이고 그 다음 field는 hpage_pinned_refcount로
+ *   사용는게 보인다.
+ */
 			unsigned long _compound_pad_1;	/* compound_head */
 			atomic_t hpage_pinned_refcount;
 			/* For both global and memcg */
