@@ -816,6 +816,13 @@ static inline bool is_page_hwpoison(struct page *page)
  * mistaken for a page type value.
  */
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - struct page의 page_type은 _mapcount 와 위치를 공유하는데 _mapcount는
+ *   -1초기값을 가진다. 이것을 구별하기위 PAGE_TYPE_BASE가 사용되고
+ *   PG_buddy의 값은 set이 bit clear, unset이 bit set이 되는 개념으로
+ *   평범한 bit set개념의 반대개념으로 사용한다.
+ */
 #define PAGE_TYPE_BASE	0xf0000000
 /* Reserve		0x0000007f to catch underflows of page_mapcount */
 #define PAGE_MAPCOUNT_RESERVE	-128
@@ -824,6 +831,11 @@ static inline bool is_page_hwpoison(struct page *page)
 #define PG_table	0x00000200
 #define PG_guard	0x00000400
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - page가 flag bit상태를 알아온다. page_type은 set과 reset이 반대이므로
+ *   @return true이면 flag가 존재한다는것.
+ */
 #define PageType(page, flag)						\
 	((page->page_type & (PAGE_TYPE_BASE | flag)) == PAGE_TYPE_BASE)
 
@@ -832,6 +844,11 @@ static inline int page_has_type(struct page *page)
 	return (int)page->page_type < PAGE_MAPCOUNT_RESERVE;
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - page_type은 set과 reset이 반대이므로 아래 함수와같이 set일때는
+ *   bit clear, clear일때는 bit set을 한다.
+ */
 #define PAGE_TYPE_OPS(uname, lname)					\
 static __always_inline int Page##uname(struct page *page)		\
 {									\
@@ -851,6 +868,10 @@ static __always_inline void __ClearPage##uname(struct page *page)	\
 /*
  * PageBuddy() indicates that the page is free and in the buddy system
  * (see mm/page_alloc.c).
+ */
+/*
+ * IAMROOT, 2022.03.12:
+ * - ex) PageBuddy, __SetPageBuddy, __ClearPageBuddy
  */
 PAGE_TYPE_OPS(Buddy, buddy)
 

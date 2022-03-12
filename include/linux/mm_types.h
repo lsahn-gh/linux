@@ -91,6 +91,11 @@ struct page {
 			 * lruvec->lru_lock.  Sometimes used as a generic list
 			 * by the page owner.
 			 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - ALLOC_NO_WATERMARKS등의 상황에서 pfmemalloc이 동작해야 될때 lru.next의 0번째
+ *   bit를 set한다. page 회수시스템이 동작해야되는 상황등을 표시하는것.
+ */
 			struct list_head lru;
 			/* See page-flags.h for PAGE_MAPPING_FLAGS */
 			struct address_space *mapping;
@@ -191,17 +196,19 @@ struct page {
  *         | compound_dtor     | hpage일경우   |
  *         | compound_order    | hpage_pinned_ |
  *         |                   | refcount      |
- * --------+-------------------+---------------+-----------
- *         | mapping           | mapping       | mapping
  *         | compound_mapcount |               |
- *         +-------------------+---------------+----------
- *         | compound_nr       |
+ * --------+-------------------+---------------+----------
+ * mapping | compound_nr       | 
  * --------+-------------------+---------------------------
  */
 		struct {	/* Tail pages of compound page */
 			unsigned long compound_head;	/* Bit zero is set */
 
 			/* First tail page only */
+/*
+ * IAMROOT, 2022.03.12:
+ * - 첫번째 tail(head + 1)에는 이값들을 설정한다는것.
+ */
 			unsigned char compound_dtor;
 			unsigned char compound_order;
 			atomic_t compound_mapcount;
@@ -210,6 +217,8 @@ struct page {
 		struct {	/* Second tail page of compound page */
 /*
  * IAMROOT, 2022.03.11:
+ * - huge page는 1보다 당연히 크므로 2번째 tail(head + 2)를 huge page 정보로
+ *   사용한다.
  * - hpage 일경우 첫번째 long field는 compound_head로 쓰기위해 _compound_pad_1
  *   로 남겨 놓는게 보이고 그 다음 field는 hpage_pinned_refcount로
  *   사용는게 보인다.
@@ -270,6 +279,10 @@ struct page {
 		 * is used for.  See page-flags.h for a list of page types
 		 * which are currently stored here.
 		 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - 추가 flag. PAGE_TYPE_BASE, PG_buddy등이 위치한다.
+ */
 		unsigned int page_type;
 
 		unsigned int active;		/* SLAB */
@@ -314,6 +327,10 @@ static inline atomic_t *compound_mapcount_ptr(struct page *page)
 	return &page[1].compound_mapcount;
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - head + 2의 page에는 hpage 정보를 가져온다.
+ */
 static inline atomic_t *compound_pincount_ptr(struct page *page)
 {
 	return &page[2].hpage_pinned_refcount;
@@ -331,6 +348,10 @@ static inline atomic_t *compound_pincount_ptr(struct page *page)
 #define PAGE_FRAG_CACHE_MAX_SIZE	__ALIGN_MASK(32768, ~PAGE_MASK)
 #define PAGE_FRAG_CACHE_MAX_ORDER	get_order(PAGE_FRAG_CACHE_MAX_SIZE)
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - page가 buddy에 있는경우 : order
+ */
 #define page_private(page)		((page)->private)
 
 static inline void set_page_private(struct page *page, unsigned long private)

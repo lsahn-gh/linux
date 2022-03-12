@@ -134,6 +134,10 @@ extern int page_group_by_mobility_disabled;
 
 #define MIGRATETYPE_MASK ((1UL << PB_migratetype_bits) - 1)
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @page에 소속되있는 pageblock(usemap)에서 MIGRATETYPE을 가져온다.
+ */
 #define get_pageblock_migratetype(page)					\
 	get_pfnblock_flags_mask(page, page_to_pfn(page), MIGRATETYPE_MASK)
 

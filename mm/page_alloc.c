@@ -358,6 +358,25 @@ compound_page_dtor * const compound_page_dtors[NR_COMPOUND_DTORS] = {
 
 int min_free_kbytes = 1024;
 int user_min_free_kbytes = -1;
+
+/*
+ * IAMROOT, 2022.03.12:
+ * - proc/sys/vm에서 변경가능하다.(kernel/sysctl.c 참고)
+ * - 15000은 150%를 의미한다.
+ * - Docu 번역
+ * 이 요소는 메모리가 조각날 때의 회수 수준을 제어합니다.
+ * 페이지 블록 내에서 이동성이 다른 페이지가 혼합될 경우 회수되는 영역의 상위
+ * 워터마크 비율을 정의합니다.
+ * compaction이 동작할일이 적게 하고 SLUB 할당, THP, hugetlbfs 페이지 등 향후
+ * high-order 할당의 성공률을 높인다는 취지다.
+ *
+ * watermark_scale_factor 매개 변수에 대해 이 단위를 10,000의 분수로 지정합니다.
+ * 기본값 15,000은 파편화로 인해 페이지블록이 혼합될 경우 최대 150%의 high
+ * watermark를 회수한다는 것을 의미한다.
+ * 회수 수준은 최근에 발생한 단편화 이벤트 수에 따라 결정됩니다.
+ * 이 값이 페이지 블록보다 작으면 페이지 블록 가치가 회수됩니다
+ * (예: 64비트 x86의 경우 2MB). 부스트 계수가 0이면 기능이 비활성화됩니다.*
+ */
 int watermark_boost_factor __read_mostly = 15000;
 int watermark_scale_factor = 10;
 
@@ -597,6 +616,10 @@ static inline int pfn_to_bitidx(const struct page *page, unsigned long pfn)
 	return (pfn >> pageblock_order) * NR_PAGEBLOCK_BITS;
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @page에 소속되있는 pageblock(usemap)에서 @mask(MIGRATETYPE_MASK등)을 가져온다.
+ */
 static __always_inline
 unsigned long __get_pfnblock_flags_mask(const struct page *page,
 					unsigned long pfn,
@@ -622,6 +645,11 @@ unsigned long __get_pfnblock_flags_mask(const struct page *page,
  * @mask: mask of bits that the caller is interested in
  *
  * Return: pageblock_bits flags
+ */
+
+/*
+ * IAMROOT, 2022.03.12:
+ * - @page에 소속되있는 pageblock(usemap)에서 @mask(MIGRATETYPE_MASK등)을 가져온다.
  */
 unsigned long get_pfnblock_flags_mask(const struct page *page,
 					unsigned long pfn, unsigned long mask)
@@ -1189,6 +1217,10 @@ static inline void add_to_free_list_tail(struct page *page, struct zone *zone,
  * Used for pages which are on another list. Move the pages to the tail
  * of the list - so the moved pages won't immediately be considered for
  * allocation again (e.g., optimization for memory onlining).
+ */
+/*
+ * IAMROOT, 2022.03.12:
+ * - @page를 @zone의 @migratetype list로 이동시킨다.
  */
 static inline void move_to_free_list(struct page *page, struct zone *zone,
 				     unsigned int order, int migratetype)
@@ -2799,6 +2831,10 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 {
 	post_alloc_hook(page, order, gfp_flags);
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 대표적인 compound page할당 요청으로 slab cache, huge page등이 존재한다.
+ */
 	if (order && (gfp_flags & __GFP_COMP))
 		prep_compound_page(page, order);
 
@@ -2808,6 +2844,12 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
 	 * steps that will free more memory. The caller should avoid the page
 	 * being used for !PFMEMALLOC purposes.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - pf(process flag)
+ *   page 회수 system에서 사용한다. 회수 과정에서 memory를 할당하기 때문에
+ *   메모리부족상황등에서도 watermark를 무시하고 할당하도록 요청하는것이다.
+ */
 	if (alloc_flags & ALLOC_NO_WATERMARKS)
 		set_page_pfmemalloc(page);
 	else
@@ -2856,6 +2898,16 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
  * This array describes the order lists are fallen back to when
  * the free lists for the desirable migrate type are depleted
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * - find_suitable_fallback등의 함수에서 요청한 migratype에 대해 순환할
+ *   migratetype list.
+ * - MIGRATE_TYPES은 종료를 의미한다.
+ * - ps) unmovable -> movable로는 잘 일어나지 않는다.
+ *   movable -> unmovable로 됬을때 1 pageblock 단위로 일어나고, pageblock에서
+ *   특정 page만 free를 한다고 해서 1 pageblock전체가 free가 되어 회수가 되는일이
+ *   거의 없기 때문이다.
+ */
 static int fallbacks[MIGRATE_TYPES][3] = {
 	[MIGRATE_UNMOVABLE]   = { MIGRATE_RECLAIMABLE, MIGRATE_MOVABLE,   MIGRATE_TYPES },
 	[MIGRATE_MOVABLE]     = { MIGRATE_RECLAIMABLE, MIGRATE_UNMOVABLE, MIGRATE_TYPES },
@@ -2888,6 +2940,11 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
  * Note that start_page and end_pages are not aligned on a pageblock
  * boundary. If alignment is required, use move_freepages_block()
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * @return buddy내에서 page(@start_pfn ~ @end_pfn)에서 @zone의
+ * @order @migratetype으로 이동이 완료된 free page개수
+ */
 static int move_freepages(struct zone *zone,
 			  unsigned long start_pfn, unsigned long end_pfn,
 			  int migratetype, int *num_movable)
@@ -2899,12 +2956,21 @@ static int move_freepages(struct zone *zone,
 
 	for (pfn = start_pfn; pfn <= end_pfn;) {
 		page = pfn_to_page(pfn);
+/*
+ * IAMROOT, 2022.03.12:
+ * - 해당 page가 buddy인지 확인한다.
+ */
 		if (!PageBuddy(page)) {
 			/*
 			 * We assume that pages that could be isolated for
 			 * migration are movable. But we don't actually try
 			 * isolating, as that would be expensive.
 			 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - lru page나 movable page는 move가 가능하다. move가 가능한 page로 세어진다.
+ *   실제 이동은 안시킨다.
+ */
 			if (num_movable &&
 					(PageLRU(page) || __PageMovable(page)))
 				(*num_movable)++;
@@ -2925,6 +2991,10 @@ static int move_freepages(struct zone *zone,
 	return pages_moved;
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @page의 pfn범위구한후 한 block단위로 fix한후 move_freepages를 수행한다.
+ */
 int move_freepages_block(struct zone *zone, struct page *page,
 				int migratetype, int *num_movable)
 {
@@ -2947,6 +3017,11 @@ int move_freepages_block(struct zone *zone, struct page *page,
 								num_movable);
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @start_order는 pageblock_order이상인 상황이다.
+ * - @pageblock_page를 pageblock_order 단위로 migratetype을 바꿔준다.
+ */
 static void change_pageblock_range(struct page *pageblock_page,
 					int start_order, int migratetype)
 {
@@ -2970,6 +3045,22 @@ static void change_pageblock_range(struct page *pageblock_page,
  * is worse than movable allocations stealing from unmovable and reclaimable
  * pageblocks.
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * 할당 중에 다른 migratype으로 폴백하는 경우 여러 페이지 블록을 오염시키는
+ * 대신 추가 할당을 충족하기 위해 동일한 페이지 블록에서 free pages를 steal해
+ * 보십시오.
+ *
+ * 만약 우리가 상대적으로 큰 버디 페이지를 steal한다면, 페이지 블록에 더 많은
+ * free pasges가 있을 것 같으니, 그것들을 모두 steal해 보세요. reclaimable 및
+ * unmovable 할당의 경우, movable 페이지 블록을 오염시키는 할당으로 인한 단편화는
+ * umovable 및 reclaimable 페이지 블록에서 steal하는 movable 할당보다 더
+ * 나쁘기 때문에 페이지 크기에 관계없이 steal한다.
+.*
+ * - @order에 대해서 @start_mt에서 page를 가져올수있는지 없는지 검사하는데,
+ *   @order가 pageblock_order보다 크면 fragment가 안되는 상황이므로
+ *   요청한 migratetype이 아닌 다른 migratetype에서 가져온다.
+ */
 static bool can_steal_fallback(unsigned int order, int start_mt)
 {
 	/*
@@ -2982,6 +3073,19 @@ static bool can_steal_fallback(unsigned int order, int start_mt)
 	if (order >= pageblock_order)
 		return true;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 이 함수에서 true를 return한다는 의미는 결국 한 pageblock전체에 대한
+ *   변경을 해야된다는것이다. unmovable, recliaimable일 이렇게 한 pageblock을
+ *   변경을 하는 이유는 unmovable, recliaimable가 만약 movable page들 사이에
+ *   1 page씩 중간중간 위치할경우 해당 pageblock들은 통일된 page type을 가지지
+ *   않는 상태(오염된 상태)가 되고 이렇게 될경우 많은 order 요청에 대해서
+ *   실패하는 경우가 많아지게 된다. 이런 상황(pageblock이 오염되는 상황)을
+ *   최소화 하기 위해서 unmovable, reclaimable은 미래에 할당요청이 올것을
+ *   예견하여, 아에 pageblock단위로 unmovable, reclaimable로 전환을 하여,
+ *   만약 미래에 unmovable, reclaimable 할당요청이 오면 이전에 변경했던
+ *   pageblock에서 가져오는 방식을 사용하는 것이다.
+ */
 	if (order >= pageblock_order / 2 ||
 		start_mt == MIGRATE_RECLAIMABLE ||
 		start_mt == MIGRATE_UNMOVABLE ||
@@ -2991,10 +3095,20 @@ static bool can_steal_fallback(unsigned int order, int start_mt)
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.12:
+ * @return @zone의 high watermark값이 boost 적용중이면 true
+ * - @zone의 high watermark값을 watermark_boost_factor값 기준으로 계산하여
+ *   갱신한다.
+ */
 static inline bool boost_watermark(struct zone *zone)
 {
 	unsigned long max_boost;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 0이면 비활성화 상태이므로 동작안한다.
+ */
 	if (!watermark_boost_factor)
 		return false;
 	/*
@@ -3003,9 +3117,17 @@ static inline bool boost_watermark(struct zone *zone)
 	 * in a small area, boosting the watermark can cause an out of
 	 * memory situation immediately.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - 굉장히 작은 zone에서 (2MB * 4)는 동작하지 않는다.
+ */
 	if ((pageblock_nr_pages * 4) > zone_managed_pages(zone))
 		return false;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - high wartermark를 150%(watermark_boost_factor)한 값을 계산한다.
+ */
 	max_boost = mult_frac(zone->_watermark[WMARK_HIGH],
 			watermark_boost_factor, 10000);
 
@@ -3020,8 +3142,18 @@ static inline bool boost_watermark(struct zone *zone)
 	if (!max_boost)
 		return false;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 최소 pageblock단위로 하겟다는것.
+ */
 	max_boost = max(pageblock_nr_pages, max_boost);
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 기존 watermark_boost값에서 pageblock_nr_pages를 더한값을 min으로 잡아서
+ *   max_boost값과 비교해 watermark_boost를 업데이트 한다.
+ * - 즉 한번에 한 pageblock씩만 증가시킨다는것.
+ */
 	zone->watermark_boost = min(zone->watermark_boost + pageblock_nr_pages,
 		max_boost);
 
@@ -3036,6 +3168,19 @@ static inline bool boost_watermark(struct zone *zone)
  * of pages are free or compatible, we can change migratetype of the pageblock
  * itself, so pages freed in the future will be put on the correct free list.
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * - page가 이동하는 방식 정리.
+ * 1. 이전 migratetypes가 highaotmic일 경우 move만 하고 종료.
+ *    (move)
+ * 2. @page의 order가 pageblock_order보다 큰경우는 type을 변경후 move
+ *    (type + move)
+ * 3. @whole_block이 false이면(steel을 못함) move만 하고 종료.
+ *    (move)
+ * 4. 그 외의 경우에서 move한후에 pageblock_order의 절반이상이 migratype을
+ * 바꿀수있는 상황일경우 type을 변경만하고 종료한다.
+ *    (move + if type)
+ */
 static void steal_suitable_fallback(struct zone *zone, struct page *page,
 		unsigned int alloc_flags, int start_type, bool whole_block)
 {
@@ -3043,6 +3188,12 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	int free_pages, movable_pages, alike_pages;
 	int old_block_type;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 다른 migratetype에서 steal을 해오는 상황이라 old를 일단 저장해놓는다.
+ * - @page는 fallback_mt에서 구해와 order단위로 migratetype으로 되있을테지만
+ *   @page가 소속된 pageblock은 다른 migratetype일수도 있다는걸 고려한다.
+ */
 	old_block_type = get_pageblock_migratetype(page);
 
 	/*
@@ -3052,6 +3203,12 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	if (is_migrate_highatomic(old_block_type))
 		goto single_page;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @current_order가 @pageblock_order보다 클경우 @pageblock_order단위로
+ *   migratetype를 바꿀수잇는상황이므로 migratetype을 바꿔주고 sigle_page로 
+ *   이동한다.
+ */
 	/* Take ownership for orders >= pageblock_order */
 	if (current_order >= pageblock_order) {
 		change_pageblock_range(page, current_order, start_type);
@@ -3063,13 +3220,29 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	 * likelihood of future fallbacks. Wake kswapd now as the node
 	 * may be balanced overall and kswapd will not wake naturally.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - @zone의 high watermark를 boost한다.
+ * - boost인 경우, reclaim이 압박을 받기전에 상황에서 미리 kswapd가
+ *   동작할수있도록 설정하는것.
+ */
 	if (boost_watermark(zone) && (alloc_flags & ALLOC_KSWAPD))
 		set_bit(ZONE_BOOSTED_WATERMARK, &zone->flags);
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - @whole_block이 true면 steal이 가능한 상황.
+ *   false라면 single_page로 이동한다.
+ */
 	/* We are not allowed to try stealing from the whole block */
 	if (!whole_block)
 		goto single_page;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - steal(move)을 이제 하는 상황. @page가 소속되있는 pageblock단위로
+ *   한번에 이동시킨다.
+ */
 	free_pages = move_freepages_block(zone, page, start_type,
 						&movable_pages);
 	/*
@@ -3077,6 +3250,29 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	 * For movable allocation, it's the number of movable pages which
 	 * we just obtained. For other types it's a bit more tricky.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * start_type에 친화적이면서 free page는 제외한 pages(alike_pages)를 구한다.
+ * 
+ * - fallback_mt(reclaimable or unmovable) -> movable
+ *   alike_pages는 in-used pages 개수가 된다.(사용중인 movable 및 lru page)
+ *
+ * - pageblock내에서 현재 바라보고있는 page 유형정리.
+ *   in-use(movable)
+ *   in-use(!movable)
+ *   MIGRATE_UNMOVABLE
+ *   MIGRATE_MOVABLE
+ *   MIGRATE_RECLAIMABLE
+ *
+ * - pageblock의 migratetype을 변경하는 조건식
+ *   이동한 page(free_pages) + alike >= pageblock 50%.
+ *
+ * - ex) 이동한 page(free_pages) + in-use(movable) >= pageblock 50%
+ *
+ *   old_block_type fallback_mt start_type new_block_type
+ *   U              -           M          U->M
+ *   R              -           M          R->M
+ */
 	if (start_type == MIGRATE_MOVABLE) {
 		alike_pages = movable_pages;
 	} else {
@@ -3087,6 +3283,20 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 		 * vice versa, be conservative since we can't distinguish the
 		 * exact migratetype of non-movable pages.
 		 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - ex) 이동한 page(free_pages) + in-use(!movable) >= pageblock 50%
+ *
+ *   old_block_type fallback_mt start_type new_block_type
+ *   M              -           U          M->U
+ *   M              -           R          M->R
+ *
+ * - ex) 이동한 page(free_pages) + 0(못구함) >= pageblock 50%
+ *
+ *   old_block_type fallback_mt start_type new_block_type
+ *   U              -           R          U->R
+ *   R              -           U          R->U
+ */
 		if (old_block_type == MIGRATE_MOVABLE)
 			alike_pages = pageblock_nr_pages
 						- (free_pages + movable_pages);
@@ -3102,6 +3312,13 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	 * If a sufficient number of pages in the block are either free or of
 	 * comparable migratability as our allocation, claim the whole block.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - free_pages는 buddy에 있으므로 어쨋든 이동이 가능하고,
+ *   alkie_pages는 buddy에는 없지만 movable가능한 page들이다.
+ *   이 page들이 pageblock의 절반이상이라면 해당 pageblock을 @start_type으로
+ *   바꾼다.
+ */
 	if (free_pages + alike_pages >= (1 << (pageblock_order-1)) ||
 			page_group_by_mobility_disabled)
 		set_pageblock_migratetype(page, start_type);
@@ -3109,6 +3326,11 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 	return;
 
 single_page:
+/*
+ * IAMROOT, 2022.03.12:
+ * - 만약 여기에 올경우 set_pageblock_migratetype을 안하고 @start_type으로
+ *   move만한다. 즉 pageblock의 migratetype을 바꾸지 않는다.
+ */
 	move_to_free_list(page, zone, current_order, start_type);
 }
 
@@ -3117,6 +3339,14 @@ single_page:
  * If only_stealable is true, this function returns fallback_mt only if
  * we can steal other freepages all together. This would help to reduce
  * fragmentation due to mixed migratetype pages in one pageblock.
+ */
+/*
+ * IAMROOT, 2022.03.12:
+ * - @migratetype에 대해서 fallback migratetype을 할수있는지 검사한다.
+ *   @only_stealable이 false라면 free page가 있다면 바로 반환하고,
+ *   @only_stealable이 true라면 free page가 있어도 무조건 1 pageblock단위로
+ *   steal이 가능한 fallback을 찾는다.
+ * - compaction을 하는 경우, @only_stealable이 true로 온다.
  */
 int find_suitable_fallback(struct free_area *area, unsigned int order,
 			int migratetype, bool only_stealable, bool *can_steal)
@@ -3128,20 +3358,43 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
 		return -1;
 
 	*can_steal = false;
+
+/*
+ * IAMROOT, 2022.03.12:
+ * - @migratetyp에 대한 list를 뒤지기전에 먼저 fallbacks에 정해진 migratetype에서
+ *   가져올수있는지 살펴본다.
+ */
 	for (i = 0;; i++) {
 		fallback_mt = fallbacks[migratetype][i];
 		if (fallback_mt == MIGRATE_TYPES)
 			break;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - fallback_mt에 free page가 없으면 다음 fallback_mt로 iteration한다.
+ */
 		if (free_area_empty(area, fallback_mt))
 			continue;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - fallbacks steal시 한 pageblock을 모두 migrate할지 판단한다.
+ */
 		if (can_steal_fallback(order, migratetype))
 			*can_steal = true;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 무조건 steal을 할필요없다면 can_steal과 무관하게 fallback_mt로 바로 반환.
+ *   즉 free 공간이 있는 fallback_mt가 찾아지면 즉시 종료가된다.
+ */
 		if (!only_stealable)
 			return fallback_mt;
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - pageblock단위로 steal이 가능하면 fallback_mt로 return.
+ */
 		if (*can_steal)
 			return fallback_mt;
 	}
@@ -3277,6 +3530,11 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
  * deviation from the rest of this file, to make the for loop
  * condition simpler.
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * - 원래 원했던 migratetype에서 할당실패했을 경우 fallback type에서 steal해와서
+ *   원래 원했던 migratetype의 free list에 넣어놓는다.
+ */
 static __always_inline bool
 __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 						unsigned int alloc_flags)
@@ -3293,6 +3551,12 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 	 * i.e. orders < pageblock_order. If there are no local zones free,
 	 * the zonelists will be reiterated without ALLOC_NOFRAGMENT.
 	 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - ALLOC_NOFRAGMENT가 붙어있을 경우 pageblock_order(2^9)으로 min_order를 유지해
+ *   대표성(pageblock의 migratetype)을 유지한다.
+ *   (ex. normal 요청한상황에서 dma를 써야되는 경우 ALLOC_NOFRAGMENT가 붙을수있다.)
+ */
 	if (alloc_flags & ALLOC_NOFRAGMENT)
 		min_order = pageblock_order;
 
@@ -3317,6 +3581,13 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 		 * allocation falls back into a different pageblock than this
 		 * one, it won't cause permanent fragmentation.
 		 */
+/*
+ * IAMROOT, 2022.03.12:
+ * - steal이 안되는 상황에서 @start_migratetype에 movable일때 최소 @order보다
+ *   큰 order에서 free page가 있는 경우, smallest order부터 할당을 하는게
+ *   낫다.
+ * - movable일 경우 move이 가능하므로 fragment가 되는 상황에 대해 관대하다.
+ */
 		if (!can_steal && start_migratetype == MIGRATE_MOVABLE
 					&& current_order > order)
 			goto find_smallest;
@@ -3327,6 +3598,12 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype,
 	return false;
 
 find_smallest:
+/*
+ * IAMROOT, 2022.03.12:
+ * - 위에서 steal이 불가능했지만 @start_migratetype이 movable이며 할당은 가능한
+ *   상황에서, @order부터 steal이 가능한 fallback migratetype이 있는지 확인한다.
+ * - 즉 작은 order부터 다시 확인을하는것.
+ */
 	for (current_order = order; current_order < MAX_ORDER;
 							current_order++) {
 		area = &(zone->free_area[current_order]);
@@ -3403,6 +3680,11 @@ retry:
 		if (alloc_flags & ALLOC_CMA)
 			page = __rmqueue_cma_fallback(zone, order);
 
+/*
+ * IAMROOT, 2022.03.12:
+ * - 위의 모든 과정에서 page를 얻는데 실패했을경우 fallback에서 free page를
+ *   steal해오는걸 시도한다. 성공한다면 retry.
+ */
 		if (!page && __rmqueue_fallback(zone, order, migratetype,
 								alloc_flags))
 			goto retry;

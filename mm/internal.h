@@ -306,6 +306,10 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
  * page cannot be allocated or merged in parallel. Alternatively, it must
  * handle invalid values gracefully, and use buddy_order_unsafe() below.
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * - page가 buddy인 경우 private는 order를 가리킨다.
+ */
 static inline unsigned int buddy_order(struct page *page)
 {
 	/* PageBuddy() must be checked by the caller */

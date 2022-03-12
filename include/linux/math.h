@@ -133,6 +133,10 @@
  * Multiplies an integer by a fraction, while avoiding unnecessary
  * overflow or loss of precision.
  */
+/*
+ * IAMROOT, 2022.03.12:
+ * - x * number / denom
+ */
 #define mult_frac(x, numer, denom)(			\
 {							\
 	typeof(x) quot = (x) / (denom);			\
