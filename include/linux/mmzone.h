@@ -999,6 +999,9 @@ typedef struct pglist_data {
 /*
  * IAMROOT, 2021.12.04:
  * - calculate_node_totalpages에서 초기화 된다.
+ *
+ * - 해당 node에 대한 zone을 가지고 있으며 'node_zonelists'이 각 원소를 참조한다.
+ *   예) ZONE_DMA, NORMAL, HIGHMEM ...
  */
 	struct zone node_zones[MAX_NR_ZONES];
 
@@ -1009,9 +1012,16 @@ typedef struct pglist_data {
 	 */
 /*
  * IAMROOT, 2022.02.18:
- * build_zonelists_in_node_order 에서 초기화된다.
+ * - build_zonelists_in_node_order 에서 초기화된다.
  * - ZONELIST_FALLBACK : node in order로 zone의 역순으로 구성된다.
  * - ZONELIST_NOFALLBACK : 해당 node에 대해서만 zone의 역순으로 구성된다.
+ *
+ * - Node 기반 order 방법
+ *   (Node 0 -> Node 2 -> Node 1 ...)
+ *
+ * - 해당 node가 memoryless라면 위 order 방법에 기반해 가장 근접한 node의
+ *   zone들을 가지며 각 zone은 버디 시스템이 관리하는 페이지가 포함된 zone으로
+ *   구성된다.
  */
 	struct zonelist node_zonelists[MAX_ZONELISTS];
 

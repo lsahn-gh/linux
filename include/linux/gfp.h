@@ -615,6 +615,8 @@ static inline enum zone_type gfp_zone(gfp_t flags)
  * IAMROOT, 2022.02.18:
  * - bit * GFP_ZONES_SHIFT에 bit에서 사용할수 있는 zone이 들어 있다. 해당
  *   zone을 추출한다.
+ *
+ * - ((1 << GFP_ZONES_SHIFT) - 1): 하위 3-bits 추출용
  */
 	z = (GFP_ZONE_TABLE >> (bit * GFP_ZONES_SHIFT)) &
 					 ((1 << GFP_ZONES_SHIFT) - 1);

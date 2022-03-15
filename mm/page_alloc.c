@@ -7177,6 +7177,10 @@ static int build_zonerefs_node(pg_data_t *pgdat, struct zoneref *zonerefs)
 	do {
 		zone_type--;
 		zone = pgdat->node_zones + zone_type;
+/*
+ * IAMROOT, 2022.03.15: 
+ * - 버디 시스템이 관리하는 페이지 영역이 포함된 zone만 @zonerefs에 추가.
+ */
 		if (managed_zone(zone)) {
 			zoneref_set_zone(zone, &zonerefs[nr_zones++]);
 			check_highest_zone(zone_type);
@@ -7260,7 +7264,8 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 
 /*
  * IAMROOT, 2022.02.18:
- * - @node를 사용적이 없다면 @node를 best node로 사용한다.
+ * - @node를 사용한 적이 없다면 @node를 @used_node_mask에 기록하고 best node로
+ *   사용한다.
  */
 	/* Use the local node if we haven't already */
 	if (!node_isset(node, *used_node_mask)) {
@@ -7270,14 +7275,17 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 
 /*
  * IAMROOT, 2022.02.18:
- * - memory가 존재하는 node 순회
+ * - @node 스스로(bestest node)에 대해서는 이미 @used_node_mask에 추가했으므로
+ *   자기자신이 아닌 next best neighbour node를 찾는다.
+ *
+ * - memory가 존재(N_MEMORY 타입)하는 node 순회
  */
 	for_each_node_state(n, N_MEMORY) {
 
 		/* Don't want a node to appear more than once */
 /*
  * IAMROOT, 2022.02.18:
- * - 중복 처리 제외
+ * - 이미 처리된 노드 n 제외.
  */
 		if (node_isset(n, *used_node_mask))
 			continue;
@@ -7287,18 +7295,24 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 
 /*
  * IAMROOT, 2022.02.18:
- * - 현재 node보다 높은 번호면 패널티를 준다.*/
+ * - 노드 n의 id가 @node 보다 작다면 +1 하여 패널티 부여.
+ */
 		/* Penalize nodes under us ("prefer the next node") */
 		val += (n < node);
 
+/*
+ * IAMROOT, 2022.03.13: 
+ * - 노드 n의 cpumask가 설정되어 있다면 (해당 노드에 cpu 존재) 패널티 부여.
+ *   PENALTY_FOR_NODE_WITH_CPUS: 1 (default)
+ */
 		/* Give preference to headless and unused nodes */
 		if (!cpumask_empty(cpumask_of_node(n)))
 			val += PENALTY_FOR_NODE_WITH_CPUS;
 
 /*
  * IAMROOT, 2022.02.18:
- * - 적당한 N배를 곱하여(이전 값들이 더 영향을 많이 받게)
- *   , n의 load에 대해 가중치를 더한다.
+ * - 1) 적당한 N배를 곱하고 (이전 값들이 더 영향을 많이 받게)
+ *   2) distance(val)에 노드 n의 node_load에 대한 가중치를 더한다.
  */
 		/* Slight preference for less loaded node */
 		val *= (MAX_NODE_LOAD*MAX_NUMNODES);
@@ -7366,6 +7380,11 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
  */
 	zonerefs->zone = NULL;
 	zonerefs->zone_idx = 0;
+/*
+ * IAMROOT, 2022.03.15: 
+ * - @pgdat node의 node_zonelists에는 버디 시스템이 관리하는 페이지가 포함된
+ *   zone만이(local과 remote 모두) 추가되어 있는 상태이다.
+ */
 }
 
 /*
@@ -7482,6 +7501,12 @@ static void build_zonelists(pg_data_t *pgdat)
 		load--;
 	}
 
+/*
+ * IAMROOT, 2022.03.15: 
+ * - 위 while loop는 각 node의 memoryless 여부 상관없이 distance weight에 따라
+ *   'node_order'를 구해내는 것이 목적이며 이를 이용해 각 node별 zonelists 초기화는
+ *   아래 함수에서 수행한다.
+ */
 	build_zonelists_in_node_order(pgdat, node_order, nr_nodes);
 	build_thisnode_zonelists(pgdat);
 }
@@ -7612,13 +7637,17 @@ static void __build_all_zonelists(void *data)
 	 * building zonelists is fine - no need to touch other nodes.
 	 */
 /*
- * IAMROOT, 2022.02.12: 
- * 처음 부팅시 진입한 경우는 null로 진입했으므로 모든 노드의 존리스트를 구성,
- * 그 외의 경우 요청한 노드만 존리스트를 구성한다.
+ * IAMROOT, 2022.03.15: 
+ * - 요청한 노드만 존리스트 구성.
  */
 	if (self && !node_online(self->node_id)) {
 		build_zonelists(self);
 	} else {
+/*
+ * IAMROOT, 2022.03.15: 
+ * - 처음 부팅시 진입(@data가 NULL)하며 모든 노드의 존리스트 구성.
+ *   -> ZONELIST_FALLBACK, ZONELIST_NOFALLBACK
+ */
 		for_each_online_node(nid) {
 			pg_data_t *pgdat = NODE_DATA(nid);
 
@@ -7692,6 +7721,8 @@ build_all_zonelists_init(void)
  * IAMROOT, 2022.02.18:
  * - 메모리가 추가되고 삭제될때마다 존에 대한 영역이 바뀌는데, 그때마다
  *   이 함수가 호출된다.
+ *   이러한 기능을 memory-hotplug라 칭하며 machine runtime에 resizing이
+ *   가능하다. (일반적으로 virtual machines에서 사용한다)
  */
 void __ref build_all_zonelists(pg_data_t *pgdat)
 {
