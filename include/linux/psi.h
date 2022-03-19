@@ -9,6 +9,13 @@
 struct seq_file;
 struct css_set;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - memory가 압박을 받는 상황에서의 정보를 저장하여 /proc/pressure/memory 를
+ *   통해 user등에 제공한다.
+ *
+ * - ex) https://www.kernel.org/doc/html/latest/accounting/psi.html
+ */
 #ifdef CONFIG_PSI
 
 extern struct static_key_false psi_disabled;

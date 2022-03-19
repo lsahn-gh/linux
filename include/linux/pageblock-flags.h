@@ -99,6 +99,10 @@ void set_pfnblock_flags_mask(struct page *page,
 
 /* Declarations for getting and setting flags. See mm/page_alloc.c */
 #ifdef CONFIG_COMPACTION
+/*
+ * IAMROOT, 2022.03.19:
+ * - @page가 소속되있는 pageblock에 skip bit가 있는지 확인한다.
+ */
 #define get_pageblock_skip(page) \
 	get_pfnblock_flags_mask(page, page_to_pfn(page),	\
 			(1 << (PB_migrate_skip)))

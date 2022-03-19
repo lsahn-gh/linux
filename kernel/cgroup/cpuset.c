@@ -3456,6 +3456,10 @@ nodemask_t cpuset_mems_allowed(struct task_struct *tsk)
  *
  * Are any of the nodes in the nodemask allowed in current->mems_allowed?
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @nodemask가 현재 task의 mems_allowed와 겹치는 부분이 있는지 확인한다.
+ */
 int cpuset_nodemask_valid_mems_allowed(nodemask_t *nodemask)
 {
 	return nodes_intersects(*nodemask, current->mems_allowed);

@@ -357,6 +357,13 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
  *
  * Return: count to be passed to read_seqcount_retry()
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - sequence lock의 시작부분. sequence value를 알아온다.
+ * - sequence lock의 메커니즘이 many read, little write 상황에서 주로 사용한다.
+ * - 지금 읽은 값과 나중에 읽은 값이 차이가 있다면 재시도를 하는 방법으로
+ *   사용한다.
+ */
 #define read_seqcount_begin(s)						\
 ({									\
 	seqcount_lockdep_reader_access(seqprop_ptr(s));			\
@@ -427,6 +434,10 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
 #define __read_seqcount_retry(s, start)					\
 	do___read_seqcount_retry(seqprop_ptr(s), start)
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 그전에 읽은값(@start)와 현재 @s->sequence값이 다른지에 대한 여부를 판별.
+ */
 static inline int do___read_seqcount_retry(const seqcount_t *s, unsigned start)
 {
 	kcsan_atomic_next(0);
@@ -443,6 +454,10 @@ static inline int do___read_seqcount_retry(const seqcount_t *s, unsigned start)
  * (and typically retried).
  *
  * Return: true if a read section retry is required, else false
+ */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 그전에 읽은값(@start)와 현재 @s->sequence값이 다른지에 대한 여부를 판별.
  */
 #define read_seqcount_retry(s, start)					\
 	do_read_seqcount_retry(seqprop_ptr(s), start)

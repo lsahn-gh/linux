@@ -210,6 +210,10 @@ static inline int __nodes_equal(const nodemask_t *src1p,
 	return bitmap_equal(src1p->bits, src2p->bits, nbits);
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - bitmap and 연산.
+ */
 #define nodes_intersects(src1, src2) \
 			__nodes_intersects(&(src1), &(src2), MAX_NUMNODES)
 static inline int __nodes_intersects(const nodemask_t *src1p,

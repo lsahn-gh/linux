@@ -3406,6 +3406,11 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
  * Reserve a pageblock for exclusive use of high-order atomic allocations if
  * there are no empty page blocks that contain a page with a suitable order
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @zone에 reserved_highatomic이 부족하면 @page를 @zone의
+ *   highatomic freelist로 이동시킨다.
+ */
 static void reserve_highatomic_pageblock(struct page *page, struct zone *zone,
 				unsigned int alloc_order)
 {
@@ -3416,6 +3421,10 @@ static void reserve_highatomic_pageblock(struct page *page, struct zone *zone,
 	 * Limit the number reserved to 1 pageblock or roughly 1% of a zone.
 	 * Check is race-prone but harmless.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 1%이상(+ 최소 1 pageblock)
+ */
 	max_managed = (zone_managed_pages(zone) / 100) + pageblock_nr_pages;
 	if (zone->nr_reserved_highatomic >= max_managed)
 		return;
@@ -3428,8 +3437,17 @@ static void reserve_highatomic_pageblock(struct page *page, struct zone *zone,
 
 	/* Yoink! */
 	mt = get_pageblock_migratetype(page);
+/*
+ * IAMROOT, 2022.03.19:
+ * - unmovable, reclaimable, movable만 if문을 실행시키겠다는것.
+ */
 	if (!is_migrate_highatomic(mt) && !is_migrate_isolate(mt)
 	    && !is_migrate_cma(mt)) {
+/*
+ * IAMROOT, 2022.03.19:
+ * - @zone에 highatomic을 1pageblock만큼 증가시키고 @page를 highatomic
+ *   으로 변경한다.
+ */
 		zone->nr_reserved_highatomic += pageblock_nr_pages;
 		set_pageblock_migratetype(page, MIGRATE_HIGHATOMIC);
 		move_freepages_block(zone, page, MIGRATE_HIGHATOMIC, NULL);
@@ -4961,6 +4979,10 @@ static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
  * get_page_from_freelist goes through the zonelist trying to allocate
  * a page.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @order 만큼의 page를 buddy system에서 할당받는다.
+ */
 static struct page *
 get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
 						const struct alloc_context *ac)
@@ -5151,11 +5173,22 @@ try_this_zone:
 			 * If this is a high-order atomic allocation then check
 			 * if the pageblock should be reserved for the future
 			 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - GFP_ATOMIC + order가 존재할때 zone memory의 1%정도를 highatomic list에
+ *   미리 준비해준다.
+ */
 			if (unlikely(order && (alloc_flags & ALLOC_HARDER)))
 				reserve_highatomic_pageblock(page, zone, order);
 
 			return page;
 		} else {
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - page를 가져오는게 실패했다면 deferred 중이라면 해당 zone에 다시 시도,
+ *   아니라면 다음 zone으로 iterate한다.
+ */
 #ifdef CONFIG_DEFERRED_STRUCT_PAGE_INIT
 			/* Try again if zone has deferred pages */
 			if (static_branch_unlikely(&deferred_pages)) {
@@ -5170,6 +5203,11 @@ try_this_zone:
 	 * It's possible on a UMA machine to get through all zones that are
 	 * fragmented. If avoiding fragmentation, reset and try again.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - nofragment요청이 있는 상태에서 모든존을 순회하고도 page확보를 못했으면
+ *   nofragment를 풀고 재 시도를 해본다.
+ */
 	if (no_fallback) {
 		alloc_flags &= ~ALLOC_NOFRAGMENT;
 		goto retry;
@@ -5220,6 +5258,12 @@ void warn_alloc(gfp_t gfp_mask, nodemask_t *nodemask, const char *fmt, ...)
 	warn_alloc_show_mem(gfp_mask, nodemask);
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - __GFP_NOFAIL option이 있을때, 할당실패를 한상황에서 호출이 된다.
+ * - alloc_flags | ALLOC_CPUSET으로 한번 시도해보고, 그래도 실패했따면
+ *   alloc_flags만으로 시도해본다.
+ */
 static inline struct page *
 __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
 			      unsigned int alloc_flags,
@@ -5334,6 +5378,10 @@ out:
 
 #ifdef CONFIG_COMPACTION
 /* Try memory compaction for high-order allocations before reclaim */
+/*
+ * IAMROOT, 2022.03.19:
+ * - compact를 하고 page를 할당받아온다.
+ */
 static struct page *
 __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
@@ -5363,6 +5411,13 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	 */
 	count_vm_event(COMPACTSTALL);
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - compact를 하면서 page가 얻어와지면 해당 page를 prepare하고 그게 아니면
+ *   buddy system에서 한번 할당을 시도해본다.
+ * - buddy system에서 한번 시도해보는 이유는 compact에서 나온 순간에
+ *   다른 cpu에서 buddy에 반납을 했을수있으므로 한번 시도해보는것이다.
+ */
 	/* Prep a captured page if available */
 	if (page)
 		prep_new_page(page, order, gfp_mask, alloc_flags);
@@ -5371,6 +5426,10 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	if (!page)
 		page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - page가 할당되었으면 compact관련 통계값을 설정한다.
+ */
 	if (page) {
 		struct zone *zone = page_zone(page);
 
@@ -5636,6 +5695,10 @@ retry:
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - @ac->highest_zoneidx 까지 zone을 iter돌며 node마다 kswapd를 깨운다.
+ */
 static void wake_all_kswapds(unsigned int order, gfp_t gfp_mask,
 			     const struct alloc_context *ac)
 {
@@ -5652,9 +5715,28 @@ static void wake_all_kswapds(unsigned int order, gfp_t gfp_mask,
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - default
+ *   alloc_flags에는 @gfp_mask에 __GFP_HIGH | __GFP_KSWAPD_RECLAIM 요청이
+ *   있으면 추가한다.
+ *   @gfp_mask가 movable이면 GFP_CMA를 추가한다.
+ *
+ * - atomic
+ *   !(gfp & __GFP_NOMEMALLOC) =>  ALLOC_WMARK_MIN + ALLOC_HARDER
+ *   gfp & __GFP_NOMEMALLOC    =>  ALLOC_WMARK_MIN 
+ * - rt task이 면서 interrupt 상황이 아닌 경우
+ *   ALLOC_WMARK_MIN + ALLOC_CPUSET + ALLOC_HARDER
+ * - 그외의 경우
+ *   ALLOC_WMARK_MIN + ALLOC_CPUSET
+ */
 static inline unsigned int
 gfp_to_alloc_flags(gfp_t gfp_mask)
 {
+/*
+ * IAMROOT, 2022.03.19:
+ * - 기본적으로 cpuset limit를 사용하도록 한다.
+ */
 	unsigned int alloc_flags = ALLOC_WMARK_MIN | ALLOC_CPUSET;
 
 	/*
@@ -5679,21 +5761,47 @@ gfp_to_alloc_flags(gfp_t gfp_mask)
 		 * Not worth trying to allocate harder for __GFP_NOMEMALLOC even
 		 * if it can't schedule.
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - ATOMIC요청상황에서 __GFP_NOMEMALLOC이 없다면 harder를 set한다.
+ *   __GFP_NOMEMALLOC의미 자체가 harder 영역을 쓰지 말라는것이므로 이 flag를
+ *   확인한다.
+ */
 		if (!(gfp_mask & __GFP_NOMEMALLOC))
 			alloc_flags |= ALLOC_HARDER;
 		/*
 		 * Ignore cpuset mems for GFP_ATOMIC rather than fail, see the
 		 * comment for __cpuset_node_allowed().
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - atomic요청이면 cpuset을 뺀다.
+ */
 		alloc_flags &= ~ALLOC_CPUSET;
+/*
+ * IAMROOT, 2022.03.19:
+ * - interrupt가 아닌 rt task에서 요청한 할당이라면 harder set.
+ * - rt task는 되도록이면 지연되지 않게 빨리 처리해야되는 task다.
+ *   (interrupt를 bottom half로 처리해야되는 경우가 많다.).
+ *   빨리 할당받게 하기위해 harder를 사용한다.
+ */
 	} else if (unlikely(rt_task(current)) && in_task())
 		alloc_flags |= ALLOC_HARDER;
 
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - movable 인경우 cma도 사용가능하도록 설정한다.
+ */
 	alloc_flags = gfp_to_alloc_flags_cma(gfp_mask, alloc_flags);
 
 	return alloc_flags;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - task가 oom으로 죽고있는 중인지 확인한다.
+ */
 static bool oom_reserves_allowed(struct task_struct *tsk)
 {
 	if (!tsk_is_oom_victim(tsk))
@@ -5713,15 +5821,37 @@ static bool oom_reserves_allowed(struct task_struct *tsk)
  * Distinguish requests which really need access to full memory
  * reserves from oom victims which can live with a portion of it
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @gfp_mask에 따라 ALLOC_NO_WATERMARKS / ALLOC_OOM을 return한다.
+ */
 static inline int __gfp_pfmemalloc_flags(gfp_t gfp_mask)
 {
+/*
+ * IAMROOT, 2022.03.19:
+ * - __GFP_NOMEMALLOC이 가상 우선순위가 높으므로 먼저 검사해보고
+ *   존재하면 false의 개념으로 0 return.
+ */
 	if (unlikely(gfp_mask & __GFP_NOMEMALLOC))
 		return 0;
+/*
+ * IAMROOT, 2022.03.19:
+ * - __GFP_MEMALLOC이 존재한다면 watermark를 무시할수있다.
+ */
 	if (gfp_mask & __GFP_MEMALLOC)
 		return ALLOC_NO_WATERMARKS;
+/*
+ * IAMROOT, 2022.03.19:
+ * - memory 회수목적으로 동작중인 softirq task 라면 watermark를 무시한다.
+ */
 	if (in_serving_softirq() && (current->flags & PF_MEMALLOC))
 		return ALLOC_NO_WATERMARKS;
 	if (!in_interrupt()) {
+/*
+ * IAMROOT, 2022.03.19:
+ * - interrupt가 아닌 일반 상황에서 memory 회수목적이면 watermark무시,
+ *   oom으로 죽고있으면 ALLOC_OOM으로 return한다.
+ */
 		if (current->flags & PF_MEMALLOC)
 			return ALLOC_NO_WATERMARKS;
 		else if (oom_reserves_allowed(current))
@@ -5731,6 +5861,12 @@ static inline int __gfp_pfmemalloc_flags(gfp_t gfp_mask)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - @gfp_mask에서 ALLOC_NO_WATERMARKS or ALLOC_OOM을 받아올수있는지를
+ *   확인하여 bool로 return한다.
+ * - pfmemalloc / oom 상황인지를 확인하는것.
+ */
 bool gfp_pfmemalloc_allowed(gfp_t gfp_mask)
 {
 	return !!__gfp_pfmemalloc_flags(gfp_mask);
@@ -5837,6 +5973,13 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - task에 지정한 mems allowed가 변경됬는지 확인. 변경이 됬는데 포함이
+ *   안되있을때에는 다시 시도한다.
+ * - @cpuset_mems_cookie와 현재 sequence값을 비교한다. 다르다면 변경이
+ *   되었을것이므로 retry의 의미로 true. 아니면 false return한다.
+ */
 static inline bool
 check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 {
@@ -5851,6 +5994,11 @@ check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 	 * when it does not intersect with the cpuset restrictions) or the
 	 * caller can deal with a violated nodemask.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 현재 task가 지원하지 않은 nodemask라면 재시도를 해야되므로 
+ *   무조건 true return.
+ */
 	if (cpusets_enabled() && ac->nodemask &&
 			!cpuset_nodemask_valid_mems_allowed(ac->nodemask)) {
 		ac->nodemask = NULL;
@@ -5864,6 +6012,11 @@ check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 	 * to fail, check if the cpuset changed during allocation and if so,
 	 * retry.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 그전에 read_mems_allowed_begin로 보관됬던 sequence값과 지금 값을 비교한다.
+ *   다르면 변경된 상태이므로 retry.
+ */
 	if (read_mems_allowed_retry(cpuset_mems_cookie))
 		return true;
 
@@ -5890,14 +6043,32 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	 * We also sanity check to catch abuse of atomic reserves being used by
 	 * callers that are not in atomic context.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - ATOMIC과 RECLAIM은 같이 사용을 못한다. atomic의미 자체가 reclaim을
+ *   안하겠다는 의미를 내포하고있다.
+ */
 	if (WARN_ON_ONCE((gfp_mask & (__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)) ==
 				(__GFP_ATOMIC|__GFP_DIRECT_RECLAIM)))
 		gfp_mask &= ~__GFP_ATOMIC;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - cpuset의 mems가 변경됬거나 task에서 허용된게 없는 node인 경우 retry를
+ *   mems값을 얻는 처음부터 시작을한다.
+ */
 retry_cpuset:
 	compaction_retries = 0;
 	no_progress_loops = 0;
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync light
+ */
 	compact_priority = DEF_COMPACT_PRIORITY;
+/*
+ * IAMROOT, 2022.03.19:
+ * - sequence 값을 cookie로써 저장해놓는다.
+ */
 	cpuset_mems_cookie = read_mems_allowed_begin();
 
 	/*
@@ -5913,6 +6084,12 @@ retry_cpuset:
 	 * there was a cpuset modification and we are retrying - otherwise we
 	 * could end up iterating over non-eligible zones endlessly.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @ac->highest_zoneidx, @ac->nodemask의 제한내에 있는 zonelist 의
+ *   first zone을 구한다.
+ *   실패한다면 nopage로 이동한다.
+ */
 	ac->preferred_zoneref = first_zones_zonelist(ac->zonelist,
 					ac->highest_zoneidx, ac->nodemask);
 	if (!ac->preferred_zoneref->zone)
@@ -5925,6 +6102,10 @@ retry_cpuset:
 	 * The adjusted alloc_flags might result in immediate success, so try
 	 * that first
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - buddy에서 할당시도를 한다.
+ */
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 	if (page)
 		goto got_pg;
@@ -5938,6 +6119,18 @@ retry_cpuset:
 	 * Don't try this for allocations that are allowed to ignore
 	 * watermarks, as the ALLOC_NO_WATERMARKS attempt didn't yet happen.
 	 */
+
+/*
+ * IAMROOT, 2022.03.19:
+ * 1. direct reclaim 상황이여야되고
+ * 2. costly_order or movable이 아닌 order가 있는 상황
+ * 3. pfmemalloc은 아닌 상황
+ *
+ * 위 상황에서만 __alloc_pages_direct_compact가 동작한다.
+ *
+ * - order 0로 만약 slowpath에 진입했을 경우 memory 단편화 문제등의 이유가
+ *   아니기때문에 compact을 할 필요가 없을것이다.
+ */
 	if (can_direct_reclaim &&
 			(costly_order ||
 			   (order > 0 && ac->migratetype != MIGRATE_MOVABLE))
@@ -6079,6 +6272,11 @@ retry:
 	}
 
 nopage:
+/*
+ * IAMROOT, 2022.03.19:
+ * - slowpath마저도 실패를 했다면 메모리 회수도 못하는 상태.
+ * - 실패를 했는데 retry를 할수있는 상황이면 다시 시도를 해본다.
+ */
 	/* Deal with possible cpuset update races before we fail */
 	if (check_retry_cpuset(cpuset_mems_cookie, ac))
 		goto retry_cpuset;
@@ -6087,11 +6285,20 @@ nopage:
 	 * Make sure that __GFP_NOFAIL request doesn't leak out and make sure
 	 * we always retry
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - NOFAIL이면 무조건 성공해야된다.
+ */
 	if (gfp_mask & __GFP_NOFAIL) {
 		/*
 		 * All existing users of the __GFP_NOFAIL are blockable, so warn
 		 * of any new users that actually require GFP_NOWAIT
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - nofail인데 reclaim을 하지 말라는건 말이 안된다. fail인 상황에서는 거의
+ *   무조건 reclaim을 해봐야되기때문.
+ */
 		if (WARN_ON_ONCE(!can_direct_reclaim))
 			goto fail;
 
@@ -6100,6 +6307,10 @@ nopage:
 		 * because we cannot reclaim anything and only can loop waiting
 		 * for somebody to do a work for us
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 메모리를 완전히 썻다는 의미로, 경고문을 한번 출력한다.
+ */
 		WARN_ON_ONCE(current->flags & PF_MEMALLOC);
 
 		/*
@@ -6108,6 +6319,13 @@ nopage:
 		 * so that we can identify them and convert them to something
 		 * else.
 		 */
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - 극한의 상황에서 order도 높으면 order값도 경고로 표시해준다.
+ *   kernel에서는 일반적으로 costly_order보다 높은 값을 사용 안한다.
+ *   주로 user driver측에서 사용할것이다.
+ */
 		WARN_ON_ONCE(order > PAGE_ALLOC_COSTLY_ORDER);
 
 		/*
@@ -6116,6 +6334,10 @@ nopage:
 		 * could deplete whole memory reserves which would just make
 		 * the situation worse
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - flag에 hader를 붙여 fallback에서 한번 요청을 해본다.
+ */
 		page = __alloc_pages_cpuset_fallback(gfp_mask, order, ALLOC_HARDER, ac);
 		if (page)
 			goto got_pg;
@@ -6440,6 +6662,11 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	alloc_flags |= alloc_flags_nofragment(ac.preferred_zoneref->zone, gfp);
 
 	/* First allocation attempt */
+/*
+ * IAMROOT, 2022.03.19:
+ * - fastpath로 먼저 get_page_from_freelist로 page 할당시도를 하고
+ *   거기서 실패하면 __alloc_pages_slowpath을 수행한다.
+ */
 	page = get_page_from_freelist(alloc_gfp, order, alloc_flags, &ac);
 	if (likely(page))
 		goto out;
@@ -6456,6 +6683,11 @@ struct page *__alloc_pages(gfp_t gfp, unsigned int order, int preferred_nid,
 	page = __alloc_pages_slowpath(alloc_gfp, order, &ac);
 
 out:
+/*
+ * IAMROOT, 2022.03.19:
+ * - cgroup의 memory controller에서 설정된 제한을 넘었는지 확인한다.
+ *   넘었다면 page를 free 시켜버린다.
+ */
 	if (memcg_kmem_enabled() && (gfp & __GFP_ACCOUNT) && page &&
 	    unlikely(__memcg_kmem_charge_page(page, gfp, order) != 0)) {
 		__free_pages(page, order);

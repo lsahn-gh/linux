@@ -1853,6 +1853,10 @@ static inline int online_section(struct mem_section *section)
 	return (section && (section->section_mem_map & SECTION_IS_ONLINE));
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - device online memory인지 확인한다.
+ */
 static inline int online_device_section(struct mem_section *section)
 {
 	unsigned long flags = SECTION_IS_ONLINE | SECTION_TAINT_ZONE_DEVICE;

@@ -156,6 +156,11 @@ EXPORT_SYMBOL(__ClearPageMovable);
  * allocation success. 1 << compact_defer_shift, compactions are skipped up
  * to a limit of 1 << COMPACT_MAX_DEFER_SHIFT
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - compaction이 실패한 상황에서 관련값들을 설정한다. 실패할수록 derfer 조건을
+ *   높인다. 매번 바로 시도해봤자 어짜피 실패할것이기때문이다.
+ */
 static void defer_compaction(struct zone *zone, int order)
 {
 	zone->compact_considered = 0;
@@ -171,13 +176,26 @@ static void defer_compaction(struct zone *zone, int order)
 }
 
 /* Returns true if compaction should be skipped this time */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 이전 compaction 결과를 참고해서 굳이 할 필요없는 compaction은
+ *   지연시킨다.
+ */
 static bool compaction_deferred(struct zone *zone, int order)
 {
 	unsigned long defer_limit = 1UL << zone->compact_defer_shift;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 실패했던 order 보다 작으면 지연을 안한다.
+ */
 	if (order < zone->compact_order_failed)
 		return false;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 여러번 지연이된 상태가 됬다면 지연을 안시킨다.
+ */
 	/* Avoid possible overflow */
 	if (++zone->compact_considered >= defer_limit) {
 		zone->compact_considered = defer_limit;
@@ -194,6 +212,12 @@ static bool compaction_deferred(struct zone *zone, int order)
  * which means an allocation either succeeded (alloc_success == true) or is
  * expected to succeed.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * @alloc_success compaction 완료후에 실제 완전히 할당이 가능한 상태라면 true
+ *                그게 아니라면 false.
+ * compact defer 값들을 업데이트한다.
+ */
 void compaction_defer_reset(struct zone *zone, int order,
 		bool alloc_success)
 {
@@ -201,6 +225,10 @@ void compaction_defer_reset(struct zone *zone, int order,
 		zone->compact_considered = 0;
 		zone->compact_defer_shift = 0;
 	}
+/*
+ * IAMROOT, 2022.03.19:
+ * - 이전에 compact fail했던 order 값보다 같거나 크다면 fail값을 + 1해준다.
+ */
 	if (order >= zone->compact_order_failed)
 		zone->compact_order_failed = order + 1;
 
@@ -208,6 +236,12 @@ void compaction_defer_reset(struct zone *zone, int order,
 }
 
 /* Returns true if restarting compaction after many failures */
+/*
+ * IAMROOT, 2022.03.19:
+ * - fail이 됬던 order보다 작은 @order라면 false, 크거나 같은 order라면
+ *   defer가 아직 많이 안됬으면 false, defer가 많이 됬고 요청이 많았다면
+ *   true return.
+ */
 static bool compaction_restarting(struct zone *zone, int order)
 {
 	if (order < zone->compact_order_failed)
@@ -240,6 +274,10 @@ static void reset_cached_positions(struct zone *zone)
  * released. It is always pointless to compact pages of such order (if they are
  * migratable), and the pageblocks they occupy cannot contain any free pages.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @page가 compound page고 pageblock_order단위 이상이면 true로 return한다.
+ */
 static bool pageblock_skip_persistent(struct page *page)
 {
 	if (!PageCompound(page))
@@ -253,6 +291,12 @@ static bool pageblock_skip_persistent(struct page *page)
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - @check_source : free쪽을 갱신할때 free set이 됬는지에 대한 여부.
+ * - @check_target : migrate쪽을 갱신할때 migrate reset이 됬는지에 대한 여부.
+ * - @return true면 reset을 수행.
+ */
 static bool
 __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 							bool check_target)
@@ -266,6 +310,10 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 		return false;
 	if (zone != page_zone(page))
 		return false;
+/*
+ * IAMROOT, 2022.03.19:
+ * - huge page일 경우 isolate를 안한다.
+ */
 	if (pageblock_skip_persistent(page))
 		return false;
 
@@ -273,6 +321,12 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 	 * If skip is already cleared do no further checking once the
 	 * restart points have been set.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @check_source, @check_target이 전부 true라면 한번은 true 된것이므로
+ *   해당 page block의 skip이 이미 clear라면 굳이 뒤에 루틴을 할필요없으므로
+ *   (skip bit를 clear하러갈 필요가 없으므로) return 한다.
+ */
 	if (check_source && check_target && !get_pageblock_skip(page))
 		return true;
 
@@ -280,10 +334,19 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 	 * If clearing skip for the target scanner, do not select a
 	 * non-movable pageblock as the starting point.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @!check_source 의 의미는 free_set을 확인하고 있는 의미 이므로
+ *   movable이 아니면 false
+ */
 	if (!check_source && check_target &&
 	    get_pageblock_migratetype(page) != MIGRATE_MOVABLE)
 		return false;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - pfn이 소속되있는 block의 start page를 가져온다.
+ */
 	/* Ensure the start of the pageblock or zone is online and valid */
 	block_pfn = pageblock_start_pfn(pfn);
 	block_pfn = max(block_pfn, zone->zone_start_pfn);
@@ -293,6 +356,10 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 		pfn = block_pfn;
 	}
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - pfn이 소속되있는 block의 end page를 가져온다.
+ */
 	/* Ensure the end of the pageblock or zone is online and valid */
 	block_pfn = pageblock_end_pfn(pfn) - 1;
 	block_pfn = min(block_pfn, zone_end_pfn(zone) - 1);
@@ -305,6 +372,12 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 	 * free page or an LRU page in the block. One or other condition
 	 * is necessary for the block to be a migration source/target.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 해당 block내에서 costly_order단위로 pageblock skip clear를 해야되는지
+ *   확인한다.
+ * - skip clear의 의미는 pageblock내를 전부 조사하겠다는 의미가 된다.
+ */
 	do {
 		if (check_source && PageLRU(page)) {
 			clear_pageblock_skip(page);
@@ -337,6 +410,10 @@ static void __reset_isolation_suitable(struct zone *zone)
 	bool source_set = false;
 	bool free_set = false;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 중복동작 방지.
+ */
 	if (!zone->compact_blockskip_flush)
 		return;
 
@@ -348,6 +425,24 @@ static void __reset_isolation_suitable(struct zone *zone)
 	 * is found, both PageBuddy and PageLRU are checked as the pageblock
 	 * is suitable as both source and target.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - migrate_pfn ~ free_pfn까지 pageblock 단위로 iterate한다.
+ * 
+ * high
+ * ----------- 
+ *            |
+ *            | free(target) scanner
+ *            |
+ *            v 
+ *  MEMORY         
+ *            ^
+ *            |
+ *            | migrate(source) scanner
+ *            |
+ * -----------
+ * low
+ */
 	for (; migrate_pfn < free_pfn; migrate_pfn += pageblock_nr_pages,
 					free_pfn -= pageblock_nr_pages) {
 		cond_resched();
@@ -355,6 +450,10 @@ static void __reset_isolation_suitable(struct zone *zone)
 		/* Update the migrate PFN */
 		if (__reset_isolation_pfn(zone, migrate_pfn, true, source_set) &&
 		    migrate_pfn < reset_migrate) {
+/*
+ * IAMROOT, 2022.03.19:
+ * - __reset_isolation_pfn이 최초에 한번 true로 됬을대 해당 if문이 실행된다.
+ */
 			source_set = true;
 			reset_migrate = migrate_pfn;
 			zone->compact_init_migrate_pfn = reset_migrate;
@@ -365,6 +464,10 @@ static void __reset_isolation_suitable(struct zone *zone)
 		/* Update the free PFN */
 		if (__reset_isolation_pfn(zone, free_pfn, free_set, true) &&
 		    free_pfn > reset_free) {
+/*
+ * IAMROOT, 2022.03.19:
+ * - __reset_isolation_pfn이 최초에 한번 true로 됬을대 해당 if문이 실행된다.
+ */
 			free_set = true;
 			reset_free = free_pfn;
 			zone->compact_init_free_pfn = reset_free;
@@ -372,6 +475,11 @@ static void __reset_isolation_suitable(struct zone *zone)
 		}
 	}
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 위 for문에서 migrate, free 둘다 reset이 안된경우 if문이 실행된다.
+ *   scanning을 못한다는 의미가 된다.
+ */
 	/* Leave no distance if no suitable block was reset */
 	if (reset_migrate >= reset_free) {
 		zone->compact_cached_migrate_pfn[0] = migrate_pfn;
@@ -1940,6 +2048,11 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
  * order == -1 is expected when compacting via
  * /proc/sys/vm/compact_memory
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - compact_memory로 진입할때는 order 입력없이 들어온다. proc을
+ *   통해서 들어왔는지 확인하는것.(manual compaction)
+ */
 static inline bool is_via_compact_memory(int order)
 {
 	return order == -1;
@@ -2145,6 +2258,19 @@ static enum compact_result compact_finished(struct compact_control *cc)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - compact가 가능한 상황인지에 대해 확인한다.
+ * - COMPACT_CONTINUE
+ *   1. proc에서 요청한 경우.
+ *   2. comapct를 위한 order 0 page공간이 확보된경우.
+ *
+ * - COMPACT_SUCCESS
+ *   1. 다른 cpu나 기타의 이유로 free memory가 확보되어 있는 경우.
+ *
+ * - COMPACT_SKIPPED
+ *   1. compact를 하기 위한 order 0 page도 확보가 불가능한경우.
+ */
 static enum compact_result __compaction_suitable(struct zone *zone, int order,
 					unsigned int alloc_flags,
 					int highest_zoneidx,
@@ -2152,6 +2278,10 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
 {
 	unsigned long watermark;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - proc을 통해 compaction을 호출한거면 continue return
+ */
 	if (is_via_compact_memory(order))
 		return COMPACT_CONTINUE;
 
@@ -2160,6 +2290,11 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
 	 * If watermarks for high-order allocation are already met, there
 	 * should be no need for compaction at all.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - watermark의 free memory가 충분하면 success로 return. 다른 cpu측에서
+ *   memory를 한번에 많이 풀어줬거나 demon등에서 회수를 한것으로 예상된다.
+ */
 	if (zone_watermark_ok(zone, order, watermark, highest_zoneidx,
 								alloc_flags))
 		return COMPACT_SUCCESS;
@@ -2178,9 +2313,29 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
 	 * ALLOC_CMA is used, as pages in CMA pageblocks are considered
 	 * suitable migration targets
 	 */
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - order-0의 워터마크가 충족되면 migration target의 빈 페이지를 분리(isolate)
+ *   할수있다.
+ *   즉, 워터마크와 allocate_flags가 일치하거나 __isolat_free_page()의 체크보다
+ *   비관적이어야 합니다. direct compressor의 allocate_flags는
+ *   프리 페이지 분리와 관련이 없기 때문에 사용하지 않습니다. 단, 압축이
+ *   성공하더라도 lowmem 예약이 할당되지 않는 영역을 건너뛰기 위해
+ *   direct compact의 highest_zoneidx를 사용합니다.
+ *   costly order의 경우, 가능성을 높이기 위해 compaction을 진행하려면
+ *   min이 아닌 low watermark가 필요합니다.
+ *   CMA 페이지 블록 내의 페이지가 적절한 이행 타깃으로 간주되기 때문에
+ *   ALLOCK_CMA가 사용됩니다. 
+ */
 	watermark = (order > PAGE_ALLOC_COSTLY_ORDER) ?
 				low_wmark_pages(zone) : min_wmark_pages(zone);
 	watermark += compact_gap(order);
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - order 0의 page가 확보가 되는지 확인한다.
+ */
 	if (!__zone_watermark_ok(zone, 0, watermark, highest_zoneidx,
 						ALLOC_CMA, wmark_target))
 		return COMPACT_SKIPPED;
@@ -2194,6 +2349,23 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
  *   COMPACT_SKIPPED  - If there are too few free pages for compaction
  *   COMPACT_SUCCESS  - If the allocation would succeed without compaction
  *   COMPACT_CONTINUE - If compaction should run now
+ */
+/*
+ * IAMROOT, 2022.03.19:
+ * - compaction 가능한 상황인지 확인한다.
+ * - COMPACT_CONTINUE
+ *   1. proc에서 요청한 경우.
+ *   2. comapct를 위한 order 0 page공간이 확보된경우.
+ *
+ * - COMPACT_SUCCESS
+ *   1. 다른 cpu나 기타의 이유로 free memory가 확보되어 있는 경우.
+ *
+ * - COMPACT_SKIPPED
+ *   1. compact를 하기 위한 order 0 page도 확보가 불가능한경우.
+ *
+ * - COMPACT_CONTINUE요건에서 order가 costly_order보다 높은 경우
+ *   fragmentation_index가 compaction에 비적합인 경우 COMPACT_SKIPPED로
+ *   변경한다.
  */
 enum compact_result compaction_suitable(struct zone *zone, int order,
 					unsigned int alloc_flags,
@@ -2220,6 +2392,13 @@ enum compact_result compaction_suitable(struct zone *zone, int order,
 	 * excessive compaction for costly orders, but it should not be at the
 	 * expense of system stability.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - costly_order 보다 높은 order에서 할당요청을 해서 memory가 확보된 경우에
+ *   fragment index를 구해온다. 0 <= idx <= sysctl_extfrag_threshold 사이면
+ *   compaction으로 해결을 못하는 상황으로 간주하여 return값을
+ *   COMPACT_NOT_SUITABLE_ZONE로 해서 후에 COMPACT_SKIPPED가 된다.
+ */
 	if (ret == COMPACT_CONTINUE && (order > PAGE_ALLOC_COSTLY_ORDER)) {
 		fragindex = fragmentation_index(zone, order);
 		if (fragindex >= 0 && fragindex <= sysctl_extfrag_threshold)
@@ -2275,6 +2454,10 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	const bool sync = cc->mode != MIGRATE_ASYNC;
 	bool update_cached;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - @cc를 초기화한다.
+ */
 	/*
 	 * These counters track activities during zone compaction.  Initialize
 	 * them before compacting a new zone.
@@ -2287,9 +2470,18 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	INIT_LIST_HEAD(&cc->migratepages);
 
 	cc->migratetype = gfp_migratetype(cc->gfp_mask);
+/*
+ * IAMROOT, 2022.03.19:
+ * - compaction suitable test를 한다.
+ */
 	ret = compaction_suitable(cc->zone, cc->order, cc->alloc_flags,
 							cc->highest_zoneidx);
 	/* Compaction is likely to fail */
+/*
+ * IAMROOT, 2022.03.19:
+ * - COMPACT_SUCCESS인 경우 이미 memory가 존재하고, COMPACT_SKIPPED은 compact를
+ *   못하는 상황이다.
+ */
 	if (ret == COMPACT_SUCCESS || ret == COMPACT_SKIPPED)
 		return ret;
 
@@ -2492,7 +2684,16 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 					MIGRATE_ASYNC :	MIGRATE_SYNC_LIGHT,
 		.alloc_flags = alloc_flags,
 		.highest_zoneidx = highest_zoneidx,
+/*
+ * IAMROOT, 2022.03.19:
+ * - direct compaction.
+ */
 		.direct_compaction = true,
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync full로 들어오면 모든 zone, no skip, 모든 block을 시도(적절성 검사안함)
+ *   한다는것.
+ */
 		.whole_zone = (prio == MIN_COMPACT_PRIORITY),
 		.ignore_skip_hint = (prio == MIN_COMPACT_PRIORITY),
 		.ignore_block_suitable = (prio == MIN_COMPACT_PRIORITY)
@@ -2508,6 +2709,12 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 	 * frees a page.
 	 */
 	barrier();
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - current task의 capture_control에 capc를 한번 달아놨다가 compact_zone이
+ *   끝나면 초기화한다.
+ */
 	WRITE_ONCE(current->capture_control, &capc);
 
 	ret = compact_zone(&cc, &capc);
@@ -2528,6 +2735,10 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 	 * Returning COMPACT_SUCCESS in such cases helps in properly accounting
 	 * the COMPACT[STALL|FAIL] when compaction is skipped.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 할당이 성공됬으면 COMPACT_SUCCESS
+ */
 	if (*capture)
 		ret = COMPACT_SUCCESS;
 
@@ -2547,6 +2758,12 @@ int sysctl_extfrag_threshold = 500;
  *
  * This is the main entry point for direct page compaction.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - zone을 iterate하면서 compact를 시도한다.
+ *   @prio가 sync full일 경우 defer되거나 중지되는 경우 없이 무조건
+ *   수행하고 아닌 경우에는 defer되거나 중지될수있다.
+ */
 enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
 		enum compact_priority prio, struct page **capture)
@@ -2560,6 +2777,11 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	 * Check if the GFP flags allow compaction - GFP_NOIO is really
 	 * tricky context because the migration might require IO
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - __GFP_IO가 GFP_KERNEL에 붙고, GFP_ATOMIC에는 안붙는다. 즉 메모리 회수가
+ *   가능한 상황에서 붙게 된다.
+ */
 	if (!may_perform_io)
 		return COMPACT_SKIPPED;
 
@@ -2570,8 +2792,17 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 					ac->highest_zoneidx, ac->nodemask) {
 		enum compact_result status;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync full일 경우 defer를 안할것이다.
+ */
 		if (prio > MIN_COMPACT_PRIORITY
 					&& compaction_deferred(zone, order)) {
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync light나 async인 상황에서 compaction이 지연이 된다면 이전 rc 값을
+ *   COMPACT_DEFERRED로 업데이트할지 결정하고 해당 zone을 skip한다.
+ */
 			rc = max_t(enum compact_result, COMPACT_DEFERRED, rc);
 			continue;
 		}
@@ -2593,6 +2824,11 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 			break;
 		}
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync full or sync light인 경우에 대해서 status를 확인해 defer_compaction
+ *   을 수행한다.
+ */
 		if (prio != COMPACT_PRIO_ASYNC && (status == COMPACT_COMPLETE ||
 					status == COMPACT_PARTIAL_SKIPPED))
 			/*
@@ -2607,6 +2843,11 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 		 * async compaction, or due to a fatal signal detected. In that
 		 * case do not try further zones
 		 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - async이면서 shcedule이 필요한상황이거나 current task가 fatal signal을
+ *   받았다면 중지한다.
+ */
 		if ((prio == COMPACT_PRIO_ASYNC && need_resched())
 					|| fatal_signal_pending(current))
 			break;

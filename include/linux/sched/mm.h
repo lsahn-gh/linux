@@ -279,6 +279,10 @@ static inline void memalloc_nofs_restore(unsigned int flags)
 	current->flags = (current->flags & ~PF_MEMALLOC_NOFS) | flags;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 현재 task에 PF_MEMALLOC을 설정하고 이전 PF_MEMALLOC값을 반환한다.
+ */
 static inline unsigned int memalloc_noreclaim_save(void)
 {
 	unsigned int flags = current->flags & PF_MEMALLOC;

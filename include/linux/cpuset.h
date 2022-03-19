@@ -133,6 +133,12 @@ extern void cpuset_print_current_mems_allowed(void);
  * causing process failure. A retry loop with read_mems_allowed_begin and
  * read_mems_allowed_retry prevents these artificial failures.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - /sys/fs/cgroup/cpuset/cpuset.mems 를 보면 할당가능한 numa node mask가
+ *   기록되있다.
+ * - 이값을 읽어 오기 위해 sequence lock을 한다.
+ */
 static inline unsigned int read_mems_allowed_begin(void)
 {
 	if (!static_branch_unlikely(&cpusets_pre_enable_key))
@@ -146,6 +152,11 @@ static inline unsigned int read_mems_allowed_begin(void)
  * read_mems_allowed_begin may have failed artificially due to a concurrent
  * update of mems_allowed. It is up to the caller to retry the operation if
  * appropriate.
+ */
+/*
+ * IAMROOT, 2022.03.19:
+ * - read_mems_allowed_begin과 한쌍이 된다. read_mems_allowed_begin에서 읽은
+ *   값(@seq)과 현재 seq값을 비교해서 다르면 true, 값으면 false return.
  */
 static inline bool read_mems_allowed_retry(unsigned int seq)
 {

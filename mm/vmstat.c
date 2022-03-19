@@ -1065,6 +1065,10 @@ struct contig_page_info {
  * migrated. Calculating that is possible, but expensive and can be
  * figured out from userspace
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @zone의 각 order별 free_area free page개수로 @info를 만든다.
+ */
 static void fill_contig_page_info(struct zone *zone,
 				unsigned int suitable_order,
 				struct contig_page_info *info)
@@ -1086,6 +1090,10 @@ static void fill_contig_page_info(struct zone *zone,
 		info->free_pages += blocks << order;
 
 		/* Count the suitable free blocks */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @suitable_order를 기준으로 환산해서 free_blocks_suitable개수를 계산한다.
+ */
 		if (order >= suitable_order)
 			info->free_blocks_suitable += blocks <<
 						(order - suitable_order);
@@ -1099,6 +1107,13 @@ static void fill_contig_page_info(struct zone *zone,
  * The value can be used to determine if page reclaim or compaction
  * should be used
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * 플래그멘테이션인덱스는 요청된 크기의 할당이 실패할 경우에만 의미가 있습니다.
+ * 이것이 사실일 경우 플래그멘테이션인덱스는 외부 플래그멘테이션 또는
+ * 메모리 부족이 문제였는지를 나타냅니다.
+ * 이 값을 사용하여 페이지 reclaim 또는 compaction 사용 여부를 결정할 수 있습니다.
+ */
 static int __fragmentation_index(unsigned int order, struct contig_page_info *info)
 {
 	unsigned long requested = 1UL << order;
@@ -1110,6 +1125,10 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
 		return 0;
 
 	/* Fragmentation index only makes sense when a request would fail */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 할당가능한 상태임으로 -1000으로 return한다.
+ */
 	if (info->free_blocks_suitable)
 		return -1000;
 
@@ -1119,6 +1138,21 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
 	 * 0 => allocation would fail due to lack of memory
 	 * 1 => allocation would fail due to fragmentation
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - 1000에 가까울수록 fragment때문에 실패, 0에 가까울수록 memory 부족 실패로
+ *   생각한다.
+ *
+ *   1000 - (1000 + (info->free_pages * 1000) / 2^order) / info->free_blocks_total
+ *              ==
+ *   1 - (1 + (info->free_pages) / 2^order) / info->free_blocks_total
+ *
+ * - free_pages가 동일한 상황에서 free_blocks_total이 클수록 return값이 커진다.
+ *   즉 free_blocks_total이 큰 상황에서 실패했다는건 단편화로 실패,
+ *   free_blocks_total이 작다는 상황에서는 메모리 부족으로 실패 라고 간주된다.
+ *
+ * - free_blocks_total이 동일한 상황에서 free_pages가 커지면 return값이 작아진다.
+ */
 	return 1000 - div_u64( (1000+(div_u64(info->free_pages * 1000ULL, requested))), info->free_blocks_total);
 }
 

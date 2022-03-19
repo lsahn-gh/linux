@@ -789,6 +789,11 @@ static void psi_flags_change(struct task_struct *task, int clear, int set)
 	task->psi_flags |= set;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - /proc/pressure/memory를 monitoring하고잇는 process들한테 @clear, @set에
+ *   대한 event를 전달한다.
+ */
 void psi_task_change(struct task_struct *task, int clear, int set)
 {
 	int cpu = task_cpu(task);
@@ -889,6 +894,10 @@ void psi_task_switch(struct task_struct *prev, struct task_struct *next,
  * Marks the calling task as being stalled due to a lack of memory,
  * such as waiting for a refault or performing reclaim.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - psi_memstall_leave와 한쌍이다.
+ */
 void psi_memstall_enter(unsigned long *flags)
 {
 	struct rq_flags rf;
@@ -897,6 +906,10 @@ void psi_memstall_enter(unsigned long *flags)
 	if (static_branch_likely(&psi_disabled))
 		return;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - in_memstall에 값이 있으면 이미 enter 된상황.
+ */
 	*flags = current->in_memstall;
 	if (*flags)
 		return;
@@ -908,6 +921,12 @@ void psi_memstall_enter(unsigned long *flags)
 	rq = this_rq_lock_irq(&rf);
 
 	current->in_memstall = 1;
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - TSK_MEMSTALL로 set한다. /proc/pressure/memory를 monitoring 하고 있는
+ *   모든 process에 대해 event를 전달한다.
+ */
 	psi_task_change(current, 0, TSK_MEMSTALL);
 
 	rq_unlock_irq(rq, &rf);
@@ -918,6 +937,10 @@ void psi_memstall_enter(unsigned long *flags)
  * @flags: flags to handle nested memdelay sections
  *
  * Marks the calling task as no longer stalled due to lack of memory.
+ */
+/*
+ * IAMROOT, 2022.03.19:
+ * - psi_memstall_enter와 한쌍이 된다.
  */
 void psi_memstall_leave(unsigned long *flags)
 {
@@ -937,6 +960,13 @@ void psi_memstall_leave(unsigned long *flags)
 	rq = this_rq_lock_irq(&rf);
 
 	current->in_memstall = 0;
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - TSK_MEMSTALL을 clear한다.
+ *   /proc/pressure/memory를 monitoring 하고 있는
+ *   모든 process에 대해 event를 전달한다.
+ */
 	psi_task_change(current, TSK_MEMSTALL, 0);
 
 	rq_unlock_irq(rq, &rf);

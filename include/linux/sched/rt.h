@@ -6,6 +6,10 @@
 
 struct task_struct;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - @prior가 MAX_RT_PRIO 미만이면 rt task로 판단한다.
+ */
 static inline int rt_prio(int prio)
 {
 	if (unlikely(prio < MAX_RT_PRIO))
@@ -13,6 +17,11 @@ static inline int rt_prio(int prio)
 	return 0;
 }
 
+
+/*
+ * IAMROOT, 2022.03.19:
+ * - @p가 rt task인지 확인한다.
+ */
 static inline int rt_task(struct task_struct *p)
 {
 	return rt_prio(p->prio);

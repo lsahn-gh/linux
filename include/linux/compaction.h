@@ -6,6 +6,14 @@
  * Determines how hard direct compaction should try to succeed.
  * Lower value means higher priority, analogically to reclaim priority.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - sync full  == min priority
+ *   sync light == min costly priority, default priority
+ *   async      == init
+ * - direct compaction을 얼마나 hard하게 동작시킬지에 대한것.
+ *   번호가 낮을수록 hard하다(우선순위가 높다).
+ */
 enum compact_priority {
 	COMPACT_PRIO_SYNC_FULL,
 	MIN_COMPACT_PRIORITY = COMPACT_PRIO_SYNC_FULL,
@@ -61,6 +69,13 @@ struct alloc_context; /* in mm/internal.h */
  * Number of free order-0 pages that should be available above given watermark
  * to make sure compaction has reasonable chance of not running out of free
  * pages that it needs to isolate as migration target during its work.
+ */
+/*
+ * IAMROOT, 2022.03.19:
+ * 압축이 작업 중에 마이그레이션 대상으로 분리해야 하는 빈 페이지가 부족하지
+ * 않도록 하기 위해 지정된 워터마크 위에 사용할 수 있는 free order 0 페이지 수다.
+ *
+ * - compaction 하는 동안에 추가로 필요로 하는 memory. order page 2개가 필요하다.
  */
 static inline unsigned long compact_gap(unsigned int order)
 {

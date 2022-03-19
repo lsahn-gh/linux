@@ -97,6 +97,10 @@
 #define in_nmi()		(nmi_count())
 #define in_hardirq()		(hardirq_count())
 #define in_serving_softirq()	(softirq_count() & SOFTIRQ_OFFSET)
+/*
+ * IAMROOT, 2022.03.19:
+ * - interrupt context가 아닌 일반 task상황인지 확인한다.
+ */
 #define in_task()		(!(in_nmi() | in_hardirq() | in_serving_softirq()))
 
 /*

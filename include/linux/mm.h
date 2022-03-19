@@ -1751,11 +1751,21 @@ static inline bool page_is_pfmemalloc(const struct page *page)
  * Only to be called by the page allocator on a freshly allocated
  * page.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - pfmemalloc set이 됬다는 표현을 lru.next의 1번 bit에 set하는걸로
+ *   표시한다.
+ */
 static inline void set_page_pfmemalloc(struct page *page)
 {
 	page->lru.next = (void *)BIT(1);
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - pfmemalloc clear는 set할떄 lru.next의 1번비트를 set했었는데
+ *   이를 없앰으로써 clear임을 나타낸다.
+ */
 static inline void clear_page_pfmemalloc(struct page *page)
 {
 	page->lru.next = NULL;

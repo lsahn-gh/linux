@@ -72,6 +72,10 @@ static inline bool oom_task_origin(const struct task_struct *p)
 	return p->signal->oom_flag_origin;
 }
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - kernel로부터 task가 oom으로 판정을 받았는지 확인한다.
+ */
 static inline bool tsk_is_oom_victim(struct task_struct * tsk)
 {
 	return tsk->signal->oom_mm;

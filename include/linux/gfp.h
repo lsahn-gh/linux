@@ -157,6 +157,16 @@ struct vm_area_struct;
  * %__GFP_NOMEMALLOC is used to explicitly forbid access to emergency reserves.
  * This takes precedence over the %__GFP_MEMALLOC flag if both are set.
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - %_GFP_NOMEMALLOC를 사용하여 비상예비구역 접근을 명시적으로 금지합니다.
+ *   둘 다 설정되어 있는 경우 이 플래그가 %_GFP_MEMALLOC 플래그보다 우선됩니다.
+ * - emergency reserves는 watermark min에 있는 공간을 의미한다.
+ * - swapping system 같은경우엔 watermark같은 memory 제한등을 안받는다. 즉
+ *   emergency reserves영역등을 사용할수있고 이런 공간을 사용할수 있다는
+ *   flag가 __GFP_MEMALLOC이다. 그런데 어떤 상황인 경우 이런 emergency reserves
+ *   영역을 사용하지 말아야 되는데 이 flag가 __GFP_NOMEMALLOC 이다.
+ */
 #define __GFP_ATOMIC	((__force gfp_t)___GFP_ATOMIC)
 #define __GFP_HIGH	((__force gfp_t)___GFP_HIGH)
 #define __GFP_MEMALLOC	((__force gfp_t)___GFP_MEMALLOC)
@@ -235,6 +245,20 @@ struct vm_area_struct;
  */
 #define __GFP_IO	((__force gfp_t)___GFP_IO)
 #define __GFP_FS	((__force gfp_t)___GFP_FS)
+/*
+ * IAMROOT, 2022.03.19:
+ * - __GFP_DIRECT_RECLAIM을 포함한 macro
+ *   __GFP_RECLAIM
+ *	GFP_KERNEL
+ *	GFP_NOIO
+ *	GFP_NOFS
+ *	GFP_USER
+ *
+ *   GFP_TRANSHUGE
+ *
+ * 위 GFP들을 사용하면 메모리 회수가 동작할수있을것이다.
+ * GFP_ATOMIC같은건 interrupt등에서 동작하므로 RECLAIM이 없는것이다.
+ */
 #define __GFP_DIRECT_RECLAIM	((__force gfp_t)___GFP_DIRECT_RECLAIM) /* Caller can reclaim */
 #define __GFP_KSWAPD_RECLAIM	((__force gfp_t)___GFP_KSWAPD_RECLAIM) /* kswapd can wake */
 #define __GFP_RECLAIM ((__force gfp_t)(___GFP_DIRECT_RECLAIM|___GFP_KSWAPD_RECLAIM))

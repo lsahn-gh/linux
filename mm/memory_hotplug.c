@@ -259,6 +259,10 @@ static int check_pfn_span(unsigned long pfn, unsigned long nr_pages,
  * walkers which rely on the fully initialized page->flags and others
  * should use this rather than pfn_valid && pfn_to_page
  */
+/*
+ * IAMROOT, 2022.03.19:
+ * - @pfn에 해당하는 memory가 있으면 @pfn의 page를 반환한다.
+ */
 struct page *pfn_to_online_page(unsigned long pfn)
 {
 	unsigned long nr = pfn_to_section_nr(pfn);
@@ -268,6 +272,10 @@ struct page *pfn_to_online_page(unsigned long pfn)
 	if (nr >= NR_MEM_SECTIONS)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - pfn이 속한 section이 online인이 확인한다.
+ */
 	ms = __nr_to_section(nr);
 	if (!online_section(ms))
 		return NULL;
@@ -276,12 +284,24 @@ struct page *pfn_to_online_page(unsigned long pfn)
 	 * Save some code text when online_section() +
 	 * pfn_section_valid() are sufficient.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - arch pfn valid를 확인한다.
+ */
 	if (IS_ENABLED(CONFIG_HAVE_ARCH_PFN_VALID) && !pfn_valid(pfn))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 해당 section에서 pfn이 유효한지 확인한다.
+ */
 	if (!pfn_section_valid(ms, pfn))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.03.19:
+ * - 일반 memory면 바로 pfn -> page 변환을한다.
+ */
 	if (!online_device_section(ms))
 		return pfn_to_page(pfn);
 
@@ -291,6 +311,11 @@ struct page *pfn_to_online_page(unsigned long pfn)
 	 * the section may be 'offline' but 'valid'. Only
 	 * get_dev_pagemap() can determine sub-section online status.
 	 */
+/*
+ * IAMROOT, 2022.03.19:
+ * - device memory이면 아래와 같은 방법으로 확인한다.
+ *   pgmap이 있으면 offline 으로 판단한다.
+ */
 	pgmap = get_dev_pagemap(pfn, NULL);
 	put_dev_pagemap(pgmap);
 
