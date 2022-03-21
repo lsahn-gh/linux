@@ -612,6 +612,40 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_OOM		ALLOC_NO_WATERMARKS
 #endif
 
+/*
+ * IAMROOT, 2022.03.16:
+ * ALLOC_* 플래그들은 page 할당자에서 사용하는 내부 플래그들이다.
+ *
+ * - ALLOC_HARDER:
+ *   인터럽트 context 등에서 할당을 하기 위해 할당 요청 시 GFP_ATOMIC 플래그를
+ *   사용하였거나, 위의 플래그를 사용하지 않았어도 rt 스레드에서 할당 요청을 한 
+ *   경우 ALLOC_HARDER 플래그를 내부에서 사용하는데, 
+ *   1) 메모리 부족 시 남은 min 워터마크 기준보다 25% 더 할당을 받게 하고,
+ *      (GFP_ATOMIC 사용시 아래 ALLOC_HIGH까지 부터 50% 한 후 추가 25% 적용)
+ *   2) GFP_ATOMIC으로 높은 order 할당이 실패하지 않도록 예비로 관리하는 
+ *      MIGRATE_HIGHATOMIC freelist를 사용하게 한다.
+ * - ALLOC_HIGH:
+ *   GFP_ATOMIC 플래그를 사용할 때 ALLOC_HARDER와 함께 이 플래그가 사용되며,
+ *   메모리 부족 시 남은 min 워터마크 기준보다 50% 더 할당을 받게 한다.
+ * - ALLOC_CMA:
+ *   movable 페이지에 대한 할당 요청 시 가능하면 cma 영역을 사용하지 않고 
+ *   할당을 시도하지만, 이 플래그를 사용하면 메모리가 부족 시 cma 영역도 
+ *   사용하여 할당을 시도한다.
+ * - ALLOC_NOFRAGMENT:
+ *   페이지 할당 시 요청한 migratetype 만으로 구성된 페이지 블럭내에서 
+ *   할당을 시도한다. 단 메모리가 부족한 경우에는 어쩔 수 없이,
+ *   이 플래그 요청을 무시하고 fragment 할당을 한다.
+ *   GFP_KERNEL or GFP_ATOMIC 등)과 같이 normal 존을 이용하는 커널 메모리 등을
+ *   할당해야 할 때 노드 내에 해당 normal zone 밑에 dma(or dma32)가 구성되어 
+ *   있는 경우 이러한 플래그를 사용되어 최대한 1 페이지 블럭내에서 여러 
+ *   migratetype의 페이지가 할당되어 구성되지 않도록 노력한다.
+ * - ALLOC_KSWAPD:
+ *   GFP_ATOMIC을 제외한 GFP_KERNEL, GFP_USER, GFP_HIGHUSER 등의 메모리 할당을
+ *   요청하는 경우 __GFP_RECLAIM 플래그(direct + kswapd)가 추가되는데 
+ *   그 중 _rGFP_RECLAIM_KSWAPD를 체크하여 이 플래그가 사용된다. 메모리 부족시
+ *   즉각 kcompactd 및 kswapd 스레드를 꺄워 동작시키는 기능을 의미한다.
+ */
+
 #define ALLOC_HARDER		 0x10 /* try to alloc harder */
 #define ALLOC_HIGH		 0x20 /* __GFP_HIGH set */
 #define ALLOC_CPUSET		 0x40 /* check for correct cpuset */
