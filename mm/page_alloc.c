@@ -125,6 +125,10 @@ static DEFINE_MUTEX(pcp_batch_high_lock);
 struct pagesets {
 	local_lock_t lock;
 };
+/*
+ * IAMROOT, 2022.03.25:
+ * - pcplist에서 page를 할당받을때 cpu 별 local lock을 거는 용도로 사용한다.
+ */
 static DEFINE_PER_CPU(struct pagesets, pagesets) = {
 	.lock = INIT_LOCAL_LOCK(lock),
 };
@@ -1924,6 +1928,10 @@ void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.22:
+ * - TODO
+ */
 static void __free_pages_ok(struct page *page, unsigned int order,
 			    fpi_t fpi_flags)
 {
@@ -2869,6 +2877,7 @@ static void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags
  * - @order에서 시작하여 frea area에서 page를 할당 받는다.
  *   만약에 @order보다 상위 order에서 page를 할당받았을 경우 절반씩 나누며
  *   반환한다.
+ * - @zone 내용이 변경되기 때문에 @zone->lock에 lock이 된채로 진입되야한다.
  */
 static __always_inline
 struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
@@ -2942,8 +2951,13 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
  */
 /*
  * IAMROOT, 2022.03.12:
- * @return buddy내에서 page(@start_pfn ~ @end_pfn)에서 @zone의
  * @order @migratetype으로 이동이 완료된 free page개수
+ * @return buddy내에서 page(@start_pfn ~ @end_pfn)에서 @zone의
+ *
+ * - @start_pfn ~ @end_pfn page를 확인하여
+ *   @orer @migratetyp free_list에 옮긴다. buddy에 없다면 free list에
+ *   옮길 필요가 없으니 @num_movable에 기록해두고, buddy에 있는것들은
+ *   옮긴다.
  */
 static int move_freepages(struct zone *zone,
 			  unsigned long start_pfn, unsigned long end_pfn,
@@ -3408,7 +3422,8 @@ int find_suitable_fallback(struct free_area *area, unsigned int order,
  */
 /*
  * IAMROOT, 2022.03.19:
- * - @zone에 reserved_highatomic이 부족하면 @page를 @zone의
+ * - @zone에 reserved_highatomic이 부족하면 @page를 @zone의 속성을
+ *   highatomic으로 변경시키고, 만약 buddy에 있을경우 
  *   highatomic freelist로 이동시킨다.
  */
 static void reserve_highatomic_pageblock(struct page *page, struct zone *zone,
@@ -3658,6 +3673,7 @@ do_steal:
  * IAMROOT, 2022.03.05:
  * - @order @migratetype frea area list(buddy system)에서 할당요청을 수행한다.
  * - cma를 고려한다.
+ * - @zone 내용이 변경되기 때문에 @zone->lock에 lock이 된채로 진입되야한다.
  */
 static __always_inline struct page *
 __rmqueue(struct zone *zone, unsigned int order, int migratetype,
@@ -4345,8 +4361,9 @@ static inline
 /*
  * IAMROOT, 2022.03.05:
  * - pcplist(@list)에서 @order page를 할당받는다.
- *   pcplist(@list)에서 모자랄 경우 buddy system(rmqueue_bulk)에서 page를 추가로
- *   가져온다.
+ *   pcplist(@list)에서 모자랄 경우 buddy system(rmqueue_bulk)에서 page를
+ *   추가로 가져온다.
+ * - pagesets pcp local lock이 걸린 상태로 진입되야 한다.
  */
 struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 			int migratetype,
@@ -4395,7 +4412,9 @@ struct page *__rmqueue_pcplist(struct zone *zone, unsigned int order,
 /* Lock and remove page from the per-cpu list */
 /*
  * IAMROOT, 2022.03.05:
- * - pcplist에서 @order page를 할당받는다.
+ * - @order, @migratetype pcplist에서 @order page를 할당받는다.
+ * - __rmqueue_pcplist를 부르기전에 lock을 걸고 통계등을 하기 위한
+ *   전후처리 함수
  */
 static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 			struct zone *zone, unsigned int order,
@@ -4431,7 +4450,38 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
  */
 /*
  * IAMROOT, 2022.03.05:
- * - @order page를 할당 받는다.
+ * - @order page를 할당받는다.
+ *   @order가 pcplist에서 받아올수 있으면 pcplist에서 받아오고 그게 아니면
+ *   buddy에서 받아온다.(pcplist + buddy)
+ * - @preferred_zone 은 통계용으로만 사용한다.
+ * - 함수 진입 및 lock 정리
+ *  rmqueue
+ *  {	rmqueue_pcplist
+ *		{
+ *			local_lock(pagesets.lock)
+ *			__rmqueue_pcplist
+ *			{
+ *				rmqueue_bulk
+ *				{
+ *					spin_lock(zone->lock)
+ *					__rmqueue
+ *					{
+ *						__rmqueue_cma_fallback
+ *						{
+ *							__rmqueue_smallest
+ *						}
+ *						__rmqueue_smallest
+ *					}
+ *					spin_unlock(zone->lock)
+ *				}
+ *			}
+ *			local_unlock(pagesets.lock)
+ *		}
+ *		spin_lock(zone->lock)
+ *		__rmqueue_smallest
+ *		__rmqueue
+ *		spin_unlock(zone->lock)
+ *	}
  */
 static inline
 struct page *rmqueue(struct zone *preferred_zone,
@@ -4894,6 +4944,20 @@ static bool zone_allows_reclaim(struct zone *local_zone, struct zone *zone)
  * probably too small. It only makes sense to spread allocations to avoid
  * fragmentation between the Normal and DMA32 zones.
  */
+/*
+ * IAMROOT, 2022.03.23:
+ * - papago
+ *   ZONE_DMA32는 플래그멘테이션을 회피하기 위한 적절한 존으로서 제한은
+ *   미묘합니다. 우선 존이 HIGHMEM일 경우 낮은 존을 너무 일찍 사용하면
+ *   플래그멘테이션보다 심각한 저메모리 압력 문제가 발생할 수 있습니다.
+ *   다음 존이 ZONE_DMA일 경우 너무 작을 수 있습니다. NORMAL_ZONE과
+ *   DMA32_ZONE 간의 플래그멘테이션을 피하기 위해 할당을 분산하는 것만이
+ *   의미가 있습니다.
+ * - ALLOC_NOFRAGMENT 추가 여부를 결정한다. 
+ * - @gfp_mask에 __GFP_KSWAPD_RECLAIM이 있었을 경우 무조건 추가된다.
+ * - @zone 이 normal이면서 NORMAL_ZONE 전의 zone이 memory가 있는 경우에만
+ *   ALLOC_NOFRAGMENT을 추가한다.
+ */
 static inline unsigned int
 alloc_flags_nofragment(struct zone *zone, gfp_t gfp_mask)
 {
@@ -4982,6 +5046,8 @@ static inline unsigned int gfp_to_alloc_flags_cma(gfp_t gfp_mask,
 /*
  * IAMROOT, 2022.03.19:
  * - @order 만큼의 page를 buddy system에서 할당받는다.
+ * - nofragment여부에 따라 preferred_zone을 결정하고 page를 할당받을 zone을
+ *   결정하며 그 과정중에 reclaim수행까지 결정한다.
  */
 static struct page *
 get_page_from_freelist(gfp_t gfp_mask, unsigned int order, int alloc_flags,
@@ -5040,11 +5106,13 @@ retry:
 		 */
 /*
  * IAMROOT, 2022.03.05:
+ * --- papago
  * - 페이지 캐시 페이지를 쓰기 위해 할당할 때 더티 제한 내에 있는 노드에서
  *   가져오기를 원하므로 단일 노드가 전역적으로 허용되는 더티 페이지의
  *   비례적 공유를 초과해서는 안 됩니다.
  *   더티 제한은 kswapd가 LRU 목록에서 페이지를 쓸 필요 없이
- *   균형을 맞출 수 있도록 노드의 낮은 메모리 저장량과 높은 워터마크를 고려한다.
+ *   균형을 맞출 수 있도록 노드의 낮은 메모리 저장량과 높은 워터마크를
+ *   고려한다.
  *
  *   XXX: 지금은 회수하기 전에 할당이 저속 경로의 노드당 더티 제한
  *   (스프레드_더티_페이지 설정 해제)을 초과할 수 있도록 하십시오.
@@ -5052,6 +5120,11 @@ retry:
  *   중요합니다.
  *   이러한 상황을 적절히 해결하려면 지저분한 스레딩과 플러셔 스레드의
  *   노드를 인식해야 합니다. 
+ * ---
+ * prepare_alloc_page을 거치고 왔다고 가정했을때 spread_dirty_pages는
+ * __GFP_WRITE가 있을시 값이 존재한다. 즉 쓰기용 페이지를 할당 받은경우
+ * true가 되며 dirty zone balancing을 수행한다.
+ * 즉 dirty가 덜된 node memory를 고른다.
  */
 		if (ac->spread_dirty_pages) {
 			if (last_pgdat_dirty_limit == zone->zone_pgdat)
@@ -5066,7 +5139,8 @@ retry:
 
 /*
  * IAMROOT, 2022.03.05:
- * - DMA나 DMA32 zone이 존재하는 상태에서, normal zone으로 요청한 상태.
+ * - no_fallback이 set되있다는것은 DMA나 DMA32 zone이 존재하는 상태에서,
+ *   normal zone으로 요청한 상태와 같다.(alloc_flags_nofragment 참고)
  *   그리고 ALLOC_NOFRAGMENT 요청이 됫으며 numa system인 상황이다.
  *   이 경우 preferred_zone 아닌 zone일때, remote node인 경우에만
  *   ALLOC_NOFRAGMENT flag 를 제거해한후 retry를 한다.
@@ -5089,7 +5163,8 @@ retry:
 
 /*
  * IAMROOT, 2022.03.05:
- * - alloc_flags에 해당하는 watermark(ALLOC_WMARK_LOW)에 대한 page개수를 가져온다.
+ * - alloc_flags에 해당하는 watermark(ALLOC_WMARK_LOW)에 대한 page개수를
+ *   가져온다.
  * - watermark로 할당 실패할 경우, 실패한 상황일때 할당할수있는 상황에
  *   대해서 검사를 한후 할당을 시도한다.
  */
@@ -6104,7 +6179,7 @@ retry_cpuset:
 	 */
 /*
  * IAMROOT, 2022.03.19:
- * - buddy에서 할당시도를 한다.
+ * - pcplist/buddy에서 할당시도를 한다.
  */
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 	if (page)
@@ -6352,6 +6427,10 @@ got_pg:
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.03.23:
+ * - @ac를 구성한다.
+ */
 static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
 		int preferred_nid, nodemask_t *nodemask,
 		struct alloc_context *ac, gfp_t *alloc_gfp,
@@ -8673,10 +8752,11 @@ static __meminit void zone_pcp_init(struct zone *zone)
 
 /*
  * IAMROOT, 2021.12.11:
- * - zone_pgdata 의 nr_zones를 갱신해준다.
- *   zone의 소속 node를 연결시켜준다.
+ * - @zone_pgdata 의 nr_zones를 갱신해준다.
+ *   @zone의 소속 node를 연결시켜준다.
+ * - @zone의 migrate, order 별 free_list를 초기화한다.
+ * - @zone의 buddy정보을 초기화한다.
  * - 이 함수가 끝남으로써 zone과 node의 정보가 연결되게 된다.
- * - zone의 buddy정보을 초기화한다.
  */
 void __meminit init_currently_empty_zone(struct zone *zone,
 					unsigned long zone_start_pfn,
@@ -9256,10 +9336,11 @@ void __ref free_area_init_core_hotplug(int nid)
  */
 /*
  * IAMROOT, 2021.12.11:
- * - zone을 순회하며, nr_kernel_pages를 계산하고, 
+ * - @pgdate에 연결된 zone을 순회하며u, nr_kernel_pages를 계산하고, 
  *   zone의 spanned_pages, present_pages등의 size들을 설정하고
  *   해당 zone이 소속하는 node와 연결시켜준다. zone의 모든 order, pcp type의
  *   buddy정보들을 초기화한다.
+ * - @pgdat에 속한 zone을의 migrate, order 별 free_list를 초기화한다.
  */
 static void __init free_area_init_core(struct pglist_data *pgdat)
 {
@@ -9410,7 +9491,8 @@ static inline void pgdat_set_deferred_range(pg_data_t *pgdat) {}
 
 /*
  * IAMROOT, 2021.12.11:
- * - 해당 nid의 zone을 초기화한다.
+ * - @nid의 pgdate를 초기화한다.
+ * - @nid의 zone을 초기화한다.
  */
 static void __init free_area_init_node(int nid)
 {

@@ -216,7 +216,8 @@ static bool compaction_deferred(struct zone *zone, int order)
  * IAMROOT, 2022.03.19:
  * @alloc_success compaction 완료후에 실제 완전히 할당이 가능한 상태라면 true
  *                그게 아니라면 false.
- * compact defer 값들을 업데이트한다.
+ * compact defer 값들을 업데이트한다. @order + 1값으로 compact defer조건을
+ * 완화한다.
  */
 void compaction_defer_reset(struct zone *zone, int order,
 		bool alloc_success)
@@ -294,8 +295,45 @@ static bool pageblock_skip_persistent(struct page *page)
 /*
  * IAMROOT, 2022.03.19:
  * - @check_source : free쪽을 갱신할때 free set이 됬는지에 대한 여부.
- * - @check_target : migrate쪽을 갱신할때 migrate reset이 됬는지에 대한 여부.
+ * - @check_target : migrate쪽을 갱신할때 migrate set이 됬는지에 대한 여부.
  * - @return true면 reset을 수행.
+ *
+ * -- git blame 참고
+ *  tree b336a96e0c0073222608d70f4e029d259bfd8691
+ *  parent 4fca9730c51d51f643f2a3f8f10ebd718349c80f
+ *
+ *  mm, compaction: be selective about what pageblocks to clear skip hints
+ *
+ *  Pageblock hints are cleared when compaction restarts or kswapd makes
+ *  enough progress that it can sleep but it's over-eager in that the bit is
+ *  cleared for migration sources with no LRU pages and migration targets
+ *  with no free pages.  As pageblock skip hint flushes are relatively rare
+ *  and out-of-band with respect to kswapd, this patch makes a few more
+ *  expensive checks to see if it's appropriate to even clear the bit.
+ *  Every pageblock that is not cleared will avoid 512 pages being scanned
+ *  unnecessarily on x86-64.
+ *
+ * The impact is variable with different workloads showing small
+ * differences in latency, success rates and scan rates.  This is expected
+ * as clearing the hints is not that common but doing a small amount of
+ * work out-of-band to avoid a large amount of work in-band later is
+ * generally a good thing.
+ *
+ * -papago
+ *  mm, compression: 생략 힌트를 지울 페이지 블록을 선택합니다.
+ *
+ *  페이지 블록 힌트는 압축이 재시작되거나 kswapd가 sleep 상태가 될 정도로
+ *  진행되지만 LRU 페이지가 없는 마이그레이션 소스 및 빈 페이지가 없는
+ *  마이그레이션 대상에 대해 비트가 지워진다는 점에서 over-eager이다.
+ *  페이지 블록 skip hint flushes는 kswapd에 관해 비교적 드물고
+ *  대역 외이기 때문에 이 패치는 비트 클리어까지 적절한지 확인하기 위해
+ *  몇 가지 더 비용이 많이 듭니다. 삭제되지 않은 모든 페이지 블록은
+ *  x86-64에서 512 페이지가 불필요하게 스캔되는 것을 방지합니다.
+ *
+ *  이 영향은 워크로드에 따라 달라지며 지연 시간, 성공률 및 검색 속도에서
+ *  작은 차이를 보입니다. 이는 힌트를 클리어하는 것이 일반적이지 않기
+ *  때문에 예상되지만 나중에 많은 양의 인밴드 작업을 피하기 위해 적은 양의
+ *  아웃오브밴드 작업을 하는 것이 일반적으로 좋습니다.
  */
 static bool
 __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
@@ -345,7 +383,8 @@ __reset_isolation_pfn(struct zone *zone, unsigned long pfn, bool check_source,
 
 /*
  * IAMROOT, 2022.03.19:
- * - pfn이 소속되있는 block의 start page를 가져온다.
+ * - pfn이 소속되있는 block의 start page를 가져온다. 성공하면
+ *   isoloate를 block단위로 수행하기 @page, start ,end를 계산한다.
  */
 	/* Ensure the start of the pageblock or zone is online and valid */
 	block_pfn = pageblock_start_pfn(pfn);
@@ -477,6 +516,34 @@ static void __reset_isolation_suitable(struct zone *zone)
 
 /*
  * IAMROOT, 2022.03.19:
+ * - 위 for문에서 source, free가 찾아진 경우
+ * high
+ * ----------- 
+ *            |
+ *            + (최초에 free_set true가 찾아진 지점)reset_free
+ *  ...
+ *            |
+ *            + (중앙지점) migrate_pfn, free_pfn
+ *            |
+ *  ...
+ *            + (최초에 source_set true가 찾아진 지점)reset_migrate
+ *            |
+ * -----------
+ * low
+ *
+ * - 위 for문에서 source, free가 못찾아진 경우
+ * high
+ * -----------+ reset_migrate
+ *            |
+ *  ...
+ *            |
+ *            + (중앙지점) migrate_pfn, free_pfn
+ *            |
+ *  ...
+ *            |
+ * -----------+ reset_free
+ * low
+ *
  * - 위 for문에서 migrate, free 둘다 reset이 안된경우 if문이 실행된다.
  *   scanning을 못한다는 의미가 된다.
  */
@@ -2313,13 +2380,13 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
 	 * ALLOC_CMA is used, as pages in CMA pageblocks are considered
 	 * suitable migration targets
 	 */
-
 /*
  * IAMROOT, 2022.03.19:
- * - order-0의 워터마크가 충족되면 migration target의 빈 페이지를 분리(isolate)
+ * --- papago
+ *   order-0의 워터마크가 충족되면 migration target의 빈 페이지를 분리(isolate)
  *   할수있다.
- *   즉, 워터마크와 allocate_flags가 일치하거나 __isolat_free_page()의 체크보다
- *   비관적이어야 합니다. direct compressor의 allocate_flags는
+ *   즉, 워터마크와 allocate_flags가 일치하거나 __isolate_free_page()의
+ *   체크보다 비관적이어야 합니다. direct compressor의 allocate_flags는
  *   프리 페이지 분리와 관련이 없기 때문에 사용하지 않습니다. 단, 압축이
  *   성공하더라도 lowmem 예약이 할당되지 않는 영역을 건너뛰기 위해
  *   direct compact의 highest_zoneidx를 사용합니다.
@@ -2492,6 +2559,12 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * Clear pageblock skip if there were failures recently and compaction
 	 * is about to be retried after being deferred.
 	 */
+/*
+ * IAMROOT, 2022.03.25:
+ * - 이 전에 compact가 실패한 상태에서 현재 요청 @cc->order가 이전 compact
+ *   실패 order보다 크며 충분히 compact defer가 된 상태라면
+ *   __reset_isolation_suitable을 실행한다.
+ */
 	if (compaction_restarting(cc->zone, cc->order))
 		__reset_isolation_suitable(cc->zone);
 
@@ -2691,8 +2764,8 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 		.direct_compaction = true,
 /*
  * IAMROOT, 2022.03.19:
- * - sync full로 들어오면 모든 zone, no skip, 모든 block을 시도(적절성 검사안함)
- *   한다는것.
+ * - sync full로 들어오면 모든 zone, no skip, 모든 block을 시도
+ *   (적절성 검사안함) 한다는것.
  */
 		.whole_zone = (prio == MIN_COMPACT_PRIORITY),
 		.ignore_skip_hint = (prio == MIN_COMPACT_PRIORITY),
@@ -2788,6 +2861,13 @@ enum compact_result try_to_compact_pages(gfp_t gfp_mask, unsigned int order,
 	trace_mm_compaction_try_to_compact_pages(order, gfp_mask, prio);
 
 	/* Compact each zone in the list */
+/*
+ * IAMROOT, 2022.03.25:
+ * - @ac->zonelist는 preferred node소속 으로 선택되고, __GFP_THISNODE가
+ *   있었다면 ZONELIST_NOFALLBACK, 아니면 ZONELIST_FALLBACK일것이다.
+ * - full scan이 아니라면 compact를 defer 할지 확인하여 defer를 시킬수도
+ *   있다.
+ */
 	for_each_zone_zonelist_nodemask(zone, z, ac->zonelist,
 					ac->highest_zoneidx, ac->nodemask) {
 		enum compact_result status;

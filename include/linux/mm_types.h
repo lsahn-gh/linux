@@ -74,6 +74,8 @@ struct mem_cgroup;
 struct page {
 /*
  * IAMROOT, 2022.03.11:
+ * - ZONES_PGSHIFT,  SECTIONS_PGSHIFT, NODES_PGSHIFT, LAST_CPUPID_PGSHIFT
+ *   값들로 section, zone, node, cpuid등의 정보들이 flags에 채워진다.
  * - enum pageflags값들이 위치한다.
  */
 	unsigned long flags;		/* Atomic flags, some possibly

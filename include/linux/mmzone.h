@@ -144,6 +144,7 @@ extern int page_group_by_mobility_disabled;
 /*
  * IAMROOT, 2021.12.11:
  * - zone_init_free_lists에서 초기화된다.
+ * - add_to_free_list등에서 add 된다.
  * - nr_free : buddy free page. buddy에서는 free page만을
  *   관리한다.
  */
@@ -719,7 +720,7 @@ struct zone {
  * - cma_pages : 보통 driver를 짜면 cma_pages를 자주쓴다.
  *
  *----
- * calculate_node_totalpages 에서 설정된다.
+ * calculate_node_totalpages, zone_init_internals 에서 설정된다.
  * - spanned_pages : hole을 포함한 해당 node및 zone의 page수
  * - present_pages : hole을 제외한 해당 node zone읜 page수
  * - present_early_pages : 일단 present_pages와 같게 설정된다.
@@ -800,6 +801,19 @@ struct zone {
 	unsigned long		compact_init_free_pfn;
 #endif
 
+/*
+ * IAMROOT, 2022.03.25:
+ * - 아래 값들은 defer_compaction, compaction_defer_reset에서 등에서 설정된다.
+ * --- 이전 compaction 결과값 저장
+ * - compaction 이 실패했다면 해당 order를 저장한다. 그 이전에도
+ *   compaction이 실패했다면 낮은 order가 우선적으로 저장된다.
+ *   compaction이 성공하고 실제 할당가능한 상태라면 compaction_defer_reset
+ *   함수에서 defer skip조건을 초기화하고 compact조건을 완화한다.
+ * --- compaction 지연(defer)
+ * - compaction을 하기 전에 compaction을 위한 defer검사를 하는데, 이때
+ *   이전 compaction 결과를 참조한다. defer가 충분히 됬다면 defer를 안하고
+ *   한번 compaction을 시도해보는 등의 로직이 존재한다.
+ */
 #ifdef CONFIG_COMPACTION
 	/*
 	 * On compaction failure, 1<<compact_defer_shift compactions
@@ -807,8 +821,21 @@ struct zone {
 	 * last failure is tracked with compact_considered.
 	 * compact_order_failed is the minimum compaction failed order.
 	 */
+/*
+ * IAMROOT, 2022.03.25:
+ * - 지연 검사(compaction_deferred)를 할때 마다 상승한다. 지연이 많이
+ *   됬다면 지연을 안시키는 limit 개념으로 사용한다.
+ */
 	unsigned int		compact_considered;
+/*
+ * IAMROOT, 2022.03.25:
+ * - defer_compaction에서 설정된다. 지연을 얼마나 시키는지에 대한 limit
+ */
 	unsigned int		compact_defer_shift;
+/*
+ * IAMROOT, 2022.03.25:
+ * - compact가 실패된 order의 가장 작은 값을 저장한다.
+ */
 	int			compact_order_failed;
 #endif
 
@@ -1022,6 +1049,9 @@ typedef struct pglist_data {
  * - 해당 node가 memoryless라면 위 order 방법에 기반해 가장 근접한 node의
  *   zone들을 가지며 각 zone은 버디 시스템이 관리하는 페이지가 포함된 zone으로
  *   구성된다.
+ *
+ * - node_zonelist등의 함수로 node_zonelist를 선택한다. __GFP_THISNODE등의
+ *   flag의 set여부에 따라 zonelist가 선택될것이다.
  */
 	struct zonelist node_zonelists[MAX_ZONELISTS];
 

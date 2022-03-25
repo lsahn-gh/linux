@@ -154,6 +154,12 @@ extern bool cgroup_memory_nokmem;
  * 내부 목적으로 사용된다.
  */
 struct alloc_context {
+/*
+ * IAMROOT, 2022.03.25:
+ * - node_zonelist 함수에서 설정된다. 요청된 gfp flag에 __GFP_THISNODE가
+ *   있다면 ZONELIST_NOFALLBACK, 그게 아니라면 ZONELIST_FALLBACK으로
+ *   선택된다.
+ */
 	struct zonelist *zonelist;
 	nodemask_t *nodemask;
 	struct zoneref *preferred_zoneref;
@@ -169,6 +175,10 @@ struct alloc_context {
 	 * the target zone since higher zone than this index cannot be
 	 * usable for this allocation request.
 	 */
+/*
+ * IAMROOT, 2022.03.23:
+ * - prepare_alloc_pages, gfp_zone에서 gfp_mask를 통해 정해졌다.
+ */
 	enum zone_type highest_zoneidx;
 	bool spread_dirty_pages;
 };
@@ -642,7 +652,7 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
  * - ALLOC_KSWAPD:
  *   GFP_ATOMIC을 제외한 GFP_KERNEL, GFP_USER, GFP_HIGHUSER 등의 메모리 할당을
  *   요청하는 경우 __GFP_RECLAIM 플래그(direct + kswapd)가 추가되는데 
- *   그 중 _rGFP_RECLAIM_KSWAPD를 체크하여 이 플래그가 사용된다. 메모리 부족시
+ *   그 중 __GFP_KSWAPD_RECLAIM를 체크하여 이 플래그가 사용된다. 메모리 부족시
  *   즉각 kcompactd 및 kswapd 스레드를 꺄워 동작시키는 기능을 의미한다.
  */
 

@@ -974,6 +974,12 @@ int __init_memblock memblock_add(phys_addr_t base, phys_addr_t size)
  * Return:
  * 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2022.03.22:
+ * @start_rgn[out] @base ~ @size에서 isolate된 후의 start region number
+ * @end_rgn[out] @base ~ @size에서 isolate된 후의 end region number
+ * - @base ~ @size 에 걸치는 region을 분리한다.
+ */
 static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 					phys_addr_t base, phys_addr_t size,
 					int *start_rgn, int *end_rgn)
@@ -1418,6 +1424,7 @@ static bool should_skip_region(struct memblock_type *type,
 /*
  * IAMROOT, 2021.10.23:
  * - arm64에서는 기본적으로 reverse로 search.
+ * - type_a && !type_b의 영역을 구한다.
  */
 void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 		      struct memblock_type *type_a,
@@ -1460,6 +1467,26 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 			phys_addr_t r_end;
 
 			r = &type_b->regions[idx_b];
+/*
+ * IAMROOT, 2022.03.22:
+ * - not type_b인 영역 r_start ~ r_end를 구하는것이다.
+ * - idx_b가 있다면 이전 region의 end가 not type_b의 start가 되므로
+ *   이전 region을 참조[-1] 하여 start값을 구하는것이다. not type_b의 end는
+ *   현재 start이므로 r->base가 될것이다.
+ *
+ * +--------+  
+ * |        |       
+ * | r[0]   |       
+ * +--------+ r->base == r_end
+ *            ^     
+ *            | not type_b 영역
+ *            v     
+ * +--------+ r[-1].base + r[-1].size 
+ * |        |       
+ * | r[-1]  |       
+ * +--------+ r[-1].base 
+ *   ----
+ */
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
 				r->base : PHYS_ADDR_MAX;
@@ -2736,6 +2763,11 @@ static void __init memmap_init_reserved_pages(void)
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.22:
+ * - memblock에서 reserve인 영역의 page를 reserved로 설정한다.
+ * - reserved되있지 않은 free memblock memory를 buddy system에 등록한다.
+ */
 static unsigned long __init free_low_memory_core_early(void)
 {
 	unsigned long count = 0;
@@ -2745,6 +2777,10 @@ static unsigned long __init free_low_memory_core_early(void)
 /*
  * IAMROOT, 2022.02.19:
  * - 모든 memblock의 MEMBLOCK_HOTPLUG를 clear해준다.
+ * ---
+ * -전범위에 대해서 memblock_isolate_range를 수행하게 된다. 이 경우 딱히
+ *  region이 나눠지는 일 없이 start_rgn, end_rgn만 구해지게 되고 순회하면서
+ *  hotplug flag가 clear 되다가 같은 type끼리 merge가 될것이다.
  */
 	memblock_clear_hotplug(0, -1);
 
@@ -2757,8 +2793,8 @@ static unsigned long __init free_low_memory_core_early(void)
 	 */
 /*
  * IAMROOT, 2022.02.19:
- * - 모든 reserved되 있지 않은 free memblock memory에 대해서 __free_memory_core를
- *   실행한다.
+ * - 모든 reserved되 있지 않은 free memblock memory에 대해서
+ *   __free_memory_core를 실행한다.
  */
 	for_each_free_mem_range(i, NUMA_NO_NODE, MEMBLOCK_NONE, &start, &end,
 				NULL)
