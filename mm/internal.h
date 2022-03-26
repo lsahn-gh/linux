@@ -209,6 +209,11 @@ __find_buddy_pfn(unsigned long page_pfn, unsigned int order)
 extern struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
 				unsigned long end_pfn, struct zone *zone);
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * [start_pfn, end_pfn)의 페이지가 zone에 속한 online page인지 여부를 검사하여
+ * 그러한 경우 start_page를 반환하고, 아니면 NULL을 반환한다.
+ */
 static inline struct page *pageblock_pfn_to_page(unsigned long start_pfn,
 				unsigned long end_pfn, struct zone *zone)
 {

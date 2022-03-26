@@ -68,6 +68,11 @@ static const unsigned int HPAGE_FRAG_CHECK_INTERVAL_MSEC = 500;
 #define COMPACTION_HPAGE_ORDER	(PMD_SHIFT - PAGE_SHIFT)
 #endif
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * freelist의 각 페이지들을 buddy 시스템으로 되돌린다.
+ * 되돌린 페이지 중 high pfn을 반환한다.
+ */
 static unsigned long release_freepages(struct list_head *freelist)
 {
 	struct page *page, *next;
@@ -252,6 +257,11 @@ static bool compaction_restarting(struct zone *zone, int order)
 		zone->compact_considered >= 1UL << zone->compact_defer_shift;
 }
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * ignore_skip_hint를 사용하기 전에는 해당 페이지가 소속된 페이지블럭의
+ * skip 비트를 확인하여 isolation 적합여부를 판단한다.
+ */
 /* Returns true if the pageblock should be scanned for pages to isolate. */
 static inline bool isolation_suitable(struct compact_control *cc,
 					struct page *page)
@@ -593,6 +603,10 @@ static bool test_and_set_skip(struct compact_control *cc, struct page *page,
 	return skip;
 }
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * 해당 @pfn이 속한 블럭의 다음 블럭 위치로 migrate 캐시를 기억한다. 
+ */
 static void update_cached_migrate(struct compact_control *cc, unsigned long pfn)
 {
 	struct zone *zone = cc->zone;
@@ -934,6 +948,10 @@ isolate_freepages_range(struct compact_control *cc,
 }
 
 /* Similar to reclaim, but different enough that they don't share logic */
+/*
+ * IAMROOT, 2022.03.26: 
+ * isolation된 페이지가 4개 lru 총합 페이지의 절반을 초과하는 경우 true를 반환
+ */
 static bool too_many_isolated(pg_data_t *pgdat)
 {
 	unsigned long active, inactive, isolated;
@@ -988,6 +1006,13 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 	 * list by either parallel reclaimers or compaction. If there are,
 	 * delay for some time until fewer pages are isolated
 	 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 너무 많은 페이지들이 isolation 되었는지 확인한다.
+ * 이러한 경우 이미 isolation한 페이지가 있거나, async 모드로 진입한 경우,
+ * 그리고 fatal signal인 경우 여기까지만 isolation할 목적으로 중단한다.
+ * 그 외의 경우 0.1초 간격으로 다시 루프를 돈다.
+ */
 	while (unlikely(too_many_isolated(pgdat))) {
 		/* stop isolation if there are still pages not migrated */
 		if (cc->nr_migratepages)
@@ -1040,6 +1065,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * contention, to give chance to IRQs. Abort completely if
 		 * a fatal signal is pending.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 장시간 isolation 하는 경우이므로 여기에도 preemption point를 호출한다.
+ * 또한 중간 중간 insterrupt가 진입할 수 있도록 lock을 한번씩 풀어준다.
+ */
 		if (!(low_pfn % SWAP_CLUSTER_MAX)) {
 			if (locked) {
 				unlock_page_lruvec_irqrestore(locked, flags);
@@ -1066,6 +1096,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * COMPACT_CLUSTER_MAX at a time so the second call must
 		 * not falsely conclude that the block should be skipped.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 1 페이지 블럭단위로 처음 만난 페이지를 valid_page로 갱신한다.
+ * skip 블럭인 경우 isolate를 중단한다.
+ */
 		if (!valid_page && IS_ALIGNED(low_pfn, pageblock_nr_pages)) {
 			if (!cc->ignore_skip_hint && get_pageblock_skip(page)) {
 				low_pfn = end_pfn;
@@ -1396,12 +1431,27 @@ static bool suitable_migration_source(struct compact_control *cc,
 {
 	int block_mt;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * pageblock_order 이상의 compound 페이지(huge page)등은 항상 false를 반환한다.
+ */
 	if (pageblock_skip_persistent(page))
 		return false;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * sync가 아닌 경우와 direct-compaction이 아닌 경우(manual-compaction, i
+ * kcompactd를 사용한 백그라운드 compaction)인 경우 무조건 true를 반환
+ */
 	if ((cc->mode != MIGRATE_ASYNC) || !cc->direct_compaction)
 		return true;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * async이면서 dirct-compaction의 경우에는 해당 페이지 블럭이 
+ * 요청한 migratetype인 경우에만 true를 반환한다. 
+ * (단 movable 할당 요청인 경우 cma 블럭도 포함)
+ */
 	block_mt = get_pageblock_migratetype(page);
 
 	if (cc->migratetype == MIGRATE_MOVABLE)
@@ -2017,6 +2067,12 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
  * starting at the block pointed to by the migrate scanner pfn within
  * compact_control.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * migrate 스캐너가 진행중인 페이지 블럭 중에 isolation을 시도할 블럭
+ * 하나를 선택해서 isolation을 진행하고 다음 3가지 결과중 하나를 반환한다.
+ * ISOLATION_SUCCESS, ISOLATON_ABORT, ISOLATION_NONE
+ */
 static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 {
 	unsigned long block_start_pfn;
@@ -2063,9 +2119,18 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 		 * many pageblocks unsuitable, so periodically check if we
 		 * need to schedule.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 32블럭 단위로 preempt point를 수행하도록 코드가 구성되어 있다.
+ */
 		if (!(low_pfn % (SWAP_CLUSTER_MAX * pageblock_nr_pages)))
 			cond_resched();
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * [block_start_pfn, block_end_pfn)이 모두 zone에 포함된 online 메모리가 아니면
+ * skip 한다.
+ */
 		page = pageblock_pfn_to_page(block_start_pfn,
 						block_end_pfn, cc->zone);
 		if (!page)
@@ -2094,6 +2159,11 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 			update_cached_migrate(cc, block_end_pfn);
 			continue;
 		}
+
+/*
+ * IAMROOT, 2022.03.26: 
+ * 한 블럭만 isolation을 시도한다.
+ */
 
 		/* Perform the isolation */
 		if (isolate_migratepages_block(cc, low_pfn, block_end_pfn,
@@ -2562,8 +2632,11 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 /*
  * IAMROOT, 2022.03.25:
  * - 이 전에 compact가 실패한 상태에서 현재 요청 @cc->order가 이전 compact
- *   실패 order보다 크며 충분히 compact defer가 된 상태라면
- *   __reset_isolation_suitable을 실행한다.
+ *   실패 order보다 크며 마지막 defer까지 이미 진행하였었으면(shift=6단계, 
+ *   count=63까지) __reset_isolation_suitable을 실행한다.
+ *
+ *   defer  0~2, 0~4, 0~8, 0~16, 0~32, 0~64
+ *                                       ^--- 끝
  */
 	if (compaction_restarting(cc->zone, cc->order))
 		__reset_isolation_suitable(cc->zone);
@@ -2574,6 +2647,12 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * want to compact the whole zone), but check that it is initialised
 	 * by ensuring the values are within zone boundaries.
 	 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * while_zone: 
+ *    1=zone의 처음 부터 시작한다.
+ *    0=기존에 캐시되어 있던 위치부터 시작한다.
+ */
 	cc->fast_start_pfn = 0;
 	if (cc->whole_zone) {
 		cc->migrate_pfn = start_pfn;
@@ -2718,6 +2797,13 @@ out:
 	 * Release free pages and update where the free scanner should restart,
 	 * so we don't leave any returned pages behind in the next attempt.
 	 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * compaction이 종료된 이후에 아직 처리되지 않은 free 스캐너가 모아놓은
+ * cc->freepages의 페이지들을 다시 버디 시스템으로 되돌린다.
+ * 되돌리는 과정에서 high pfn 페이지의 경우 기존에 기억해둔 free 스캐너 캐시
+ * 시작위치보다 더 높은 경우 다시 free 스캐너 캐시 위치에 갱신한다.
+ */
 	if (cc->nr_freepages > 0) {
 		unsigned long free_pfn = release_freepages(&cc->freepages);
 

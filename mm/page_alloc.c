@@ -2094,6 +2094,11 @@ void __init memblock_free_pages(struct page *page, unsigned long pfn,
  * the first and last page of a pageblock and avoid checking each individual
  * page in a pageblock.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * [start_pfn, end_pfn)의 페이지가 zone에 속한 online page인지 여부를 검사하여
+ * 그러한 경우 start_page를 반환하고, 아니면 NULL을 반환한다.
+ */
 struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
 				     unsigned long end_pfn, struct zone *zone)
 {

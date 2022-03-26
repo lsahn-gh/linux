@@ -347,6 +347,25 @@ static __always_inline bool vmstat_item_in_bytes(int idx)
 #define LRU_ACTIVE 1
 #define LRU_FILE 2
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * free 페이지를 관리하는 버디 시스템과,
+ * 반대의 위치에서 할당되어 사용중인 페이지들중 회수가 가능한 페이지들을 
+ * 대상으로만 관리하는 회수 관리 시스템에서 사용된다. 이러한 회수 시스템에서
+ * lru(least recently used) 알고리즘 기반으로 동작시킨다.
+ * 
+ * 총 5개의 리스트로 구성되어 있으며, 다음과 같은 의미를 갖는다.
+ * inactive anon(0): 자주사용되지 않는 페이지들이 있을 가능성이 많은 
+ *                   사용자 페이지들이 관리된다. 
+ *   active anon(1): 사용되는 페이지들이 있을 가능성이 많은 
+ *                   사용자 페이지들이 관리된다. 
+ * inactive file(2): 자주사용되지 않는 페이지들이 있을 가능성이 많은 
+ *                   파일 캐시 페이지들이 관리된다. 
+ *   active file(3): 사용되는 페이지들이 있을 가능성이 많은 
+ *                   파일 캐시 페이지들이 관리된다. 
+ * unevictable(4):   회수 시스템에서 관리하지 않을 페이지들이 존재한다.
+ */
+
 enum lru_list {
 	LRU_INACTIVE_ANON = LRU_BASE,
 	LRU_ACTIVE_ANON = LRU_BASE + LRU_ACTIVE,
@@ -399,6 +418,14 @@ struct lruvec {
 	struct pglist_data *pgdat;
 #endif
 };
+
+/*
+ * IAMROOT, 2022.03.26: 
+ * ISOLATE_UNMAPPED:
+ * ISOLATE_ASYNC_MIGRATE: sync migrate 이외의 모든 경우
+ * ISOLATE_UNEVICTABLE: sysctl_compact_unevictable_allowed 설정값에 따라 결정
+ *                      rt 커널의 경우 default=0, 그 외의 경우 default=1
+ */
 
 /* Isolate unmapped pages */
 #define ISOLATE_UNMAPPED	((__force isolate_mode_t)0x2)
