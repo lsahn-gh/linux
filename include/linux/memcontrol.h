@@ -393,6 +393,11 @@ static inline struct mem_cgroup *obj_cgroup_memcg(struct obj_cgroup *objcg)
  * against some type of pages, e.g. slab pages or ex-slab pages or
  * kmem pages.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 해당 페이지를 관리하고 있는 memcg를 반환한다.
+ * 반환할때 위의 3개 관리비트는 제거한다.
+ */
 static inline struct mem_cgroup *__page_memcg(struct page *page)
 {
 	unsigned long memcg_data = page->memcg_data;
@@ -725,6 +730,13 @@ void mem_cgroup_migrate(struct page *oldpage, struct page *newpage);
  * @pgdat combination. This can be the node lruvec, if the memory
  * controller is disabled.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * memcg 동작 및 지정 여부에 따라 다음 중 하나의 lruvec을 알아온다.
+ * 1) memcg가 동작하지 않는 경우 노드의 __lruvec을 사용한다.
+ * 2) @memcg가 null로 요청된 경우 memcg의 루트에 있는 lruvec을 사용한다.
+ * 3) memcg가 지정된 경우 해당 memcg의 lruvec을 사용한다.
+ */
 static inline struct lruvec *mem_cgroup_lruvec(struct mem_cgroup *memcg,
 					       struct pglist_data *pgdat)
 {
@@ -757,6 +769,13 @@ out:
  * @page: the page
  *
  * This function relies on page->mem_cgroup being stable.
+ */
+/*
+ * IAMROOT, 2022.03.26: 
+ * memcg 동작 및 지정 여부에 따라 다음 중 하나의 lruvec을 알아온다.
+ * 1) memcg가 동작하지 않는 경우 노드의 __lruvec을 사용한다.
+ * 2) @memcg가 null로 요청된 경우 memcg의 루트에 있는 lruvec을 사용한다.
+ * 3) memcg가 지정된 경우 해당 memcg의 lruvec을 사용한다.
  */
 static inline struct lruvec *mem_cgroup_page_lruvec(struct page *page)
 {

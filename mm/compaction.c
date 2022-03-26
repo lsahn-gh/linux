@@ -584,6 +584,10 @@ void reset_isolation_suitable(pg_data_t *pgdat)
  * Sets the pageblock skip bit if it was clear. Note that this is a hint as
  * locks are not required for read/writers. Returns true if it was already set.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 해당 페이지가 있는 페이지 블럭의 skip bit 여부를 알아오고, skip bit를 설정한다.
+ */
 static bool test_and_set_skip(struct compact_control *cc, struct page *page,
 							unsigned long pfn)
 {
@@ -983,6 +987,30 @@ static bool too_many_isolated(pg_data_t *pgdat)
  * The pages are isolated on cc->migratepages list (not required to be empty),
  * and cc->nr_migratepages is updated accordingly.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 1 페이지블럭내 페이지들을 순회하며 migrate 가능한 lru 페이지들을 분리하여 
+ * cc->migratepages 리스트로 이동한다. 이동시 lru 플래그를 제거한다.
+ * 
+ * isolate를 중단하는 case:
+ *-------------------------
+ * 1) 너무 많은 페이지를 isolate한 경우 (lru의 절반 이상)
+ * 2) 페이지블럭에 skip 비트가 있는 경우, 물론 ignore_skip_hint=0 일때
+
+ * 이동이 불가능한 페이지들:
+ *--------------------------
+ * 1) buddy 페이지
+ * 2) alloc_contig_range() 호출이 아닌 상태에서 huge 페이지
+ * 3) non-lru movable 페이지를 제외한 non-lru 페이지
+ * 4) pinned anon 페이지
+ * 5) FS 허용하지 않을 때의 파일 매핑된 페이지
+ * 6) lru 페이지중 async 모드에서 다음 조건에 해당되는 페이지
+ *    - write-back 페이지
+ *    - migratepage()가 구현되지 않은 fs에 있는 파일 매핑된 페이지 
+ * 7) unmapped 페이지들만 요청한 시 파일 매핑된 페이지
+ * 8) alloc_contig_range() 호출인 상태에서 compound 페이지
+ */
+
 static int
 isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			unsigned long end_pfn, isolate_mode_t isolate_mode)
@@ -1030,6 +1058,12 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 
 	cond_resched();
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * async 모드의 direct-compaction 호출인 경우 skip_on_failure를 true로 변경한다.
+ * 또한 해당 order 단위로 low_pfn값에 해당하는 pfn을 next_skip_pfn에 대입해둔다.
+ */
+
 	if (cc->direct_compaction && (cc->mode == MIGRATE_ASYNC)) {
 		skip_on_failure = true;
 		next_skip_pfn = block_end_pfn(low_pfn, cc->order);
@@ -1038,6 +1072,12 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 	/* Time to isolate some pages for migration */
 	for (; low_pfn < end_pfn; low_pfn++) {
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * 1개 이상 isolation된 페이지가 있고, 이미 next_skip_pfn위치를 지났으면
+ * 루프를 break 한다.
+ * 이 과정에서 아직 isolate한 페이지가 없으면 next_skip_pfn만 갱신한다.
+ */
 		if (skip_on_failure && low_pfn >= next_skip_pfn) {
 			/*
 			 * We have isolated all migration candidates in the
@@ -1110,6 +1150,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			valid_page = page;
 		}
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * alloc_contig_range() 함수를 사용하여 hugepage를 isolate를 시도한다.
+ */
 		if (PageHuge(page) && cc->alloc_contig) {
 			ret = isolate_or_dissolve_huge_page(page, &cc->migratepages);
 
@@ -1148,6 +1192,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * the worst thing that can happen is that we skip some
 		 * potential isolation targets.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 할당되어 사용되는 페이지들을 대상으로 isolate해야 하므로 버디 페이지들은 
+ * skip 한다.
+ */
 		if (PageBuddy(page)) {
 			unsigned long freepage_order = buddy_order_unsafe(page);
 
@@ -1169,6 +1218,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * at once. The check is racy, but we can consider only valid
 		 * values and the only danger is skipping too much.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * alloc_contig_range()로 할당 요청한 경우가 아니면 THP 또는 hugetlbfs 같은
+ *  compound 페이지들은 isolate_fail로 이동한다.
+ */
 		if (PageCompound(page) && !cc->alloc_contig) {
 			const unsigned int order = compound_order(page);
 
@@ -1182,6 +1236,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * It's possible to migrate LRU and non-lru movable pages.
 		 * Skip any other type of page
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * non-lru 페이지들은 isolate_fail로 이동한다. 단 non-lru 페이지들 중
+ * non-lru movable 페이지는 isolate 시도를 한다. 
+ */
 		if (!PageLRU(page)) {
 			/*
 			 * __PageMovable can return false positive so we need
@@ -1206,6 +1265,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * so avoid taking lru_lock and isolating it unnecessarily in an
 		 * admittedly racy check.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * pinned anon 페이지인 경우 isolate_fail로 이동한다.
+ * 참조카운터(_count)가 매핑카운터(_mapcount)보다 큰 경우 pinned 페이지
+ */
 		if (!page_mapping(page) &&
 		    page_count(page) > page_mapcount(page))
 			goto isolate_fail;
@@ -1214,6 +1278,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * Only allow to migrate anonymous pages in GFP_NOFS context
 		 * because those do not depend on fs locks.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * FS(file system)를 이용한 reclaim이 허용되지 않았기 때문에 파일 매핑된 페이지는
+ * isolate_fail로 이동한다.
+ */
 		if (!(cc->gfp_mask & __GFP_FS) && page_mapping(page))
 			goto isolate_fail;
 
@@ -1222,12 +1291,28 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		 * sure the page is not being freed elsewhere -- the
 		 * page release code relies on it.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 페이지에 대한 참조 카운터를 획득한다. 만일 실패하는 경우 isolate_fail로 
+ * 이동한다.
+ */
 		if (unlikely(!get_page_unless_zero(page)))
 			goto isolate_fail;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * lru 페이지가 migrate가 가능한 상태가 아니면 isolate_fail_put으로 이동한다.
+ */
 		if (!__isolate_lru_page_prepare(page, isolate_mode))
 			goto isolate_fail_put;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * 페이지를 lru 리스트에서 다른 리스트로 이동하기 위해 lru 플래그를 클리어한다.
+ * lru 리스트 관리를 받지 않는다는 의미이다.
+ * LRU 플래그를 제거하는 시점에서 이미 다른 cpu에서 LRU 플래그를 제거한 경우
+ * isolate_fail_put으로 이동한다.
+ */
 		/* Try isolate the page */
 		if (!TestClearPageLRU(page))
 			goto isolate_fail_put;
@@ -1235,6 +1320,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		lruvec = mem_cgroup_page_lruvec(page);
 
 		/* If we already hold the lock, we can skip some rechecking */
+/*
+ * IAMROOT, 2022.03.26: 
+ * lock건 lurvec의 위치가 동일하지 않은 경우 다시 lock을 획득하고 획득한 memcg
+ * 위치를 locked에 갱신한다.
+ */
 		if (lruvec != locked) {
 			if (locked)
 				unlock_page_lruvec_irqrestore(locked, flags);
@@ -1245,6 +1335,12 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			lruvec_memcg_debug(lruvec, page);
 
 			/* Try get exclusive access under lock */
+/*
+ * IAMROOT, 2022.03.26: 
+ * lock을 걸고 확인해본다. 누군가 먼저 해당 진행하는 블럭에 skip 비트를 
+ * 먼저 설정해두었는지.. 만일 누군가 먼저 설정한 경우 현재 루틴은 
+ * 진행을 포기하기 위해 isolate_abort로 이동한다.
+ */
 			if (!skip_updated) {
 				skip_updated = true;
 				if (test_and_set_skip(cc, page, low_pfn))
@@ -1256,6 +1352,11 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			 * and it's on LRU. It can only be a THP so the order
 			 * is safe to read and it's 0 for tail pages.
 			 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * alloc_contig_range()로 호출하지 않은 일반적인 할당 시 compound 페이지는
+ * lru로 되돌리기 위해 lru 플래그를 설정하고 isolate_fail_put으로 이동한다.
+ */
 			if (unlikely(PageCompound(page) && !cc->alloc_contig)) {
 				low_pfn += compound_nr(page) - 1;
 				SetPageLRU(page);
@@ -1268,12 +1369,20 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			low_pfn += compound_nr(page) - 1;
 
 		/* Successfully isolated */
+/*
+ * IAMROOT, 2022.03.26: 
+ * lruvec 리스트에서 현재 페이지를 분리한다.
+ */
 		del_page_from_lru_list(page, lruvec);
 		mod_node_page_state(page_pgdat(page),
 				NR_ISOLATED_ANON + page_is_file_lru(page),
 				thp_nr_pages(page));
 
 isolate_success:
+/*
+ * IAMROOT, 2022.03.26: 
+ * cc->migratepages 리스트에 분리한 페이지를 추가한다.
+ */
 		list_add(&page->lru, &cc->migratepages);
 isolate_success_no_list:
 		cc->nr_migratepages += compound_nr(page);
@@ -1285,6 +1394,11 @@ isolate_success_no_list:
 		 * or a lock is contended. For contention, isolate quickly to
 		 * potentially remove one source of contention.
 		 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 1 페이지 블럭 전체를 isloation하지 않았어도 32개 이상의 페이지를 isolation
+ * 한 경우 rescan 요구와 contended가 없는 상황이면 중단한다.
+ */
 		if (cc->nr_migratepages >= COMPACT_CLUSTER_MAX &&
 		    !cc->rescan && !cc->contended) {
 			++low_pfn;
@@ -1300,6 +1414,13 @@ isolate_fail_put:
 			locked = NULL;
 		}
 		put_page(page);
+
+/*
+ * IAMROOT, 2022.03.26: 
+ * isolate_fail: 레이블에서는 isolate가 실패했을 때 이동되어지는 곳이다.
+ * 에러가 없으면 당연히 다음 page를 계속하고, 만일 에러 발생시 skip 할지
+ * 여부에 따라 종료될 수 있다.
+ */
 
 isolate_fail:
 		if (!skip_on_failure && ret != -ENOMEM)
@@ -1333,6 +1454,10 @@ isolate_fail:
 			break;
 	}
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * 1페이지 블럭안에서 루프를 다 돌고 종료하였다.
+ */
 	/*
 	 * The PageBuddy() check could have potentially brought us outside
 	 * the range to be scanned.
@@ -1358,6 +1483,13 @@ isolate_abort:
 	 * there were no pages isolated in the block or if the block is
 	 * rescanned twice in a row.
 	 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 마지막 종료하였고, isolate 페이지가 없거나 rescan 요구가 있었으면
+ * 다음 블럭위치부터 시작하도록 캐시에 기록한다.
+ * 또한 valid 페이지에 대한 skip비트가 설정되지 않은 경우 valid 페이지가 
+ * 속한 블럭의 skip 비트를 설정한다.
+ */
 	if (low_pfn == end_pfn && (!nr_isolated || cc->rescan)) {
 		if (valid_page && !skip_updated)
 			set_pageblock_skip(valid_page);
@@ -1497,6 +1629,11 @@ freelist_scan_limit(struct compact_control *cc)
 /*
  * Test whether the free scanner has reached the same or lower pageblock than
  * the migration scanner, and compaction should thus terminate.
+ */
+/*
+ * IAMROOT, 2022.03.26: 
+ * migrate 스캐너와 free 스캐너가 만나 교차하는 순간인지,
+ * 즉 스캐닝 종료인지 여부를 반환한다.
  */
 static inline bool compact_scanners_met(struct compact_control *cc)
 {
@@ -2187,8 +2324,11 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
  */
 /*
  * IAMROOT, 2022.03.19:
- * - compact_memory로 진입할때는 order 입력없이 들어온다. proc을
- *   통해서 들어왔는지 확인하는것.(manual compaction)
+ * - 다음과 같은 compaction 호출에서 order 입력없이 들어온다.
+ *   1) manual compaction:  
+ *   2) pro-active compaction:
+ *   3) alloc_contig_range():
+ *  그외 direct compaction과 kcompactd의 경우 order가 지정된다.
  */
 static inline bool is_via_compact_memory(int order)
 {
@@ -2280,6 +2420,11 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 	int ret;
 
 	/* Compaction run completes if the migrate and free scanner meet */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 해당 zone 전체 블럭에 대해 스캐닝이 완료했으면
+ * 캐시들을 존의 가장 최하측및 상위 블럭으로 지정한다.
+ */
 	if (compact_scanners_met(cc)) {
 		/* Let the next compaction start anew. */
 		reset_cached_positions(cc->zone);
@@ -2293,6 +2438,11 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		if (cc->direct_compaction)
 			cc->zone->compact_blockskip_flush = true;
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * zone의 전체에 대해 진행을 하도록 시작하여 끝까지 완료한 경우 complete로 
+ * 끝나고, 그렇지 않고 중간에 시작한 경우는 partial skipped로 끝난다.
+ */
 		if (cc->whole_zone)
 			return COMPACT_COMPLETE;
 		else
@@ -2318,6 +2468,10 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		goto out;
 	}
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * order가 지정되지 않는 compaction 요청들의 경우이다.
+ */
 	if (is_via_compact_memory(cc->order))
 		return COMPACT_CONTINUE;
 
@@ -2327,6 +2481,10 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 	 * migration source is unmovable/reclaimable but it's not worth
 	 * special casing.
 	 */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 지금 진행중인 migrate 스캐너 위치가 페이지 블럭단위의 시작이 아닌 경우이다.
+ */
 	if (!IS_ALIGNED(cc->migrate_pfn, pageblock_nr_pages))
 		return COMPACT_CONTINUE;
 

@@ -421,10 +421,11 @@ struct lruvec {
 
 /*
  * IAMROOT, 2022.03.26: 
- * ISOLATE_UNMAPPED:
- * ISOLATE_ASYNC_MIGRATE: sync migrate 이외의 모든 경우
- * ISOLATE_UNEVICTABLE: sysctl_compact_unevictable_allowed 설정값에 따라 결정
- *                      rt 커널의 경우 default=0, 그 외의 경우 default=1
+ * 아래 3가지 요청은 각 비트별로 중북되어 요청될 수 있다.
+ * 1) ISOLATE_UNMAPPED:	  umapped only 요청인 경우
+ * 2) ISOLATE_ASYNC_MIGRATE: sync migrate 이외의 모든 경우
+ * 3) ISOLATE_UNEVICTABLE:   sysctl_compact_unevictable_allowed 설정값에 따라 결정
+ *                           rt 커널의 경우 default=0, 그 외의 경우 default=1
  */
 
 /* Isolate unmapped pages */

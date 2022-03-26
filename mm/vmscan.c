@@ -1875,6 +1875,19 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
  *
  * returns true on success, false on failure.
  */
+/*
+ * IAMROOT, 2022.03.26: 
+ * 5개의 lru list중 4개를 사용하고, 마지막 unevictable lru list는 조건에 따라
+ * 사용을 하는데 다음과 같은 페이지들은 제외한다.
+ * 1) async mode로 수행시 기록 중인 페이지(write-back)
+ * 2)       "             dirty 상태의 페이지가 lock을 획득하지 못한 경우 
+ * 3)       "             dirty 상태의 파일 매핑된 페이지가 
+ *                        ops->migratepage 콜백구현이 없을때
+ *                        (참고: ext2등의 일반적인 파일시스템에는 구현되어 있음)
+ * 
+ * 4) unmapped 페이지들만 요청한 경우(ISOLATE_UNMAPPED) 해당 페이지가 파일 매핑된 
+ *    페이지인 경우
+ */
 bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
 {
 	/* Only take pages on the LRU. */

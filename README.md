@@ -201,6 +201,10 @@
 - alloc_page() 진행중 ... get_page_from_freelist()
 
 ### 43주차
-- 2022.03.19, Zoom 온라인(7명 참석)
+- 2022.03.19, Zoom 온라인(8명 참석)
+- alloc_page() 진행중 ... direct-compaction
+
+### 44주차
+- 2022.03.26, Zoom 온라인(9명 참석)
 - alloc_page() 진행중 ... direct-compaction
 

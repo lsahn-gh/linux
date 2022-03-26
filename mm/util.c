@@ -705,6 +705,12 @@ struct anon_vma *page_anon_vma(struct page *page)
 	return __page_rmapping(page);
 }
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * 해당 페이지가 파일 매핑된 페이지인경우 해당 address_space를 반환한다..
+ * 1) swap 캐시된 페이지
+ * 2) 일반 페이지(파일) 캐시
+ */
 struct address_space *page_mapping(struct page *page)
 {
 	struct address_space *mapping;
@@ -722,6 +728,10 @@ struct address_space *page_mapping(struct page *page)
 		return swap_address_space(entry);
 	}
 
+/*
+ * IAMROOT, 2022.03.26: 
+ * anon 페이지들은 address_space를 가지지 않는다.
+ */
 	mapping = page->mapping;
 	if ((unsigned long)mapping & PAGE_MAPPING_ANON)
 		return NULL;
