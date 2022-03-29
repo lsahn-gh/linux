@@ -1165,6 +1165,11 @@ vm_fault_t finish_mkwrite_fault(struct vm_fault *vmf);
 						NODES_PGOFF : ZONES_PGOFF)
 #endif
 
+/*
+ * IAMROOT, 2022.03.28:
+ * - zone + node( flags & (ZONE_MASK | NODE_MASK)) 값을 zone id라는 걸로
+ *   명명한것으로 보인다.
+ */
 #define ZONEID_PGSHIFT		(ZONEID_PGOFF * (ZONEID_SHIFT != 0))
 
 /*
@@ -1416,6 +1421,12 @@ static inline bool page_needs_cow_for_dma(struct vm_area_struct *vma,
  * node id available in page flags.
  * We only guarantee that it will return the same value for two combinable
  * pages in a zone.
+ */
+/*
+ * IAMROOT, 2022.03.28:
+ * - set_page_links에서 set_page_zone, set_page_node를 통해서 node, zone을
+ *   각각 입력했는데 아래 함수를 사용하면 두값이 한번에 뽑혀나온다.
+ *   zone + node를 zone_id라는 명칭으로 사용한다.
  */
 static inline int page_zone_id(struct page *page)
 {

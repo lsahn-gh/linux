@@ -2096,8 +2096,28 @@ void __init memblock_free_pages(struct page *page, unsigned long pfn,
  */
 /*
  * IAMROOT, 2022.03.26: 
- * [start_pfn, end_pfn)의 페이지가 zone에 속한 online page인지 여부를 검사하여
- * 그러한 경우 start_page를 반환하고, 아니면 NULL을 반환한다.
+ * -papago
+ *  [start_ fn , end_pfn]의 간격으로 지정된 페이지 블록 전체
+ *  (또는 그 서브셋)가 유효하고, 같은 존내에 있는 것을 확인한 후,
+ *  프리 압축 스캐너의 이행으로 스캔 합니다.
+ *
+ * start_pfn의 구조 페이지 포인터를 반환하거나 체크가 통과되지 않은 경우
+ * NULL을 반환합니다.
+ *
+ * 일부 구성에서는 node0 node1 node0과 같은 설정을 할 수 있습니다.
+ * 즉, 페이지의 존 범위 내의 모든 페이지가 단일 존에 속하지 않을 수 있습니다.
+ * node0과 node1 사이의 경계는 단일 페이지 블록 내에서 발생할 수 있지만
+ * node0 node1 node0은 단일 페이지 블록 내에서 인터리빙할 수 없다고
+ * 가정합니다. 따라서 페이지 블록의 첫 번째 페이지와 마지막 페이지를 확인하고
+ * 페이지 블록의 각 페이지를 확인하지 않는 것으로 충분합니다.
+ *
+ * - [start_pfn, end_pfn)의 페이지가 zone에 속한 online page인지 여부를
+ *   검사하여 그러한 경우 start_page를 반환하고, 아니면 NULL을 반환한다.
+ * - @start_pfn ~ @end_pfn이 online page + @zone에 소속되었는지 확인할려면
+ *   1. @start_pfn, @end_pfn 둘다 vaild page여야 된다.
+ *   2. @start_pfn, @end_pfn 둘다 online page여야 된다.
+ *   3. @start_pfn이 @zone에 속하며 @end_pfn과 같은 zone id를 갖아야된다.
+ * - ps) zone id = zone + node (page_zone_id 주석 참고)
  */
 struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
 				     unsigned long end_pfn, struct zone *zone)
@@ -2111,6 +2131,12 @@ struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
 	if (!pfn_valid(start_pfn) || !pfn_valid(end_pfn))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.03.28:
+ * - @start_pfn, @end_pfn은 pageblock단위고, page는
+ *   section단위로 online이 되기때문에 @start_pfn만 check하면 @end_pfn도
+ *   online일 것으로 예상할수있을 것이다.
+ */
 	start_page = pfn_to_online_page(start_pfn);
 	if (!start_page)
 		return NULL;

@@ -257,15 +257,21 @@ static bool compaction_restarting(struct zone *zone, int order)
 		zone->compact_considered >= 1UL << zone->compact_defer_shift;
 }
 
+/* Returns true if the pageblock should be scanned for pages to isolate. */
 /*
  * IAMROOT, 2022.03.26: 
  * ignore_skip_hint를 사용하기 전에는 해당 페이지가 소속된 페이지블럭의
  * skip 비트를 확인하여 isolation 적합여부를 판단한다.
+ * @return @cc->ignore_skip_hint가 true면 skip을 확인 안하겠다는 것이므로
+ *		   skip 확인없이 true, skip이 true면 false, skip이 false면 true
  */
-/* Returns true if the pageblock should be scanned for pages to isolate. */
 static inline bool isolation_suitable(struct compact_control *cc,
 					struct page *page)
 {
+/*
+ * IAMROOT, 2022.03.28:
+ * - full scan이면 true로 set됬었을 것이다.
+ */
 	if (cc->ignore_skip_hint)
 		return true;
 
@@ -616,7 +622,10 @@ static void update_cached_migrate(struct compact_control *cc, unsigned long pfn)
 	struct zone *zone = cc->zone;
 
 	pfn = pageblock_end_pfn(pfn);
-
+/*
+ * IAMROOT, 2022.03.29:
+ * - alloc_contig_range요청일때만 true가 되는듯하다.
+ */
 	/* Set for isolation rather than compaction */
 	if (cc->no_set_skip_hint)
 		return;
@@ -1108,7 +1117,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 /*
  * IAMROOT, 2022.03.26: 
  * 장시간 isolation 하는 경우이므로 여기에도 preemption point를 호출한다.
- * 또한 중간 중간 insterrupt가 진입할 수 있도록 lock을 한번씩 풀어준다.
+ * 또한 중간 중간 interrupt가 진입할 수 있도록 lock을 한번씩 풀어준다.
  */
 		if (!(low_pfn % SWAP_CLUSTER_MAX)) {
 			if (locked) {
@@ -1558,6 +1567,27 @@ isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
 #endif /* CONFIG_COMPACTION || CONFIG_CMA */
 #ifdef CONFIG_COMPACTION
 
+/*
+ * IAMROOT, 2022.03.29:
+ * - migrate에 적절하다(true)
+ *   persistent block이 아니다.
+ *   -> 연속되지 않았으니 migrate할만하다.
+ *   mode가 sync이다.
+ *   -> 즉 background 동작이 아니다.
+ *   direct_compaction이 아니다.
+ *   -> 즉 user 요청이거나 backgroup다. 무조건 해야된다.
+ *   요청된 mt와 @page의 pageblock mt가 같다(movable일경우 cma포함)
+ *
+ * - migarte에 부적절하다.(false)
+ *   persistent block이다.
+ *   -> 길게 연속되있는걸 굳이 옮기진 않는다는것.
+ *   mode가 async이며 direct_compaction이 true이며, 요청 mt와 pageblock의 mt
+ *   가 다르다
+ *   -> asnyc direct_compaction을 asnyc direct_compaction이라고 묶어 부르는듯
+ *   싶다. asnc에 대해서는 movable 페이지만으로 제한한다. movable page가
+ *   unmovable page를 포함할 가능성이 낮다는 가정하에 지연 시간을 줄이기
+ *   위한 heuristic이라고 한다.(Git blame참고)
+ */
 static bool suitable_migration_source(struct compact_control *cc,
 							struct page *page)
 {
@@ -1572,7 +1602,7 @@ static bool suitable_migration_source(struct compact_control *cc,
 
 /*
  * IAMROOT, 2022.03.26: 
- * sync가 아닌 경우와 direct-compaction이 아닌 경우(manual-compaction, i
+ * async가 아닌 경우와 direct-compaction이 아닌 경우(manual-compaction, i
  * kcompactd를 사용한 백그라운드 compaction)인 경우 무조건 true를 반환
  */
 	if ((cc->mode != MIGRATE_ASYNC) || !cc->direct_compaction)
@@ -1580,7 +1610,7 @@ static bool suitable_migration_source(struct compact_control *cc,
 
 /*
  * IAMROOT, 2022.03.26: 
- * async이면서 dirct-compaction의 경우에는 해당 페이지 블럭이 
+ * sync이면서 dirct-compaction의 경우에는 해당 페이지 블럭이 
  * 요청한 migratetype인 경우에만 true를 반환한다. 
  * (단 movable 할당 요청인 경우 cma 블럭도 포함)
  */
@@ -1618,6 +1648,21 @@ static bool suitable_migration_target(struct compact_control *cc,
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.03.28:
+ *
+ * fast_search_fail return
+ * 0                33
+ * 1                17
+ * 2                9
+ * 3                5
+ * 4                3
+ * 5                2          
+ * 6                1
+ *
+ * - 이전 fast search 실패 횟수가 많을 수록 freelist iterate 횟수를
+ *   약 절반씩 줄인다.
+ */
 static inline unsigned int
 freelist_scan_limit(struct compact_control *cc)
 {
@@ -2061,6 +2106,15 @@ int sysctl_compact_unevictable_allowed __read_mostly = 0;
 int sysctl_compact_unevictable_allowed __read_mostly = 1;
 #endif
 
+/*
+ * IAMROOT, 2022.03.29:
+ * - @cc->fast_start_pfn이 ULONG_MAX값이 아닐경우 @pfn과 min 비교하여
+ *   update한다.
+ * - compact_zone함수 등에서 @cc->fast_start_pfn이 0으로 초기화되어
+ *   update가능한 상태가 된다.
+ * - reinit_migrate_pfn함수 등에서 @cc->fast_start_pfn이 ULONG_MAX로
+ *   설정되어 update 불가능한 상태가 된다.
+ */
 static inline void
 update_fast_start_pfn(struct compact_control *cc, unsigned long pfn)
 {
@@ -2073,6 +2127,12 @@ update_fast_start_pfn(struct compact_control *cc, unsigned long pfn)
 	cc->fast_start_pfn = min(cc->fast_start_pfn, pfn);
 }
 
+/*
+ * IAMROOT, 2022.03.29:
+ * - @cc가 fast_start_pfn이 설정된 상태에서만 @cc->migrate_pfn을
+ *   fast_start_pfn으로 update하고 fast_start_pfn은 ULONG_MAX로 만들어
+ *   update_fast_start_pfn에서 update되는걸 막는다.
+ */
 static inline unsigned long
 reinit_migrate_pfn(struct compact_control *cc)
 {
@@ -2090,6 +2150,60 @@ reinit_migrate_pfn(struct compact_control *cc)
  * some free pages to reduce the number of pages that need migration
  * before a pageblock is free.
  */
+/*
+ * IAMROOT, 2022.03.28:
+ * - movable freelist에서 compact범위의 12.5 ~ 50% 범위에 대한 freepages를 찾아
+ *   skip bit를 set하고 movable freelist의 tail로 옮겨 놓는다.
+ *   @cc->fast_start_pfn이 찾아진 freepages와 min값으로 비교되 업데이트되며
+ *   만약 실패할시에는 cc->migrate_pfn이 cc->fast_start_pfn으로 update되고,
+ *   cc->fast_start_pfn은 ULONG_MAX으로 되어 향후 update가 안된다.
+ *
+ * --- ex) cc->migrate_pfn = 100, cc->migrate_pfn = 200, 50%의 범위
+ *  cc->fast_search_fail = 0 일때, freepage가 찾아진 경우
+ *
+ * order의 movable freelist에 들어있는 freepage
+ *
+ * 50%의 범위이므로 100 ~ 150까지만 유효하다.
+ * before
+ * +-----+-----+
+ * | idx | pfn |
+ * +-----+-----+
+ * | 0   | 210 |
+ * | 1   | 180 | 
+ * | 2   | 90  |
+ * | 3   | 130 | (100 ~ 150의 범위. tail로 이동)
+ * | 4   | 110 |
+ * | 5   | 120 |
+ * +-----+-----+
+ *
+ * after
+ * +-----+-----+
+ * | idx | pfn |
+ * +-----+-----+
+ * | 0   | 210 |
+ * | 1   | 180 |
+ * | 2   | 90  |
+ * | 3   | 110 |
+ * | 4   | 120 |
+ * | 5   | 130 | (tail로 이동되며 skip이 set되고
+ * +-----+-----+ cc->fast_start_pfn = 130으로 설정된다.)
+ *
+ * ---
+ * - 관련변수
+ *   -- @cc->fast_start_pfn
+ *   0 : 이 함수를 최초에 진입하기전에 0으로 초기화가 되어 진입하게 된다.
+ *   fast_start_pfn이 update가 가능한 상태.
+ *   ULONG_MAX : fast search가 실패했을때 설정되며 마지막 fast_start_pfn이
+ *   cc->migrate_pfn으로 reinit된다. 이렇게 한번이라도 실패를 하고 나서는
+ *   만약 page를찾는데 성공해도 fast_start_pfn이 변경되진 않고
+ *   tail로 이동만 할것이다.
+ *   -- @cc->fast_search_fail
+ *   fast search가 된다면 증가되고 향후에 freelist iter횟수 제한에 사용된다.
+ *   만약 성공한다면 0으로 초기화된다. 
+ *   -- @cc->migrate_pfn
+ *   fase search가 처음으로 실패했을시 가장 최근의 fast_start_pfn으로
+ *   대체 된다.
+ */
 static unsigned long fast_find_migrateblock(struct compact_control *cc)
 {
 	unsigned int limit = freelist_scan_limit(cc);
@@ -2101,6 +2215,10 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 	bool found_block = false;
 
 	/* Skip hints are relied on to avoid repeats on the fast search */
+/*
+ * IAMROOT, 2022.03.28:
+ * - skip을 안하겠다는 의미이므로 첫번째 pfn으로 바로 넘긴다.
+ */
 	if (cc->ignore_skip_hint)
 		return pfn;
 
@@ -2109,6 +2227,12 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 	 * of a pageblock then assume this is a continuation of a previous
 	 * scan restarted due to COMPACT_CLUSTER_MAX.
 	 */
+/*
+ * IAMROOT, 2022.03.28:
+ * - 현재 zone의 start와 일치하지 않고, pageblock의 start pfn도 아니라면
+ *   새로 재계된 scan이라고 생각하여 skip을 안한다.
+ *   (reinit_migrate_pfn을 통해 migrate_pfn이 reinit 된경우등) 
+ */
 	if (pfn != cc->zone->zone_start_pfn && pfn != pageblock_start_pfn(pfn))
 		return pfn;
 
@@ -2126,6 +2250,19 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 	 * reduces the risk that a large movable pageblock is freed for
 	 * an unmovable/reclaimable small allocation.
 	 */
+/*
+ * IAMROOT, 2022.03.28:
+ * - direct compaction가 true(kcompactd or /proc/... 으로 아닌 경우등)
+ *   이면서 UNMOVABLE이나 RECLAIMABLE일 경우 skip을 안한다.
+ *
+ * ---
+ * - direct compaction == false -> komcpacd or /proc/... 의 요청.
+ *   무조건 skip 여부를 확인
+ * - direct compaction == true -> komcpacd or /proc/... 의 요청이 아닐때,
+ *   MOVABLE 에 대해서만 skip 여부를 확인한다.
+ *   skip을 하게되면 큰 block을 사용할수 있는데,
+ *   UNMOVABLE, RECLAIMABLE에 대해서는 꼼꼼하게 page를 다쓰는게 좋기때문이다.
+ */
 	if (cc->direct_compaction && cc->migratetype != MIGRATE_MOVABLE)
 		return pfn;
 
@@ -2135,11 +2272,42 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 	 * within the first eighth to reduce the chances that a migration
 	 * target later becomes a source.
 	 */
+/*
+ * IAMROOT, 2022.03.28:
+ * - 시작 위치가 zone start와 일치할 경우 시작부 50%만 확인.
+ *   그렇지 않을 경우 12.5%( 1 / 2 / 4 => 1 / 8)만 확인.
+ *   (reinit_migrate_pfn을 통해 migrate_pfn이 reinit 된경우등) 
+ */
 	distance = (cc->free_pfn - cc->migrate_pfn) >> 1;
 	if (cc->migrate_pfn != cc->zone->zone_start_pfn)
 		distance >>= 2;
+/*
+ * IAMROOT, 2022.03.28:
+ * - 좁혀진 범위에서는 end pfn을 high_pfn으로 설정.
+ */
 	high_pfn = pageblock_start_pfn(cc->migrate_pfn + distance);
-
+/*
+ * IAMROOT, 2022.03.29:
+ * - movable freelist에서 high_pfn미만 주소의 page이면서 skip bit가 clear인
+ *   page(이미 한번 tail로 보낸 page가 아닌)를 찾는다.
+ *   찾는데 성공한다면 fast search관련 변수를 update한다.
+ *
+ * - 종료조건
+ *   1. order가 PAGE_ALLOC_COSTLY_ORDER 보다 작아진경우
+ *   2. found_block이 true가 된경우
+ *   3. 스캔횟수(nr_scanned)가 limit보다 크거나 같아진경우.
+ *
+ * - limit
+ * fast_search_fail limit
+ * 0                33
+ * 1                17
+ * 2                9
+ * 3                5
+ * 4                3
+ * 5                2          
+ * 6                1
+ *
+ */
 	for (order = cc->order - 1;
 	     order >= PAGE_ALLOC_COSTLY_ORDER && !found_block && nr_scanned < limit;
 	     order--) {
@@ -2153,10 +2321,21 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 
 		spin_lock_irqsave(&cc->zone->lock, flags);
 		freelist = &area->free_list[MIGRATE_MOVABLE];
+/*
+ * IAMROOT, 2022.03.29:
+ * - movable freelist에서 최대 limit만큼 시도하여 high_pfn미만의 주소를 가진,
+ *   skip bit가 clear인 page를 찾는다.
+ *   찾았다면 해당 page를 tail로 보내고 fast search관련 변수를 업데이트
+ *   한후 종료한다.
+ */
 		list_for_each_entry(freepage, freelist, lru) {
 			unsigned long free_pfn;
 
 			if (nr_scanned++ >= limit) {
+/*
+ * IAMROOT, 2022.03.29:
+ * - 제일 마지막 freepage는 tail로 보낸다.
+ */
 				move_freelist_tail(freelist, freepage);
 				break;
 			}
@@ -2169,12 +2348,22 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
 				 * the list assumes an entry is deleted, not
 				 * reordered.
 				 */
+/*
+ * IAMROOT, 2022.03.29:
+ * - skip bit가 있으면 이미 tail로 옮긴 page이므로 pass한다.
+ */
 				if (get_pageblock_skip(freepage))
 					continue;
 
 				/* Reorder to so a future search skips recent pages */
 				move_freelist_tail(freelist, freepage);
-
+/*
+ * IAMROOT, 2022.03.29:
+ * - compact_zone 함수를 통해 현재 함수에 진입한 경우 최초에
+ *   cc->fast_start_pfn은 초기화 됬을 것이다.
+ *   min(free_pfn, cc->fast_start_pfn)으로 업데이트 된다.
+ * - skip bit를 set하고 tail로 옮긴다.
+ */
 				update_fast_start_pfn(cc, free_pfn);
 				pfn = pageblock_start_pfn(free_pfn);
 				cc->fast_search_fail = 0;
@@ -2226,6 +2415,12 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	 * initialized by compact_zone(). The first failure will use
 	 * the lowest PFN as the starting point for linear scanning.
 	 */
+/*
+ * IAMROOT, 2022.03.29:
+ * - compact범위의 12.5~50%내의 범위에서 [PAGE_ALLOC_COSTLY_ORDER, cc->order) 
+ *   의 freelist에서 skip bit가 없던 freepage의 주소를 가져오는걸 시도한다.
+ *   실패하거나 find조건에 안맞다면 cc->migrate_pfn == low_pfn
+ */
 	low_pfn = fast_find_migrateblock(cc);
 	block_start_pfn = pageblock_start_pfn(low_pfn);
 	if (block_start_pfn < cc->zone->zone_start_pfn)
@@ -2236,6 +2431,12 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 	 * the isolation_suitable check below, check whether the fast
 	 * search was successful.
 	 */
+/*
+ * IAMROOT, 2022.03.29:
+ * - fast_find_migrateblock에서 block이 찾아졌다면 cc->fast_search_fail == 0
+ *   이고 low_pfn은 cc->migrate_pfn과 다를것이다. fast find 결과를
+ *   저장해놓는것이다.
+ */
 	fast_find_block = low_pfn != cc->migrate_pfn && !cc->fast_search_fail;
 
 	/* Only scan within a pageblock boundary */
@@ -2280,6 +2481,12 @@ static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 		 * before making it "skip" so other compaction instances do
 		 * not scan the same block.
 		 */
+/*
+ * IAMROOT, 2022.03.28:
+ * - 제일 처음 iterate에서 fast_find_block이 true일수있다. 이 if문은
+ *   동작을 안시킬것이다. 두번째 iterate부터는 fast_find_block은 무조건 false
+ *   가 되므로 isolation_suitable을 확인할것이다.
+ */
 		if (IS_ALIGNED(low_pfn, pageblock_nr_pages) &&
 		    !fast_find_block && !isolation_suitable(cc, page))
 			continue;
@@ -2806,12 +3013,18 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * by ensuring the values are within zone boundaries.
 	 */
 /*
+ * IAMROOT, 2022.03.29:
+ * - isolate_migratepages함수에서 fast_find_migrateblock를 할때
+ *   update_fast_start_pfn를 통하여
+ *   가장 주소가 낮은 fast_start_pfn을 기록하기 위해 0으로 초기화해놓는다.
+ */
+	cc->fast_start_pfn = 0;
+/*
  * IAMROOT, 2022.03.26: 
  * while_zone: 
  *    1=zone의 처음 부터 시작한다.
  *    0=기존에 캐시되어 있던 위치부터 시작한다.
  */
-	cc->fast_start_pfn = 0;
 	if (cc->whole_zone) {
 		cc->migrate_pfn = start_pfn;
 		cc->free_pfn = pageblock_start_pfn(end_pfn - 1);

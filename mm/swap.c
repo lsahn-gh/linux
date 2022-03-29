@@ -589,6 +589,11 @@ static void lru_lazyfree_fn(struct page *page, struct lruvec *lruvec)
  * Either "cpu" is the current CPU, and preemption has already been
  * disabled; or "cpu" is being hot-unplugged, and is already dead.
  */
+/*
+ * IAMROOT, 2022.03.28:
+ * - TODO
+ * - lru memory를 buddy로 돌려보낸다.
+ */
 void lru_add_drain_cpu(int cpu)
 {
 	struct pagevec *pvec = &per_cpu(lru_pvecs.lru_add, cpu);
@@ -695,6 +700,11 @@ void mark_page_lazyfree(struct page *page)
 	}
 }
 
+/*
+ * IAMROOT, 2022.03.28:
+ * - TODO
+ * - lru memory를 buddy로 돌려보낸다.
+ */
 void lru_add_drain(void)
 {
 	local_lock(&lru_pvecs.lock);

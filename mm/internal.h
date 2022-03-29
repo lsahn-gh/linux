@@ -217,6 +217,58 @@ extern struct page *__pageblock_pfn_to_page(unsigned long start_pfn,
 static inline struct page *pageblock_pfn_to_page(unsigned long start_pfn,
 				unsigned long end_pfn, struct zone *zone)
 {
+/*
+ * IAMROOT, 2022.03.28:
+ * - Git blame 참고 / papago
+ *   tree 8a57a26127dc9c96059ceedebc2cf13e5d124e3c
+ *   parent e1409c325fdc1fef7b3d8025c51892355f065d15
+ *
+ *   mm/compaction: speed up pageblock_pfn_to_page() when zone is contiguous.
+ *   There is a performance drop report due to hugepage allocation and in
+ *   there half of cpu time are spent on pageblock_pfn_to_page() in
+ *   compaction [1].
+ *
+ *   In that workload, compaction is triggered to make hugepage but most of
+ *   pageblocks are un-available for compaction due to pageblock type and
+ *   skip bit so compaction usually fails. Most costly operations in this
+ *   case is to find valid pageblock while scanning whole zone range.
+ *   To check if pageblock is valid to compact, valid pfn within pageblock is
+ *   required and we can obtain it by calling pageblock_pfn_to_page().
+ *   This function checks whether pageblock is in a single zone and return
+ *   valid pfn if possible. Problem is that we need to check it every time
+ *   before scanning pageblock even if we re-visit it and this turns out to
+ *   be very expensive in this workload.
+ *
+ *   Although we have no way to skip this pageblock check in the system where
+ *   hole exists at arbitrary position, we can use cached value for zone
+ *   continuity and just do pfn_to_page() in the system where hole doesn't
+ *   exist.  This optimization considerably speeds up in above workload.
+ *
+ * ---
+ *
+ *  mm/compaction: 존이 연속된 경우 pageblock_pfn_to_page() 속도를 높입니다.
+ *
+ * 페이지 할당이 크기 때문에 퍼포먼스가 저하된 보고서가 있으며, 이 보고서에서는
+ * CPU 시간의 절반이 압축으로 pageblock_pfn_to_page()에 소비됩니다 [1].
+ *
+ * 이 워크로드에서는 큰 페이지를 만들기 위해 압축이 트리거되지만 대부분의
+ * 페이지 블록은 페이지 블록 유형과 건너뛰기 비트로 인해 압축에 사용할 수
+ * 없기 때문에 압축이 실패합니다. 이 경우 가장 비용이 많이 드는 작업은
+ * 존 범위 전체를 스캔하면서 유효한 페이지 블록을 찾는 것입니다. 페이지 블록이
+ * 압축에 유효한지 여부를 확인하려면 페이지 블록 내의 유효한 pfn이 필요하며
+ * pageblock_pfn_to_page()를 호출하여 얻을 수 있습니다. 이 함수는
+ * 페이지 블록이 단일 존 내에 있는지 확인하고 가능하면 유효한 pfn을 반환합니다.
+ * 문제는 다시 방문하더라도 페이지 블록을 스캔하기 전에 매번 확인해야 하고,
+ * 이 작업 부하에서 비용이 많이 든다는 것입니다.
+ *
+ * 홀이 임의의 위치에 있는 시스템에서는 이 페이지 블록체크를 생략할 수 없지만
+ * 존의 연속성에 캐시된 값을 사용하여 홀이 존재하지 않는 시스템에서는
+ * pfn_to_page()를 실행할 수 있습니다. 이러한 최적화를 통해 위의 워크로드에서
+ * 속도가 크게 향상됩니다.
+ *
+ * - 대략 hole이 없는 system에서는 zone->contiguous가 true가 될수 있으며
+ *   이 경우 즉시 pfn_to_page로 확인이 가능하다는 뜻인듯 싶다.
+ */
 	if (zone->contiguous)
 		return pfn_to_page(start_pfn);
 
@@ -270,11 +322,33 @@ struct compact_control {
 	 * isolate_migratepages_block will update the value to the next pfn
 	 * after the last isolated one.
 	 */
+/*
+ * IAMROOT, 2022.03.29:
+ * - migrate_pfn
+ *   compact의 start pfn. compact범위가 정해지면 migrate_pfn이 정해지는데,
+ *   여기서 한번더 fast_find_migrateblock을 통해 fast search가 실패한다면
+ *   가장 최근 fast_start_pfn으로 migrate_pfn이 update되며 줄어들어 범위가
+ *   줄어들수있다.
+ */
 	unsigned long migrate_pfn;
+/*
+ * IAMROOT, 2022.03.29:
+ * - fast_find_migrateblock에서 migrate_pfn을 갱신하기 위한 임시변수.
+ *   fast search를 한다면 0, 이후 fast search가 실패한다면 ULONG_MAX로
+ *   되서 향후 udpate를 막는다.
+ */
 	unsigned long fast_start_pfn;	/* a pfn to start linear scan from */
 	struct zone *zone;
+/*
+ * IAMROOT, 2022.03.29:
+ * - 총 freelist scan 횟수가 저장된다.
+ */
 	unsigned long total_migrate_scanned;
 	unsigned long total_free_scanned;
+/*
+ * IAMROOT, 2022.03.29:
+ * - fast_find_migrateblock에서 freelist scan횟수를 결정한다.
+ */
 	unsigned short fast_search_fail;/* failures to use free list searches */
 	short search_order;		/* order to start a fast search at */
 	const gfp_t gfp_mask;		/* gfp mask of a direct compactor */

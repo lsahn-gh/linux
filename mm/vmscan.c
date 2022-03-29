@@ -1887,6 +1887,32 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
  * 
  * 4) unmapped 페이지들만 요청한 경우(ISOLATE_UNMAPPED) 해당 페이지가 파일 매핑된 
  *    페이지인 경우
+ *
+ * --- memory 측면에서 disk로부터 file을 읽게되는 큰 그림
+ *
+ * - open/read/write syscall 호출시
+ *
+ *            page cache 사용         anon memory 사용
+ *          +--------------+   +-------------------------+
+ *          |              |   |                 syscall |
+ *          |              |   |                 +-----+ |
+ * +----+   |+------------+|   |+-----------+    |open | |
+ * |disk| =>|| file cache || =>||buffer     | => |read | |
+ * +----+   |+------------+|   |+-----------+    |write| |
+ *          |              |   |                 +-----+ |
+ *          +--------------+   +-------------------------+
+ *
+ * - mmap 사용시
+ *
+ *           pinned page     vm
+ *          +-----------+    +-----------------------+
+ *          |syscall    |    | mmap 요청 인자에 따른 |
+ * +----+   |+----+     |    | vm mapping 주소 연결  |
+ * |disk| =>||mmap|     | => |                       |
+ * +----+   |+----+     |    |                       |
+ *          +-----------+    +-----------------------+
+ *                           이렇게 연결(mmapping)될경우 fs에서 migrate call
+ *                           구현이 없으면 migrate 할수 없다.
  */
 bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
 {
