@@ -171,6 +171,14 @@ static inline int page_ref_dec_return(struct page *page)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.03.30:
+ * 1. @page의 참조카운터가 처음부터 @u인경우
+ *  -> add를 안하고 @return success
+ *
+ * 2. @page의 참조카운터가 @u이 아닌 경우
+ *  -> add @nr을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
+ */
 static inline int page_ref_add_unless(struct page *page, int nr, int u)
 {
 	int ret = atomic_add_unless(&page->_refcount, nr, u);

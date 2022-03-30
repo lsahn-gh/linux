@@ -774,6 +774,14 @@ static inline int put_page_testzero(struct page *page)
  * This can be called when MMU is off so it must not access
  * any of the virtual mappings.
  */
+/*
+ * IAMROOT, 2022.03.30:
+ * 1. @page의 참조카운터가 처음부터 0인경우
+ *  -> add를 안하고 @return success
+ *
+ * 2. @page의 참조카운터가 0이 아닌 경우
+ *  -> add 1을 하고 난 결과값이 0인 경우 @return sucess, 아니면 @return false
+ */
 static inline int get_page_unless_zero(struct page *page)
 {
 	return page_ref_add_unless(page, 1, 0);

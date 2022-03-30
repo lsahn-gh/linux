@@ -58,6 +58,10 @@
 
 #include "internal.h"
 
+/*
+ * IAMROOT, 2022.03.30:
+ * - @page에 lock을 걸고 isolate를 수행한다.
+ */
 int isolate_movable_page(struct page *page, isolate_mode_t mode)
 {
 	struct address_space *mapping;
@@ -71,6 +75,11 @@ int isolate_movable_page(struct page *page, isolate_mode_t mode)
 	 * the put_page() at the end of this block will take care of
 	 * release this page, thus avoiding a nasty leakage.
 	 */
+/*
+ * IAMROOT, 2022.03.30:
+ * - isolate를 위해 즉 참조를 들어가는데 만약 refcount가 0이었다면
+ *   해당 page는 누군가에 의해 free 되버린거니 실패로 빠져나간다.
+ */
 	if (unlikely(!get_page_unless_zero(page)))
 		goto out;
 
@@ -79,6 +88,11 @@ int isolate_movable_page(struct page *page, isolate_mode_t mode)
 	 * assumes anybody doesn't touch PG_lock of newly allocated page
 	 * so unconditionally grabbing the lock ruins page's owner side.
 	 */
+/*
+ * IAMROOT, 2022.03.30:
+ * - 이미 이 함수를 진입하기전에 peek을 했거나 무조건 isolate 가능하겠다고
+ *   생각을 하고 들어왔지만 다시한번 더 확인해본다.
+ */
 	if (unlikely(!__PageMovable(page)))
 		goto out_putpage;
 	/*
@@ -92,21 +106,41 @@ int isolate_movable_page(struct page *page, isolate_mode_t mode)
 	 * lets be sure we have the page lock
 	 * before proceeding with the movable page isolation steps.
 	 */
+/*
+ * IAMROOT, 2022.03.30:
+ * - page lock을 시도
+ */
 	if (unlikely(!trylock_page(page)))
 		goto out_putpage;
-
+/*
+ * IAMROOT, 2022.03.30:
+ * - 실제 movable이 가능한 page인지
+ * - 이미 isolate가 됬는지 다시 한번 peek
+ */
 	if (!PageMovable(page) || PageIsolated(page))
 		goto out_no_isolated;
 
 	mapping = page_mapping(page);
 	VM_BUG_ON_PAGE(!mapping, page);
 
+/*
+ * IAMROOT, 2022.03.30:
+ * - 해당 fs에 맞는 isolate 수행
+ */
 	if (!mapping->a_ops->isolate_page(page, mode))
 		goto out_no_isolated;
 
 	/* Driver shouldn't use PG_isolated bit of page->flags */
 	WARN_ON_ONCE(PageIsolated(page));
+/*
+ * IAMROOT, 2022.03.30:
+ * - isolate가 완료 됬으므로 flag set
+ */
 	__SetPageIsolated(page);
+/*
+ * IAMROOT, 2022.03.30:
+ * - trylock_page와 한쌍. unlock
+ */
 	unlock_page(page);
 
 	return 0;

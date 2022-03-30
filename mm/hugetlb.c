@@ -1735,12 +1735,20 @@ out_error:
  * transparent huge pages.  See the PageTransHuge() documentation for more
  * details.
  */
+/*
+ * IAMROOT, 2022.03.30:
+ * - @page가 husge page인지를 확인한다.
+ */
 int PageHuge(struct page *page)
 {
 	if (!PageCompound(page))
 		return 0;
 
 	page = compound_head(page);
+/*
+ * IAMROOT, 2022.03.30:
+ * - set_compound_page_dtor에서 설정됬었다.
+ */
 	return page[1].compound_dtor == HUGETLB_PAGE_DTOR;
 }
 EXPORT_SYMBOL_GPL(PageHuge);

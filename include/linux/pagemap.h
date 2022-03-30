@@ -609,6 +609,10 @@ extern void unlock_page(struct page *page);
 /*
  * Return true if the page was successfully locked
  */
+/*
+ * IAMROOT, 2022.03.30:
+ * - page lock.
+ */
 static inline int trylock_page(struct page *page)
 {
 	page = compound_head(page);

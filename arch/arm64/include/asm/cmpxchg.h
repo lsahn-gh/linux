@@ -44,6 +44,56 @@
  *   alternative를 할려면 code 크기가 똑같아야되는데 lse code는 실제 명령어가
  *   1줄이므로 4줄로 확장하기위에 nop(3)을 넣은것. nop_lse도 마찬가지로
  *   끝에 dmb가 오므로 공백을 넣기 위함이다.
+ *
+ * -ex) __XCHG_CASE(w,,, 32,,,,,,)
+ *  @x @ptr에 저장할값.
+ *  @return @ptr에 저장된 이전값.
+ *
+ * 1. ldxr을 통해서 @ptr에 exchage lock을 걸면서 @ptr값을 @return에 load한다.
+ * 2. stxr을 하면서 ldxr의 exchage lock이 실패했으면 store를 안하고 ldxr로
+ * 돌아가 다시 exchage lock을 하면서 load를 시도하고, 성공했다면 @x값을 @ptr에
+ * store 한다.
+ *
+ *  static inline u32 __xchg_case_32(u32 x, volatile void *ptr)		\
+ *  {
+ *		u32 ret;
+ *		unsigned long tmp;
+ *
+ *		asm volatile(ARM64_LSE_ATOMIC_INSN(
+ *		"	prfm	pstl1strm, %2\n"
+ *		"1:	ldxr %w0, %2\n"
+ *		"	stxr %w1, %w3, %2\n"
+ *		"	cbnz	%w1, 1b\n"
+ *
+ *		"	swp %w3, %w0, %2\n"
+ *		__nops(3)
+ *		"	" #nop_lse)	
+ *		: "=&r" (ret), "=&r" (tmp), "+Q" (*(u32 *)ptr)
+ *		: "r" (x)
+ *		: cl);
+ *		return ret;
+ *	}
+ *
+ *	%w0 = ret, %w1 = tmp, %2 = ptr, w3 = x
+ *	1:
+ *	ldxr %w0, %2
+ *		-> try_lock(%2)          => try_lock(ptr)
+ *		   %w0 = %2              => ret = *ptr
+ *	stxr w1, w3, %2
+ *		-> if (is_lock_mine(%2)) => is_lock_mine(ptr)
+ *	       {
+ *				*%2 = %3         => *ptr = x
+ *				unlock(%2)       => unlock(ptr)
+ *				%w1 = 0          => tmp = 0
+ *		   } else
+ *		   {
+ *				%w1 = 1 => tmp = 1
+ *		   }
+ *  cbnz %w1, 1b
+ *		-> if (tmp != 0)
+ *			{
+ *				goto 1:
+ *			}
  */
 #define __XCHG_CASE(w, sfx, name, sz, mb, nop_lse, acq, acq_lse, rel, cl)	\
 static inline u##sz __xchg_case_##name##sz(u##sz x, volatile void *ptr)		\

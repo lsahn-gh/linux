@@ -564,6 +564,14 @@ atomic_fetch_add_unless(atomic_t *v, int a, int u)
 	return arch_atomic_fetch_add_unless(v, a, u);
 }
 
+/*
+ * IAMROOT, 2022.03.30:
+ * 1. @*v가 처음부터 @u인경우
+ *  -> add를 안하고 @return success
+ *
+ * 2. @*v가 @u이 아닌 경우
+ *  -> add @a을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
+ */
 static __always_inline bool
 atomic_add_unless(atomic_t *v, int a, int u)
 {

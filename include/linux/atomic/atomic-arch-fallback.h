@@ -983,6 +983,14 @@ arch_atomic_cmpxchg(atomic_t *v, int old, int new)
 #endif /* arch_atomic_try_cmpxchg */
 
 #ifndef arch_atomic_try_cmpxchg
+/*
+ * IAMROOT, 2022.03.30:
+ * - __CMPXCHG_CASE 참고
+ * - @*v가 old와 일치할때만 *new값으로 update한다. 성공했으면 true.
+ *   아니면 @old가 현재 @*v값으로 갱신되며 @return false.
+ * - @*v == old => *v = new로 update. @return true
+ *   @*v != old => *old = *v로 update. @return false.
+ */
 static __always_inline bool
 arch_atomic_try_cmpxchg(atomic_t *v, int *old, int new)
 {
@@ -1167,14 +1175,41 @@ arch_atomic_add_negative(int i, atomic_t *v)
  * Atomically adds @a to @v, so long as @v was not already @u.
  * Returns original value of @v
  */
+/*
+ * IAMROOT, 2022.03.30:
+ * 1. @*v가 처음부터 @u인경우
+ *  -> add를 안하고 @return success
+ *
+ * 2. @*v가 @u이 아닌 경우
+ *  -> add @a를 한 값이 c(old)값과 일치하지 않을때까지 c(old) + a를 더한다.
+ *  old는 매번 add를 시도할때마다 갱신되며 갱신된 old값(add가 된 결과값)
+ *  으로 + a를 다시 시도하는 식으로 진행한다.
+ *
+ * - ex) u == 0, a == 1 일경우
+ *   1. *v == 0인경우
+ *   arch_atomic_try_cmpxchg를 안하고 바로 return
+ *   2. *v == -1이고 중간에 방해없이 add가 된경우
+ *   arch_atomic_try_cmpxchg에서 결과값 c = -1 + 1 = 0 으로 c = 0으로 return된다.
+ *   3. *v == 1이고 중간에 방해없이 add가 된경우
+ *   arch_atomic_try_cmpxchg에서 결과값 c = 1 + 1 = 2 으로 c = 2가 되어
+ *   return된다.
+ */
 static __always_inline int
 arch_atomic_fetch_add_unless(atomic_t *v, int a, int u)
 {
+/*
+ * IAMROOT, 2022.03.30:
+ * - @v에서 c를 읽고 최초에 한번 먼저 @u와 비교해 일치한다면 return u
+ */
 	int c = arch_atomic_read(v);
 
 	do {
 		if (unlikely(c == u))
 			break;
+/*
+ * IAMROOT, 2022.03.30:
+ * - @c(old)값과 @c(old) + a(add값)이 일치하지 않을때까지
+ */
 	} while (!arch_atomic_try_cmpxchg(v, &c, c + a));
 
 	return c;
@@ -1191,6 +1226,14 @@ arch_atomic_fetch_add_unless(atomic_t *v, int a, int u)
  *
  * Atomically adds @a to @v, if @v was not already @u.
  * Returns true if the addition was done.
+ */
+/*
+ * IAMROOT, 2022.03.30:
+ * 1. @*v가 처음부터 @u인경우
+ *  -> add를 안하고 @return success
+ *
+ * 2. @*v가 @u이 아닌 경우
+ *  -> add @a을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
  */
 static __always_inline bool
 arch_atomic_add_unless(atomic_t *v, int a, int u)

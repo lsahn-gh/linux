@@ -116,6 +116,11 @@ static void split_map_pages(struct list_head *list)
 
 #ifdef CONFIG_COMPACTION
 
+/*
+ * IAMROOT, 2022.03.30:
+ * @return 1 movable 가능.
+ * - movable이 실제 가능한지 완전히 확인한다.
+ */
 int PageMovable(struct page *page)
 {
 	struct address_space *mapping;
@@ -1214,6 +1219,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			 * a valid page order. Consider only values in the
 			 * valid order range to prevent low_pfn overflow.
 			 */
+/*
+ * IAMROOT, 2022.03.30:
+ * - unsafe로 가져왔기 때문에 유효한 order 인지만 체크하고 처리한다.
+ */
 			if (freepage_order > 0 && freepage_order < MAX_ORDER)
 				low_pfn += (1UL << freepage_order) - 1;
 			continue;
@@ -1231,6 +1240,7 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
  * IAMROOT, 2022.03.26: 
  * alloc_contig_range()로 할당 요청한 경우가 아니면 THP 또는 hugetlbfs 같은
  *  compound 페이지들은 isolate_fail로 이동한다.
+ *  low_pfn을 compund page의 next page로 설정한다.
  */
 		if (PageCompound(page) && !cc->alloc_contig) {
 			const unsigned int order = compound_order(page);
@@ -1255,6 +1265,12 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			 * __PageMovable can return false positive so we need
 			 * to verify it under page_lock.
 			 */
+/*
+ * IAMROOT, 2022.03.30:
+ * - enum pageflags 위 주석 참고
+ * - __PageMovable을 통하여 non-lru movable page인지 peek한다.
+ * - PageIsolated를 통해여 이미 분리된 page인지 확인한다.
+ */
 			if (unlikely(__PageMovable(page)) &&
 					!PageIsolated(page)) {
 				if (locked) {
@@ -1580,9 +1596,8 @@ isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
  *
  * - migarte에 부적절하다.(false)
  *   persistent block이다.
- *   -> 길게 연속되있는걸 굳이 옮기진 않는다는것.
- *   mode가 async이며 direct_compaction이 true이며, 요청 mt와 pageblock의 mt
- *   가 다르다
+ *   -> 연속되있는걸 굳이 옮기진 않는다는것.
+ *   async direct_compaction이 true이며, 요청 mt와 pageblock의 mt가 다르다
  *   -> asnyc direct_compaction을 asnyc direct_compaction이라고 묶어 부르는듯
  *   싶다. asnc에 대해서는 movable 페이지만으로 제한한다. movable page가
  *   unmovable page를 포함할 가능성이 낮다는 가정하에 지연 시간을 줄이기

@@ -1913,6 +1913,9 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
  *          +-----------+    +-----------------------+
  *                           이렇게 연결(mmapping)될경우 fs에서 migrate call
  *                           구현이 없으면 migrate 할수 없다.
+ * --- lru page
+ * - lru page라는 의미 자체가 이미 할당중인 page이다. migrate 가능한 것들을
+ *   찾는 과정이된다.
  */
 bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
 {

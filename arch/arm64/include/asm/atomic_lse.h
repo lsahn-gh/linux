@@ -436,6 +436,53 @@ static inline s64 __lse_atomic64_dec_if_positive(atomic64_t *v)
  *   동일하면 새로운 값(Xt)을 같은 메모리 주소에 기록한다.
  *   이때 메모리 주소로부터 읽어온 값은 'Xt값 저장 성공 여부'에
  *   상관없이 Xs에 저장하며 이 모든 과정들은 atomic하게 이루어진다.
+ *
+ * ---ex) arch_atomic_cmpxchg
+ *  arch_atomic_cmpxchg(v, old, new)
+ *  -> arch_cmpxchg(&((v)->counter), (old), (new))
+ *    -> __cmpxchg_wrapper(_mb, &((v)->counter), (old), (new)) 
+ *      -> return __cmpxchg_mb(&((v)->counter), (old), (new), sizeof(v->counter))
+ *		  -> return __cmpxchg_case_mb_32(&((v)->counter), old, new)
+ *		    -> __lse_ll_sc_body(_cmpxchg_case_mb_32, &((v)->counter), old, new)
+ *		      -> __lse__cmpxchg_case_mb_32(&((v)-counter), old, new)
+ * --ex) __CMPXCHG_CASE(w,  ,  mb_, 32, al, "memory")
+ *  static __always_inline u32 __lse__cmpxchg_case_mb_32(volatile void *ptr,
+ *														 u32 old, u32 new)
+ * {
+ *		register unsigned long x0 asm ("x0") = (unsigned long)ptr;
+ *		register u32 x1 asm ("x1") = old;
+ *		register u32 x2 asm ("x2") = new;
+ *		unsigned long tmp
+ *		asm volatile(
+ *		".arch_extension lse\n"
+ *		"	mov	%w[tmp], %w[old]\n"
+ *		"	casal %w[tmp], %w[new], %[v]\n"
+ *		"	mov	%w[ret], %w[tmp]"
+ *			: [ret] "+r" (x0), [v] "+Q" (*(unsigned long *)ptr),
+ *			[tmp] "=&r" (tmp)
+ *			: [old] "r" (x1), [new] "r" (x2)
+ *			: cl);
+ *		return x0;
+ *	}
+ *
+ * mov tmp old
+ *	-> tmp = old
+ * casal tmp, new, *ptr
+ *	-> lock()
+ *	   if (*ptr == tmp)
+ *	   {
+ *			tmp = *ptr
+ *			*ptr = new
+ *	   } else
+ *	   {
+ *			tmp = *ptr
+ *	   }
+ *	   unlock()
+ * mov ret tmp
+ * -> ret = tmp
+ *
+ * 즉 old == *ptr 인 경우만 *ptr = new가 되며 return값은 *ptr = new를 하기전
+ * *ptr 값으로 return된다.
  */
 #define __CMPXCHG_CASE(w, sfx, name, sz, mb, cl...)			\
 static __always_inline u##sz						\

@@ -15,6 +15,109 @@
 #endif /* !__GENERATING_BOUNDS_H */
 
 /*
+ * IAMROOT, 2022.03.30:
+ * --- non-lru movable page migration 에 대한 내용중 PG_isolated, PG_movable
+ *  Git blame / papago
+ *   tree 4e3b462d23437d7521081758c2005ae0025978f7
+ *   parent c6c919eb90e021fbcfcbfa9dd3d55930cdbb67f9
+ *
+ * 4. non-lru movable page flags
+ *
+ * There are two page flags for supporting non-lru movable page.
+ *
+ * non-lru movable page를 지원하기 위한 두 개의 페이지 플래그가 있습니다.
+ *
+ * - PG_movable
+ *
+ * Driver should use the below function to make page movable under page_lock.
+ *
+ * void __SetPageMovable(struct page *page, struct address_space *mapping).
+ *
+ * It needs argument of address_space for registering migration family functions
+ * which will be called by VM.Exactly speaking, PG_movable is not a real flag
+ * of struct page. Rather than, VM reuses page->mapping's lower bits to
+ * represent it.
+ *
+ * #define PAGE_MAPPING_MOVABLE 0x2
+ * page->mapping = page->mapping | PAGE_MAPPING_MOVABLE;
+ *
+ * so driver shouldn't access page->mapping directly. Instead, driver should
+ * use page_mapping which mask off the low two bits of page->mapping so it can
+ * get right struct address_space.
+ *
+ * For testing of non-lru movable page, VM supports __PageMovable function.
+ * However, it doesn't guarantee to identify non-lru movable page because
+ * page->mapping field is unified with other variables in struct page. As well,
+ * if driver releases the page after isolation by VM, page->mapping doesn't have
+ * stable value although it has PAGE_MAPPING_MOVABLE(Look at __ClearPageMovable).
+ * But __PageMovable is cheap to catch whether page is LRU or non-lru movable
+ * once the page has been isolated. Because LRU pages never can have
+ * PAGE_MAPPING_MOVABLE in page->mapping. It is also good for just peeking to
+ * test non-lru movable pages before more expensive checking with lock_page in
+ * pfn scanning to select victim.
+ *
+ * For guaranteeing non-lru movable page, VM provides PageMovable function.
+ * Unlike __PageMovable, PageMovable functions validates page->mapping and
+ * mapping->a_ops->isolate_page under lock_page. The lock_page prevents sudden
+ * destroying of page->mapping.
+ *
+ * Driver using __SetPageMovable should clear the flag via __ClearMovablePage
+ * under page_lock before the releasing the page.
+ *
+ * page_lock에서 페이지를 이동하려면 다음 기능을 사용해야 합니다.
+ *
+ *		void __SetPageMovable(struct page *page, struct address_space *mapping)
+ *
+ * VM에서 호출되는 마이그레이션 패밀리 기능을 등록하려면 address_space 인수가
+ * 필요합니다.정확히 말하면, PG_movable은 struct page의 실제 플래그가 아닙니다.
+ * VM은 page->mapping의 하위비트를 재사용하여 나타냅니다.
+ *
+ *		#param PAGE_MAPPING_MOVERABLE 0x2
+ *		page->param = page->paraming | PAGE_MAPPING_MOVABLE;
+*
+ * 따라서 드라이버는 page->mapping에 직접 액세스 할 수 없습니다.
+ * 대신 드라이버는 page_mapping을 사용해야 합니다.page_mapping은 page->mapping의
+ * 하위2비트를 마스크하여 올바른 struct address_space를 얻을 수 있도록 합니다.
+ *
+ * non-lru movable page를 테스트하기 위해 VM은 __PageMovable
+ * 함수를 지원합니다. 단, page->mapping필드는 struct page 내의 다른 변수와
+ * 통일되어 있기 때문에 non-lru movable page를 식별할 수 있는 것은 아닙니다.
+ * 또, 드라이버가 VM에 의해서 페이지를 분리한 후에 페이지를 해방하는 경우,
+ * 페이지 매핑은 PAGE_MAPPING_MOVABLE이 되어 있어도 안정된 값을 가지지 않습니다
+ * (__ClearPageMovable을 참조). 그러나 __PageMovable은 페이지가 분리되면
+ * 페이지가 lru / non-lru movable page인지 파악하는 데 비용이 적게 듭니다.
+ * LRU 페이지의 페이지에는 PAGE_MAPPING_MOVABLE을 사용할 수 없기 때문입니다.
+* 또한 victim을 선택하기 위해 pfn 스캔에서 lock_page를 사용하여 보다 비싼
+* 검사를 하기 전에 non-lru movable page인지 훔쳐보는 것만으로 좋습니다.
+*
+* non-lru page인지 보증하기 위해 VM는 PageMovable 기능을 제공합니다.
+* __PageMovable과 달리 PageMovable 함수는 lock_page에서 page->mapping 및
+* 매핑->a_ops->isolate_page를 검증합니다. lock_page는 페이지 > 매핑이 갑자기
+* 파괴되는 것을 방지합니다.
+*
+* __SetPageMovable을 사용하는 드라이버는 페이지를 해제하기 전에 page_lock
+* 아래의 __ClearMovablePage를 통해 플래그를 클리어해야 합니다.
+ *
+ * - PG_isolated
+ *
+ *   To prevent concurrent isolation among several CPUs, VM marks isolated page
+ *   as PG_isolated under lock_page. So if a CPU encounters PG_isolated non-lru
+ *   movable page, it can skip it. Driver doesn't need to manipulate the flag
+ *   because VM will set/clear it automatically. Keep in mind that if driver
+ *   sees PG_isolated page, it means the page have been isolated by VM so it
+ *   shouldn't touch page.lru field. PG_isolated is alias with PG_reclaim flag
+ *   so driver shouldn't use the flag for own purpose.
+ *
+ *   여러 CPU 간의 동시 분리를 방지하기 위해 VM은 lock_page 아래에 분리된
+ *   페이지를 PG_isolated로 표시합니다. 따라서 CPU에서 PG_solated non-ru
+ *   movable 페이지가 발견되면 CPU는 이 페이지를 건너뛸 수 있습니다.
+ *   VM은 플래그를 자동으로 설정/삭제하므로 드라이버는 플래그를 조작할 필요가
+ *   없습니다. 드라이버가 PG_isolated 페이지를 표시할 경우 VM에 의해 페이지가
+ *   분리되었기 때문에 page.lru 필드를 터치하지 않아야 한다는 것을 의미합니다.
+ *   PG_isolated는 PG_reclaim 플래그가 있는 별칭이므로 운전자는 플래그를
+ *   자신의 목적으로 사용할 수 없습니다.
+ */
+/*
  * Various page->flags bits:
  *
  * PG_reserved is set for special pages. The "struct page" of such a page
@@ -597,6 +700,18 @@ static __always_inline int PageAnon(struct page *page)
 	return ((unsigned long)page->mapping & PAGE_MAPPING_ANON) != 0;
 }
 
+/*
+ * IAMROOT, 2022.03.30:
+ * - non-lru movable page인지를 peek 한다.
+ * - page가 isolate된 상태에서 release되버리면 page->mapping은 안정된값을
+ *   가지지 않는다.(__ClearPageMovable 참고)
+ * - 하지만 lru page에서는 PAGE_MAPPING_MOVABLE을 사용할수 없기 때문에
+ *   isolate가 된 page라면 non-lru movable or lru movable page인지를
+ *   파악하는데 PAGE_MAPPING_MOVABLE만을 검사하면 되므로 적은 비용이 든다.
+ * - pfn scanning을 하면서 비용이 많이드는 lock_page보다 이 함수를 사용하여
+ *   peek 하기에 좋다.
+ * - lock_page를 사용하는 non-lru page 함수는 PageMovable.
+ */
 static __always_inline int __PageMovable(struct page *page)
 {
 	return ((unsigned long)page->mapping & PAGE_MAPPING_FLAGS) ==
@@ -915,7 +1030,11 @@ PAGE_TYPE_OPS(Table, table)
 PAGE_TYPE_OPS(Guard, guard)
 
 extern bool is_free_buddy_page(struct page *page);
-
+/*
+ * IAMROOT, 2022.03.30:
+ * - isolate할시 cpu끼리 같은 page를 중복으로 isolate 안시키기 위한 장치.
+ *   (상당 PG_isolated 주석 참고)
+ */
 __PAGEFLAG(Isolated, isolated, PF_ANY);
 
 /*
