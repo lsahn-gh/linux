@@ -353,6 +353,7 @@ static inline atomic_t *compound_pincount_ptr(struct page *page)
 /*
  * IAMROOT, 2022.03.12:
  * - page가 buddy에 있는경우 : order
+ *          swapcache : entry
  */
 #define page_private(page)		((page)->private)
 

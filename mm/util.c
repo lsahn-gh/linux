@@ -736,6 +736,10 @@ struct address_space *page_mapping(struct page *page)
 	if ((unsigned long)mapping & PAGE_MAPPING_ANON)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.03.31:
+ * - 하위 2bit는 flag로 사용중이므로 제외한 값을 사용한다.
+ */
 	return (void *)((unsigned long)mapping & ~PAGE_MAPPING_FLAGS);
 }
 EXPORT_SYMBOL(page_mapping);

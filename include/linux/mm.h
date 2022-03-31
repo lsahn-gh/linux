@@ -776,11 +776,14 @@ static inline int put_page_testzero(struct page *page)
  */
 /*
  * IAMROOT, 2022.03.30:
+ * - @page의 참조카운터에 add에 성공하면(add 전 or add 후값이 0이 아니면)
+ *   return true. add에 실패하면(전후값이 0이면) return false
+ *
  * 1. @page의 참조카운터가 처음부터 0인경우
- *  -> add를 안하고 @return success
+ *  -> add를 안하고 @return 0(false)
  *
  * 2. @page의 참조카운터가 0이 아닌 경우
- *  -> add 1을 하고 난 결과값이 0인 경우 @return sucess, 아니면 @return false
+ *  -> add 1을 하고 난 결과값이 0인 경우 @return 0(false), 아니면 @return true(1)
  */
 static inline int get_page_unless_zero(struct page *page)
 {

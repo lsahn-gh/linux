@@ -173,11 +173,15 @@ static inline int page_ref_dec_return(struct page *page)
 
 /*
  * IAMROOT, 2022.03.30:
+ * - @page의 참조카운터에 add에 성공하면(add 전 or add 후값이 @u가 아니면)
+ *   return true. add에 실패하면(전후값이 @u이면) return false
+ *
  * 1. @page의 참조카운터가 처음부터 @u인경우
- *  -> add를 안하고 @return success
+ *  -> add를 안하고 @return 0(false)
  *
  * 2. @page의 참조카운터가 @u이 아닌 경우
- *  -> add @nr을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
+ *  -> add @nr을 하고 난 결과값이 @u인 경우 @return 0(false), 아니면
+ *  @return 1(true)
  */
 static inline int page_ref_add_unless(struct page *page, int nr, int u)
 {

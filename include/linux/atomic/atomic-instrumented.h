@@ -566,11 +566,14 @@ atomic_fetch_add_unless(atomic_t *v, int a, int u)
 
 /*
  * IAMROOT, 2022.03.30:
+ * - add에 성공하면(add 전 or add 후값이 @u가 아니면) return true.
+ *   add에 실패하면(전후값이 @u이면) return false
+ *
  * 1. @*v가 처음부터 @u인경우
- *  -> add를 안하고 @return success
+ *  -> add를 안하고 @return false
  *
  * 2. @*v가 @u이 아닌 경우
- *  -> add @a을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
+ *  -> add @a을 하고 난 결과값이 @u인 경우 @return false, 아니면 @return true
  */
 static __always_inline bool
 atomic_add_unless(atomic_t *v, int a, int u)

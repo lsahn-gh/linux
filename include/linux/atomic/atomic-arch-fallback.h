@@ -1177,8 +1177,12 @@ arch_atomic_add_negative(int i, atomic_t *v)
  */
 /*
  * IAMROOT, 2022.03.30:
+ * @return @*v가 @u값인경우 바로 return @*v
+ *         @*v가 @u값이 아닌 경우 @*v + @a
+ * - @*v값이 @u가 아니면 @a를 더한다.
+ *
  * 1. @*v가 처음부터 @u인경우
- *  -> add를 안하고 @return success
+ *  -> add를 안하고 @return @u
  *
  * 2. @*v가 @u이 아닌 경우
  *  -> add @a를 한 값이 c(old)값과 일치하지 않을때까지 c(old) + a를 더한다.
@@ -1229,11 +1233,13 @@ arch_atomic_fetch_add_unless(atomic_t *v, int a, int u)
  */
 /*
  * IAMROOT, 2022.03.30:
+ * - add에 성공하면 return true, @u와 값이 일치하면 return false.
+ *
  * 1. @*v가 처음부터 @u인경우
- *  -> add를 안하고 @return success
+ *  -> add를 안하고 @return false
  *
  * 2. @*v가 @u이 아닌 경우
- *  -> add @a을 하고 난 결과값이 @u인 경우 @return sucess, 아니면 @return false
+ *  -> *v += @a을 하고 난 결과값이 @u인 경우 @return false, 아니면 @return true
  */
 static __always_inline bool
 arch_atomic_add_unless(atomic_t *v, int a, int u)

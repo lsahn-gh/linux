@@ -60,7 +60,8 @@
 
 /*
  * IAMROOT, 2022.03.30:
- * - @page에 lock을 걸고 isolate를 수행한다.
+ * - non-lru movable page에 대해서 해당 page와 연결된 driver가 isolate 를 지원
+ *   하는지 확인하여 가능 하면 @page에 lock을 걸고 isolate를 수행한다.
  */
 int isolate_movable_page(struct page *page, isolate_mode_t mode)
 {
