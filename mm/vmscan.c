@@ -1924,6 +1924,10 @@ bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
 		return false;
 
 	/* Compaction should not handle unevictable pages but CMA can do so */
+/*
+ * IAMROOT, 2022.03.31:
+ * - unevictable page인경우 cma에 한해서 migrate가 가능하다.
+ */
 	if (PageUnevictable(page) && !(mode & ISOLATE_UNEVICTABLE))
 		return false;
 
@@ -1953,6 +1957,12 @@ bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
 			 * the page lock until after the page is removed
 			 * from the page cache.
 			 */
+/*
+ * IAMROOT, 2022.03.31:
+ * - truncate와 race가 될수있기 때문에(Git blame) lock을 한다는 것과
+ *   mapping이 없거나, migrate callback이 있는 page만 block없이 migrate
+ *   수행이 가능하다고 한다.
+ */
 			if (!trylock_page(page))
 				return false;
 

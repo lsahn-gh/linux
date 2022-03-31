@@ -426,6 +426,34 @@ struct lruvec {
  * 2) ISOLATE_ASYNC_MIGRATE: sync migrate 이외의 모든 경우
  * 3) ISOLATE_UNEVICTABLE:   sysctl_compact_unevictable_allowed 설정값에 따라 결정
  *                           rt 커널의 경우 default=0, 그 외의 경우 default=1
+ *
+ * --- ISOLATE_UNEVICTABLE / Git blame, papago
+ *
+ * CMA: migrate mlocked pages.
+ *
+ * Presently CMA cannot migrate mlocked pages so it ends up failing to allocate
+ * contiguous memory space.
+ *
+ * This patch makes mlocked pages be migrated out. Of course, it can affect
+ * realtime processes but in CMA usecase, contiguous memory allocation failing
+ * is far worse than access latency to an mlocked page being variable while CMA
+ * is running. If someone wants to make the system realtime, he shouldn't enable
+ * CMA because stalls can still happen at random times.
+ *
+ * CMA: mlocked 페이지를 마이그레이션합니다.
+ *
+ * 현재 CMA는 mlocked 페이지를 이행할 수 없기 때문에 연속 메모리 영역 할당에
+ * 실패합니다.
+ *
+ * 이 패치는 잠긴 페이지를 밖으로 마이그레이션합니다. 물론 실시간 프로세스에
+ * 영향을 줄 수 있지만 CMA 사용 사례에서 연속 메모리 할당 실패는 CMA 실행 중
+ * mlocked 페이지에 대한 액세스 지연보다 훨씬 심각합니다. 시스템을 실시간으로
+ * 만들고 싶다면 CMA를 활성화하지 마십시오.그것은 여전히 랜덤한 시간에 정지할 수
+ * 있기 때문입니다.
+ *
+ * - CMA을 사용하는 mlocked pages에 대해 migrate를 하기위한 flag. migrate 도중
+ *   process 실행에 영향을 줄수 있기때문에 rt kernel일 경우 default = 0로
+ *   하는 듯 보인다.
  */
 
 /* Isolate unmapped pages */

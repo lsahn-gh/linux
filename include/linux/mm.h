@@ -776,6 +776,8 @@ static inline int put_page_testzero(struct page *page)
  */
 /*
  * IAMROOT, 2022.03.30:
+ * - @page가 free 상태(buddy)가 아니라면 참조카운터를 획득한다.
+ *   획득 성공시 return 1, 실패시 return 0
  * - @page의 참조카운터에 add에 성공하면(add 전 or add 후값이 0이 아니면)
  *   return true. add에 실패하면(전후값이 0이면) return false
  *
@@ -783,7 +785,7 @@ static inline int put_page_testzero(struct page *page)
  *  -> add를 안하고 @return 0(false)
  *
  * 2. @page의 참조카운터가 0이 아닌 경우
- *  -> add 1을 하고 난 결과값이 0인 경우 @return 0(false), 아니면 @return true(1)
+ *  -> add 1을 하고 난 결과값이 0인 경우 @return 0(false), 아니면 @return 1(true)
  */
 static inline int get_page_unless_zero(struct page *page)
 {

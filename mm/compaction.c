@@ -1084,13 +1084,44 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 	}
 
 	/* Time to isolate some pages for migration */
+/*
+ * IAMROOT, 2022.03.31:
+ * -
+ */
 	for (; low_pfn < end_pfn; low_pfn++) {
 
 /*
  * IAMROOT, 2022.03.26: 
+ *
  * 1개 이상 isolation된 페이지가 있고, 이미 next_skip_pfn위치를 지났으면
  * 루프를 break 한다.
  * 이 과정에서 아직 isolate한 페이지가 없으면 next_skip_pfn만 갱신한다.
+ *
+ * - async direct compaction 일때만 low_pfn >= next_skip_pfn 조건을 확인할것이다.
+ *   다시 말해 적당한 범위에서 isolate가 찾아지면 종료가 가능하다.
+ *   sync 일때는 해당 if문을 탈일이 없다. 즉 범위문제로 중간에 멈추지 않고
+ *   쭉 진행할것이다.
+ *
+ * --- low_pfn 관점에서 if문 진입
+ *
+ * - 평범하게 for문을 진입하는경우
+ *   next_skip_pfn은 최초에 cc->order만큼의 distance를 가질것이고, isolate가
+ *   없거나 isolate 실패를 한상황이면 cc->order만큼 더 범위를 검사하는 식으로
+ *   진행이 된다.
+ *   
+ * - conintue를 통해서 for문을 재진입한경우
+ *   -- buddy : buddy page 크기만큼 low_pfn이 증가되서 진입한다.
+ *   만약 skip후 low_pfn이 next_skip_pfn보다 커지게되면 진입할것이다.
+ *   즉 이 경우엔 해당 if문을 진입할 일이없다.
+ *
+ *   -- isolate에 성공 : migrate page가 아직 부족하거나, rescan요청이 있거나,
+ *   경합중이면 low_pfn++로 진입한다.(compound page나 huge page였을 경우 해당
+ *   page 크기만큼 low_pfn이 증가된채로 진입) next_skip_pfn이 갱신이 잘 안된다면
+ *   cc->order만큼만 검사를 하고 그 사이에 isolate가 된게 하나라도 있으면
+ *   해당 if문에서 빠져나가게 될것이다.
+ *
+ *   -- isolate fail : 
+ *   --
  */
 		if (skip_on_failure && low_pfn >= next_skip_pfn) {
 			/*
@@ -1156,6 +1187,16 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
  * skip 블럭인 경우 isolate를 중단한다.
  */
 		if (!valid_page && IS_ALIGNED(low_pfn, pageblock_nr_pages)) {
+/*
+ * IAMROOT, 2022.03.31:
+ * skip hint 무시 요청이 없을때만 동작한다.
+ * - isolate가 끝난 상황에서 isolate된게 한개도 없거나 rescan요청이 있는 경우,
+ *   즉 isolate가 할게 없거나 이미 꽤 많은 범위를 검색 했는데 lock을 해본적이
+ *   없다면 valid_page skip으로 설정하는 데, 만약 skip이 지워지기 전이나
+ *   빠른시간안에 누군가에 요청해서 같은 시작주소로 isolate가 수행되게 되면
+ *   해봤자 isolate할게 적거나 이미 할만큼 한 상태라 시간낭비이므로
+ *   abort 시킨다.
+ */
 			if (!cc->ignore_skip_hint && get_pageblock_skip(page)) {
 				low_pfn = end_pfn;
 				page = NULL;
@@ -1250,6 +1291,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			goto isolate_fail;
 		}
 
+/*
+ * IAMROOT, 2022.03.31:
+ * ----------- 이시점에 compound page는 모두 cc->alloc_contig = true  -----------
+ */
 		/*
 		 * Check may be lockless but that's ok as we recheck later.
 		 * It's possible to migrate LRU and non-lru movable pages.
@@ -1285,6 +1330,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 			goto isolate_fail;
 		}
 
+/*
+ * IAMROOT, 2022.03.31:
+ * ----------- 이시점에 LRU page들만 남게 된다. -----------
+ */
 		/*
 		 * Migration will fail if an anonymous page is pinned in memory,
 		 * so avoid taking lru_lock and isolating it unnecessarily in an
@@ -1342,12 +1391,16 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
 		if (!TestClearPageLRU(page))
 			goto isolate_fail_put;
 
+/*
+ * IAMROOT, 2022.03.31:
+ * ----------- 이시점에 page의 LRU flag는 제거됬다. -----------
+ */
 		lruvec = mem_cgroup_page_lruvec(page);
 
 		/* If we already hold the lock, we can skip some rechecking */
 /*
  * IAMROOT, 2022.03.26: 
- * lock건 lurvec의 위치가 동일하지 않은 경우 다시 lock을 획득하고 획득한 memcg
+ * lock건 lruvec의 위치가 동일하지 않은 경우 다시 lock을 획득하고 획득한 memcg
  * 위치를 locked에 갱신한다.
  */
 		if (lruvec != locked) {
@@ -1365,6 +1418,10 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
  * lock을 걸고 확인해본다. 누군가 먼저 해당 진행하는 블럭에 skip 비트를 
  * 먼저 설정해두었는지.. 만일 누군가 먼저 설정한 경우 현재 루틴은 
  * 진행을 포기하기 위해 isolate_abort로 이동한다.
+ *
+ * - 위쪽에 if문 valid_page갱신때와 같은 상황으로, 해당 page를 시작지점으로
+ *   이미 isolate시도를 근시일내에 해봤는데 isolate가 한개도 없었거나
+ *   충분히 해봤으면 abort한다.
  */
 			if (!skip_updated) {
 				skip_updated = true;
@@ -1381,6 +1438,9 @@ isolate_migratepages_block(struct compact_control *cc, unsigned long low_pfn,
  * IAMROOT, 2022.03.26: 
  * alloc_contig_range()로 호출하지 않은 일반적인 할당 시 compound 페이지는
  * lru로 되돌리기 위해 lru 플래그를 설정하고 isolate_fail_put으로 이동한다.
+ *
+ * -  현재 if문을 진입하기 전에 이미 위에서 non-lock 상태로 같은조건으
+ *    검사를 했지만 lock을 새로 얻은후에 다시 확인 한다.
  */
 			if (unlikely(PageCompound(page) && !cc->alloc_contig)) {
 				low_pfn += compound_nr(page) - 1;
@@ -1448,6 +1508,18 @@ isolate_fail_put:
  */
 
 isolate_fail:
+/*
+ * IAMROOT, 2022.03.31:
+ * - sync or indirect compaction일때만 ret을 검사해서 continue 시킨다.
+ *   즉 실패를 해도 error 상태가 아니면 요청된 end_pfn까지 전부 돌아보거나
+ *   위에 isolate sucess에서 COMPACT_CLUSTER_MAX조건이 있는 if문에 빠져가기전까지
+ *   isolate 시킬것이다.
+ *
+ * - ret이 -ENOMEM(memory 관련 erorr)이 되는경우는
+ *   isolate_or_dissolve_huge_page 때만 존재한다.
+ *   즉 sync or indirect compaction일때 huge만 안건드리면
+ *   (건드려도 memory 실패만 안나면) 범위 전체를 탐색할것이다.
+ */
 		if (!skip_on_failure && ret != -ENOMEM)
 			continue;
 
@@ -1456,6 +1528,11 @@ isolate_fail:
 		 * instead of migrating, as we cannot form the cc->order buddy
 		 * page anyway.
 		 */
+/*
+ * IAMROOT, 2022.03.31:
+ * - ENOMEM이 발생했거나 async direct compaction일 경우에 여기에 도달한다.
+ * - isolate하고 있는 중간에 실패했다면 isolate 햇던것을 원복 시킨다.
+ */
 		if (nr_isolated) {
 			if (locked) {
 				unlock_page_lruvec_irqrestore(locked, flags);
@@ -1466,6 +1543,12 @@ isolate_fail:
 			nr_isolated = 0;
 		}
 
+/*
+ * IAMROOT, 2022.03.31:
+ * - async direct compaction 일때만 next_skip_pfn을 사용하는데 이미 여기 온시점이
+ *   이런 상황이(-ENOMEM일 수도 있지만)므로 next_skip_pfn을 갱신해준다.
+ *   -ENOMEM인 경우 아래에서 바로 처리해준다.
+ */
 		if (low_pfn < next_skip_pfn) {
 			low_pfn = next_skip_pfn - 1;
 			/*
@@ -1477,6 +1560,11 @@ isolate_fail:
 
 		if (ret == -ENOMEM)
 			break;
+/*
+ * IAMROOT, 2022.03.31:
+ * - for 문이 끝나는 시점으로 갱신된 low_pfn으로 다음 iterate를 수행한다.
+ *   compound page인 경우 이미 해당 범위의 보정이 끝난 low_pfn일것이다.
+ */
 	}
 
 /*
@@ -1495,6 +1583,10 @@ isolate_fail:
 isolate_abort:
 	if (locked)
 		unlock_page_lruvec_irqrestore(locked, flags);
+/*
+ * IAMROOT, 2022.03.31:
+ * - abort가 발생한 @page는 LRU flag가 제거되었을 수 있으므로 다시 설정해준다.
+ */
 	if (page) {
 		SetPageLRU(page);
 		put_page(page);
@@ -1516,6 +1608,12 @@ isolate_abort:
  * 속한 블럭의 skip 비트를 설정한다.
  */
 	if (low_pfn == end_pfn && (!nr_isolated || cc->rescan)) {
+/*
+ * IAMROOT, 2022.03.31:
+ * - valid_page는 pageblock단위로 생길것이다.
+ *   누군가 이미 isolate를 한 상황이라 abort로 빠져나온 상황 (!vaild_page)
+ *   이 없고 한번이라도 lock을 걸어본 (skip_updated) 적이 없다면 skip을 표시한다.
+ */
 		if (valid_page && !skip_updated)
 			set_pageblock_skip(valid_page);
 		update_cached_migrate(cc, low_pfn);
