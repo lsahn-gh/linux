@@ -762,6 +762,10 @@ struct inode;
 /*
  * Drop a ref, return true if the refcount fell to zero (the page has no users)
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * @return (--page->refcount == 0)
+ */
 static inline int put_page_testzero(struct page *page)
 {
 	VM_BUG_ON_PAGE(page_ref_count(page) == 0, page);
@@ -961,6 +965,13 @@ enum compound_dtor_id {
 #endif
 	NR_COMPOUND_DTORS,
 };
+/*
+ * IAMROOT, 2022.04.02:
+ * - mm/page_alloc.c 
+ *   COMPOUND_PAGE_DTOR : free_compound_page
+ *   HUGETLB_PAGE_DTOR : free_huge_page
+ *   TRANSHUGE_PAGE_DTOR : free_transhuge_page
+ */
 extern compound_page_dtor * const compound_page_dtors[NR_COMPOUND_DTORS];
 
 /*
@@ -974,6 +985,10 @@ static inline void set_compound_page_dtor(struct page *page,
 	page[1].compound_dtor = compound_dtor;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page type별 destroy를 하기 위한 callback 함수를 호출한다.
+ */
 static inline void destroy_compound_page(struct page *page)
 {
 	VM_BUG_ON_PAGE(page[1].compound_dtor >= NR_COMPOUND_DTORS, page);
@@ -1275,6 +1290,12 @@ static inline bool is_pci_p2pdma_page(const struct page *page)
 #define page_ref_zero_or_close_to_overflow(page) \
 	((unsigned int) page_ref_count(page) + 127u <= 127u)
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - put_page와 한쌍이 된다. 참조카운터를 증가시킨다.
+ *   page flag같은것을 볼때는 lock이나 참조없이 확인하지만 실제
+ *   page내용을 read/write 할때는 참조카운터를 늘려줘야한다.
+ */
 static inline void get_page(struct page *page)
 {
 	page = compound_head(page);
@@ -1300,6 +1321,10 @@ static inline __must_check bool try_get_page(struct page *page)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page의 refcount를 감소시키고, 감소후 refcount가 0이라면 free(__put_page)시킨다.
+ */
 static inline void put_page(struct page *page)
 {
 	page = compound_head(page);

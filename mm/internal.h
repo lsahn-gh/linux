@@ -81,6 +81,11 @@ unsigned find_lock_entries(struct address_space *mapping, pgoff_t start,
  * (2) page is part of an mlocked VMA
  *
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 evictable인지(회수가 가능한지) 확인한다.
+ * - unevictable flag가 없거나 mlock이 안걸려있어야된다.
+ */
 static inline bool page_evictable(struct page *page)
 {
 	bool ret;

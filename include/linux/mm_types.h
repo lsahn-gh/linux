@@ -118,6 +118,8 @@ struct page {
  * IAMROOT, 2022.03.05:
  * - buddy에서는 order로 사용한다. 다른걸로 사용할때 이
  *   위치가 order가 될것이다.
+ * - hugetlb일 경우 HPG_XXX를 사용한다.
+ *   (ex. HPG_migratable)
  */
 			unsigned long private;
 		};

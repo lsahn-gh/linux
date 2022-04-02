@@ -56,11 +56,21 @@ static inline void pagevec_reinit(struct pagevec *pvec)
 	pvec->nr = 0;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @pvec local_lock이 걸린상태로 진입한다.
+ * - @pvec의 page개수를 return한다.
+ */
 static inline unsigned pagevec_count(struct pagevec *pvec)
 {
 	return pvec->nr;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @pvec local_lock이 걸린상태로 진입한다.
+ * - @pvec의 빈공간을 return한다.
+ */
 static inline unsigned pagevec_space(struct pagevec *pvec)
 {
 	return PAGEVEC_SIZE - pvec->nr;
@@ -68,6 +78,11 @@ static inline unsigned pagevec_space(struct pagevec *pvec)
 
 /*
  * Add a page to a pagevec.  Returns the number of slots still available.
+ */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @pvec local_lock이 걸린상태로 진입한다.
+ * - @page를 @pvec에 추가한다.
  */
 static inline unsigned pagevec_add(struct pagevec *pvec, struct page *page)
 {

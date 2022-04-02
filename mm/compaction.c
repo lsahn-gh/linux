@@ -119,7 +119,10 @@ static void split_map_pages(struct list_head *list)
 /*
  * IAMROOT, 2022.03.30:
  * @return 1 movable 가능.
- * - movable이 실제 가능한지 완전히 확인한다.
+ * - movable page인지를 완전히 확인한다.
+ *   lock이 된채로 이 함수에 접근을 해야된다.
+ * - __PageMovable에서는 movable page인지 peek 검사,
+ *   mapping은 실제 driver에서 address_space가 존재하는지 검사한다.
  */
 int PageMovable(struct page *page)
 {
@@ -1804,6 +1807,21 @@ static inline bool compact_scanners_met(struct compact_control *cc)
  * in reverse. Reorders the list such as the unscanned pages are scanned
  * first on the next iteration of the free scanner
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @freepage가 last page가 아니면 free_page 의 뒷 entry들을 앞으로 옮긴다.
+ *
+ * -
+ *  freelist : node1 node2 node3 node4 node5 node6
+ *                                 ^freepage
+ *  < list_cut_before 수행 >
+ *
+ *  head : node4 node5 node6
+ *  list : node1 node2 node3 
+ *
+ * < list_splice_tail 수행 >
+ * head : node4 node5 node6 node1 node2 node3
+ */
 static void
 move_freelist_head(struct list_head *freelist, struct page *freepage)
 {
@@ -1872,6 +1890,12 @@ fast_isolate_around(struct compact_control *cc, unsigned long pfn, unsigned long
 }
 
 /* Search orders in round-robin fashion */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @order를 1씩 내린다. 만약 0보다 작아지면 cc->order - 1로 갱신한다.
+ *   @order가 cc->search_order와 같아질경우(한바퀴 동안 전부 실패했다는 듯)
+ *   search_order를 -1로 갱신하고 return -1로 수행한다.
+ */
 static int next_search_order(struct compact_control *cc, int order)
 {
 	order--;
@@ -1889,6 +1913,10 @@ static int next_search_order(struct compact_control *cc, int order)
 	return order;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * @return free scan start pfn
+ */
 static unsigned long
 fast_isolate_freepages(struct compact_control *cc)
 {
@@ -1902,6 +1930,11 @@ fast_isolate_freepages(struct compact_control *cc)
 	int order;
 
 	/* Full compaction passes in a negative order */
+/*
+ * IAMROOT, 2022.04.02:
+ * - order == -1(지정되지 않음(user 요청등)) or 0(single page 요청)일때 조정
+ *   없이 그냥 return.
+ */
 	if (cc->order <= 0)
 		return cc->free_pfn;
 
@@ -1909,6 +1942,12 @@ fast_isolate_freepages(struct compact_control *cc)
 	 * If starting the scan, use a deeper search and use the highest
 	 * PFN found if a suitable one is not found.
 	 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - free_pfn은 high => low address로 진행한다. if문 뜻은 free_pfn이 설정된
+ *   범위까지 끝낫으므로 다시 limit을 정해 scan을 수행해야된다는것.
+ * - 최초의 시작이라면 cc->free_pfn은 0xffff.. 일것이다.
+ */
 	if (cc->free_pfn >= cc->zone->compact_init_free_pfn) {
 		limit = pageblock_nr_pages >> 1;
 		scan_start = true;
@@ -1919,6 +1958,20 @@ fast_isolate_freepages(struct compact_control *cc)
 	 * a pfn from the top half if the search is problematic.
 	 */
 	distance = (cc->free_pfn - cc->migrate_pfn);
+/*
+ * IAMROOT, 2022.04.02:
+ * - low_pfn : 25%, min_pfn : 50%
+ * -
+ *  ----- cc->free_pfn
+ *
+ *  ----- low_pfn
+ *
+ *  ----- min_pfn 
+ *
+ *
+ *
+ *  ---- cc->migrate_pfn
+ */
 	low_pfn = pageblock_start_pfn(cc->free_pfn - (distance >> 2));
 	min_pfn = pageblock_start_pfn(cc->free_pfn - (distance >> 1));
 
@@ -1929,6 +1982,11 @@ fast_isolate_freepages(struct compact_control *cc)
 	 * Search starts from the last successful isolation order or the next
 	 * order to search after a previous failure
 	 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - 마지막 성공 order부터 시작을 하거나 실패했던 order -1(search_order) 부터 시작한다.
+ *   (next_search_order 참고)
+ */
 	cc->search_order = min_t(unsigned int, cc->order - 1, cc->search_order);
 
 	for (order = cc->search_order;
@@ -1945,7 +2003,15 @@ fast_isolate_freepages(struct compact_control *cc)
 			continue;
 
 		spin_lock_irqsave(&cc->zone->lock, flags);
+/*
+ * IAMROOT, 2022.04.02:
+ * - movable 만 조회한다. migrate는 movable page로만 할수있다.
+ */
 		freelist = &area->free_list[MIGRATE_MOVABLE];
+/*
+ * IAMROOT, 2022.04.02:
+ * - buddy에 오래있던 page순으로 (cold순)으로 가져온다.
+ */
 		list_for_each_entry_reverse(freepage, freelist, lru) {
 			unsigned long pfn;
 
@@ -1953,10 +2019,22 @@ fast_isolate_freepages(struct compact_control *cc)
 			nr_scanned++;
 			pfn = page_to_pfn(freepage);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - highest를 갱신한다. 극단적인 경우 zone범위 내료 clamp를 한다.
+ */
 			if (pfn >= highest)
 				highest = max(pageblock_start_pfn(pfn),
 					      cc->zone->zone_start_pfn);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 높은 주소의 page를 찾을수록 좋은 page로 생각한다.
+ * - low_pfn보다 높게 찾아진것은 성공으로 판단하여 fail count를 0으로 초기화,
+ *   search_order를 성공한 order로 갱신한다.
+ *   차선으로 min_pfn ~ low_pfn 사이면서 이전에 차선으로 찾은 high_pfn 보다 높은
+ *   page일 경우 high_pfn에 차선 page로 갱신하고 scan 최대 횟수를 반절씩 줄인다.
+ */
 			if (pfn >= low_pfn) {
 				cc->fast_search_fail = 0;
 				cc->search_order = order;
@@ -1976,6 +2054,11 @@ fast_isolate_freepages(struct compact_control *cc)
 		}
 
 		/* Use a minimum pfn if a preferred one was not found */
+/*
+ * IAMROOT, 2022.04.02:
+ * - low_pfn보다 높은 주소(좋은 case)의 page를 못찾은 경우, 차선으로 택한 page를
+ *   사용한다.
+ */
 		if (!page && high_pfn) {
 			page = pfn_to_page(high_pfn);
 
@@ -1984,6 +2067,15 @@ fast_isolate_freepages(struct compact_control *cc)
 		}
 
 		/* Reorder to so a future search skips recent pages */
+/*
+ * IAMROOT, 2022.04.02:
+ * - scan이 끝난 지점(freepage) page들을 head로 옮긴다.
+ * - ex) node4가 freepage
+ *  before : node1 node2 node3 node4 node5 node6
+ *                                ^------------ scan
+ *  after  : [node4 node5 node6] node1 node2 node3
+ *            옮겨진 page들                    ^--- 다음 scan은 여기부터 시작
+ */
 		move_freelist_head(freelist, freepage);
 
 		/* Isolate the page if available */
@@ -2169,12 +2261,21 @@ splitmap:
  * This is a migrate-callback that "allocates" freepages by taking pages
  * from the isolated freelists in the block we are migrating to.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - migrate시 이동이 될 대상인 free page를 가져온다(unmap_and_move 참고)
+ */
 static struct page *compaction_alloc(struct page *migratepage,
 					unsigned long data)
 {
 	struct compact_control *cc = (struct compact_control *)data;
 	struct page *freepage;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 처음진입했거나 isolate한 page가 하나도 없으면 isolate하기 위해서
+ *   free scanning을 한다.
+ */
 	if (list_empty(&cc->freepages)) {
 		isolate_freepages(cc);
 
@@ -2182,6 +2283,10 @@ static struct page *compaction_alloc(struct page *migratepage,
 			return NULL;
 	}
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - freepages에서 한개를 빼온다.
+ */
 	freepage = list_entry(cc->freepages.next, struct page, lru);
 	list_del(&freepage->lru);
 	cc->nr_freepages--;
@@ -2510,7 +2615,9 @@ static unsigned long fast_find_migrateblock(struct compact_control *cc)
  * IAMROOT, 2022.03.26: 
  * migrate 스캐너가 진행중인 페이지 블럭 중에 isolation을 시도할 블럭
  * 하나를 선택해서 isolation을 진행하고 다음 3가지 결과중 하나를 반환한다.
- * ISOLATION_SUCCESS, ISOLATON_ABORT, ISOLATION_NONE
+ * ISOLATON_ABORT : 중단.
+ * ISOLATION_SUCCESS : isolate된 page가 존재.
+ * ISOLATION_NONE : isolate된 page가 하나도 없음.
  */
 static isolate_migrate_t isolate_migratepages(struct compact_control *cc)
 {
@@ -2733,6 +2840,10 @@ static bool should_proactive_compact_node(pg_data_t *pgdat)
 	return fragmentation_score_node(pgdat) > wmark_high;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @cc에 따라 compact를 어떻게 할지(complete, skip, continue)를 결정한다.
+ */
 static enum compact_result __compact_finished(struct compact_control *cc)
 {
 	unsigned int order;
@@ -2769,6 +2880,10 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 			return COMPACT_PARTIAL_SKIPPED;
 	}
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - proactive 요청이 왔을때의 처리.
+ */
 	if (cc->proactive_compaction) {
 		int score, wmark_low;
 		pg_data_t *pgdat;
@@ -2810,6 +2925,11 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 
 	/* Direct compactor: Is a suitable page free? */
 	ret = COMPACT_NO_SUITABLE_PAGE;
+
+/*
+ * IAMROOT, 2022.04.02:
+ * - cc->order의 순서로 cc->migratetype 의 freearea를 iterator한다.
+ */
 	for (order = cc->order; order < MAX_ORDER; order++) {
 		struct free_area *area = &cc->zone->free_area[order];
 		bool can_steal;
@@ -2820,6 +2940,11 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 
 #ifdef CONFIG_CMA
 		/* MIGRATE_MOVABLE can fallback on MIGRATE_CMA */
+/*
+ * IAMROOT, 2022.04.02:
+ * - movable 요청인 경우에는 cma도 검사를 해본다. 즉 movable요청이면
+ *   movable, cma free_area 둘중하나라도 free 용량이 있으면 success
+ */
 		if (migratetype == MIGRATE_MOVABLE &&
 			!free_area_empty(area, MIGRATE_CMA))
 			return COMPACT_SUCCESS;
@@ -2828,6 +2953,11 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 		 * Job done if allocation would steal freepages from
 		 * other migratetype buddy lists.
 		 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - fallback list도 뒤져본다. fall list에도 없으면 다음 order로
+ *   iterate
+ */
 		if (find_suitable_fallback(area, order, migratetype,
 						true, &can_steal) != -1) {
 
@@ -2843,6 +2973,13 @@ static enum compact_result __compact_finished(struct compact_control *cc)
 			 * to sync compaction, as async compaction operates
 			 * on pageblocks of the same migratetype.
 			 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - unmovable 이나 reclaim type으로 steal을 해온 경우 좀 더 compact를
+ *   해야될수있으므로 Continue를 처리한다.
+ *   하지만 async 요청이면 적당히 짧게 끝내는 개념으로, 아니면 pageblock 단위
+ *   로 적당한 범위로 success 처리한다.
+ */
 			if (cc->mode == MIGRATE_ASYNC ||
 					IS_ALIGNED(cc->migrate_pfn,
 							pageblock_nr_pages)) {
@@ -2861,6 +2998,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @cc에 따라 compact 상태(complete, skip, continue)를 결정한다.
+ */
 static enum compact_result compact_finished(struct compact_control *cc)
 {
 	int ret;
@@ -3168,6 +3309,16 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 	 * Until a pageblock with isolation candidates is found, keep the
 	 * cached PFNs in sync to avoid revisiting the same blocks.
 	 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - aync일 경우 isolate 실패시 sync cache를 aync cache로 갱신해야되는 여부를
+ *   판별하기위한 flag.
+ * - aync요청일 경우 scan을 하면서 compact_cached_migrate_pfn이 update될텐데,
+ *   만약 실패할경우 sync compact_cached_migrate_pfn을 async 완료지점으로 동기화시켜
+ *   줌으로써 나중에 sync mode에서 동작할 때 aync에서 isolate실패했던 범위를
+ *   건너뛰게 하기 위함이다.
+ *
+ */
 	update_cached = !sync &&
 		cc->zone->compact_cached_migrate_pfn[0] == cc->zone->compact_cached_migrate_pfn[1];
 
@@ -3189,6 +3340,10 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 		 * migration. If it fails, it'll be marked skip and scanning
 		 * will proceed as normal.
 		 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - rescan을 false로 초기화한다.
+ */
 		cc->rescan = false;
 		if (pageblock_start_pfn(last_migrated_pfn) ==
 		    pageblock_start_pfn(iteration_start_pfn)) {
@@ -3197,11 +3352,22 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 
 		switch (isolate_migratepages(cc)) {
 		case ISOLATE_ABORT:
+/*
+ * IAMROOT, 2022.04.02:
+ * - 중단됫으므로 isolate된 page들을 원래위치로 되돌린다.
+ */
 			ret = COMPACT_CONTENDED;
 			putback_movable_pages(&cc->migratepages);
 			cc->nr_migratepages = 0;
 			goto out;
 		case ISOLATE_NONE:
+/*
+ * IAMROOT, 2022.04.02:
+ * - isolate된 page가 하나도 없다. update_cached가 true라면 scan 시작시
+ *   sync과 aync의 cache가 같은 상황이면서 현재 async인 상황인데, async에서
+ *   isolatge 실패를 했으므로 sync에서 같은 구간을 다시 scan안하도록 sync cache를
+ *   현재 완료된 async cache로 update해준다.
+ */
 			if (update_cached) {
 				cc->zone->compact_cached_migrate_pfn[1] =
 					cc->zone->compact_cached_migrate_pfn[0];
@@ -3214,6 +3380,10 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			 */
 			goto check_drain;
 		case ISOLATE_SUCCESS:
+/*
+ * IAMROOT, 2022.04.02:
+ * - isolate가 성공했으므로 update cache를 할필요가 없다.
+ */
 			update_cached = false;
 			last_migrated_pfn = iteration_start_pfn;
 		}
@@ -3270,6 +3440,10 @@ check_drain:
 		}
 
 		/* Stop if a page has been captured */
+/*
+ * IAMROOT, 2022.04.02:
+ * - capture page가 있는 경우 success로 하고 종료한다.
+ */
 		if (capc && capc->page) {
 			ret = COMPACT_SUCCESS;
 			break;

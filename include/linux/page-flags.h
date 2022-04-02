@@ -621,6 +621,13 @@ PAGEFLAG(Unevictable, unevictable, PF_HEAD)
 	__CLEARPAGEFLAG(Unevictable, unevictable, PF_HEAD)
 	TESTCLEARFLAG(Unevictable, unevictable, PF_HEAD)
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - memory를 특정목적으로 lock을 하여 swap, compaction, reclaim, migration,
+ *   isolation등을 막아야 할때사용한다.
+ * - pinned는 특정영역에 memory를 고정시켜놓아 node cpu변경등을 못하게 막는걸로,
+ *   mlock과는 의미가 다르다.
+ */
 #ifdef CONFIG_MMU
 PAGEFLAG(Mlocked, mlocked, PF_NO_TAIL)
 	__CLEARPAGEFLAG(Mlocked, mlocked, PF_NO_TAIL)
@@ -845,6 +852,12 @@ TESTPAGEFLAG_FALSE(HeadHuge)
  * PageTransHuge() returns true for both transparent huge and
  * hugetlbfs pages, but not normal pages. PageTransHuge() can only be
  * called only in the core VM paths where hugetlbfs pages can't exist.
+ */
+/*
+ * IAMROOT, 2022.04.02:
+ * - THP or hugetlbfs 인지 확인한다 (PageHuge는 hugetlb인지만을 확인)
+ * - THP page인지 확인하는 방법은 아래처럼 사용한다.
+ *  is_thp = PageTransHuge(page) && !PageHuge(page);
  */
 static inline int PageTransHuge(struct page *page)
 {

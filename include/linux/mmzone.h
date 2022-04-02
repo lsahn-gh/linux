@@ -854,8 +854,8 @@ struct zone {
 	/* pfn where compaction migration scanner should start */
 /*
  * IAMROOT, 2022.03.29:
- * - 0 : async, sync둘다에 대한 cache
- *   1 : sync에 대해서만의 cache
+ * - 0 : async에 대한 cache
+ *   1 : sync에 대한 cache
  */
 	unsigned long		compact_cached_migrate_pfn[ASYNC_AND_SYNC];
 	unsigned long		compact_init_migrate_pfn;

@@ -349,6 +349,10 @@ const char * const migratetype_names[MIGRATE_TYPES] = {
 #endif
 };
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - page type별 destroy callback 함수. destroy_compound_page등에서 호출될것이다.
+ */
 compound_page_dtor * const compound_page_dtors[NR_COMPOUND_DTORS] = {
 	[NULL_COMPOUND_DTOR] = NULL,
 	[COMPOUND_PAGE_DTOR] = free_compound_page,

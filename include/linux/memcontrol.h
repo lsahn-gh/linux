@@ -1536,6 +1536,11 @@ static inline void unlock_page_lruvec_irqrestore(struct lruvec *lruvec,
 }
 
 /* Test requires a stable page->memcg binding, see page_memcg() */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 외부에서 이동됬을수 있기때문에 @lruvec와 일치하는지 확인한다.
+ *   (node, memcg가 일치하는지)
+ */
 static inline bool page_matches_lruvec(struct page *page, struct lruvec *lruvec)
 {
 	return lruvec_pgdat(lruvec) == page_pgdat(page) &&
@@ -1557,6 +1562,13 @@ static inline struct lruvec *relock_page_lruvec_irq(struct page *page,
 }
 
 /* Don't lock again iff page's lruvec locked */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page의 @locked_lruvec를 memcg로부터 얻어온다.
+ * @locked_lruvec[in] 이면 한번도 lruvec을 가져온적이 없는상태(NULL)이면
+ *		      lruvec을 얻어오기만 하고, 이미 lruvec을 얻어온 상태(!NULL)
+ *		      @page와 lruvec 일치하는지 확인해 유지하던가 다시 얻어온다.
+ */
 static inline struct lruvec *relock_page_lruvec_irqsave(struct page *page,
 		struct lruvec *locked_lruvec, unsigned long *flags)
 {

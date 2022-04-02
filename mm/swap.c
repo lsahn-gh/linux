@@ -77,17 +77,30 @@ static DEFINE_PER_CPU(struct lru_pvecs, lru_pvecs) = {
  * This path almost never happens for VM activity - pages are normally
  * freed via pagevecs.  But it gets used by networking.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page를 release한다(lru list에서 제거한다.)
+ */
 static void __page_cache_release(struct page *page)
 {
 	if (PageLRU(page)) {
 		struct lruvec *lruvec;
 		unsigned long flags;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 통계를 위해 @page의 lruvec를 가져오고, @page를 lru에서 제거한다.
+ */
 		lruvec = lock_page_lruvec_irqsave(page, &flags);
 		del_page_from_lru_list(page, lruvec);
 		__clear_page_lru_flags(page);
 		unlock_page_lruvec_irqrestore(lruvec, flags);
 	}
+/*
+ * IAMROOT, 2022.04.02:
+ * - page가 waitqueue에 있을수 있는 상태(무언가 write를 할려고 대기중)인데,
+ *   @page를 release해버리므로 waitqueue에서 clear한다.
+ */
 	__ClearPageWaiters(page);
 }
 
@@ -98,6 +111,11 @@ static void __put_single_page(struct page *page)
 	free_unref_page(page, 0);
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page를 destroy 한다.
+ * - TODO
+ */
 static void __put_compound_page(struct page *page)
 {
 	/*
@@ -106,11 +124,20 @@ static void __put_compound_page(struct page *page)
 	 * (it's never listed to any LRU lists) and no memcg routines should
 	 * be called for hugetlb (it has a separate hugetlb_cgroup.)
 	 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 hugetlb가 아닌 thp에 대해선 __page_cache_release를 호출해야된다.
+ *   hugetlb는 PageLRU가 set될일이 없기때문이다.
+ */
 	if (!PageHuge(page))
 		__page_cache_release(page);
 	destroy_compound_page(page);
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - TODO
+ */
 void __put_page(struct page *page)
 {
 	if (is_zone_device_page(page)) {
@@ -215,10 +242,24 @@ static void pagevec_move_tail_fn(struct page *page, struct lruvec *lruvec)
 }
 
 /* return true if pagevec needs to drain */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @pvec local_lock이 된채로 진입해야된다.
+ * - lru cache에 add, 만약 cache 공간이 overflow면 flush 필요 여부를 return한다.
+ *
+ * ps) pagevec == lru cache
+ */
 static bool pagevec_add_and_need_flush(struct pagevec *pvec, struct page *page)
 {
 	bool ret = false;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - true가 되는 조건
+ *	-- 마지막 공간에 넣어진 경우
+ *	-- @page가 compound page인 경우
+ *	-- lru cache가 disable인 경우
+ */
 	if (!pagevec_add(pvec, page) || PageCompound(page) ||
 			lru_cache_disabled())
 		ret = true;
@@ -439,6 +480,11 @@ EXPORT_SYMBOL(mark_page_accessed);
  * pagevec is drained. This gives a chance for the caller of lru_cache_add()
  * have the page added to the active list using mark_page_accessed().
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - lru로 보내기 전에 lru cache에 미리 add시키고 만약 cache가 가득 찾으면
+ *   lru list로 flush한다.
+ */
 void lru_cache_add(struct page *page)
 {
 	struct pagevec *pvec;
@@ -446,7 +492,15 @@ void lru_cache_add(struct page *page)
 	VM_BUG_ON_PAGE(PageActive(page) && PageUnevictable(page), page);
 	VM_BUG_ON_PAGE(PageLRU(page), page);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - lru cache에 대한 참조.
+ */
 	get_page(page);
+/*
+ * IAMROOT, 2022.04.02:
+ * - interrupt disable / enable
+ */
 	local_lock(&lru_pvecs.lock);
 	pvec = this_cpu_ptr(&lru_pvecs.lru_add);
 	if (pagevec_add_and_need_flush(pvec, page))
@@ -893,6 +947,11 @@ void lru_cache_disable(void)
  * Decrement the reference count on all the pages in @pages.  If it
  * fell to zero, remove the page from the LRU and free it.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - TODO
+ * - 참조카운터를 감소시켜서 0이면 release 시킨다.
+ */
 void release_pages(struct page **pages, int nr)
 {
 	int i;
@@ -909,15 +968,27 @@ void release_pages(struct page **pages, int nr)
 		 * excessive with a continuous string of pages from the
 		 * same lruvec. The lock is held only if lruvec != NULL.
 		 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - lock을 너무 오래잡고있다고 판단하면 한번풀어준다.
+ */
 		if (lruvec && ++lock_batch == SWAP_CLUSTER_MAX) {
 			unlock_page_lruvec_irqrestore(lruvec, flags);
 			lruvec = NULL;
 		}
 
 		page = compound_head(page);
+/*
+ * IAMROOT, 2022.04.02:
+ * - zero huge page는 release를 할필요없다.
+ */
 		if (is_huge_zero_page(page))
 			continue;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - TODO
+ */
 		if (is_zone_device_page(page)) {
 			if (lruvec) {
 				unlock_page_lruvec_irqrestore(lruvec, flags);
@@ -938,10 +1009,25 @@ void release_pages(struct page **pages, int nr)
 			continue;
 		}
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 참조가 있으면 누가 계속 사용하고 있으므로 release를 할필요없다.
+ * - pagevec등에서 제거되는 경우 refcount가 감소후에도 0이 안될수있으므로
+ *   이런 경우에는 put_page_testzero를 통해서 refcount만 감소하고 continue될것이다.
+ */
 		if (!put_page_testzero(page))
 			continue;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 여기부턴 page refcount == 0 이다.
+ */
 		if (PageCompound(page)) {
+/*
+ * IAMROOT, 2022.04.02:
+ * - compound page를 put한다. __ClearPageWaiters는 __put_compound_page안에
+ *   내장되있다.
+ */
 			if (lruvec) {
 				unlock_page_lruvec_irqrestore(lruvec, flags);
 				lruvec = NULL;
@@ -955,6 +1041,10 @@ void release_pages(struct page **pages, int nr)
 
 			lruvec = relock_page_lruvec_irqsave(page, lruvec,
 									&flags);
+/*
+ * IAMROOT, 2022.04.02:
+ * - relock이 됬으면 한번 unlock을 한거랑 같으므로 lock_batch도 reset해준다.
+ */
 			if (prev_lruvec != lruvec)
 				lock_batch = 0;
 
@@ -964,6 +1054,10 @@ void release_pages(struct page **pages, int nr)
 
 		__ClearPageWaiters(page);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - pages_to_free에 미리 옮겨놓는다.
+ */
 		list_add(&page->lru, &pages_to_free);
 	}
 	if (lruvec)
@@ -995,8 +1089,19 @@ void __pagevec_release(struct pagevec *pvec)
 }
 EXPORT_SYMBOL(__pagevec_release);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 evicatble이 가능한 상태인지(mapping flag, mlock등을 검사)확인하고,
+ *   @page에 맞는 lru list에 add한다.
+ */
 static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec)
 {
+/*
+ * IAMROOT, 2022.04.02:
+ * - unevictable flag를 가져오면서 clear한다.
+ *   unevictable flag가 있다는것은 UNEVICTABLE list에 넣어야된다는 의미이다.
+ * - vm stat을 계산하기위한 용도로만 사용한다.
+ */
 	int was_unevictable = TestClearPageUnevictable(page);
 	int nr_pages = thp_nr_pages(page);
 
@@ -1032,9 +1137,18 @@ static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec)
 	smp_mb__after_atomic();
 
 	if (page_evictable(page)) {
+/*
+ * IAMROOT, 2022.04.02:
+ * - evictable이 가능한상태. 이전에 unevictable이였으면 PGRESCUED 통계에 넣는다.
+ */
 		if (was_unevictable)
 			__count_vm_events(UNEVICTABLE_PGRESCUED, nr_pages);
 	} else {
+/*
+ * IAMROOT, 2022.04.02:
+ * - (위에서 Clear했을수도 있는) unevictable flag를 다시 set한다.
+ *   unevictable이면 active가 의미가 없어지므로 active flag도 clear해준다.
+ */
 		ClearPageActive(page);
 		SetPageUnevictable(page);
 		if (!was_unevictable)
@@ -1048,6 +1162,11 @@ static void __pagevec_lru_add_fn(struct page *page, struct lruvec *lruvec)
 /*
  * Add the passed pages to the LRU, then drop the caller's refcount
  * on them.  Reinitialises the caller's pagevec.
+ */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @pvec local_lock이 걸린상태로 진입한다.
+ * - @pvec을 실제 lru list로 옮기고 @pvec를 초기화한다.(nr = 0)
  */
 void __pagevec_lru_add(struct pagevec *pvec)
 {
@@ -1063,6 +1182,10 @@ void __pagevec_lru_add(struct pagevec *pvec)
 	}
 	if (lruvec)
 		unlock_page_lruvec_irqrestore(lruvec, flags);
+/*
+ * IAMROOT, 2022.04.02:
+ * - page vec에서 제거를 했기때문에 pagevec에 대한 refconunt를 감소시킨다.
+ */
 	release_pages(pvec->pages, pvec->nr);
 	pagevec_reinit(pvec);
 }

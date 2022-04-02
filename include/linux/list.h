@@ -414,6 +414,17 @@ static inline void list_cut_position(struct list_head *list,
  * If @entry == @head, all entries on @head are moved to
  * @list.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @head -> @list로 이동.
+ *
+ *  head : [node1 node2 node3] node4 node5 node6
+ *         ^list                ^entry
+ *  < list_cut_before 수행 >
+ *
+ *  head : node4 node5 node6
+ *  list : node1 node2 node3 
+ */
 static inline void list_cut_before(struct list_head *list,
 				   struct list_head *head,
 				   struct list_head *entry)
@@ -422,6 +433,7 @@ static inline void list_cut_before(struct list_head *list,
 		INIT_LIST_HEAD(list);
 		return;
 	}
+
 	list->next = head->next;
 	list->next->prev = list;
 	list->prev = entry->prev;
@@ -430,6 +442,12 @@ static inline void list_cut_before(struct list_head *list,
 	entry->prev = head;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @prev와 @next사이에 @list를 추가한다.
+ * ---
+ *  prev -> list -> next ..
+ */
 static inline void __list_splice(const struct list_head *list,
 				 struct list_head *prev,
 				 struct list_head *next)
@@ -460,6 +478,15 @@ static inline void list_splice(const struct list_head *list,
  * list_splice_tail - join two lists, each list being a queue
  * @list: the new list to add.
  * @head: the place to add it in the first list.
+ */
+/*
+ * IAMROOT, 2022.04.02:
+ * head : node4 node5 node6
+ * list : node1 node2 node3 
+ *
+ * after
+ *
+ * head : node4 node5 node6 node1 node2 node3
  */
 static inline void list_splice_tail(struct list_head *list,
 				struct list_head *head)

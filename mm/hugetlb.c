@@ -1737,7 +1737,10 @@ out_error:
  */
 /*
  * IAMROOT, 2022.03.30:
- * - @page가 husge page인지를 확인한다.
+ * - @page가 hugetlb page인지를 확인한다.
+ *   (PageTransHuge 참고)
+ * - THP page인지 확인하는 방법은 아래처럼 사용한다.
+ *  is_thp = PageTransHuge(page) && !PageHuge(page);
  */
 int PageHuge(struct page *page)
 {
@@ -6279,9 +6282,19 @@ int get_hwpoison_huge_page(struct page *page, bool *hugetlb)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - HPG_migratable 참고
+ * - hugetlb를 putback한다.
+ * - ref drop을 수행한다.
+ */
 void putback_active_hugepage(struct page *page)
 {
 	spin_lock_irq(&hugetlb_lock);
+/*
+ * IAMROOT, 2022.04.02:
+ * - HPG_migratable를 set하고 hugetlb의 activelist로 복귀시킨다.
+ */
 	SetHPageMigratable(page);
 	list_move_tail(&page->lru, &(page_hstate(page))->hugepage_activelist);
 	spin_unlock_irq(&hugetlb_lock);

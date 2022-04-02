@@ -275,6 +275,10 @@ static inline unsigned int thp_order(struct page *page)
  * thp_nr_pages - The number of regular pages in this huge page.
  * @page: The head page of a huge page.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 huge page인지를 확인해 page 개수를 return한다.
+ */
 static inline int thp_nr_pages(struct page *page)
 {
 	VM_BUG_ON_PGFLAGS(PageTail(page), page);
@@ -293,6 +297,10 @@ vm_fault_t do_huge_pmd_numa_page(struct vm_fault *vmf);
 extern struct page *huge_zero_page;
 extern unsigned long huge_zero_pfn;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - zero huge page인지 확인한다.
+ */
 static inline bool is_huge_zero_page(struct page *page)
 {
 	return READ_ONCE(huge_zero_page) == page;

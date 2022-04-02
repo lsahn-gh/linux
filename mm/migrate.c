@@ -154,6 +154,12 @@ out:
 	return -EBUSY;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - lock_page가 걸린상태.
+ * - @page는 이미 non-lru movable page임이 확실하다. driver에 등록된 callback
+ *   함수로 puback을 한다.
+ */
 static void putback_movable_page(struct page *page)
 {
 	struct address_space *mapping;
@@ -171,6 +177,12 @@ static void putback_movable_page(struct page *page)
  * built from lru, balloon, hugetlbfs page. See isolate_migratepages_range()
  * and isolate_huge_page().
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @l(isolate된 page들이 있는 list)을 원래 위치로 복귀 시키고, isolate를 drop한다.
+ * - hugetlb는 hugetlb activelist로, lru page는 lru list로,
+ *   non-lru movable page는 driver에게 맡긴다.
+ */
 void putback_movable_pages(struct list_head *l)
 {
 	struct page *page;
@@ -187,6 +199,14 @@ void putback_movable_pages(struct list_head *l)
 		 * __PageMovable because LRU page's mapping cannot have
 		 * PAGE_MAPPING_MOVABLE.
 		 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - non-lru page
+ *   lock을 걸고 PageMovable로 확실히 검사를 한후 movable이라면
+ *   원래 page가 있던 곳의 driver 체제로 putback한다.
+ * - lru page
+ *   stat를 재계산해주고 lru page로 putback시킨다.
+ */
 		if (unlikely(__PageMovable(page))) {
 			VM_BUG_ON_PAGE(!PageIsolated(page), page);
 			lock_page(page);
@@ -195,6 +215,10 @@ void putback_movable_pages(struct list_head *l)
 			else
 				__ClearPageIsolated(page);
 			unlock_page(page);
+/*
+ * IAMROOT, 2022.04.02:
+ * - isolate ref drop
+ */
 			put_page(page);
 		} else {
 			mod_node_page_state(page_pgdat(page), NR_ISOLATED_ANON +
@@ -1213,6 +1237,14 @@ int next_demotion_node(int node)
  * Obtain the lock on page, remove all ptes and migrate the page
  * to the newly allocated page in newpage.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - thp + normal page에 대해서 수행한다.
+ * - compact_zone을 통해서 불려졌을 경우
+ *   get_new_page = compaction_alloc
+ *   put_new_page = compaction_free
+ *   private = struct compact_control *cc
+ */
 static int unmap_and_move(new_page_t get_new_page,
 				   free_page_t put_new_page,
 				   unsigned long private, struct page *page,
@@ -1223,9 +1255,21 @@ static int unmap_and_move(new_page_t get_new_page,
 	int rc = MIGRATEPAGE_SUCCESS;
 	struct page *newpage = NULL;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - thp migrate를 지원을안하는데 page가 thp면 error 처리.
+ */
 	if (!thp_migration_supported() && PageTransHuge(page))
 		return -ENOSYS;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - migrate 대상인 것들은 ref가 2이상이여야 되는데, 만약 이 시점에서 1이됬다면
+ *   page를 사용했던 모든 app에서 free를 했단 뜻이므로 더이상 migrate를 하지 않고
+ *   isolate를 풀어버리고 goto out으로 빠져나가면서 put_page를 하는 시점에
+ *   ref drop되어 buddy system으로 돌아갈것이다.
+ *   
+ */
 	if (page_count(page) == 1) {
 		/* page was freed from under us. So we are done. */
 		ClearPageActive(page);
@@ -1474,6 +1518,10 @@ static inline int try_split_thp(struct page *page, struct page **page2,
  *
  * Returns the number of pages that were not migrated, or an error code.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * @reason enum migrate_reason
+ */
 int migrate_pages(struct list_head *from, new_page_t get_new_page,
 		free_page_t put_new_page, unsigned long private,
 		enum migrate_mode mode, int reason, unsigned int *ret_succeeded)
@@ -1489,6 +1537,10 @@ int migrate_pages(struct list_head *from, new_page_t get_new_page,
 	bool is_thp = false;
 	struct page *page;
 	struct page *page2;
+/*
+ * IAMROOT, 2022.04.02:
+ * - current task의 PF_SWAPWRITE를 저장후, migrate이후 원복해준다.
+ */
 	int swapwrite = current->flags & PF_SWAPWRITE;
 	int rc, nr_subpages;
 	LIST_HEAD(ret_pages);
@@ -1496,9 +1548,17 @@ int migrate_pages(struct list_head *from, new_page_t get_new_page,
 
 	trace_mm_migrate_pages_start(mode, reason);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - migrate동안 PF_SWAPWRITE를 set한다.
+ */
 	if (!swapwrite)
 		current->flags |= PF_SWAPWRITE;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - retry 나 thp_retry가 존재하면 최대 10번 iterate한다.
+ */
 	for (pass = 0; pass < 10 && (retry || thp_retry); pass++) {
 		retry = 0;
 		thp_retry = 0;
@@ -1510,6 +1570,11 @@ retry:
 			 * Capture required information that might get lost
 			 * during migration.
 			 */
+/*
+ * IAMROOT, 2022.04.02:
+ * - thp를 즉시 확인하는 api가 없어서 아래방법을 사용한다.
+ * - (thp + hugetlbfs) - hugetlbfs = thp
+ */
 			is_thp = PageTransHuge(page) && !PageHuge(page);
 			nr_subpages = thp_nr_pages(page);
 			cond_resched();
@@ -1628,6 +1693,10 @@ out:
 	trace_mm_migrate_pages(nr_succeeded, nr_failed, nr_thp_succeeded,
 			       nr_thp_failed, nr_thp_split, mode, reason);
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - 수행전 PF_SWAPWRITE가 없엇으면 clear해준다.(원복)
+ */
 	if (!swapwrite)
 		current->flags &= ~PF_SWAPWRITE;
 

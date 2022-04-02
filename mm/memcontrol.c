@@ -1199,6 +1199,10 @@ struct lruvec *lock_page_lruvec_irq(struct page *page)
 	return lruvec;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - cgroup에서 lruvec를 얻어온면서 spin_lock을 얻어온다.
+ */
 struct lruvec *lock_page_lruvec_irqsave(struct page *page, unsigned long *flags)
 {
 	struct lruvec *lruvec;

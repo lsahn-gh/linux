@@ -534,6 +534,38 @@ unsigned long hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
  *	Synchronization: hugetlb_lock held for examination and modification.
  * HPG_vmemmap_optimized - Set when the vmemmap pages of the page are freed.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * huegtlb 페이지 고유의 스테이트플래그 이러한 플래그는 hugetb 헤드 페이지의
+ * page.private에 있습니다. 이러한 플래그를 조작하려면 다음 매크로를 통해
+ * 작성된 함수를 사용해야 합니다.
+ *
+ * HPG_restore_reserve - hugetb 페이지가 할당 시 예약을 소비할 때 설정합니다.
+ * 페이지가 완전히 인스턴스화되면 클리어. Freeroutine은 플래그를 체크하여
+ * 오류 경로 예약을 복원합니다.
+ * Synchronization: 페이지가 해방되었을 때 할당 후 사용 전 또는 사용 전
+ * 페이지만 참조할 수 있는 코드에 의해 검사 또는 수정됩니다.
+ *
+ * HPG_migratable - 페이지 캐시 및/또는 페이지 테이블에 새로 할당된 페이지를
+ * 추가한 후 설정합니다. 페이지가 후보 형식임을 나타냅니다.
+ * Synchronization: no-locking상태로 신규 페이지 할당 후 초기 설정.
+ * migration 처리 (isolate, migrate, putback) 중에 검사 및 수정하면
+ * hugetlb_lock이 유지됩니다.
+ *
+ * HPG_temporary - Buddyallocator에서 일시적으로 할당된 페이지에서 설정합니다
+ * 일반적으로 풀에 사용 가능한 페이지가 없을 때 마이그레이션 대상 페이지에
+ * 사용됩니다. hugetb 빈 페이지 경로는 이 플래그가 버디 할당자로 설정된
+ * 페이지를 즉시 개방합니다.
+ * Synchronization: 코드가 참조만 있는 것을 알고 있을 때 버디로부터 대량의
+ * 페이지를 할당받은 후 설정할 수 있습니다. 다른 모든 검사 및 수정에는
+ * hugetlb_lock이 필요합니다.
+ *
+ * HPG_freed - 페이지가 빈 목록에 있을 때 설정합니다.
+ * Synchronization: 검사 및 수정을 위해 보류된 hugetb_lock.
+ *
+ * HPG_vmemmap_optimized - 페이지의 vmemmap 페이지가 해방되는 시기를
+ * 설정합니다.
+ */
 enum hugetlb_page_flags {
 	HPG_restore_reserve = 0,
 	HPG_migratable,

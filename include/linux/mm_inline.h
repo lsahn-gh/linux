@@ -24,6 +24,11 @@ static inline int page_is_file_lru(struct page *page)
 	return !PageSwapBacked(page);
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - lru 변경에 따른 state update
+ * - @lruvec에서 관리하는 현재 page수를 관리한다.
+ */
 static __always_inline void update_lru_size(struct lruvec *lruvec,
 				enum lru_list lru, enum zone_type zid,
 				int nr_pages)
@@ -42,6 +47,11 @@ static __always_inline void update_lru_size(struct lruvec *lruvec,
  * __clear_page_lru_flags - clear page lru flags before releasing a page
  * @page: the page that was on lru and now has a zero reference
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page는 lru list에서 제거된상태. @page에서 lru 관련 flag를 clear한다.
+ * - lru 관련 flags : PG_lru, PG_active, PG_unevictable
+ */
 static __always_inline void __clear_page_lru_flags(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageLRU(page), page);
@@ -49,6 +59,10 @@ static __always_inline void __clear_page_lru_flags(struct page *page)
 	__ClearPageLRU(page);
 
 	/* this shouldn't happen, so leave the flags to bad_page() */
+/*
+ * IAMROOT, 2022.04.02:
+ * - Active와 unevictable는 절대로 같이 set될수없다.
+ */
 	if (PageActive(page) && PageUnevictable(page))
 		return;
 
@@ -63,10 +77,23 @@ static __always_inline void __clear_page_lru_flags(struct page *page)
  * Returns the LRU list a page should be on, as an index
  * into the array of LRU lists.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - page flag에 unevictable가 set되 있으면 unevictable lru list에 넣어야된다는
+ *   의미이다.
+ * - lru가 file인지 아닌지에 따라 LRU_INACTIVE_FILE / LRU_INACTIVE_ANON일지 1차적으로
+ *   정하고 그 다음에 page가 active인지를 한번더 고려해 LRU_ACTIVE를 더할지를 고려하여,
+ *   최종적으로 LRU_INACTIVE_FILE / LRU_ACTIVE_FILE / LRU_INACTIVE_ANON /
+ *   LRU_ACTIVE_ANON 가 return될것이다.
+ */
 static __always_inline enum lru_list page_lru(struct page *page)
 {
 	enum lru_list lru;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 actvie / unevictable flag가 동시에 있을수없다.
+ */
 	VM_BUG_ON_PAGE(PageActive(page) && PageUnevictable(page), page);
 
 	if (PageUnevictable(page))
@@ -79,6 +106,10 @@ static __always_inline enum lru_list page_lru(struct page *page)
 	return lru;
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page가 위치해야될 lru enum을 구하고 해당 lru에 추가한다.
+ */
 static __always_inline void add_page_to_lru_list(struct page *page,
 				struct lruvec *lruvec)
 {
@@ -97,6 +128,10 @@ static __always_inline void add_page_to_lru_list_tail(struct page *page,
 	list_add_tail(&page->lru, &lruvec->lists[lru]);
 }
 
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page의 lru list에서 @page를 제거하고 @lruvec state를 갱신한다.
+ */
 static __always_inline void del_page_from_lru_list(struct page *page,
 				struct lruvec *lruvec)
 {

@@ -1214,9 +1214,18 @@ int remove_mapping(struct address_space *mapping, struct page *page)
  *
  * lru_lock must not be held, interrupts must be enabled.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - @page를 lru list로 돌려보낸다. 그리고 isolate ref를 drop시켜준다.
+ */
 void putback_lru_page(struct page *page)
 {
 	lru_cache_add(page);
+
+/*
+ * IAMROOT, 2022.04.02:
+ * - isolate에 대한 ref drop.
+ */
 	put_page(page);		/* drop ref from isolate */
 }
 

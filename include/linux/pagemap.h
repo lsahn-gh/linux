@@ -26,6 +26,10 @@ static inline bool mapping_empty(struct address_space *mapping)
 /*
  * Bits in mapping->flags.
  */
+/*
+ * IAMROOT, 2022.04.02:
+ * - AS(address_space)
+ */
 enum mapping_flags {
 	AS_EIO		= 0,	/* IO error on async write */
 	AS_ENOSPC	= 1,	/* ENOSPC on async write */
