@@ -206,5 +206,9 @@
 
 ### 44주차
 - 2022.03.26, Zoom 온라인(9명 참석)
-- alloc_page() 진행중 ... direct-compaction
+- alloc_page() 진행중 ... direct-compaction(isolation)
+
+### 45주차
+- 2022.04.02, Zoom 온라인(9명 참석)
+- alloc_page() 진행중 ... direct-compaction(migration)
 
