@@ -418,12 +418,16 @@ static inline void list_cut_position(struct list_head *list,
  * IAMROOT, 2022.04.02:
  * - @head -> @list로 이동.
  *
- *  head : [node1 node2 node3] node4 node5 node6
- *         ^list                ^entry
+ *  head : [n1 n2 n3] n4 n5 n6
+ *         ^list       ^entry
+ *
  *  < list_cut_before 수행 >
  *
- *  head : node4 node5 node6
- *  list : node1 node2 node3 
+ *  head : n4 n5 n6
+ *  list : root n1 n2 n3 
+ *
+ *  ---
+ *
  */
 static inline void list_cut_before(struct list_head *list,
 				   struct list_head *head,
@@ -444,9 +448,8 @@ static inline void list_cut_before(struct list_head *list,
 
 /*
  * IAMROOT, 2022.04.02:
- * - @prev와 @next사이에 @list를 추가한다.
- * ---
- *  prev -> list -> next ..
+ * - list의 root node을 splice하여 prev, next에 연결한다.
+ * - list->prev <==> next , prev <= list->next
  */
 static inline void __list_splice(const struct list_head *list,
 				 struct list_head *prev,
@@ -455,6 +458,36 @@ static inline void __list_splice(const struct list_head *list,
 	struct list_head *first = list->next;
 	struct list_head *last = list->prev;
 
+/*
+ * IAMROOT, 2022.04.02:
+ * ex) last <==> list <==> first
+ *
+ * 1. first->prev = prev;
+ *
+ * last <==> list ---> first
+ *           prev <--- first
+ *           
+ * 2. prev->next = first;
+ *
+ * last <==> list ---> first
+ *           prev <==> first
+ *
+ * 3. last->next = next;
+ *
+ * last <--- list ---> first
+ *           prev <==> first
+ * last ---> next
+ *
+ * 4. next->prev = last;
+ *
+ * last <--- list ---> first
+ *           prev <==> first
+ * last <==> next
+ *
+ * 5. 정리.
+ * list : 의미없어짐
+ * list->prev <==> next, prev <==> list->next
+ */
 	first->prev = prev;
 	prev->next = first;
 
@@ -481,12 +514,14 @@ static inline void list_splice(const struct list_head *list,
  */
 /*
  * IAMROOT, 2022.04.02:
+ * - @head의 tail부분에 list를 잇는다.
  * head : node4 node5 node6
- * list : node1 node2 node3 
+ * list : root node1 node2 node3 
  *
  * after
  *
  * head : node4 node5 node6 node1 node2 node3
+ * list : root(의미없음)
  */
 static inline void list_splice_tail(struct list_head *list,
 				struct list_head *head)

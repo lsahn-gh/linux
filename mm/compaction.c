@@ -1811,16 +1811,16 @@ static inline bool compact_scanners_met(struct compact_control *cc)
  * IAMROOT, 2022.04.02:
  * - @freepage가 last page가 아니면 free_page 의 뒷 entry들을 앞으로 옮긴다.
  *
- * -
- *  freelist : node1 node2 node3 node4 node5 node6
- *                                 ^freepage
+ * - ex) freepage == n4
+ *  freelist : n1 n2 n3 n4 n5 n6
+ *                      ^freepage
  *  < list_cut_before 수행 >
  *
- *  head : node4 node5 node6
- *  list : node1 node2 node3 
+ *  head : n4 n5 n6
+ *  list : root n1 n2 n3 
  *
  * < list_splice_tail 수행 >
- * head : node4 node5 node6 node1 node2 node3
+ * head : n4 n5 n6 n1 n2 n3
  */
 static void
 move_freelist_head(struct list_head *freelist, struct page *freepage)
