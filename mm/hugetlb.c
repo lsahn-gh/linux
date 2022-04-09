@@ -1788,6 +1788,11 @@ struct address_space *hugetlb_page_mapping_lock_write(struct page *hpage)
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 offset을 구한다.
+ *   page_head_index^(page_head_order) + (page - page_head)
+ */
 pgoff_t hugetlb_basepage_index(struct page *page)
 {
 	struct page *page_head = compound_head(page);

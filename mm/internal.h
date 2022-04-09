@@ -499,6 +499,10 @@ extern pmd_t maybe_pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma);
  * Returns -EFAULT if all of the page is outside the range of vma.
  * If page is a compound head, the entire compound page is considered.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 소속된 @vma로부터 실제 가상주소를 알아온다.
+ */
 static inline unsigned long
 vma_address(struct page *page, struct vm_area_struct *vma)
 {
@@ -508,6 +512,10 @@ vma_address(struct page *page, struct vm_area_struct *vma)
 	VM_BUG_ON_PAGE(PageKsm(page), page);	/* KSM page->index unusable */
 	pgoff = page_to_pgoff(page);
 	if (pgoff >= vma->vm_pgoff) {
+/*
+ * IAMROOT, 2022.04.09:
+ * - 일반적인경우 vm_start를 base로 address를 구한다.
+ */
 		address = vma->vm_start +
 			((pgoff - vma->vm_pgoff) << PAGE_SHIFT);
 		/* Check for address beyond vma (or wrapped through 0?) */

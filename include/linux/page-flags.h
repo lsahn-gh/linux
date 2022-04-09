@@ -541,6 +541,11 @@ PAGEFLAG(Error, error, PF_NO_TAIL) TESTCLEARFLAG(Error, error, PF_NO_TAIL)
 PAGEFLAG(Referenced, referenced, PF_HEAD)
 	TESTCLEARFLAG(Referenced, referenced, PF_HEAD)
 	__SETPAGEFLAG(Referenced, referenced, PF_HEAD)
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - page를 기록중인 상태면 set.
+ */
 PAGEFLAG(Dirty, dirty, PF_HEAD) TESTSCFLAG(Dirty, dirty, PF_HEAD)
 	__CLEARPAGEFLAG(Dirty, dirty, PF_HEAD)
 PAGEFLAG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
@@ -696,6 +701,10 @@ __PAGEFLAG(Reported, reported, PF_NO_COMPOUND)
 #define PAGE_MAPPING_KSM	(PAGE_MAPPING_ANON | PAGE_MAPPING_MOVABLE)
 #define PAGE_MAPPING_FLAGS	(PAGE_MAPPING_ANON | PAGE_MAPPING_MOVABLE)
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - anon or movable이 mapping되있는지 검사한다.
+ */
 static __always_inline int PageMappingFlags(struct page *page)
 {
 	return ((unsigned long)page->mapping & PAGE_MAPPING_FLAGS) != 0;
@@ -731,6 +740,12 @@ static __always_inline int __PageMovable(struct page *page)
  * which KSM maps into multiple mms, wherever identical anonymous page content
  * is found in VM_MERGEABLE vmas.  It's a PageAnon page, pointing not to any
  * anon_vma, but to that page's node of the stable tree.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - KSM(Kernel same page merge)
+ *   커널에 동일한 page가 많을때 여러개 가지고 있을 필요가 없는데, 거기에 대한
+ *   처리 관련.
  */
 static __always_inline int PageKsm(struct page *page)
 {

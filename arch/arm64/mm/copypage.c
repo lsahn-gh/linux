@@ -14,13 +14,27 @@
 #include <asm/cpufeature.h>
 #include <asm/mte.h>
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - arm64는 highmem이 없으므로 그냥 copy한다.
+ */
 void copy_highpage(struct page *to, struct page *from)
 {
+/*
+ * IAMROOT, 2022.04.09:
+ * - to, from : 물리주소를 가리킴.
+ *   kto, kfrom : 가상주소를 가리킴. void *로 해야 맞는데 그냥 struct page *를
+ *   쓴거 같다.
+ */
 	struct page *kto = page_address(to);
 	struct page *kfrom = page_address(from);
 
 	copy_page(kto, kfrom);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @from에 mte tag가 있다면 @to측에도 mte tag를 설정해준다.
+ */
 	if (system_supports_mte() && test_bit(PG_mte_tagged, &from->flags)) {
 		set_bit(PG_mte_tagged, &to->flags);
 		page_kasan_tag_reset(to);

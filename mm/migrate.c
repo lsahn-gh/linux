@@ -231,6 +231,11 @@ void putback_movable_pages(struct list_head *l)
 /*
  * Restore a potential migration pte to a working pte entry
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - TODO
+ * - @page와 연결된 @addr를 unmap한다.
+ */
 static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 				 unsigned long addr, void *old)
 {
@@ -327,6 +332,13 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
  * Get rid of all migration entries and replace them by
  * references to the indicated page.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 소속된 anon_vma나 i_mmap을 찾아 @page의 start ~ end범위를
+ *   iterate하며 @rwc(remove_migration_pte)를 수행한다.
+ * - @locked에 따라 rmap_walk, rmap_walk_locked를 실행한다.
+ * - __unmap_and_move에서 호출시 migrate가 실패했으면 @new == @old다.
+ */
 void remove_migration_ptes(struct page *old, struct page *new, bool locked)
 {
 	struct rmap_walk_control rwc = {
@@ -413,6 +425,11 @@ unlock:
 }
 #endif
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - ZONE_DEVICE가 private를 가지고 있는지, mapping이 되있을때 thp 개수,
+ *   private보유 여부등을 가산하여 return한다.
+ */
 static int expected_page_refs(struct address_space *mapping, struct page *page)
 {
 	int expected_count = 1;
@@ -436,6 +453,18 @@ static int expected_page_refs(struct address_space *mapping, struct page *page)
  * 2 for pages with a mapping
  * 3 for pages with a mapping and PagePrivate/PagePrivate2 set.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 기본속성을 @newpage로 이동시킨다.
+ *
+ * --- mapping
+ * - mapping이 안되있는 경우.
+ *   refcount만 확인하여 속성값만 복사시킨다.
+ *
+ * - mapping이 되있는 경우
+ *   mapping경합을 막기 위해 atomic방식으로 page를 freeze시키고
+ *   속성값 및 통계(mapping이 되있으므로 통계값이 있다.)값을 이동시킨다.
+ */
 int migrate_page_move_mapping(struct address_space *mapping,
 		struct page *newpage, struct page *page, int extra_count)
 {
@@ -447,18 +476,37 @@ int migrate_page_move_mapping(struct address_space *mapping,
 
 	if (!mapping) {
 		/* Anonymous page without mapping */
+/*
+ * IAMROOT, 2022.04.09:
+ * - mapping이 안되있으면 page ref count는 1이여야 될수있다 하지만
+ *   Git blame 참고했을때 aio_migratepage 때문에 이렇게 expected_count를
+ *   사용하는거 같다.
+ */
 		if (page_count(page) != expected_count)
 			return -EAGAIN;
 
 		/* No turning back from here */
 		newpage->index = page->index;
 		newpage->mapping = page->mapping;
+/*
+ * IAMROOT, 2022.04.09:
+ * - SwapBack : swap을 할수있는 anon_page라는 의미.
+ *   @page가 swapback set이였으므로 newpage도 똑같이 set해준다.
+ */
 		if (PageSwapBacked(page))
 			__SetPageSwapBacked(newpage);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - mapping이 안되있는 page는 이렇게만 하고 migrate가 완료된다.
+ */
 		return MIGRATEPAGE_SUCCESS;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 여기부터 mapping된 page의 migrate.
+ */
 	oldzone = page_zone(page);
 	newzone = page_zone(newpage);
 
@@ -468,6 +516,10 @@ int migrate_page_move_mapping(struct address_space *mapping,
 		return -EAGAIN;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - ref를 freeze한다. atomic연산이므로 경합에서 실패할수도 있다.
+ */
 	if (!page_ref_freeze(page, expected_count)) {
 		xas_unlock_irq(&xas);
 		return -EAGAIN;
@@ -477,8 +529,16 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	 * Now we know that no one else is looking at the page:
 	 * no turning back from here.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 속성들을 @newpage로 복사한다.
+ */
 	newpage->index = page->index;
 	newpage->mapping = page->mapping;
+/*
+ * IAMROOT, 2022.04.09:
+ * - thp의 경우 512의 refcount가 증가될것이다.
+ */
 	page_ref_add(newpage, nr); /* add cache reference */
 	if (PageSwapBacked(page)) {
 		__SetPageSwapBacked(newpage);
@@ -491,6 +551,11 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	}
 
 	/* Move dirty while page refs frozen and newpage not yet exposed */
+/*
+ * IAMROOT, 2022.04.09:
+ * - old가 dirty(modify)이라면 new를 dirty로 하고, old는 cache를 내리
+ *   필요없으므로 dirty를 clear해준다.
+ */
 	dirty = PageDirty(page);
 	if (dirty) {
 		ClearPageDirty(page);
@@ -512,6 +577,10 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	 * to one less reference.
 	 * We know this isn't the last reference.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - 위에서 했던 freeze를 푼다.
+ */
 	page_ref_unfreeze(page, expected_count - nr);
 
 	xas_unlock(&xas);
@@ -527,6 +596,10 @@ int migrate_page_move_mapping(struct address_space *mapping,
 	 * via NR_FILE_PAGES and NR_ANON_MAPPED if they
 	 * are mapped to swap space.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - new와 old의 zone이 다를 경우 통계값 또한 이동켜준다.
+ */
 	if (newzone != oldzone) {
 		struct lruvec *old_lruvec, *new_lruvec;
 		struct mem_cgroup *memcg;
@@ -598,6 +671,10 @@ int migrate_huge_page_move_mapping(struct address_space *mapping,
 
 /*
  * Copy the page to its new location
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - flag들을 전부 copy한다.
  */
 void migrate_page_states(struct page *newpage, struct page *page)
 {
@@ -672,6 +749,11 @@ void migrate_page_states(struct page *newpage, struct page *page)
 }
 EXPORT_SYMBOL(migrate_page_states);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - NO_COPY가 아닌상황등일때 진입한다.
+ * - @page -> @newpage로 page가 가리키는 contents를 cpu copy한다.
+ */
 void migrate_page_copy(struct page *newpage, struct page *page)
 {
 	if (PageHuge(page) || PageTransHuge(page))
@@ -693,19 +775,38 @@ EXPORT_SYMBOL(migrate_page_copy);
  *
  * Pages are locked upon entry and exit.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page를 migrate에 성공한다면 @page의 NO_COPY flag에 따라
+ *   contents, states를 @newpage로 복사한다.
+ */
 int migrate_page(struct address_space *mapping,
 		struct page *newpage, struct page *page,
 		enum migrate_mode mode)
 {
 	int rc;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 이 함수에 진입전 writeback이 clear가 될때까지 기다렸을것이다.
+ */
 	BUG_ON(PageWriteback(page));	/* Writeback must be complete */
 
 	rc = migrate_page_move_mapping(mapping, newpage, page, 0);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 실패상황은 경합상황등으로 인한 again밖에 없다.
+ */
 	if (rc != MIGRATEPAGE_SUCCESS)
 		return rc;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - NO_COPY의 경우엔 여기서 일단 states만 복사해놓고 contents는 나중에
+ *   다른게 해줄것이다.
+ *   (ex. 아직 page fault가 발생안한 file 참조등의 상황, DMA engine)
+ */
 	if (mode != MIGRATE_SYNC_NO_COPY)
 		migrate_page_copy(newpage, page);
 	else
@@ -860,6 +961,10 @@ int buffer_migrate_page_norefs(struct address_space *mapping,
 /*
  * Writeback a page to clean the dirty state
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - 기록이 안된 @page를 강제로 write 시킨다.
+ */
 static int writeout(struct address_space *mapping, struct page *page)
 {
 	struct writeback_control wbc = {
@@ -901,6 +1006,13 @@ static int writeout(struct address_space *mapping, struct page *page)
 /*
  * Default handling if a filesystem does not provide a migration function.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page에 mapping된 fs에 migratepage가 구현이 안됬을때 진입한다.
+ *   @page가 dirty일 경우 무조건 fs write ops를 통해 write를 시키고
+ *   @newpage를 migrate안한다. 그게 아니면 @page의 private buffer를
+ *   release시키고 migrate를 시도한다.
+ */
 static int fallback_migrate_page(struct address_space *mapping,
 	struct page *newpage, struct page *page, enum migrate_mode mode)
 {
@@ -920,6 +1032,10 @@ static int fallback_migrate_page(struct address_space *mapping,
 	 * Buffers may be managed in a filesystem specific way.
 	 * We must have no buffers or drop them.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - private buffer를 release한다.
+ */
 	if (page_has_private(page) &&
 	    !try_to_release_page(page, GFP_KERNEL))
 		return mode == MIGRATE_SYNC ? -EAGAIN : -EBUSY;
@@ -938,6 +1054,10 @@ static int fallback_migrate_page(struct address_space *mapping,
  *   < 0 - error code
  *  MIGRATEPAGE_SUCCESS - success
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page를 @newpage로 migrate한다.
+ */
 static int move_to_new_page(struct page *newpage, struct page *page,
 				enum migrate_mode mode)
 {
@@ -951,6 +1071,13 @@ static int move_to_new_page(struct page *newpage, struct page *page,
 	mapping = page_mapping(page);
 
 	if (likely(is_lru)) {
+/*
+ * IAMROOT, 2022.04.09:
+ * - mapping이 안되있으면 직접 migrate_page를 수행한다.
+ * - lru movable이면서 mapping->a_ops->migratepage 가 존재하면
+ *   fs와 연결된 상황이다. fs ops를 빌려 migratepage를 수행한다.
+ * - mapping이 되있는데 migratepage ops를 지원안한다면 fs에서 지원안한다는것.
+ */
 		if (!mapping)
 			rc = migrate_page(mapping, newpage, page, mode);
 		else if (mapping->a_ops->migratepage)
@@ -972,12 +1099,21 @@ static int move_to_new_page(struct page *newpage, struct page *page,
 		 * isolation step. In that case, we shouldn't try migration.
 		 */
 		VM_BUG_ON_PAGE(!PageIsolated(page), page);
+/*
+ * IAMROOT, 2022.04.09:
+ * - 한번더 완전히 검사하여 migrate를 할필요없으면 isolate를 풀어버리고
+ *   성공했다 치고 복귀한다.
+ */
 		if (!PageMovable(page)) {
 			rc = MIGRATEPAGE_SUCCESS;
 			__ClearPageIsolated(page);
 			goto out;
 		}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - driver ops빌려 migratepage를 처리한다.
+ */
 		rc = mapping->a_ops->migratepage(mapping, newpage,
 						page, mode);
 		WARN_ON_ONCE(rc == MIGRATEPAGE_SUCCESS &&
@@ -996,6 +1132,10 @@ static int move_to_new_page(struct page *newpage, struct page *page,
 			 * We clear PG_movable under page_lock so any compactor
 			 * cannot try to migrate this page.
 			 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - migrate가 끝낫으므로 isolate를 풀어준다.
+ */
 			__ClearPageIsolated(page);
 		}
 
@@ -1007,6 +1147,11 @@ static int move_to_new_page(struct page *newpage, struct page *page,
 		if (!PageMappingFlags(page))
 			page->mapping = NULL;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - contents를 copy했을때 flush를 안햇었는데 zone device 아닌 경우에 대해서
+ *   여기서 flush를 시킨다.
+ */
 		if (likely(!is_zone_device_page(newpage)))
 			flush_dcache_page(newpage);
 
@@ -1015,14 +1160,32 @@ out:
 	return rc;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 1. @page를 @newpage로 속성들을 복사한다. @page따라서 contents까지
+ *   복사한다.
+ *   2. @page를 unmap한다. @page에따라서 @newpage에 mapping을 한다.
+ */
 static int __unmap_and_move(struct page *page, struct page *newpage,
 				int force, enum migrate_mode mode)
 {
 	int rc = -EAGAIN;
 	bool page_was_mapped = false;
 	struct anon_vma *anon_vma = NULL;
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - 이 함수를 진입했으면 movable page일것이다. non-lru movable인지
+ *   lru movable인지 기록해놓는다.
+ */
 	bool is_lru = !__PageMovable(page);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - lock을 시도한다. lock을 실패할경우 force는 false이거나 async,
+ *   direct compaction일 경우 error 처리로 진행한다.
+ *   force는 true일 경우 무조건 lock을 수행한다.
+ */
 	if (!trylock_page(page)) {
 		if (!force || mode == MIGRATE_ASYNC)
 			goto out;
@@ -1046,6 +1209,10 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 		lock_page(page);
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - WriteBack 중인 page. task가 wrieback이 될때까지 기다린다.
+ */
 	if (PageWriteback(page)) {
 		/*
 		 * Only in the case of a full synchronous migration is it
@@ -1053,6 +1220,11 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 		 * the retry loop is too short and in the sync-light case,
 		 * the overhead of stalling is too much
 		 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - sync light나 async면 busy로 error처리. 아니면 writeback이 풀릴때까지
+ *   기다린다.
+ */
 		switch (mode) {
 		case MIGRATE_SYNC:
 		case MIGRATE_SYNC_NO_COPY:
@@ -1080,6 +1252,10 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 	 * because that implies that the anon page is no longer mapped
 	 * (and cannot be remapped so long as we hold the page lock).
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 anon page면 @page가 소속된 anon_vma를 가져온다.
+ */
 	if (PageAnon(page) && !PageKsm(page))
 		anon_vma = page_get_anon_vma(page);
 
@@ -1094,11 +1270,19 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 	if (unlikely(!trylock_page(newpage)))
 		goto out_unlock;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - non-lru movable이면 
+ */
 	if (unlikely(!is_lru)) {
 		rc = move_to_new_page(newpage, page, mode);
 		goto out_unlock_both;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - lru movable 이면.
+ */
 	/*
 	 * Corner case handling:
 	 * 1. When a new swap-cache page is read into, it is added to the LRU
@@ -1125,9 +1309,17 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 		page_was_mapped = true;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - mapped가 안되있으므로 옮기기만 하면된다는것.
+ */
 	if (!page_mapped(page))
 		rc = move_to_new_page(newpage, page, mode);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 기존 mapped된 page를 unmap한다.
+ */
 	if (page_was_mapped)
 		remove_migration_ptes(page,
 			rc == MIGRATEPAGE_SUCCESS ? newpage : page, false);
@@ -1239,6 +1431,11 @@ int next_demotion_node(int node)
  */
 /*
  * IAMROOT, 2022.04.02:
+ * - 1. get_new_page를 통해서 new_page를 얻어온다.
+ *   2. @page를 newpage로 속성들을 복사한다. @page따라서 contents까지
+ *   복사한다.
+ *   3. @page를 unmap한다. @page에따라서 newpage에 mapping을 한다.
+ * ---
  * - thp + normal page에 대해서 수행한다.
  * - compact_zone을 통해서 불려졌을 경우
  *   get_new_page = compaction_alloc
@@ -1283,6 +1480,10 @@ static int unmap_and_move(new_page_t get_new_page,
 		goto out;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - callback func에서 (free scanner에서 넣어놨던)freepage를 가져온다.
+ */
 	newpage = get_new_page(page, private);
 	if (!newpage)
 		return -ENOMEM;
@@ -1351,6 +1552,10 @@ out:
  * There is also no race when direct I/O is issued on the page under migration,
  * because then pte is replaced with migration swap entry and direct I/O code
  * will wait in the page fault for migration to complete.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - SKIP
  */
 static int unmap_and_move_huge_page(new_page_t get_new_page,
 				free_page_t put_new_page, unsigned long private,
@@ -1481,6 +1686,10 @@ out:
 	return rc;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - thp page를 일반 page로 분할한다.
+ */
 static inline int try_split_thp(struct page *page, struct page **page2,
 				struct list_head *from)
 {
@@ -1579,6 +1788,11 @@ retry:
 			nr_subpages = thp_nr_pages(page);
 			cond_resched();
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - pass > 2 (force) : __unmap_and_move에서 trylock이 실패시 강제로 lock을
+ *   할지에 대한 여부 설정.
+ */
 			if (PageHuge(page))
 				rc = unmap_and_move_huge_page(get_new_page,
 						put_new_page, private, page,
@@ -1597,6 +1811,11 @@ retry:
 			 *	Other errno: put on ret_pages list then splice to
 			 *		     from list
 			 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - migrate를 실패 한경우 thp에 대하여 split를 해서 retry를 조건에 따라
+ *   시도한다.
+ */
 			switch(rc) {
 			/*
 			 * THP migration might be unsupported or the
@@ -1683,6 +1902,10 @@ out:
 	 * Put the permanent failure page back to migration list, they
 	 * will be put back to the right list by the caller.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - 남은 page(ret_pages)를 from에 복귀 시킨다.
+ */
 	list_splice(&ret_pages, from);
 
 	count_vm_events(PGMIGRATE_SUCCESS, nr_succeeded);

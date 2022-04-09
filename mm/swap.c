@@ -780,6 +780,10 @@ static void lru_add_and_bh_lrus_drain(void)
 	invalidate_bh_lrus_cpu();
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - cache에 있는것을 lru로 drain시킨다.
+ */
 void lru_add_drain_cpu_zone(struct zone *zone)
 {
 	local_lock(&lru_pvecs.lock);

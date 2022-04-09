@@ -2593,6 +2593,10 @@ struct page *ksm_might_need_to_copy(struct page *page,
 	return new_page;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - SKIP
+ */
 void rmap_walk_ksm(struct page *page, struct rmap_walk_control *rwc)
 {
 	struct stable_node *stable_node;

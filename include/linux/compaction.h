@@ -132,6 +132,10 @@ static inline bool compaction_made_progress(enum compact_result result)
 }
 
 /* Compaction has failed and it doesn't make much sense to keep retrying. */
+/*
+ * IAMROOT, 2022.04.09:
+ * - compaction이 실패했다면 return true, 아니면 false
+ */
 static inline bool compaction_failed(enum compact_result result)
 {
 	/* All zones were scanned completely and still not result. */

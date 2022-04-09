@@ -1257,6 +1257,14 @@ arch_atomic_add_unless(atomic_t *v, int a, int u)
  * Atomically increments @v by 1, if @v is non-zero.
  * Returns true if the increment was done.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @*v가 0이 아닌 경우에만 inc를 한다.
+ * - @*v가 0이 아닌 경우 -> inc후 return true
+ * - @*v가 0인 경우 -> return false
+ * - ex) *v == 0 => return false
+ *       *v == 1 => *v = 2가 되고 return true
+ */
 static __always_inline bool
 arch_atomic_inc_not_zero(atomic_t *v)
 {

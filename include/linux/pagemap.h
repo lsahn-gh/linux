@@ -523,6 +523,10 @@ static inline struct page *read_mapping_page(struct address_space *mapping,
  * Get index of the page within radix-tree (but not for hugetlb pages).
  * (TODO: remove once hugetlb pages will have ->index in PAGE_SIZE)
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 시작주소로부터의 offset을 가져온다.
+ */
 static inline pgoff_t page_to_index(struct page *page)
 {
 	struct page *head;
@@ -543,6 +547,10 @@ extern pgoff_t hugetlb_basepage_index(struct page *page);
 /*
  * Get the offset in PAGE_SIZE (even for hugetlb pages).
  * (TODO: hugetlb pages should have ->index in PAGE_SIZE)
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 시작 주소 page의 몇번째 index인지를 가져온다.
  */
 static inline pgoff_t page_to_pgoff(struct page *page)
 {

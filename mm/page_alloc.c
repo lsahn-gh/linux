@@ -3870,6 +3870,10 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
  * thread pinned to the current processor or a processor that
  * is not online.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - pcplist를 drain시킨다.
+ */
 static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 {
 	unsigned long flags;
@@ -3891,6 +3895,10 @@ static void drain_pages_zone(unsigned int cpu, struct zone *zone)
  * thread pinned to the current processor or a processor that
  * is not online.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @cpu가 속한 전체 zone에 대해서 drain을 수행한다.
+ */
 static void drain_pages(unsigned int cpu)
 {
 	struct zone *zone;
@@ -3905,6 +3913,11 @@ static void drain_pages(unsigned int cpu)
  *
  * The CPU has to be pinned. When zone parameter is non-NULL, spill just
  * the single zone's pages.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @zone이 인자로 오면 해당 zone만, 아니면 전체 zone에 대해서 drain을
+ *   수행한다.
  */
 void drain_local_pages(struct zone *zone)
 {
@@ -5560,6 +5573,14 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - compact가 실패했을경우 compact priority를 재조정해보기 위해 진입한다.
+ * - false인경우
+ *   1. order = 0
+ *   2. signal 받음
+ *   3. 
+ */
 static inline bool
 should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
 		     enum compact_result compact_result,
@@ -5586,6 +5607,10 @@ should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
 	 * so it doesn't really make much sense to retry except when the
 	 * failure could be caused by insufficient priority
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - compaction을 처음부터 끝까지 다했는데 실패했다면 goto check_priority
+ */
 	if (compaction_failed(compact_result))
 		goto check_priority;
 
@@ -5593,6 +5618,11 @@ should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
 	 * compaction was skipped because there are not enough order-0 pages
 	 * to work with, so we retry only if it looks like reclaim can help.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - compaction이 skip된 상황이면 order 0가 충분하지 않았을지도 모르므로
+ *   모든 존의 reclaimable page 까지 확인해본다.
+ */
 	if (compaction_needs_reclaim(compact_result)) {
 		ret = compaction_zonelist_suitable(ac, order, alloc_flags);
 		goto out;
@@ -6283,6 +6313,11 @@ retry_cpuset:
 			 * sync compaction could be very expensive, so keep
 			 * using async compaction.
 			 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - costly_order가 실패했고 retry요청이 없는경우에
+ *   비용이 낮은 compact_priority로 변경한다.
+ */
 			compact_priority = INIT_COMPACT_PRIORITY;
 		}
 	}
@@ -6327,6 +6362,10 @@ retry:
 		goto got_pg;
 
 	/* Try direct compaction and then allocating */
+/*
+ * IAMROOT, 2022.04.09:
+ * - retry등을 할때는 compact_priority에 따라서 수행한다.
+ */
 	page = __alloc_pages_direct_compact(gfp_mask, order, alloc_flags, ac,
 					compact_priority, &compact_result);
 	if (page)

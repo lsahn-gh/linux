@@ -2281,6 +2281,13 @@ void vma_adjust_trans_huge(struct vm_area_struct *vma,
 	}
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 anon일 경우 migrate(unmap + copy + map)까지 진행을하고 아니면
+ *   unmmap만하고 끝난다.
+ * - unmap만 하는 @page들은 page fault기반같것들이다.(원본이 disk등 다른곳에
+ *   있고 fault로 생기게 되는 page들)
+ */
 static void unmap_page(struct page *page)
 {
 	enum ttu_flags ttu_flags = TTU_RMAP_LOCKED | TTU_SPLIT_HUGE_PMD |
@@ -2402,6 +2409,10 @@ static void __split_huge_page_tail(struct page *head, int tail,
 	lru_add_page_tail(head, page_tail, lruvec, list);
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - huge_page를 split한다.
+ */
 static void __split_huge_page(struct page *page, struct list_head *list,
 		pgoff_t end)
 {
@@ -2609,6 +2620,11 @@ bool can_split_huge_page(struct page *page, int *pextra_pins)
  * Returns -EBUSY if the page is pinned or if anon_vma disappeared from under
  * us.
  */
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - huge page를 normal page로 split하여 list에 전달한다.
+ */
 int split_huge_page_to_list(struct page *page, struct list_head *list)
 {
 	struct page *head = compound_head(page);
@@ -2716,6 +2732,10 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 		ret = 0;
 	} else {
 		spin_unlock(&ds_queue->split_queue_lock);
+/*
+ * IAMROOT, 2022.04.09:
+ * - 경합실패. error처리
+ */
 fail:
 		if (mapping)
 			xa_unlock(&mapping->i_pages);

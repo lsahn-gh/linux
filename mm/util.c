@@ -654,6 +654,10 @@ void *kvrealloc(const void *p, size_t oldsize, size_t newsize, gfp_t flags)
 }
 EXPORT_SYMBOL(kvrealloc);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - flag를 제외하고 address자체만을 가져온다.
+ */
 static inline void *__page_rmapping(struct page *page)
 {
 	unsigned long mapping;
@@ -675,6 +679,10 @@ void *page_rmapping(struct page *page)
  * Return true if this page is mapped into pagetables.
  * For compound page it returns true if any subpage of compound page is mapped.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 물리 페이지가 가상주소에 mapping이 되있는지 확인한다.
+ */
 bool page_mapped(struct page *page)
 {
 	int i;
@@ -694,6 +702,12 @@ bool page_mapped(struct page *page)
 }
 EXPORT_SYMBOL(page_mapped);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 속한 anon_vma를 가져온다.
+ * - @page의 mapping에는 address_space가 보통 저장되는데 anon_page는
+ *   anon_vma가 저장되있다는게 간접적으로 알수있다.
+ */
 struct anon_vma *page_anon_vma(struct page *page)
 {
 	unsigned long mapping;
@@ -764,10 +778,20 @@ int __page_mapcount(struct page *page)
 }
 EXPORT_SYMBOL_GPL(__page_mapcount);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @src의 가상주소 데이터를 @dst의 가상주소로 복사한다.
+ * - huge page만이 아닌 normal or huge page를 처리한다.
+ *   (huge page도 처리 할수있다는 뜻이다.)
+ */
 void copy_huge_page(struct page *dst, struct page *src)
 {
 	unsigned i, nr = compound_nr(src);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 같은 index끼리 copy_highpage를 호출한다.
+ */
 	for (i = 0; i < nr; i++) {
 		cond_resched();
 		copy_highpage(nth_page(dst, i), nth_page(src, i));

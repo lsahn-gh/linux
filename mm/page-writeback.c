@@ -2876,6 +2876,10 @@ EXPORT_SYMBOL(__test_set_page_writeback);
 /*
  * Wait for a page to complete writeback
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - writeback이 풀릴때까지 기다린다.
+ */
 void wait_on_page_writeback(struct page *page)
 {
 	while (PageWriteback(page)) {

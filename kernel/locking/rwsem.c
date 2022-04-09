@@ -1498,6 +1498,10 @@ EXPORT_SYMBOL(down_read_killable);
 /*
  * trylock for reading -- returns 1 if successful, 0 if contention
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * @return 1 success, 0 fail
+ */
 int down_read_trylock(struct rw_semaphore *sem)
 {
 	int ret = __down_read_trylock(sem);

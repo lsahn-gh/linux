@@ -483,6 +483,10 @@ void __init anon_vma_init(void)
  * if there is a mapcount, we can dereference the anon_vma after observing
  * those.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 소속된 anon_vma를 가져온다.
+ */
 struct anon_vma *page_get_anon_vma(struct page *page)
 {
 	struct anon_vma *anon_vma = NULL;
@@ -526,6 +530,11 @@ out:
  * atomic op -- the trylock. If we fail the trylock, we fall back to getting a
  * reference like with page_get_anon_vma() and then block on the mutex.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page->mapping에서 anon_vma를 root lock / anon_vma lock을 하여
+ *   가져온다.
+ */
 struct anon_vma *page_lock_anon_vma_read(struct page *page)
 {
 	struct anon_vma *anon_vma = NULL;
@@ -541,12 +550,21 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 
 	anon_vma = (struct anon_vma *) (anon_mapping - PAGE_MAPPING_ANON);
 	root_anon_vma = READ_ONCE(anon_vma->root);
+/*
+ * IAMROOT, 2022.04.09:
+ * - root에 대해서 lock을 시도한다.
+ */
 	if (down_read_trylock(&root_anon_vma->rwsem)) {
 		/*
 		 * If the page is still mapped, then this anon_vma is still
 		 * its anon_vma, and holding the mutex ensures that it will
 		 * not go away, see anon_vma_free().
 		 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - root에 lock을 걸고나서 mapped가 풀렸는지 확인한다.
+ *   (lock을 건사이에 풀렸을수도 있기때문에). 풀렸다면 실패처리.
+ */
 		if (!page_mapped(page)) {
 			up_read(&root_anon_vma->rwsem);
 			anon_vma = NULL;
@@ -555,11 +573,19 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 	}
 
 	/* trylock failed, we got to sleep */
+/*
+ * IAMROOT, 2022.04.09:
+ * - refcount가 0면 error 처리.
+ */
 	if (!atomic_inc_not_zero(&anon_vma->refcount)) {
 		anon_vma = NULL;
 		goto out;
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 한번 mapped가 풀린지 확인한다. 풀렸으면 error 처리.
+ */
 	if (!page_mapped(page)) {
 		rcu_read_unlock();
 		put_anon_vma(anon_vma);
@@ -568,6 +594,10 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 
 	/* we pinned the anon_vma, its safe to sleep */
 	rcu_read_unlock();
+/*
+ * IAMROOT, 2022.04.09:
+ * - 자신의 것에 대해서 lock을 한다.
+ */
 	anon_vma_lock_read(anon_vma);
 
 	if (atomic_dec_and_test(&anon_vma->refcount)) {
@@ -576,6 +606,11 @@ struct anon_vma *page_lock_anon_vma_read(struct page *page)
 		 * and bail -- can't simply use put_anon_vma() because
 		 * we'll deadlock on the anon_vma_lock_write() recursion.
 		 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - refcount를 감소시킨 후에도 refcount가 있으면 여기서 __put_anon_vma를
+ *   수행한다. 
+ */
 		anon_vma_unlock_read(anon_vma);
 		__put_anon_vma(anon_vma);
 		anon_vma = NULL;
@@ -1653,6 +1688,10 @@ static bool invalid_migration_vma(struct vm_area_struct *vma, void *arg)
 	return vma_is_temporary_stack(vma);
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 mapped가 안됬는지 확인한다.
+ */
 static int page_not_mapped(struct page *page)
 {
 	return !page_mapped(page);
@@ -1689,6 +1728,11 @@ void try_to_unmap(struct page *page, enum ttu_flags flags)
  *
  * If TTU_SPLIT_HUGE_PMD is specified any PMD mappings will be split into PTEs
  * containing migration entries.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - TODO
+ * - unmap + mapping + mmu notify
  */
 static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		     unsigned long address, void *arg)
@@ -1797,6 +1841,11 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 
 		/* Nuke the page table entry. */
 		flush_cache_page(vma, address, pte_pfn(*pvmw.pte));
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - 기존 pte를 가져오면서 clear(unmap)한다.
+ */
 		pteval = ptep_clear_flush(vma, address, pvmw.pte);
 
 		/* Move the dirty bit to the page. Now the pte is gone. */
@@ -1868,9 +1917,17 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 			mmu_notifier_invalidate_range(mm, address,
 						      address + PAGE_SIZE);
 		} else {
+/*
+ * IAMROOT, 2022.04.09:
+ * - 위 if문을 제외한 page들에 대한(anon등) unmap + mapping 처리.
+ */
 			swp_entry_t entry;
 			pte_t swp_pte;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - arch dependency unmap진행.(ex) sparc)
+ */
 			if (arch_unmap_one(mm, vma, address, pteval) < 0) {
 				set_pte_at(mm, address, pvmw.pte, pteval);
 				ret = false;
@@ -1913,6 +1970,10 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
 		put_page(page);
 	}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - mmu에 mapping이 바꼇다는것을 notify(invalidate)해준다.
+ */
 	mmu_notifier_invalidate_range_end(&range);
 
 	return ret;
@@ -1925,6 +1986,11 @@ static bool try_to_migrate_one(struct page *page, struct vm_area_struct *vma,
  *
  * Tries to remove all the page table entries which are mapping this page and
  * replace them with special swap entries. Caller must hold the page lock.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page가 소속된 anon_vma나 i_mmap을 찾아 @page의 start ~ end범위를
+ *   iterate하며 @rwc(try_to_migrate_one)를 수행한다.
  */
 void try_to_migrate(struct page *page, enum ttu_flags flags)
 {
@@ -1954,6 +2020,15 @@ void try_to_migrate(struct page *page, enum ttu_flags flags)
 	 * locking requirements of exec(), migration skips
 	 * temporary VMAs until after exec() completes.
 	 */
+/*
+ * IAMROOT, 2022.04.09:
+ * - papago
+ *   실행 중에 임시 VMA가 설정되고 나중에 이동됩니다.
+ *   VMA가 anon_vma이 lock상태에서 이동되지만 페이지 테이블은 이동되지 않아
+ *   마이그레이션에서 마이그레이션 ptes을 찾을 수 없습니다.
+ *   마이그레이션은 exec()의 잠금 요구 사항을 증가시키는 대신
+ *   exec()이 완료될 때까지 임시 VMA를 건너뜁니다.
+ */
 	if (!PageKsm(page) && PageAnon(page))
 		rwc.invalid_vma = invalid_migration_vma;
 
@@ -2228,11 +2303,20 @@ void __put_anon_vma(struct anon_vma *anon_vma)
 		anon_vma_free(root);
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @rwc->anon_lock이 존재하면 해당함수에서 lock을 걸고,
+ *   그게 아니면 @page에 대해서 anon_vma lock을 걸고 anon_vma를 가져온다.
+ */
 static struct anon_vma *rmap_walk_anon_lock(struct page *page,
 					struct rmap_walk_control *rwc)
 {
 	struct anon_vma *anon_vma;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - ex) page_lock_anon_vma_read
+ */
 	if (rwc->anon_lock)
 		return rwc->anon_lock(page);
 
@@ -2264,6 +2348,11 @@ static struct anon_vma *rmap_walk_anon_lock(struct page *page,
  * vm_flags for that VMA.  That should be OK, because that vma shouldn't be
  * LOCKED.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @locked에 따라 lock을 한후 anon_vma구하여 anon_vma의 root를 가지고
+ *   @page의 start ~ end까지의 범위에서 @rwc의 callback함수를 호출한다.
+ */
 static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
 		bool locked)
 {
@@ -2271,6 +2360,11 @@ static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
 	pgoff_t pgoff_start, pgoff_end;
 	struct anon_vma_chain *avc;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - locked이미 걸려있으면 anon_vma만 가져오고 그게 아니면 lock을 걸고
+ *   가져온다.
+ */
 	if (locked) {
 		anon_vma = page_anon_vma(page);
 		/* anon_vma disappear under us? */
@@ -2283,6 +2377,11 @@ static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
 
 	pgoff_start = page_to_pgoff(page);
 	pgoff_end = pgoff_start + thp_nr_pages(page) - 1;
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - pgoff_start ~ pgoff_end까지범위의 avc를 순회한다.
+ */
 	anon_vma_interval_tree_foreach(avc, &anon_vma->rb_root,
 			pgoff_start, pgoff_end) {
 		struct vm_area_struct *vma = avc->vma;
@@ -2291,9 +2390,23 @@ static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
 		VM_BUG_ON_VMA(address == -EFAULT, vma);
 		cond_resched();
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - skip하기 위한 동작.
+ */
 		if (rwc->invalid_vma && rwc->invalid_vma(vma, rwc->arg))
 			continue;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * ex) rmap_one
+ * try_to_unmap   : try_to_unmap_one
+ * try_to_migrate : try_to_migrate_one
+ * remove_migration_ptes : remove_migration_pte,
+ *
+ * ex) done
+ * try_to_migrate : page_not_mapped
+ */
 		if (!rwc->rmap_one(page, vma, address, rwc->arg))
 			break;
 		if (rwc->done && rwc->done(page))
@@ -2316,6 +2429,12 @@ static void rmap_walk_anon(struct page *page, struct rmap_walk_control *rwc,
  * where the page was found will be held for write.  So, we won't recheck
  * vm_flags for that VMA.  That should be OK, because that vma shouldn't be
  * LOCKED.
+ */
+/*
+ * IAMROOT, 2022.04.09:
+ * - @locked에 따라 lock을 한후 address_space의 i_mmap을
+ *   @page의 start ~ end까지의 범위를 순회하여 @rwc의
+ *   callback함수를 호출한다.
  */
 static void rmap_walk_file(struct page *page, struct rmap_walk_control *rwc,
 		bool locked)
@@ -2360,6 +2479,10 @@ done:
 		i_mmap_unlock_read(mapping);
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - lock arg는 false. @page속성에 따라 함수를 호출한다.
+ */
 void rmap_walk(struct page *page, struct rmap_walk_control *rwc)
 {
 	if (unlikely(PageKsm(page)))
@@ -2371,6 +2494,12 @@ void rmap_walk(struct page *page, struct rmap_walk_control *rwc)
 }
 
 /* Like rmap_walk, but caller holds relevant rmap lock */
+
+/*
+ * IAMROOT, 2022.04.09:
+ * - lock이미 걸려있다. locked arg는 true. @page속성에 따라 함수를 호출한다.
+ *   (ksm은 locked을 할수 없다는게 주석으로 보인다.)
+ */
 void rmap_walk_locked(struct page *page, struct rmap_walk_control *rwc)
 {
 	/* no ksm support for now */

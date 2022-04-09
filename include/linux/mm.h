@@ -238,6 +238,11 @@ int overcommit_policy_handler(struct ctl_table *, int, void *, size_t *,
 int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 		pgoff_t index, gfp_t gfp, void **shadowp);
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page의 + n의 pfn을 구하여 page구조체를 return한다.
+ * - @page -> pfn 변환. pfn + n = new_pfn. new_pfn으로 new_page return.
+ */
 #if defined(CONFIG_SPARSEMEM) && !defined(CONFIG_SPARSEMEM_VMEMMAP)
 #define nth_page(page,n) pfn_to_page(page_to_pfn((page)) + (n))
 #else
@@ -1270,6 +1275,10 @@ static inline void put_devmap_managed_page(struct page *page)
 }
 #endif /* CONFIG_DEV_PAGEMAP_OPS */
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - ZONE_DEVICE가 private page를 가지고 있는지 확인.
+ */
 static inline bool is_device_private_page(const struct page *page)
 {
 	return IS_ENABLED(CONFIG_DEV_PAGEMAP_OPS) &&
@@ -1715,6 +1724,7 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
 
 /*
  * IAMROOT, 2022.03.05:
+ * - page_address의 define으로 이 함수를 호출한다.
  * - lowmem일 경우에만 사용할수있다. @page가 가리키는 va를 가져온다.
  */
 static __always_inline void *lowmem_page_address(const struct page *page)

@@ -3222,6 +3222,10 @@ failed:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page에서 private하게 관리하는 data buffer를 해제한다.
+ */
 int try_to_free_buffers(struct page *page)
 {
 	struct address_space * const mapping = page->mapping;

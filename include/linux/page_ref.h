@@ -192,6 +192,11 @@ static inline int page_ref_add_unless(struct page *page, int nr, int u)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @page를 참조 못하도록 막아둔다.
+ * - @page의 refcount가 @count랑 같으면 0으로 set한다.
+ */
 static inline int page_ref_freeze(struct page *page, int count)
 {
 	int ret = likely(atomic_cmpxchg(&page->_refcount, count, 0) == count);

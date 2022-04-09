@@ -582,6 +582,11 @@ atomic_add_unless(atomic_t *v, int a, int u)
 	return arch_atomic_add_unless(v, a, u);
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - ex) *v == 0 => return false
+ *       *v == 1 => *v = 2가 되고 return true
+ */
 static __always_inline bool
 atomic_inc_not_zero(atomic_t *v)
 {

@@ -23,6 +23,10 @@ struct rb_root {
  * Furthermore, users that want to cache both pointers may
  * find it a bit asymmetric, but that's ok.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - 가장 작은 주소(가장 왼쪽 아래)를 rb_leftmost로 기억해놓는다.
+ */
 struct rb_root_cached {
 	struct rb_root rb_root;
 	struct rb_node *rb_leftmost;

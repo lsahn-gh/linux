@@ -2299,6 +2299,10 @@ static struct page *compaction_alloc(struct page *migratepage,
  * freelist.  All pages on the freelist are from the same zone, so there is no
  * special handling needed for NUMA.
  */
+/*
+ * IAMROOT, 2022.04.09:
+ * - migrate 실패했을시 @page를 freepages에 되돌린다.
+ */
 static void compaction_free(struct page *page, unsigned long data)
 {
 	struct compact_control *cc = (struct compact_control *)data;
@@ -3168,6 +3172,11 @@ enum compact_result compaction_suitable(struct zone *zone, int order,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - @ac에 등록된 zone들이 compaction가능한지 reclimable page + free page snapshot
+ *   을 확인한다. 모든 zone이 skipped(0 order도 없는 상태)라면 false.
+ */
 bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 		int alloc_flags)
 {
@@ -3200,6 +3209,14 @@ bool compaction_zonelist_suitable(struct alloc_context *ac, int order,
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - compact 수행
+ *   1. migrate scanner, free scanner를 사용하여 migratable, free page를 찾는다.
+ *   2. 다음 comacpt를 위해 범위를 cache해놓는다.
+ *   3. migrate할 page들을 isolate를 시키고, 성공을 한다면 free page에
+ *	migrate를 진행한다.
+ */
 static enum compact_result
 compact_zone(struct compact_control *cc, struct capture_control *capc)
 {
@@ -3388,6 +3405,10 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 			last_migrated_pfn = iteration_start_pfn;
 		}
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - migrate(unmap + copy + map or unmap)
+ */
 		err = migrate_pages(&cc->migratepages, compaction_alloc,
 				compaction_free, (unsigned long)cc, cc->mode,
 				MR_COMPACTION, NULL);
@@ -3397,6 +3418,10 @@ compact_zone(struct compact_control *cc, struct capture_control *capc)
 
 		/* All pages were either migrated or will be released */
 		cc->nr_migratepages = 0;
+/*
+ * IAMROOT, 2022.04.09:
+ * - error가 발생하면 migrate_pages를 전부 되돌리고 시작점을 다시 정한다.
+ */
 		if (err) {
 			putback_movable_pages(&cc->migratepages);
 			/*
@@ -3486,6 +3511,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - compact_zone을 실행하기 위한 cc설정을 하고, compact_zone을 수행한다.
+ */
 static enum compact_result compact_zone_order(struct zone *zone, int order,
 		gfp_t gfp_mask, enum compact_priority prio,
 		unsigned int alloc_flags, int highest_zoneidx,

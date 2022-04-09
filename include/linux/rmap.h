@@ -85,6 +85,10 @@ struct anon_vma_chain {
 #endif
 };
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - Try To Unmap(TTU)
+ */
 enum ttu_flags {
 	TTU_SPLIT_HUGE_PMD	= 0x4,	/* split huge PMD if any */
 	TTU_IGNORE_MLOCK	= 0x8,	/* ignore mlock */

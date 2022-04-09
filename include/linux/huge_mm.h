@@ -101,7 +101,15 @@ ssize_t single_hugepage_flag_show(struct kobject *kobj,
 				  enum transparent_hugepage_flag flag);
 extern struct kobj_attribute shmem_enabled_attr;
 
+/*
+ * IAMROOT, 2022.04.09:
+ * - 21 - 12 = 9
+ */
 #define HPAGE_PMD_ORDER (HPAGE_PMD_SHIFT-PAGE_SHIFT)
+/*
+ * IAMROOT, 2022.04.09:
+ * - 512
+ */
 #define HPAGE_PMD_NR (1<<HPAGE_PMD_ORDER)
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
