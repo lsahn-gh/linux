@@ -133,6 +133,10 @@ struct cpuset {
 	 */
 	nodemask_t old_mems_allowed;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - rate 제한 용도.
+ */
 	struct fmeter fmeter;		/* memory_pressure filter */
 
 	/*
@@ -2126,6 +2130,10 @@ static void fmeter_init(struct fmeter *fmp)
 }
 
 /* Internal meter update - process cnt events and update value */
+/*
+ * IAMROOT, 2022.04.16:
+ * - fmeter의 값을 갱신하고 count를 초기화한다.
+ */
 static void fmeter_update(struct fmeter *fmp)
 {
 	time64_t now;
@@ -2147,6 +2155,10 @@ static void fmeter_update(struct fmeter *fmp)
 }
 
 /* Process any previous ticks, then bump cnt by one (times scale). */
+/*
+ * IAMROOT, 2022.04.16:
+ * - fmeter의 값을 갱신하고 count를 초기화한다.
+ */
 static void fmeter_markevent(struct fmeter *fmp)
 {
 	spin_lock(&fmp->lock);
@@ -3471,6 +3483,10 @@ int cpuset_nodemask_valid_mems_allowed(nodemask_t *nodemask)
  * callback_lock.  If no ancestor is mem_exclusive or mem_hardwall
  * (an unusual configuration), then returns the root cpuset.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - cgroup에서 첫번째 hardwall이 쳐져있는곳까지 올라간다.
+ */
 static struct cpuset *nearest_hardwall_ancestor(struct cpuset *cs)
 {
 	while (!(is_mem_exclusive(cs) || is_mem_hardwall(cs)) && parent_cs(cs))
@@ -3518,6 +3534,13 @@ static struct cpuset *nearest_hardwall_ancestor(struct cpuset *cs)
  *	GFP_KERNEL   - any node in enclosing hardwalled cpuset ok
  *	GFP_USER     - only nodes in current tasks mems allowed ok.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재 task상황와 요청한 request(gfp_mask) 따라 memory node를 사용할수있는지
+ *   확인한다.
+ * - gfp_mask에 __GFP_HARDWALL이 존재하면 현재 task에 대한 mems_allowed만 확인하고,
+ *   그게 아니면 hardwall이 세팅된 ancestor까지 찾아 올라가 mems_allowed를 확인한다.
+ */
 bool __cpuset_node_allowed(int node, gfp_t gfp_mask)
 {
 	struct cpuset *cs;		/* current cpuset ancestors */
@@ -3544,6 +3567,11 @@ bool __cpuset_node_allowed(int node, gfp_t gfp_mask)
 	spin_lock_irqsave(&callback_lock, flags);
 
 	rcu_read_lock();
+/*
+ * IAMROOT, 2022.04.16:
+ * - @gfp_flags에서 hardwall 요청이 없는 경우 hardwall이 set되있는 parent까지
+ *   거슬러 올라가서 해당 ancestor의 node allowed에 속한 @node인지 확인한다.
+ */
 	cs = nearest_hardwall_ancestor(task_cs(current));
 	allowed = node_isset(node, cs->mems_allowed);
 	rcu_read_unlock();
@@ -3668,9 +3696,33 @@ int cpuset_memory_pressure_enabled __read_mostly;
  * (direct) page reclaim by any task attached to the cpuset.
  **/
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - papago
+ *   cpuset_memory_pressure_bump: per-cpuset의 회수 통계를 유지합니다.
+ *
+ *   각 cpuset에서 tasks에 의해 시작된 동기(직접) 페이지 회수 작업의 실행 평균을
+ *   유지합니다.
+ *
+ *   이는 cpuset의 일부 작업이 사용이 허용된 모든 노드의 메모리에서 낮게 실행된
+ *   속도를 나타내며, clean pages를 토스하거나 dirty pages를 쓰면서 더 많은
+ *   여유 메모리를 만들기 위해 커널 페이지 회수 코드를 입력해야 했다.
+ *
+ *   per-cpuset 읽기 전용 파일 "memory_pressure"의 사용자 공간에 표시합니다.
+ *   표시되는 값은 cpuset에 연결된 모든 작업에 의해 동기(직접) 페이지 재확보되는
+ *   최근 항목 비율을 나타내는 정수입니다.
+ *
+ * - clean pages
+ *   disk에서 읽어왔는데 page가 수정이 안된 상태.
+ */
 void __cpuset_memory_pressure_bump(void)
 {
 	rcu_read_lock();
+/*
+ * IAMROOT, 2022.04.16:
+ * - fmeter
+ *   rate 제한용도.
+ */
 	fmeter_markevent(&task_cs(current)->fmeter);
 	rcu_read_unlock();
 }

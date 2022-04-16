@@ -5747,6 +5747,10 @@ void __fs_reclaim_release(unsigned long ip)
 	lock_release(&__fs_reclaim_map, ip);
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - fs reclaim lock
+ */
 void fs_reclaim_acquire(gfp_t gfp_mask)
 {
 	gfp_mask = current_gfp_context(gfp_mask);
@@ -5788,6 +5792,10 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 
 	/* We now go into synchronous reclaim */
 	cpuset_memory_pressure_bump();
+/*
+ * IAMROOT, 2022.04.16:
+ * - psi정보를 제공한다.
+ */
 	psi_memstall_enter(&pflags);
 	fs_reclaim_acquire(gfp_mask);
 	noreclaim_flag = memalloc_noreclaim_save();
@@ -6327,6 +6335,14 @@ retry:
 	if (alloc_flags & ALLOC_KSWAPD)
 		wake_all_kswapds(order, gfp_mask, ac);
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - gfp_mask 따라서 ALLOC_NO_WATERMARKS / ALLOC_OOM가 reserve_flags에
+ *   올수있고, 만약 그렇게 되면 reserve_flags의 migratetype이 MOVABLE일 경우
+ *   ALLOC_CMA까지 넣어 alloc_flags를 갱신한다.
+ * - 한번 실패한 상황에서 gfp_mask가 정말 왠간하면 반드시 할당을 해봐야되는
+ *   상황일 경우에 억지로라도 범위를 늘리는 개념.
+ */
 	reserve_flags = __gfp_pfmemalloc_flags(gfp_mask);
 	if (reserve_flags)
 		alloc_flags = gfp_to_alloc_flags_cma(gfp_mask, reserve_flags);
@@ -6336,21 +6352,46 @@ retry:
 	 * ignored. These allocations are high priority and system rather than
 	 * user oriented.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - papago
+ *   메모리 정책을 무시할 수 있는 경우 nodemask 및 zonelist iterators를
+ *   재설정합니다. 이러한 할당은 사용자 지향이라기보다는 높은 우선 순위와
+ *   시스템입니다.
+ * - retry상황이고, 딱히 alloc_flags에서 memory 제한을 안시켰으며,
+ *   reserve_flags가 있는 상황(급한 상황)일 경우 nodemask제한 까지 풀고,
+ *   제한을 푼것을 기준으로 preferred_zoneref까지 다시 구한다.
+ */
 	if (!(alloc_flags & ALLOC_CPUSET) || reserve_flags) {
 		ac->nodemask = NULL;
 		ac->preferred_zoneref = first_zones_zonelist(ac->zonelist,
 					ac->highest_zoneidx, ac->nodemask);
 	}
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 수정된 alloc_flags, ac등을 토대로 buddy에서 다시할당을 시도한다.
+ */
 	/* Attempt with potentially adjusted zonelist and alloc_flags */
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 	if (page)
 		goto got_pg;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - node, zonelist등의 영역제한까지 푼상태에서 조차도 buddy할당이 실패했을때,
+ *   can_direct_reclaim요청이 없으면 그냥 할당실패로 빠지고, 그게 아니면
+ *   direct reclaim을 한다.
+ */
 	/* Caller is not willing to reclaim, we can't balance anything */
 	if (!can_direct_reclaim)
 		goto nopage;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재 task가 이미 memory 할당중이라면 메모리회수 재귀호출을 막기위해
+ *   예외처리한다.
+ */
 	/* Avoid recursion of direct reclaim */
 	if (current->flags & PF_MEMALLOC)
 		goto nopage;

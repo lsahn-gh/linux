@@ -897,6 +897,8 @@ void psi_task_switch(struct task_struct *prev, struct task_struct *next,
 /*
  * IAMROOT, 2022.03.19:
  * - psi_memstall_leave와 한쌍이다.
+ * - memory pressure상태라는 것.
+ * - psi(Pressure Stall Information)
  */
 void psi_memstall_enter(unsigned long *flags)
 {

@@ -1676,6 +1676,11 @@ extern struct pid *cad_pid;
 #define PF_SUPERPRIV		0x00000100	/* Used super-user privileges */
 #define PF_DUMPCORE		0x00000200	/* Dumped core */
 #define PF_SIGNALED		0x00000400	/* Killed by a signal */
+/*
+ * IAMROOT, 2022.04.16:
+ * - task가 memory 회수 mode이면 set된다. memory 제한없이 사용할수있는 권한을 가질 수 있다.
+ * - memory 회수 재귀등을 확인하는 flag로도 사용한다.
+ */
 #define PF_MEMALLOC		0x00000800	/* Allocating memory */
 #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */
 #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */

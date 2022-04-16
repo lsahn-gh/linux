@@ -522,6 +522,11 @@ static long add_nr_deferred(long nr, struct shrinker *shrinker,
 	return atomic_long_add_return(nr, &shrinker->nr_deferred[nid]);
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재 node에서 reclaim이 불가능할경우 system이나 상위 요청에서 demotion을
+ *   허락했는지 확인하고, 다음 demotion node가 있는지 확인한다.
+ */
 static bool can_demote(int nid, struct scan_control *sc)
 {
 	if (!numa_demotion_enabled)
@@ -539,10 +544,21 @@ static bool can_demote(int nid, struct scan_control *sc)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - swap memory가 존재하거나 다른 demotion node가 존재하는지 확인한다.
+ */
 static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 					  int nid,
 					  struct scan_control *sc)
 {
+/*
+ * IAMROOT, 2022.04.16:
+ * - 연결되있는 cgroup이 없으면 system에서 swap 설정이 되있고,
+ *   swap pages가 존재하는지 확인한다.
+ *   그게 아니면 연결되잇는 cgroup을 통해서 현재 task가 가져올수있는
+ *   남은 swap page가 존재하는지 확인한다.
+ */
 	if (memcg == NULL) {
 		/*
 		 * For non-memcg reclaim, is there
@@ -556,6 +572,10 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 			return true;
 	}
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 남은 swap page가 없는 경우 
+ */
 	/*
 	 * The page can not be swapped.
 	 *
@@ -568,6 +588,15 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
  * This misses isolated pages which are not accounted for to save counters.
  * As the data only determines if reclaim or compaction continues, it is
  * not expected that isolated pages will be a dominating factor.
+ */
+/*
+ * IAMROOT, 2022.04.16:
+ * - @zone에서 page 회수가 가능한 개수를 추정한다.
+ * 1) 잔여 swap 공간이 없는 경우 
+ *	NR_ZONE_INACTIVE_FILE + NR_ZONE_ACTIVE_FILE
+ * 2) 잔여 swap 공간이 있는 경우
+ *	NR_ZONE_INACTIVE_FILE + NR_ZONE_ACTIVE_FILE +
+ *	NR_ZONE_INACTIVE_ANON + NR_ZONE_ACTIVE_ANON
  */
 unsigned long zone_reclaimable_pages(struct zone *zone)
 {
@@ -2882,6 +2911,10 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 
 		for_each_evictable_lru(lru) {
 			if (nr[lru]) {
+/*
+ * IAMROOT, 2022.04.16:
+ * - SWAP_CLUSTER_MAX을 min으로 기준하여 scan 숫자를 누적한다.
+ */
 				nr_to_scan = min(nr[lru], SWAP_CLUSTER_MAX);
 				nr[lru] -= nr_to_scan;
 
@@ -2902,6 +2935,11 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 		 * stop reclaiming one LRU and reduce the amount scanning
 		 * proportional to the original scan target.
 		 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 위 for문에서 scan할것을 제외한 나머지 값들에 대해서 file, anon으로 나눠
+ *   합산한다.
+ */
 		nr_file = nr[LRU_INACTIVE_FILE] + nr[LRU_ACTIVE_FILE];
 		nr_anon = nr[LRU_INACTIVE_ANON] + nr[LRU_ACTIVE_ANON];
 
@@ -2914,6 +2952,11 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 		if (!nr_file || !nr_anon)
 			break;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 남아있는 file, anon중에 작은것을 기준으로 scan_target, lru, percentage를 정한다.
+ *   percentage = (scan으로 빠진 page) * 100/ (전체 page)
+ */
 		if (nr_file > nr_anon) {
 			unsigned long scan_target = targets[LRU_INACTIVE_ANON] +
 						targets[LRU_ACTIVE_ANON] + 1;
@@ -3290,6 +3333,10 @@ again:
  * the allocation would already succeed without compaction. Return false if we
  * should reclaim first.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * @return true면 compaction 가능한 상황. false면 reclaim을 해야되는 상황.
+ */
 static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 {
 	unsigned long watermark;
@@ -3303,6 +3350,11 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 		/* Compaction cannot yet proceed. Do reclaim. */
 		return false;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - suitable == COMPACT_CONTINUE 
+ *   watermark를 기준으로 확인한다.
+ */
 	/*
 	 * Compaction is already possible, but it takes time to run and there
 	 * are potentially other callers using the pages just freed. So proceed
@@ -3340,6 +3392,10 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	 * highmem pages could be pinning lowmem pages storing buffer_heads
 	 */
 	orig_mask = sc->gfp_mask;
+/*
+ * IAMROOT, 2022.04.16:
+ * - buffer heads over인 상황이면 highmem까지 포함시키고 reclaim_idx를 갱신한다.
+ */
 	if (buffer_heads_over_limit) {
 		sc->gfp_mask |= __GFP_HIGHMEM;
 		sc->reclaim_idx = gfp_zone(sc->gfp_mask);
@@ -3352,10 +3408,17 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 		 * to global LRU.
 		 */
 		if (!cgroup_reclaim(sc)) {
+/*
+ * IAMROOT, 2022.04.16:
+ * - __GFP_HARDWALL을 요청하고 cpuset_zone_allowed를 확인한다. 다음의 상황에서
+ *   for문을 계속진행하고 아니면 continue가 된다. (__cpuset_node_allowed 참고)
+ *   1. intrrupt context인 경우
+ *   2. zone이 속한 node가 현재 task에서 허락한 node인 경우
+ *   3. oom중인 경우
+ */
 			if (!cpuset_zone_allowed(zone,
 						 GFP_KERNEL | __GFP_HARDWALL))
 				continue;
-
 			/*
 			 * If we already have plenty of memory free for
 			 * compaction in this zone, don't free any more.
@@ -3365,6 +3428,11 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 			 * noticeable problem, like transparent huge
 			 * page allocations.
 			 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재 zone이 compaction을 할 수 있는 상황인지 여기서 한번 검사한다.
+ *   가능하면 compaction_ready를 true로 하고 continue한다.
+ */
 			if (IS_ENABLED(CONFIG_COMPACTION) &&
 			    sc->order > PAGE_ALLOC_COSTLY_ORDER &&
 			    compaction_ready(zone, sc)) {
@@ -3378,6 +3446,10 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 			 * node may be shrunk multiple times but in that case
 			 * the user prefers lower zones being preserved.
 			 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 한번 했던 node는 skip
+ */
 			if (zone->zone_pgdat == last_pgdat)
 				continue;
 
@@ -3452,6 +3524,10 @@ retry:
 		__count_zid_vm_events(ALLOCSTALL, sc->reclaim_idx, 1);
 
 	do {
+/*
+ * IAMROOT, 2022.04.16:
+ * - priority에 따라서 vmpressure event를 동작시킨다.
+ */
 		vmpressure_prio(sc->gfp_mask, sc->target_mem_cgroup,
 				sc->priority);
 		sc->nr_scanned = 0;
@@ -3526,6 +3602,10 @@ retry:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - direct reclaim 허락 여부를 판단한다.
+ */
 static bool allow_direct_reclaim(pg_data_t *pgdat)
 {
 	struct zone *zone;
@@ -3537,6 +3617,10 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
 	if (pgdat->kswapd_failures >= MAX_RECLAIM_RETRIES)
 		return true;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - reclaim page가 존재하는 zone을 찾아 min_wmark와 free_page를 각각 합산한다.
+ */
 	for (i = 0; i <= ZONE_NORMAL; i++) {
 		zone = &pgdat->node_zones[i];
 		if (!managed_zone(zone))
@@ -3549,14 +3633,29 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
 		free_pages += zone_page_state(zone, NR_FREE_PAGES);
 	}
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - reclaim page가 없다면 direct reclaim을 허락한다.
+ */
 	/* If there are no reserves (unexpected config) then do not throttle */
 	if (!pfmemalloc_reserve)
 		return true;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 남은 reserve의 절반이상의 free_pages가 존재하면 direct reclaim을 허락한다.
+ *   그게 아니면 kswapd를 깨운다.
+ *   즉 memory가 많이 부족해지면 kswpad를 깨운다.
+ */
 	wmark_ok = free_pages > pfmemalloc_reserve / 2;
 
 	/* kswapd must be awake if processes are being throttled */
 	if (!wmark_ok && waitqueue_active(&pgdat->kswapd_wait)) {
+/*
+ * IAMROOT, 2022.04.16:
+ * - kswapd를 깨우기전 kswapd_highest_zoneidx가 ZONE_NORMAL보다 크다면
+ *   ZONE_NORMAL로 제한한다.
+ */
 		if (READ_ONCE(pgdat->kswapd_highest_zoneidx) > ZONE_NORMAL)
 			WRITE_ONCE(pgdat->kswapd_highest_zoneidx, ZONE_NORMAL);
 
@@ -3575,6 +3674,26 @@ static bool allow_direct_reclaim(pg_data_t *pgdat)
  * Returns true if a fatal signal was delivered during throttling. If this
  * happens, the page allocator should not consider triggering the OOM killer.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - papgo
+ *   backing storage가 네트워크에 의해 backing되고 기본 노드에 대한 PFMEMALLOC 
+ *   약이 위험할 정도로 고갈되는 경우 직접 회수기를 조절합니다.
+ *   kswapd는 계속 진행되며 낮은 워터마크에 도달하면 프로세스를 웨이크업합니다.
+ *
+ *   스로틀 중에 치명적인 신호가 전달되면 true를 반환합니다. 
+ *   이 경우 페이지 할당자는 OOM 킬러를 트리거하는 것을 고려해서는 안 됩니다.
+ *
+ * - network swap이 일어날경우 network packet을 만들어야 되는데 이때도 할당이
+ *   필요하다. 할당을 하기위해 memory를 너무많이 사용하면 또 부하가 걸리기 때문에
+ *   이런 상황에서 reclaim을 막는다.
+ *
+ * - reclaim을 너무 자주하지 않게 하기위해 throttling을 수행한다.
+ *   direct reclaim이 가능한등의 조건이면 throttling을 하지 않고, 그게 아니라
+ *   실제 reclaim memory가 없으면 throttling을 수행한다.
+ *
+ * - @return true이면 direct reclaim을 할 필요가 없는 상황.
+ */
 static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 					nodemask_t *nodemask)
 {
@@ -3589,6 +3708,10 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 * committing a transaction where throttling it could forcing other
 	 * processes to block on log_wait_commit().
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - kernel thread는 throttling도 안하고 direct reclaim도 안한다.
+ */
 	if (current->flags & PF_KTHREAD)
 		goto out;
 
@@ -3596,6 +3719,10 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 * If a fatal signal is pending, this process should not throttle.
 	 * It should return quickly so it can exit and free its memory
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - fatal signal도 throttling도 안하고 direct reclaim도 안한다.
+ */
 	if (fatal_signal_pending(current))
 		goto out;
 
@@ -3613,6 +3740,24 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 * for remote pfmemalloc reserves and processes on different nodes
 	 * should make reasonable progress.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 사용 가능한 ZONE_NORMAL 또는 그보다 낮은 존을 가진 첫 번째 노드를 찾아
+ *   pfmemalloc reserve가 정상인지 확인한다. 네트워크를 통해 스왑할 때
+ *   네트워크 버퍼를 할당하기 위해 GFP_KERNEL이 필요하므로 ZONE_HIGHMEM을
+ *   사용할 수 없습니다.
+ *
+ *   throttling은 사용 가능한 첫 번째 노드를 기반으로 하며 조절된 프로세스는
+ *   kswapd가 진행하여 절전 모드를 해제할 때까지 대기열에 대기합니다.
+ *   프로세스 웨이크업과 프로세스가 동일한 노드에서 웨이크업한다고 가정했을 때
+ *   회수 진행 상황 사이에는 유사성이 있습니다.
+ *   더 중요한 것은 remote 노드에서 실행되는 프로세스가 remote pfmemalloc reserve에
+ *   대해 경쟁하지 않을 것이며 다른 노드에서 프로세스가 합리적으로 진행되어야
+ *   한다는 것이다. 
+ *
+ * - ZONE_NORMAL이하를 가진 첫번째 node를 찾아가 direct reclaim을
+ *   허용했으면 제한을 안둔다.
+ */
 	for_each_zone_zonelist_nodemask(zone, z, zonelist,
 					gfp_zone(gfp_mask), nodemask) {
 		if (zone_idx(zone) > ZONE_NORMAL)
@@ -3626,9 +3771,17 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	}
 
 	/* If no zone was usable by the allocation flags then do not throttle */
+/*
+ * IAMROOT, 2022.04.16:
+ * - ZONE_NORMAL 이하의 zone이 없는 경우. throttling, direct reclaim을 안한다.
+ */
 	if (!pgdat)
 		goto out;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 여기부터 throttling을 시작하겠다는것.
+ */
 	/* Account for the throttling */
 	count_vm_event(PGSCAN_DIRECT_THROTTLE);
 
@@ -3640,6 +3793,11 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 * blocked waiting on the same lock. Instead, throttle for up to a
 	 * second before continuing.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 실제 sleep되는 구간. fs의 경우가 아니면(ex. memory) 최대 1초,
+ *   그게 아니면 direct reclaim이 가능할때까지 기다린다.
+ */
 	if (!(gfp_mask & __GFP_FS))
 		wait_event_interruptible_timeout(pgdat->pfmemalloc_wait,
 			allow_direct_reclaim(pgdat), HZ);
@@ -3648,6 +3806,12 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 		wait_event_killable(zone->zone_pgdat->pfmemalloc_wait,
 			allow_direct_reclaim(pgdat));
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - throttle을 하고나서 fatal signal을 받았다면 direct reclaim을 한다.
+ *   task가 죽었으면 해당 task가 사용하던 memory가 회수될것이므로 한번
+ *   reclaim을 시도 해보겠다는 의미이다.
+ */
 	if (fatal_signal_pending(current))
 		return true;
 
@@ -3655,6 +3819,10 @@ out:
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - direct reclaim을 수행하는데, 만약 memory가 너무 적을 경우 throttle을 수행한다.
+ */
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 				gfp_t gfp_mask, nodemask_t *nodemask)
 {
@@ -3684,9 +3852,17 @@ unsigned long try_to_free_pages(struct zonelist *zonelist, int order,
 	 * 1 is returned so that the page allocator does not OOM kill at this
 	 * point.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 실제 throttle 수행 및 direct reclaim여부를 판단한다.
+ */
 	if (throttle_direct_reclaim(sc.gfp_mask, zonelist, nodemask))
 		return 1;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - direct reclaim을 수행한다.
+ */
 	set_task_reclaim_state(current, &sc.reclaim_state);
 	trace_mm_vmscan_direct_reclaim_begin(order, sc.gfp_mask);
 

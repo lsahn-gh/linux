@@ -126,6 +126,10 @@ struct mem_cgroup_tree {
 	struct mem_cgroup_tree_per_node *rb_tree_per_node[MAX_NUMNODES];
 };
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - node별로 운영되는 rb tree
+ */
 static struct mem_cgroup_tree soft_limit_tree __read_mostly;
 
 /* for OOM */
@@ -246,6 +250,10 @@ static inline bool should_force_charge(void)
 }
 
 /* Some nice accessors for the vmpressure. */
+/*
+ * IAMROOT, 2022.04.16:
+ * - @memcg의 vmpressure를 가져온다. NULLd이면 root꺼를 가져온다.
+ */
 struct vmpressure *memcg_to_vmpressure(struct mem_cgroup *memcg)
 {
 	if (!memcg)
@@ -464,6 +472,10 @@ mem_cgroup_page_nodeinfo(struct mem_cgroup *memcg, struct page *page)
 	return memcg->nodeinfo[nid];
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - @nid에 대한 sot_limit_tree를 가져온다.
+ */
 static struct mem_cgroup_tree_per_node *
 soft_limit_tree_node(int nid)
 {
@@ -513,6 +525,11 @@ static void __mem_cgroup_insert_exceeded(struct mem_cgroup_per_node *mz,
 	mz->on_tree = true;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - @mz가 rightmost라면 righmost를 @mz이전으로 갱신한다.
+ * - @mz를 @mctz에서 제거한다.
+ */
 static void __mem_cgroup_remove_exceeded(struct mem_cgroup_per_node *mz,
 					 struct mem_cgroup_tree_per_node *mctz)
 {
@@ -536,6 +553,10 @@ static void mem_cgroup_remove_exceeded(struct mem_cgroup_per_node *mz,
 	spin_unlock_irqrestore(&mctz->lock, flags);
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - soft_limit을 초과한 memory 사용량을 return한다.
+ */
 static unsigned long soft_limit_excess(struct mem_cgroup *memcg)
 {
 	unsigned long nr_pages = page_counter_read(&memcg->memory);
@@ -599,6 +620,11 @@ static void mem_cgroup_remove_from_trees(struct mem_cgroup *memcg)
 	}
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - rb_rightmost로 cache되있던 node중에 soft_limit보다 사용량이 높은 node를
+ *   한개 빼온다. 없으면 null.
+ */
 static struct mem_cgroup_per_node *
 __mem_cgroup_largest_soft_limit_node(struct mem_cgroup_tree_per_node *mctz)
 {
@@ -617,6 +643,10 @@ retry:
 	 * position in the tree.
 	 */
 	__mem_cgroup_remove_exceeded(mz, mctz);
+/*
+ * IAMROOT, 2022.04.16:
+ * - memory 사용량이 sotf_limit을 안넘었거나 css참조를 실패한경우 retry.
+ */
 	if (!soft_limit_excess(mz->memcg) ||
 	    !css_tryget(&mz->memcg->css))
 		goto retry;
@@ -624,6 +654,11 @@ done:
 	return mz;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - rb_rightmost로 cache되있던 node중에 soft_limit보다 사용량이 높은 node를
+ *   한개 빼온다. 없으면 null.
+ */
 static struct mem_cgroup_per_node *
 mem_cgroup_largest_soft_limit_node(struct mem_cgroup_tree_per_node *mctz)
 {
@@ -958,6 +993,10 @@ static __always_inline bool memcg_kmem_bypass(void)
  * Reclaimers can specify a node in @reclaim to divide up the memcgs
  * in the hierarchy among all concurrent reclaimers operating on the
  * same node.
+ */
+/*
+ * IAMROOT, 2022.04.16:
+ * - cgroup의 dir구조를 iterate한다.
  */
 struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 				   struct mem_cgroup *prev,
@@ -3392,6 +3431,10 @@ unsigned long mem_cgroup_soft_limit_reclaim(pg_data_t *pgdat, int order,
 	 * is empty. Do it lockless to prevent lock bouncing. Races
 	 * are acceptable as soft limit is best effort anyway.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - mctz를 못 가져왔거나(memcg init 이전이거나) tree가 비어있는경우 return.
+ */
 	if (!mctz || RB_EMPTY_ROOT(&mctz->rb_root))
 		return 0;
 
@@ -7290,6 +7333,12 @@ void __mem_cgroup_uncharge_swap(swp_entry_t entry, unsigned int nr_pages)
 	rcu_read_unlock();
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재 @memcg에서 통제되고, 아직 사용되지 않은 남은 swap 페이지개수를 구해온다.
+ * - sysfs기준으로 봤을때 limit_in_bytes는 swap.max, usage_in_bytes가
+ *   swap.usage와 연결된다.
+ */
 long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
 {
 	long nr_swap_pages = get_nr_swap_pages();
@@ -7297,6 +7346,14 @@ long mem_cgroup_get_nr_swap_pages(struct mem_cgroup *memcg)
 	if (cgroup_memory_noswap || !cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		return nr_swap_pages;
 	for (; memcg != root_mem_cgroup; memcg = parent_mem_cgroup(memcg))
+/*
+ * IAMROOT, 2022.04.16:
+ * - max - usage(현재 사용량) = 남은 swap page 개수
+ *   sysfs기준(PAGE_SIZE 고려 생략) : nr_swap_pages = 
+ *	min(nr_swap_pages, limit_in_bytes - usage_in_bytes)
+ *
+ * - 현재 system 에 남은 swap page 개수와 min 비교를 하여 가져온다.
+ */
 		nr_swap_pages = min_t(long, nr_swap_pages,
 				      READ_ONCE(memcg->swap.max) -
 				      page_counter_read(&memcg->swap));

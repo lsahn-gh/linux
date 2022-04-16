@@ -501,6 +501,12 @@ do {										\
  * to %true before the @timeout elapsed, or -%ERESTARTSYS if it was
  * interrupted by a signal.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - sleep이랑 비슷하며 wakeup이 가능하고 interrupt가 들어올때 깨어날수있다.
+ *   깨어날떄마다 condition을 확인하고, 일치하지 않으면 다시 잠든다.
+ *   최대 @timeout까지 잠든다.
+ */
 #define wait_event_interruptible_timeout(wq_head, condition, timeout)		\
 ({										\
 	long __ret = timeout;							\
@@ -895,6 +901,10 @@ extern int do_wait_intr_irq(wait_queue_head_t *, wait_queue_entry_t *);
  *
  * The function will return -ERESTARTSYS if it was interrupted by a
  * signal and 0 if @condition evaluated to true.
+ */
+/*
+ * IAMROOT, 2022.04.16:
+ * - wait_event_interruptible + fatal signal
  */
 #define wait_event_killable(wq_head, condition)					\
 ({										\

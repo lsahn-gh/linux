@@ -149,6 +149,10 @@ struct mem_cgroup_per_node {
 	struct rb_node		tree_node;	/* RB tree node */
 	unsigned long		usage_in_excess;/* Set to the value by which */
 						/* the soft limit is exceeded*/
+/*
+ * IAMROOT, 2022.04.16:
+ * - node가 tree에 달려있는지의 여부. false면 그냥 node만 있는 상황.
+ */
 	bool			on_tree;
 	struct mem_cgroup	*memcg;		/* Back pointer, we cannot */
 						/* use container_of	   */

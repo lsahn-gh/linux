@@ -348,6 +348,10 @@ static inline void css_get_many(struct cgroup_subsys_state *css, unsigned int n)
  * access is good enough for this function.  Returns %true if a reference
  * count was successfully obtained; %false otherwise.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - @css ref를 증가시킨다. ref제어가 필요없을경우 그냥 true return.
+ */
 static inline bool css_tryget(struct cgroup_subsys_state *css)
 {
 	if (!(css->flags & CSS_NO_REF))

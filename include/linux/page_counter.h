@@ -6,6 +6,18 @@
 #include <linux/kernel.h>
 #include <asm/page.h>
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - cgroup1 기준 sysfs에서 각 인자 접근 이름(memsw_files, mem_cgroup_read_u64 참고)
+ *   sysfs               | member name
+ *   --------------------+-----------------------
+ *   usage_in_bytes      | usage * PAGE_SIZE
+ *   max_usage_in_bytes  | watermark * PAGE_SIZE
+ *   limit_in_bytes      | max * PAGE_SIZE
+ *   failcnt             | failcnt
+ *   soft_limit_in_bytes | soft_limit * PAGE_SIZE
+ * - cgroup2는 직접확인해야된다.(예)swap_files)
+ */
 struct page_counter {
 	atomic_long_t usage;
 	unsigned long min;

@@ -35,6 +35,11 @@
  * TODO: Make the window size depend on machine size, as we do for vmstat
  * thresholds. Currently we set it to 512 pages (2MB for 4KB pages).
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - scan을 얼나 할것인가에 대한 기준값.
+ *   32 * 16 = 512
+ */
 static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
 
 /*
@@ -42,6 +47,12 @@ static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
  * scanned/reclaimed ratio. The current values were chosen empirically. In
  * essence, they are percents: the higher the value, the more number
  * unsuccessful reclaims there were.
+ */
+/*
+ * IAMROOT, 2022.04.16:
+ * - ex) scanned = 100, reclaim = 30
+ *   1 - (reclaim / scanned) = 70 / 100 => 70%.
+ * - 직 reclaim이 scanned에 비해 적을수록 %가 높아진다.
  */
 static const unsigned int vmpressure_level_med = 60;
 static const unsigned int vmpressure_level_critical = 95;
@@ -64,6 +75,10 @@ static const unsigned int vmpressure_level_critical = 95;
  * critical level when scanning depth is ~10% of the lru size (vmscan
  * scans 'lru_size >> prio' pages, so it is actually 12.5%, or one
  * eights).
+ */
+/*
+ * IAMROOT, 2022.04.16:
+ * - log2(10) = 3, DEF_PRIORITY는 12
  */
 static const unsigned int vmpressure_level_critical_prio = ilog2(100 / 10);
 
@@ -108,6 +123,10 @@ static const char * const vmpressure_str_modes[] = {
 	[VMPRESSURE_LOCAL] = "local",
 };
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - @pressure 값(0 ~ 100)을 enum으로 환산한다.
+ */
 static enum vmpressure_levels vmpressure_level(unsigned long pressure)
 {
 	if (pressure >= vmpressure_level_critical)
@@ -117,6 +136,10 @@ static enum vmpressure_levels vmpressure_level(unsigned long pressure)
 	return VMPRESSURE_LOW;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - @scanned, @reclaimed 값을 enum으로 환산한다.
+ */
 static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
 						    unsigned long reclaimed)
 {
@@ -154,6 +177,20 @@ struct vmpressure_event {
 	struct list_head node;
 };
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - vmpr에 등록된 ev들(tasks)에 대해서 조건에 만족하는 tasks에 한해
+ *   event signal을 보낸다.
+ * @ancestor 한번이라도 시도했는지에 대한 flag. local끼리는 단 한번만 시도한다.
+ * @signalled  한번이라도 성공했는지에 대한 flag. VMPRESSURE_NO_PASSTHROUGH mode
+ *             한테는 안보낸다.
+ *
+ * - listener 의 mode에 따라 event를 받는 여부
+ *   VMPRESSURE_LOCAL	       : 최초에 등록되 있어야 시도를 한다.
+ *   VMPRESSURE_NO_PASSTHROUGH : 모든 listener 중에서 이전에 signal을 받은적이
+ *                               없을때만 시도를 한다.
+ *   VMPRESSURE_HIERARCHY      : level만 확인한다.
+ */
 static bool vmpressure_event(struct vmpressure *vmpr,
 			     const enum vmpressure_levels level,
 			     bool ancestor, bool signalled)
@@ -162,6 +199,14 @@ static bool vmpressure_event(struct vmpressure *vmpr,
 	bool ret = false;
 
 	mutex_lock(&vmpr->events_lock);
+/*
+ * IAMROOT, 2022.04.16:
+ * - 두번째 이후라면 ancestor가 true. 즉 local끼리는 성공 유무 상관없이 한번만
+ *   시도 한다는것이다.
+ *   signalled가 true라면 이전에 최소 한번 signal을 보냈다는것이고, 이 상황에서
+ *   mode가 VMPRESSURE_NO_PASSTHROUGH면 보내지 않는다.
+ *   
+ */
 	list_for_each_entry(ev, &vmpr->events, node) {
 		if (ancestor && ev->mode == VMPRESSURE_LOCAL)
 			continue;
@@ -177,6 +222,10 @@ static bool vmpressure_event(struct vmpressure *vmpr,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - tree_scanned,  tree_reclaimed값으로 vmpressure level을 계산하고, signal을 보낸다.
+ */
 static void vmpressure_work_fn(struct work_struct *work)
 {
 	struct vmpressure *vmpr = work_to_vmpressure(work);
@@ -208,6 +257,12 @@ static void vmpressure_work_fn(struct work_struct *work)
 
 	level = vmpressure_calc_level(scanned, reclaimed);
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 최초에 등록된 listener에 보내고, 그 이후에 parent들한테 event signal을 보낸다.
+ *   한번이라도 signal보내는데 성공했으면 signalled는 true, 두번째 시도부터는
+ *   ancestor가 true가 된다.
+ */
 	do {
 		if (vmpressure_event(vmpr, level, ancestor, signalled))
 			signalled = true;
@@ -236,6 +291,11 @@ static void vmpressure_work_fn(struct work_struct *work)
  *
  * This function does not return any value.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - @tree값에 따라 work queue를 동작할지, socket_pressure를 갱신할지 선택한다.
+ * - 누적 scanned가 vmpressure_win보다 작다면 누적만 시킨다.
+ */
 void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		unsigned long scanned, unsigned long reclaimed)
 {
@@ -257,6 +317,17 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 	 * Indirect reclaim (kswapd) sets sc->gfp_mask to GFP_KERNEL, so
 	 * we account it too.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - papago
+ *   여기서는 userland가 우리를 도울 수 있는 압력만을 설명하고자 한다. 예를 들어,
+ *   DMA 영역이 압력을 받고 있다고 가정하자. 어떤 종류의 pressure을 userland에
+ *   통지하면 userland에 의한 불필요한 memory freeing(userland에는 DMA fallback 대신
+ *   HIGHMEM/MOVABLE 페이지가 있을 가능성이 더 높기 때문에)를 유발하기 때문에
+ *   대부분 낭비가 될 것이다. 그렇기 때문에 이동 가능한 고메모리 및 FS/IO 페이지만
+ *   포함합니다.  간접 회수(kswapd)는 sc->gfp_mask를 GFP_KERNEL로 설정하므로 우리도
+ *   이를 고려합니다.
+ */
 	if (!(gfp & (__GFP_HIGHMEM | __GFP_MOVABLE | __GFP_IO | __GFP_FS)))
 		return;
 
@@ -268,17 +339,43 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 	 * (scanning depth) goes too high (deep), we will be notified
 	 * through vmpressure_prio(). But so far, keep calm.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - papago
+ *   스캔한 페이지가 없는 상태에서 여기에 도달하면 회수자가 현재 스캔 깊이에서
+ *   축소 가능한 LRU를 찾을 수 없다는 것을 나타냅니다. 그러나 그것은 우리가
+ *   아직 임계 압력을 보고해야 한다는 것을 의미하지는 않는다.
+ *   검색 우선 순위(스캔 깊이)가 너무 높은 경우(깊이) vmpressure_prio()를 통해
+ *   알립니다. 하지만 아직까지는, 침착하세요.
+ * - scanned 값은 compact를 실패한 상황에서 reclaim을 하러 오는 등의 상황에서
+ *   (do_try_to_free_pages) 일때는 window sie 개념으로 vmpressure_win가 오게 된다. 
+ *   즉 무조건 수행을 한다는 의미.
+ */
 	if (!scanned)
 		return;
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - tree가 true면 legacy mode로 동작한다.
+ */
 	if (tree) {
 		spin_lock(&vmpr->sr_lock);
+/*
+ * IAMROOT, 2022.04.16:
+ * - vmpr->tree_scanned += scanned;
+ *   scanned = vmpr->tree_scanned;
+ */
 		scanned = vmpr->tree_scanned += scanned;
 		vmpr->tree_reclaimed += reclaimed;
 		spin_unlock(&vmpr->sr_lock);
 
 		if (scanned < vmpressure_win)
 			return;
+/*
+ * IAMROOT, 2022.04.16:
+ * - vmpressure_init에서 등록됬던 vmpressure_work_fn 함수가 work thread로 동작한다.
+ *   listener들한테 signal을 보낸다.
+ */
 		schedule_work(&vmpr->work);
 	} else {
 		enum vmpressure_levels level;
@@ -308,6 +405,10 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 			 * asserted for a second in which subsequent
 			 * pressure events can occur.
 			 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - 현재시간 + 1초. 즉 1초후
+ */
 			memcg->socket_pressure = jiffies + HZ;
 		}
 	}
@@ -324,12 +425,20 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
  *
  * This function does not return any value.
  */
+/*
+ * IAMROOT, 2022.04.16:
+ * - @prio가 vmpressure_level_critical_prio 이하일때 vmpressure에서 work를 동작시킨다.
+ */
 void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
 {
 	/*
 	 * We only use prio for accounting critical level. For more info
 	 * see comment for vmpressure_level_critical_prio variable above.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - DEF_PRIORITY는 12.
+ */
 	if (prio > vmpressure_level_critical_prio)
 		return;
 

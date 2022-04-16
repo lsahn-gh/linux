@@ -72,6 +72,10 @@ int cpuset_nodemask_valid_mems_allowed(nodemask_t *nodemask);
 
 extern bool __cpuset_node_allowed(int node, gfp_t gfp_mask);
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - memory node를 사용할수 있는 상황인지 확인한다.
+ */
 static inline bool cpuset_node_allowed(int node, gfp_t gfp_mask)
 {
 	if (cpusets_enabled())
@@ -79,11 +83,19 @@ static inline bool cpuset_node_allowed(int node, gfp_t gfp_mask)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - memory node를 사용할수 있는 상황인지 확인한다.
+ */
 static inline bool __cpuset_zone_allowed(struct zone *z, gfp_t gfp_mask)
 {
 	return __cpuset_node_allowed(zone_to_nid(z), gfp_mask);
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - memory node를 사용할수 있는 상황인지 확인한다.
+ */
 static inline bool cpuset_zone_allowed(struct zone *z, gfp_t gfp_mask)
 {
 	if (cpusets_enabled())

@@ -60,6 +60,12 @@ struct task_delay_info {
 #include <linux/slab.h>
 #include <linux/jump_label.h>
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - "Enable per-task delay accounting"
+ *   cpu가 자기가 한일을 수행도중 다른일을 하느라 멈췄던 횟수에 대해
+ *   counting을 수행한다.
+ */
 #ifdef CONFIG_TASK_DELAY_ACCT
 DECLARE_STATIC_KEY_FALSE(delayacct_key);
 extern int delayacct_on;	/* Delay accounting turned on/off */
@@ -145,6 +151,15 @@ static inline __u64 delayacct_blkio_ticks(struct task_struct *tsk)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.04.16:
+ * - 참고
+ *   /proc/<pid>/schedstat 에서 각 process별 값 확인이 가능하다.
+ *   (proc_pid_schedstat 참고)
+ *   1) time spent on the cpu
+ *   2) time spent waiting on a runqueue
+ *   3) # of timeslices run on this cpu
+ */
 static inline void delayacct_freepages_start(void)
 {
 	if (current->delays)

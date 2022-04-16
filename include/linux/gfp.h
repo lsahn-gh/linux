@@ -126,6 +126,10 @@ struct vm_area_struct;
  */
 #define __GFP_RECLAIMABLE ((__force gfp_t)___GFP_RECLAIMABLE)
 #define __GFP_WRITE	((__force gfp_t)___GFP_WRITE)
+/*
+ * IAMROOT, 2022.04.16:
+ * - cgroup에서 상위 그룹으로의 참조등을 차단한다.
+ */
 #define __GFP_HARDWALL   ((__force gfp_t)___GFP_HARDWALL)
 #define __GFP_THISNODE	((__force gfp_t)___GFP_THISNODE)
 #define __GFP_ACCOUNT	((__force gfp_t)___GFP_ACCOUNT)
