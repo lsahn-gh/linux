@@ -216,3 +216,7 @@
 - 2022.04.09, Zoom 온라인(6명 참석)
 - alloc_page() 진행중 ... direct-compaction(rmap-walk-control)
 
+### 47주차
+- 2022.04.16, Zoom 온라인(7명 참석)
+- alloc_page() 진행중 ... direct-reclaim
+
