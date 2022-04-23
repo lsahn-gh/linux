@@ -62,6 +62,10 @@ static inline void page_counter_init(struct page_counter *counter,
 	counter->parent = parent;
 }
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - file name : usage_in_bytes
+ */
 static inline unsigned long page_counter_read(struct page_counter *counter)
 {
 	return atomic_long_read(&counter->usage);

@@ -87,8 +87,17 @@ struct scan_control {
 	/* Can active pages be deactivated as part of reclaim? */
 #define DEACTIVATE_ANON 1
 #define DEACTIVATE_FILE 2
+/*
+ * IAMROOT, 2022.04.23:
+ * - active를 끌수 있다는 뜻. 0번 bit는 anon, 1번 비트는 file
+ */
 	unsigned int may_deactivate:2;
 	unsigned int force_deactivate:1;
+/*
+ * IAMROOT, 2022.04.23:
+ * - may_deactivate에 설정이 안되있어 deactive를 못했을때 set된다.
+ *   (shrink_list 참고)
+ */
 	unsigned int skipped_deactivate:1;
 
 	/* Writepage batching in laptop mode; RECLAIM_WRITE */
@@ -158,6 +167,12 @@ struct scan_control {
 };
 
 #ifdef ARCH_HAS_PREFETCHW
+/*
+ * IAMROOT, 2022.04.23:
+ * - page 구조체들은 flag등을 atomic으로 관리하는데 여러 core가 이런 atomic
+ *   접근으로 경합상태에 빠질수 있으므로 미리 prefetch를 하여 경합상태를
+ *   줄이려는 의도이다.
+ */
 #define prefetchw_prev_lru_page(_page, _base, _field)			\
 	do {								\
 		if ((_page)->lru.prev != _base) {			\
@@ -446,6 +461,10 @@ static bool cgroup_reclaim(struct scan_control *sc)
  * This function tests whether the vmscan currently in progress can assume
  * that the normal dirty throttling mechanism is operational.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - dirty throttling
+ */
 static bool writeback_throttling_sane(struct scan_control *sc)
 {
 	if (!cgroup_reclaim(sc))
@@ -616,6 +635,10 @@ unsigned long zone_reclaimable_pages(struct zone *zone)
  * @lruvec: lru vector
  * @lru: lru to use
  * @zone_idx: zones to consider (use MAX_NR_ZONES for the whole LRU list)
+ */
+/*
+ * IAMROOT, 2022.04.23:
+ * - @lru에 등록되있는 page 수를 zone_idx까지 합산하여 return한다.
  */
 static unsigned long lruvec_lru_size(struct lruvec *lruvec, enum lru_list lru,
 				     int zone_idx)
@@ -1265,6 +1288,19 @@ enum page_references {
 	PAGEREF_ACTIVATE,
 };
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - PAGEREF_RECLAIM
+ *   page가 Mlock등의 이유로 VM_LOCK이 된상태.거나 아래 경우들이 아니면.
+ * - PAGEREF_ACTIVATE(referenced set.)
+ *   mapping count가 존재.
+ *   이전에 reference되있거나 mapping count가 2군데 이상인경우.
+ *   실행가능한 code이면. 
+ * - PAGEREF_KEEP(referenced set.)
+ *   mapping count가 1개 존재. 이전에 reference 된적이 없음. 실행code가 아님.
+ * - PAGEREF_RECLAIM_CLEAN
+ *   이전에 reference되있었고 file or clean anon page 이면.
+ */
 static enum page_references page_check_references(struct page *page,
 						  struct scan_control *sc)
 {
@@ -1319,6 +1355,12 @@ static enum page_references page_check_references(struct page *page,
 }
 
 /* Check if a page is dirty or under writeback */
+/*
+ * IAMROOT, 2022.04.23:
+ * - @page가 anon page인 경우 dirty, writeback은 false.
+ *   아닌 경우 @page의 dirty, writeback flag를 먼저 읽는다.
+ *   그 후에 fs에 mapping되 있다면 is_dirty_writeback ops로 결정한다.
+ */
 static void page_check_dirty_writeback(struct page *page,
 				       bool *dirty, bool *writeback)
 {
@@ -1328,6 +1370,12 @@ static void page_check_dirty_writeback(struct page *page,
 	 * Anonymous pages are not handled by flushers and must be written
 	 * from reclaim context. Do not stall reclaim based on them
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - !page_is_file_lru에서 대부분의 anon page가 찾아지고, anon page 임에도
+ *   page_is_file_lru로 true가 나오는 조건에선(clean anon page)
+ *   (PageAnon(page) && !PageSwapBacked(page)) 로 clean anon page임을 확인한다.
+ */
 	if (!page_is_file_lru(page) ||
 	    (PageAnon(page) && !PageSwapBacked(page))) {
 		*dirty = false;
@@ -1339,10 +1387,19 @@ static void page_check_dirty_writeback(struct page *page,
 	*dirty = PageDirty(page);
 	*writeback = PageWriteback(page);
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - buffer head가 없는 경우 return.
+ */
 	/* Verify dirty/writeback state if the filesystem supports it */
 	if (!page_has_private(page))
 		return;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - 참고함수
+ *   nfs_check_dirty_writeback
+ */
 	mapping = page_mapping(page);
 	if (mapping && mapping->a_ops->is_dirty_writeback)
 		mapping->a_ops->is_dirty_writeback(page, dirty, writeback);
@@ -1429,6 +1486,11 @@ retry:
 		page = lru_to_page(page_list);
 		list_del(&page->lru);
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - lock일 실패했으면 ret_pages에 넣어놓고 유보시키고 다 끝난후에 @page_list
+ *   에 되돌린다.
+ */
 		if (!trylock_page(page))
 			goto keep;
 
@@ -1439,9 +1501,18 @@ retry:
 		/* Account the number of base pages even though THP */
 		sc->nr_scanned += nr_pages;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - active로 되돌린다.
+ */
 		if (unlikely(!page_evictable(page)))
 			goto activate_locked;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - 요청(@sc)에서 unmap page만을 하라고 했는데 page가 mapped상태일 경우
+ *   pass한다.
+ */
 		if (!sc->may_unmap && page_mapped(page))
 			goto keep_locked;
 
@@ -1467,6 +1538,10 @@ retry:
 		 * pages marked for immediate reclaim are making it to the
 		 * end of the LRU a second time.
 		 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 이미 이 page를 다른 쪽에서 reclaim하고 있는 상태면 nr_congested로 누적.
+ */
 		mapping = page_mapping(page);
 		if (((dirty || writeback) && mapping &&
 		     inode_write_congested(mapping->host)) ||
@@ -1515,8 +1590,34 @@ retry:
 		 * memory pressure on the cache working set any longer than it
 		 * takes to write them to disk.
 		 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - writeback이라면 case 3가지의 처리 방법이 있다.
+ */
 		if (PageWriteback(page)) {
 			/* Case 1 above */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papgo
+ *   1) 회수할 때 writeback 아래에 있는 페이지 수가 너무 많고 이 페이지가
+ *   wrtieback 및 페이지 회수 아래에 있으면 페이지가 IO를 위해 대기 중이지만
+ *   IO가 완료되기 전에 LRU를 통해 재활용되고 있음을 나타냅니다.
+ *   IO 오류나 스토리지 연결 끊김으로 인해 페이지를 다시 쓸 수 없는 경우
+ *   페이지에서 대기하는 것 자체가 무기한 정지될 위험이 있으므로 대신 LRU가
+ *   너무 빨리 스캔되고 페이지 목록이 처리된 후 호출자가 정지할 수 있습니다.
+ *
+ * - papgo
+ *   사례 1)과 2)에서는 inactive list의 clean pages계속 검색하고 active list에서
+ *   다시 refill 하는동안 페이지를 활성화하여 방해가 되지 않도록 합니다.
+ *   여기서 관찰할 수 있는 것은 디스크 쓰기를 기다리는 것이 잠재적으로 재로드의
+ *   원인이 되는 것보다 더 비싸다는 것입니다.
+ *   즉시 회수하도록 표시되므로 디스크에 쓰는 데 걸리는 시간보다 더 이상
+ *   캐시 작업 세트에 메모리 부담을 주지 않습니다.
+ *
+ * - kswapd에서 실행되었고 해당 page가 이미 reclaim중이며 해당 node가 writeback
+ *   상태라면(many pages writeback) nr_immediate를 증가시키고 activate_locked로
+ *   이동한다.
+ */
 			if (current_is_kswapd() &&
 			    PageReclaim(page) &&
 			    test_bit(PGDAT_WRITEBACK, &pgdat->flags)) {
@@ -1526,6 +1627,10 @@ retry:
 			/* Case 2 above */
 			} else if (writeback_throttling_sane(sc) ||
 			    !PageReclaim(page) || !may_enter_fs) {
+/*
+ * IAMROOT, 2022.04.23:
+ * - reclaim 대상이라는것만 표시해놓고 activate_locked로 돌아간다.
+ */
 				/*
 				 * This is slightly racy - end_page_writeback()
 				 * might have just cleared PageReclaim, then
@@ -1813,6 +1918,10 @@ activate_locked_split:
 			nr_pages = 1;
 		}
 activate_locked:
+/*
+ * IAMROOT, 2022.04.23:
+ * - 모종의 이유로 실패하였을 경우 active로 되돌린다.
+ */
 		/* Not a candidate for swapping, so reclaim swap space. */
 		if (PageSwapCache(page) && (mem_cgroup_swap_full(page) ||
 						PageMlocked(page)))
@@ -2022,6 +2131,10 @@ bool __isolate_lru_page_prepare(struct page *page, isolate_mode_t mode)
  * Update LRU sizes after isolating pages. The LRU size updates must
  * be complete before mem_cgroup_update_lru_size due to a sanity check.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - taken한(isolate 성공) page가 존재하는 zone만 lru size를 update한다.
+ */
 static __always_inline void update_lru_sizes(struct lruvec *lruvec,
 			enum lru_list lru, unsigned long *nr_zone_taken)
 {
@@ -2057,12 +2170,26 @@ static __always_inline void update_lru_sizes(struct lruvec *lruvec,
  *
  * returns how many pages were moved onto *@dst.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * @nr_scanned scan시도를 한번이라도 했던 page개수
+ * @return isolate가 성공한 page개수(nr_taken)
+ *
+ * @nr_to_scan만큼 scan을 하며 isolate를 시도한다. 성공한 page들은 @dst로 옮기고
+ * 개수를 return시킨다.
+ * isolate 실패한 page들은 rotate한다.
+ */
 static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		struct lruvec *lruvec, struct list_head *dst,
 		unsigned long *nr_scanned, struct scan_control *sc,
 		enum lru_list lru)
 {
 	struct list_head *src = &lruvec->lists[lru];
+/*
+ * IAMROOT, 2022.04.23:
+ * - scan : @sc에서 요청한 범위안에 있는 page 개수
+ * - nr_taken : scan 페이지 개수 내에서 isolate까지 성공한 page개수
+ */
 	unsigned long nr_taken = 0;
 	unsigned long nr_zone_taken[MAX_NR_ZONES] = { 0 };
 	unsigned long nr_skipped[MAX_NR_ZONES] = { 0, };
@@ -2082,6 +2209,11 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		nr_pages = compound_nr(page);
 		total_scan += nr_pages;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - 요청한 zone에 속한 page가 아닐 경우 pages_skipped로 옮기고 nr_skipped를
+ *   누적한다.
+ */
 		if (page_zonenum(page) > sc->reclaim_idx) {
 			list_move(&page->lru, &pages_skipped);
 			nr_skipped[page_zonenum(page)] += nr_pages;
@@ -2099,6 +2231,11 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		 * only when the page is being freed somewhere else.
 		 */
 		scan += nr_pages;
+/*
+ * IAMROOT, 2022.04.23:
+ * - isolate를 실패시 @src로 돌려보낸다. 이때 @src의 맨앞에 위치하게 될것이다.
+ *   (빼올땐 맨뒤, 다시 넣을땐 맨 앞.(rotate))
+ */
 		if (!__isolate_lru_page_prepare(page, mode)) {
 			/* It is being freed elsewhere */
 			list_move(&page->lru, src);
@@ -2109,11 +2246,18 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		 * sure the page is not being freed elsewhere -- the
 		 * page release code relies on it.
 		 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - get refcount
+ */
 		if (unlikely(!get_page_unless_zero(page))) {
 			list_move(&page->lru, src);
 			continue;
 		}
-
+/*
+ * IAMROOT, 2022.04.23:
+ * - 따른 thread가 isolate를 해버렸다. 성공하게 되면 lru flag를 clear한다.
+ */
 		if (!TestClearPageLRU(page)) {
 			/* Another thread is already isolating this page */
 			put_page(page);
@@ -2121,6 +2265,11 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 			continue;
 		}
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - isolate prepare, get refcount, lru clear 성공까지 되면 isolate성공으로
+ *   판단한다.
+ */
 		nr_taken += nr_pages;
 		nr_zone_taken[page_zonenum(page)] += nr_pages;
 		list_move(&page->lru, dst);
@@ -2133,6 +2282,10 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 	 * scanning would soon rescan the same pages to skip and put the
 	 * system at risk of premature OOM.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - skipped page가 존재하면 src로 한번에 복귀시키고(rotate) PGSCAN_SKIP count를 누적시킨다.
+ */
 	if (!list_empty(&pages_skipped)) {
 		int zid;
 
@@ -2205,6 +2358,10 @@ int isolate_lru_page(struct page *page)
  * the LRU list will go small and be scanned faster than necessary, leading to
  * unnecessary swapping, thrashing and OOM.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - isolate > inactive 이면 isolate가 많다고 판단한다.
+ */
 static int too_many_isolated(struct pglist_data *pgdat, int file,
 		struct scan_control *sc)
 {
@@ -2229,6 +2386,10 @@ static int too_many_isolated(struct pglist_data *pgdat, int file,
 	 * won't get blocked by normal direct-reclaimers, forming a circular
 	 * deadlock.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - __GFP_IO, __GFP_FS둘다 있으면 inactive를 1/8로 줄인다.
+ */
 	if ((sc->gfp_mask & (__GFP_IO | __GFP_FS)) == (__GFP_IO | __GFP_FS))
 		inactive >>= 3;
 
@@ -2240,6 +2401,12 @@ static int too_many_isolated(struct pglist_data *pgdat, int file,
  * On return, @list is reused as a list of pages to be freed by the caller.
  *
  * Returns the number of pages moved to the given lruvec.
+ */
+/*
+ * IAMROOT, 2022.04.23:
+ * @list[in/out] in - lru로 옮길 pages
+ *               out - lru로 옮기면서 free할 pages이 생기면 넣는다.
+ * @return lru move에 성공한 page개수
  */
 static unsigned int move_pages_to_lru(struct lruvec *lruvec,
 				      struct list_head *list)
@@ -2271,7 +2438,10 @@ static unsigned int move_pages_to_lru(struct lruvec *lruvec,
 		 *                                        list_add(&page->lru,)
 		 */
 		SetPageLRU(page);
-
+/*
+ * IAMROOT, 2022.04.23:
+ * - ref가 0으로 됬으면 그 사이에 해제된것이므로 buddy로 되돌릴 준비를 한다.
+ */
 		if (unlikely(put_page_testzero(page))) {
 			__clear_page_lru_flags(page);
 
@@ -2293,6 +2463,10 @@ static unsigned int move_pages_to_lru(struct lruvec *lruvec,
 		add_page_to_lru_list(page, lruvec);
 		nr_pages = thp_nr_pages(page);
 		nr_moved += nr_pages;
+/*
+ * IAMROOT, 2022.04.23:
+ * - page가 active이면 @lruvec의 nonresident_age를 parent를 올라가며 증가시킨다.
+ */
 		if (PageActive(page))
 			workingset_age_nonresident(lruvec, nr_pages);
 	}
@@ -2300,6 +2474,10 @@ static unsigned int move_pages_to_lru(struct lruvec *lruvec,
 	/*
 	 * To save our caller's stack, now use input list for pages to free.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - free할 page들은 이미 비어있을 list에 옮겨 놓는다.
+ */
 	list_splice(&pages_to_free, list);
 
 	return nr_moved;
@@ -2336,6 +2514,11 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	struct pglist_data *pgdat = lruvec_pgdat(lruvec);
 	bool stalled = false;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - isolate 된 page가 inactvie page에 비해 많으면 0.1초 지연시킨다.
+ *   2번이상 지연되면 return.
+ */
 	while (unlikely(too_many_isolated(pgdat, file, sc))) {
 		if (stalled)
 			return 0;
@@ -2430,6 +2613,11 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
  * The downside is that we have to touch page->_refcount against each page.
  * But we had to alter page->flags anyway.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 참조하는 실행 code를 제외한 page들을 inactive list로 옮긴다.
+ *   nr_to_scan은 위에서 최대 32개로 제한됫을것이다.
+ */
 static void shrink_active_list(unsigned long nr_to_scan,
 			       struct lruvec *lruvec,
 			       struct scan_control *sc,
@@ -2451,6 +2639,12 @@ static void shrink_active_list(unsigned long nr_to_scan,
 
 	spin_lock_irq(&lruvec->lru_lock);
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - @lruvec에서 @nr_to_scan만큼 scan을 하여 isolate를 시도한다.
+ *   isolate에 성공한 page들은 l_hold에 넣어지고 nr_taken로 개수가
+ *   return 된다. (nr_scanned는 scan을 시도한 page수)
+ */
 	nr_taken = isolate_lru_pages(nr_to_scan, lruvec, &l_hold,
 				     &nr_scanned, sc, lru);
 
@@ -2462,16 +2656,29 @@ static void shrink_active_list(unsigned long nr_to_scan,
 
 	spin_unlock_irq(&lruvec->lru_lock);
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - isolate된 page들을 조건에 따라 l_active, l_inactive로 넣어놓는다.
+ */
 	while (!list_empty(&l_hold)) {
 		cond_resched();
 		page = lru_to_page(&l_hold);
 		list_del(&page->lru);
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - app등에서 Mlock이 됫거나 unevictable로 변경 될 경우를 검사한다.
+ */
 		if (unlikely(!page_evictable(page))) {
 			putback_lru_page(page);
 			continue;
 		}
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - buffer heads over인 상황이고 page가 private를 가지고 있으면(즉 buffer를
+ *   가지고 있는 page이면) lock시도후 release한다.
+ */
 		if (unlikely(buffer_heads_over_limit)) {
 			if (page_has_private(page) && trylock_page(page)) {
 				if (page_has_private(page))
@@ -2491,6 +2698,12 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			 * IO, plus JVM can create lots of anon VM_EXEC pages,
 			 * so we ignore them here.
 			 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 참조된 page를 찾았고, 그중에 실행가능한 파일 page가 있다면 active list로
+ *   옮겨놓는다.
+ *   회수를 하지 말고 active에 놔두라는 의미.
+ */
 			if ((vm_flags & VM_EXEC) && page_is_file_lru(page)) {
 				nr_rotated += thp_nr_pages(page);
 				list_add(&page->lru, &l_active);
@@ -2498,6 +2711,11 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			}
 		}
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - deactive를 한다. active flag를 지우고 inactive list에 옮긴다.
+ *   active -> inactive가 될때 workingset 가 set된다.
+ */
 		ClearPageActive(page);	/* we are de-activating */
 		SetPageWorkingset(page);
 		list_add(&page->lru, &l_inactive);
@@ -2511,6 +2729,10 @@ static void shrink_active_list(unsigned long nr_to_scan,
 	nr_activate = move_pages_to_lru(lruvec, &l_active);
 	nr_deactivate = move_pages_to_lru(lruvec, &l_inactive);
 	/* Keep all free pages in l_active list */
+/*
+ * IAMROOT, 2022.04.23:
+ * - free page를 l_active에 모아놓는다
+ */
 	list_splice(&l_inactive, &l_active);
 
 	__count_vm_events(PGDEACTIVATE, nr_deactivate);
@@ -2588,6 +2810,10 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 				 struct lruvec *lruvec, struct scan_control *sc)
 {
 	if (is_active_lru(lru)) {
+/*
+ * IAMROOT, 2022.04.23:
+ * - deactive할수있다면 shrink_active_list를 호출한다.
+ */
 		if (sc->may_deactivate & (1 << is_file_lru(lru)))
 			shrink_active_list(nr_to_scan, lruvec, sc, lru);
 		else
@@ -2661,6 +2887,12 @@ enum scan_balance {
  * nr[0] = anon inactive pages to scan; nr[1] = anon active pages to scan
  * nr[2] = file inactive pages to scan; nr[3] = file active pages to scan
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - memcg에서 swappiness값을 가져와서 그 값을 토대로 scan 비율을 얻어오고
+ *   evictable lru을 @lurvec에서 순회하며 sc->reclaim_idx zone까지의
+ *   page수를 가져와서 lru마다 scan할 page수를 @nr에 얻어온다.
+ */
 static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 			   unsigned long *nr)
 {
@@ -2674,6 +2906,11 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	unsigned long ap, fp;
 	enum lru_list lru;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - 요청에서 swap을 하지 말라고 했거나 anon_page가 reclaim이 불가능한 상태면
+ *   (swap할 공간이 없으므로) file만을 scan한다.
+ */
 	/* If we have no swap space, do not bother scanning anon pages. */
 	if (!sc->may_swap || !can_reclaim_anon_pages(memcg, pgdat->node_id, sc)) {
 		scan_balance = SCAN_FILE;
@@ -2687,6 +2924,16 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	 * using the memory controller's swap limit feature would be
 	 * too expensive.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papago
+ *   스왑 기능이 없는 경우에도 OOM을 방지하기 위해 글로벌 회수 기능이 스왑되지만
+ *   memcg 사용자는 메모리 컨트롤러의 스왑 제한 기능을 사용하는 경우 이 knob를
+ *   사용하여 개별 그룹에 대한 스왑을 완전히 비활성화하려고 합니다.
+ *
+ * - 상위에서 target memcg가 설정되서 내려왔지만 실제 전역이나 memcg의 
+ *   swappiness설정값이 disable인 경우 swap을 하지 말라는것이다.
+ */
 	if (cgroup_reclaim(sc) && !swappiness) {
 		scan_balance = SCAN_FILE;
 		goto out;
@@ -2697,6 +2944,13 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	 * system is close to OOM, scan both anon and file equally
 	 * (unless the swappiness setting disagrees with swapping).
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 시스템이 OOM에 근접해 있을 때는 압력 밸런싱의 영리함을 적용하지 말고,
+ *   anon과 파일을 모두 동일하게 스캔하십시오.
+ *   (스왑성 설정이 스왑과 일치하지 않는 경우).
+ * - 우선순위가 가장 높게 설정되 있을 경우 swappiness를 고려안하고 균등하게 한다.
+ */
 	if (!sc->priority && swappiness) {
 		scan_balance = SCAN_EQUAL;
 		goto out;
@@ -2705,6 +2959,10 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	/*
 	 * If the system is almost out of file pages, force-scan anon.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - file 사용이 거의 없는 시스템에서는 anon page만 스캔한다.
+ */
 	if (sc->file_is_tiny) {
 		scan_balance = SCAN_ANON;
 		goto out;
@@ -2714,6 +2972,10 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	 * If there is enough inactive page cache, we do not reclaim
 	 * anything from the anonymous working right now.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - cold cache(inactive page cache)가 많다고 판단했던 경우 file만 scan.
+ */
 	if (sc->cache_trim_mode) {
 		scan_balance = SCAN_FILE;
 		goto out;
@@ -2735,11 +2997,32 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
 	 *
 	 * With swappiness at 100, anon and file have equal IO cost.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papago
+ *   anon 페이지와 파일 페이지 사이의 압력 밸런스를 계산합니다.
+ *
+ * 각 LRU에 가해지는 압력은 각 목록을 재확보하는 데 드는 비용에 반비례합니다.
+ * 이는 다시 장애가 발생한 페이지 공유에 따라 결정됩니다. 이는 스왑된
+ * anon 페이지를 다시 불러올 때와 파일 시스템 페이지(스왑)를 다시 불러올
+ * 때의 상대적 IO 비용에 곱한 것입니다.
+ *
+ * 목록이 완전히 뒤처지지 않도록 이러한 영향을 제한하고 있지만:
+ * 적어도 3분의 1의 압력이 가해질 때, 휘청거린다.
+ *
+ * swappiness가 100인 경우, annon 및 file의 IO 비용은 동일합니다.*
+ */
 	total_cost = sc->anon_cost + sc->file_cost;
 	anon_cost = total_cost + sc->anon_cost;
 	file_cost = total_cost + sc->file_cost;
 	total_cost = anon_cost + file_cost;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - cost가 없다는 가정하에 계산
+ *   ap = swappiness
+ *   fp = 200 - swappiness
+ */
 	ap = swappiness * (total_cost + 1);
 	ap /= anon_cost + 1;
 
@@ -2756,6 +3039,10 @@ out:
 		unsigned long low, min;
 		unsigned long scan;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - @lruvec의 @lru에 해당하는 page수를 @sc->recalim_idx까지 합산하여 가져온다.
+ */
 		lruvec_size = lruvec_lru_size(lruvec, lru, sc->reclaim_idx);
 		mem_cgroup_protection(sc->target_mem_cgroup, memcg,
 				      &min, &low);
@@ -2803,7 +3090,17 @@ out:
 
 			/* Avoid TOCTOU with earlier protection check */
 			cgroup_size = max(cgroup_size, protection);
-
+/*
+ * IAMROOT, 2022.04.23:
+ * - scan = lruvec_size * (1 - (protection / (cgroup_size + 1)))
+ * - memcg usage와 protection에 대한 역비율을 lruvec_size에도 적용한다.
+ *
+ * - ex) protection = 30, cgroup_size = 99, lruvec_size = 10
+ *   scan = 10 - 10 * 30 / 100 = 10 - 300 /100 = 7
+ *
+ * - ex) protection = 30, cgroup_size = 200, lruvec_size = 10
+ *   scan = 10 - 10 * 30 / 100 = 10 - 300 /201 = 9
+ */
 			scan = lruvec_size - lruvec_size * protection /
 				(cgroup_size + 1);
 
@@ -2823,6 +3120,11 @@ out:
 		 * If the cgroup's already been deleted, make sure to
 		 * scrape out the remaining cache.
 		 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 위의 계산으로 scan이 0이고, memcg가 offline이 됬다면 해당 cache가 필요없어
+ *   지므로 SWAP_CLUSTER_MAX를 min 기준으로 해서 scan을 정한다.
+ */
 		if (!scan && !mem_cgroup_online(memcg))
 			scan = min(lruvec_size, SWAP_CLUSTER_MAX);
 
@@ -2838,6 +3140,10 @@ out:
 			 * the offlined memory cgroups because of a
 			 * round-off error.
 			 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 위에서 계산했던 ap, fp 비율을 토대로 scan을 계산한다.
+ */
 			scan = mem_cgroup_online(memcg) ?
 			       div64_u64(scan * fraction[file], denominator) :
 			       DIV64_U64_ROUND_UP(scan * fraction[file],
@@ -2900,10 +3206,20 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	 * abort proportional reclaim if either the file or anon lru has already
 	 * dropped to zero at the first pass.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - recalim target memcg가 없고(global 이라는 뜻), kswapd에서 호출한게 아니고,
+ *   (direct reclaim이라는 뜻)
+ *   priority가 DEF_PRIORITY이면(처음 시작) scan_adjusted가 true가 된다.
+ */
 	scan_adjusted = (!cgroup_reclaim(sc) && !current_is_kswapd() &&
 			 sc->priority == DEF_PRIORITY);
 
 	blk_start_plug(&plug);
+/*
+ * IAMROOT, 2022.04.23:
+ * - ACTIVE_ANON을 제외한 lru page들을 바라본다.
+ */
 	while (nr[LRU_INACTIVE_ANON] || nr[LRU_ACTIVE_FILE] ||
 					nr[LRU_INACTIVE_FILE]) {
 		unsigned long nr_anon, nr_file, percentage;

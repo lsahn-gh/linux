@@ -701,6 +701,16 @@ static inline int split_swap_cluster(swp_entry_t entry)
 #endif
 
 #ifdef CONFIG_MEMCG
+/*
+ * IAMROOT, 2022.04.23:
+ * - swap을 할 수 있는 memory는 user memory(anon memory)만이 가능하다.
+ * - swappiness
+ *   scan control을 할때 file, anon 에 대한 비율.
+ *   file은 200. anon이 swappiness 0 ~ 200까지 로 하여 비율에 따라 scan control을
+ *   수행 한다.
+ *
+ * - cgroup2는 memcg의 swappiness가 존재하지 않는다.
+ */
 static inline int mem_cgroup_swappiness(struct mem_cgroup *memcg)
 {
 	/* Cgroup2 doesn't have per-cgroup swappiness */

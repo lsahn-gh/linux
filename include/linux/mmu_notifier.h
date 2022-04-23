@@ -537,6 +537,10 @@ static inline void mmu_notifier_range_init_owner(
 	range->owner = owner;
 }
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - young(AF(Access Flag)) 변화에 대한것을 notify해준다.
+ */
 #define ptep_clear_flush_young_notify(__vma, __address, __ptep)		\
 ({									\
 	int __young;							\

@@ -261,6 +261,10 @@ int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 /* test whether an address (unsigned long or pointer) is aligned to PAGE_SIZE */
 #define PAGE_ALIGNED(addr)	IS_ALIGNED((unsigned long)(addr), PAGE_SIZE)
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - lru list에서 가장 마지막에 있는 page를 가져온다.
+ */
 #define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
 
 void setup_initial_init_mm(void *start_code, void *end_code,

@@ -226,6 +226,17 @@ static void unpack_shadow(void *shadow, int *memcgidp, pg_data_t **pgdat,
  * to the in-memory dimensions. This function allows reclaim and LRU
  * operations to drive the non-resident aging along in parallel.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papgo
+ *   workingset_age_nonresident - LRU가 에이징될 때 비거주 항목을 에이징합니다.
+ *   @lruvec: the lruvec that was aged
+ *   @nr_pages: the numbver of pages to count
+ *   카운트할 페이지 수 메모리 내 페이지가 에이징되면 나중에 리폴트 거리가
+ *   메모리 내 치수와 비슷해지려면 비거주 페이지도 에이징해야 합니다.
+ *   이 기능을 통해 회수 및 LRU 작업을 통해 비거주자 노화를 병렬로 진행할 수
+ *   있습니다.
+ */
 void workingset_age_nonresident(struct lruvec *lruvec, unsigned long nr_pages)
 {
 	/*
@@ -239,6 +250,17 @@ void workingset_age_nonresident(struct lruvec *lruvec, unsigned long nr_pages)
 	 * the virtual inactive lists of all its parents, including
 	 * the root cgroup's, age as well.
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papago
+ *   그룹 회수란 모든 하위 그룹을 라운드 로빈 방식으로 회수하는 것을 의미합니다.
+ *   즉, 각 cgroup은 하위 그룹의 LRU 순서로 구성된 LRU 순서를 가지고 있으며,
+ *   모든 페이지는 해당 그룹을 소유한 cgroup뿐만 아니라 해당 그룹의 모든
+ *   상위 그룹에서도 LRU 위치를 가지고 있다.
+ *
+ *   따라서 리프 cgroup의 물리적 비활성 목록이 에이징되면 루트 cgroup을 포함한
+ *   모든 상위 그룹의 가상 비활성 목록도 에이징됩니다.
+ */
 	do {
 		atomic_long_add(nr_pages, &lruvec->nonresident_age);
 	} while ((lruvec = parent_lruvec(lruvec)));

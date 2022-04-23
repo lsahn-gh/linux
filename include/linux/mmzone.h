@@ -389,6 +389,11 @@ static inline bool is_active_lru(enum lru_list lru)
 	return (lru == LRU_ACTIVE_ANON || lru == LRU_ACTIVE_FILE);
 }
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - 0번 : anon
+ *   1번 : file
+ */
 #define ANON_AND_FILE 2
 
 enum lruvec_flags {

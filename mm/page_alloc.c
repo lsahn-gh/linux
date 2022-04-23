@@ -4213,6 +4213,11 @@ void free_unref_page(struct page *page, unsigned int order)
 /*
  * Free a list of 0-order pages
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - @list에 있는 page들을 buddy로 돌려 보낸다.
+ * - TODO
+ */
 void free_unref_page_list(struct list_head *list)
 {
 	struct page *page, *next;

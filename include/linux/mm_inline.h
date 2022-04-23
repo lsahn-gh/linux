@@ -19,6 +19,15 @@
  * needs to survive until the page is last deleted from the LRU, which
  * could be as far down as __page_cache_release.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 일반 anon page들은 SwapBacked flag가 set되있다.
+ * - SwapBacked flag가 unset인 경우
+ *   clean anon page인 경우(lazy free)
+ *   정말 file page인 경우
+ * - return이 true여도 anon인 경우가 있다. anon page판단히 확실해야될 경우
+ *   PageAnon(page) 조건으로 anon임을 확실시한다.
+ */
 static inline int page_is_file_lru(struct page *page)
 {
 	return !PageSwapBacked(page);

@@ -474,7 +474,7 @@ mem_cgroup_page_nodeinfo(struct mem_cgroup *memcg, struct page *page)
 
 /*
  * IAMROOT, 2022.04.16:
- * - @nid에 대한 sot_limit_tree를 가져온다.
+ * - @nid에 대한 soft_limit_tree를 가져온다.
  */
 static struct mem_cgroup_tree_per_node *
 soft_limit_tree_node(int nid)
@@ -555,7 +555,8 @@ static void mem_cgroup_remove_exceeded(struct mem_cgroup_per_node *mz,
 
 /*
  * IAMROOT, 2022.04.16:
- * - soft_limit을 초과한 memory 사용량을 return한다.
+ * - memcg soft_limit(soft_limit_in_bytes)을 초과한 memory 사용량
+ *   (usage_in_bytes - soft_limit_in_bytes)을 return한다.
  */
 static unsigned long soft_limit_excess(struct mem_cgroup *memcg)
 {
@@ -1646,6 +1647,13 @@ static int mem_cgroup_soft_reclaim(struct mem_cgroup *root_memcg,
 		if (!victim) {
 			loop++;
 			if (loop >= 2) {
+/*
+ * IAMROOT, 2022.04.23:
+ * - break 경우의 수
+ *   1. total == 0
+ *   2. loop > 100
+ *   3. total >= excess >> 2  (total이 초과메모리의 25% 이상)
+ */
 				/*
 				 * If we have not been able to reclaim
 				 * anything, it might because there are

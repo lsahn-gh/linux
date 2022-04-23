@@ -3952,6 +3952,11 @@ EXPORT_SYMBOL(generic_file_write_iter);
  *
  * Return: %1 if the release was successful, otherwise return zero.
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * - @page를 해제한다. mapping되있는것은 mapping ops로 호출하고 아니면
+ *   try_to_free_buffers를 호출한다.
+ */
 int try_to_release_page(struct page *page, gfp_t gfp_mask)
 {
 	struct address_space * const mapping = page->mapping;

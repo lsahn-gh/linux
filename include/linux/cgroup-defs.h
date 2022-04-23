@@ -162,6 +162,10 @@ struct cgroup_subsys_state {
 	 */
 	int id;
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - CSS_ONLINE 등의 값이 위치한다.
+ */
 	unsigned int flags;
 
 	/*

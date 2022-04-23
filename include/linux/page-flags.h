@@ -552,6 +552,10 @@ PAGEFLAG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
 	TESTCLEARFLAG(LRU, lru, PF_HEAD)
 PAGEFLAG(Active, active, PF_HEAD) __CLEARPAGEFLAG(Active, active, PF_HEAD)
 	TESTCLEARFLAG(Active, active, PF_HEAD)
+/*
+ * IAMROOT, 2022.04.23:
+ * - active 
+ */
 PAGEFLAG(Workingset, workingset, PF_HEAD)
 	TESTCLEARFLAG(Workingset, workingset, PF_HEAD)
 __PAGEFLAG(Slab, slab, PF_NO_TAIL)
@@ -616,6 +620,12 @@ static __always_inline int PageSwapCache(struct page *page)
 	return PageSwapBacked(page) && test_bit(PG_swapcache, &page->flags);
 
 }
+
+/*
+ * IAMROOT, 2022.04.23:
+ * - swap 접근은 항상 swap cache를 통해서 하는데, 해당 page가 swap cache에 있을때
+ *   사용.
+ */
 SETPAGEFLAG(SwapCache, swapcache, PF_NO_TAIL)
 CLEARPAGEFLAG(SwapCache, swapcache, PF_NO_TAIL)
 #else

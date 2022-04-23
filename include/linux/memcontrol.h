@@ -655,6 +655,16 @@ static inline void mem_cgroup_protection(struct mem_cgroup *root,
 	 * is possible and reclaiming B would be violating the protection.
 	 *
 	 */
+/*
+ * IAMROOT, 2022.04.23:
+ * - papago
+ *   targeted 회수에는 회수 보호가 적용되지 않습니다.
+ *   mem_cgroup_protected 계산은 회수 대상이 서로 다른 병렬 회수기에 대해 계산된
+ *   유효 값에 대한 보호를 불변으로 유지할 만큼 충분히 강력하지 않기 때문에
+ *   우리는 여기서 이 특정 사례를 특별히 다루고 있다. 이는 특히 대상 회수에 대해
+ *   유효 값이 0이지만 외부 회수에 대해서는 다른 값을 갖는 tail memcgs
+ *   (LRU에 대한 페이지가 있음)의 경우 문제가 된다.
+ */
 	if (root == memcg)
 		return;
 

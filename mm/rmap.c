@@ -804,6 +804,12 @@ struct page_referenced_arg {
 /*
  * arg: page_referenced_arg will be passed
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * app이 @page를 access한적이 있는지 확인한다.
+ *
+ * @return 해당 함수는 loop로 동작하는데, loop를 break할지 안할지에 대한 여부.
+ */
 static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 			unsigned long address, void *arg)
 {
@@ -824,6 +830,10 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 			return false; /* To break the loop */
 		}
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - mapping이 되있는 경우
+ */
 		if (pvmw.pte) {
 			if (ptep_clear_flush_young_notify(vma, address,
 						pvmw.pte)) {
@@ -856,10 +866,21 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 		referenced++;
 
 	if (referenced) {
+
+/*
+ * IAMROOT, 2022.04.23:
+ * - @pra->referenced(결과 값)에 누적한다. 해당 page가 참조가 됬다면 1씩증가
+ *   하는 개념.
+ */
 		pra->referenced++;
 		pra->vm_flags |= vma->vm_flags;
 	}
 
+/*
+ * IAMROOT, 2022.04.23:
+ * - @pra(검색해야될 범위 및 결과값)의 mapcount가 0이 됬다는건 검색범위가
+ *   종료됬다는것이므로 false return.
+ */
 	if (!pra->mapcount)
 		return false; /* To break the loop */
 
@@ -886,6 +907,13 @@ static bool invalid_page_referenced_vma(struct vm_area_struct *vma, void *arg)
  *
  * Quick test_and_clear_referenced for all mappings to a page,
  * returns the number of ptes which referenced the page.
+ */
+/*
+ * IAMROOT, 2022.04.23:
+ * - 해당 page를 참조하고 있는 ptes 개수를 return한다.
+ * - pra에 검색범위(mapcount) 및 target memcg를 설정하고
+ *   rmap_walk함수를 통해서 해당 page를 참조하고 있는 count를 pra.referenced에
+ *   누적시킨다.
  */
 int page_referenced(struct page *page,
 		    int is_locked,

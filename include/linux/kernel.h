@@ -490,6 +490,20 @@ static inline void ftrace_dump(enum ftrace_dump_mode oops_dump_mode) { }
  * @member:	the name of the member within the struct.
  *
  */
+/*
+ * IAMROOT, 2022.04.23:
+ * struct foo {
+ *	..
+ *	struct abc a;
+ *	..
+ * };
+ *
+ * func (struct abc *b)
+ * {
+ *	struct foo *f = container_of(b, struct foo, a)
+ *	...
+ * }
+ */
 #define container_of(ptr, type, member) ({				\
 	void *__mptr = (void *)(ptr);					\
 	BUILD_BUG_ON_MSG(!__same_type(*(ptr), ((type *)0)->member) &&	\
