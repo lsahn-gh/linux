@@ -3124,7 +3124,7 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
  *
  * - COMPACT_SKIPPED
  *   1. compact를 하기 위한 order 0 page도 확보가 불가능한경우.
- *   compact가 불가능한경우
+ *   메모리 단편화의 이유로 compact가 불가능한경우
  *
  * - COMPACT_CONTINUE요건에서 order가 costly_order보다 높은 경우
  *   fragmentation_index가 compaction에 비적합인 경우 COMPACT_SKIPPED로

@@ -623,7 +623,7 @@ static void mem_cgroup_remove_from_trees(struct mem_cgroup *memcg)
 
 /*
  * IAMROOT, 2022.04.16:
- * - rb_rightmost로 cache되있던 @mctz의 mz중에 soft_limit보다 사용량이 높은
+ * - rb_rightmost로 cache되있던 @mctz의 mz중에 제일 큰 초과값으로 cache된
  *   mz를 한개 빼온다. 없으면 null.
  */
 static struct mem_cgroup_per_node *
@@ -1148,8 +1148,6 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 
 	if (pos)
 		css = &pos->css;
-
-	for (;;) {
 /*
  * IAMROOT, 2022.04.27:
  * - child -> sibling -> parent 순으로 root까지 탐색해간다.
@@ -1777,8 +1775,12 @@ static int mem_cgroup_soft_reclaim(struct mem_cgroup *root_memcg,
  * IAMROOT, 2022.04.23:
  * - break 경우의 수
  *   1. total == 0
+ *   시작부터 @root_memcg부터 release됬는지 해서 cgroup참조를 못한등의 상황으로
+ *   생각된다.
  *   2. loop > 100
  *   3. total >= excess >> 2  (total이 초과메모리의 25% 이상)
+ *   @root_memcg를 포함해서 몇개에 대한 memcg에 대해서는 작업을 수행은 했다.
+ *   하지만 탐색 실패가 너무 많을 거나 어느정도 reclaim했다면 그냥 break.
  */
 				/*
 				 * If we have not been able to reclaim

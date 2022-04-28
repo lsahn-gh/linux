@@ -3675,11 +3675,11 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 		return false;
 
 	/*
-	 * compaction is already possible, but it takes time to run and there
+	 * Compaction is already possible, but it takes time to run and there
 	 * are potentially other callers using the pages just freed. so proceed
 	 * with reclaim to make a buffer of free pages available to give
 	 * compaction a reasonable chance of completing and allocating the page.
-	 * note that we won't actually reclaim the whole buffer in one attempt
+	 * Note that we won't actually reclaim the whole buffer in one attempt
 	 * as the target watermark in should_continue_reclaim() is lower. but if
 	 * we are already above the high+gap watermark, don't reclaim at all.
 	 */
