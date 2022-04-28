@@ -2356,6 +2356,16 @@ arch_atomic64_fetch_add_unless(atomic64_t *v, s64 a, s64 u)
  * Atomically adds @a to @v, if @v was not already @u.
  * Returns true if the addition was done.
  */
+/*
+ * IAMROOT, 2022.04.27:
+ * - arch_atomic64_add_unless(ptr, 1, 0);
+ *   old = *ptr;
+ *   if (old != 0) {
+ *		*ptr += 1;
+ *		return true;
+ *	 }
+ *	return false;
+ */
 static __always_inline bool
 arch_atomic64_add_unless(atomic64_t *v, s64 a, s64 u)
 {

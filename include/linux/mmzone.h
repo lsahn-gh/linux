@@ -472,6 +472,30 @@ struct lruvec {
 typedef unsigned __bitwise isolate_mode_t;
 
 enum zone_watermarks {
+/*
+ * IAMROOT, 2022.04.26:
+ * - compact에서 watermark사용
+ *   WMARK_MIN : compact를 해야되는 상황에서
+ *				 order <= PAGE_ALLOC_COSTLY_ORDER 인 order에 대해서 주로 사용.
+ *				 (__compaction_suitable 참고)
+ *   WMARK_LOW : compact를 해야되는 상황에서
+ *				 order > PAGE_ALLOC_COSTLY_ORDER인 order에 주로 사용.
+ *				 (__compaction_suitable 참고)
+ *   WMARK_HIGH : costly order에 대해서 compact를 하는게 확정인 상태
+ *				 (order에 대한 할당이 안되는 상태) 인데, reclaim까지 해야 될수
+ *				 있는 상황에서, reclaim을 skip하기 위해(reclaim 작업이 오래걸리고
+ *				 costly order 할당이면 low ~ high사이정도면 그래도 좀 compact
+ *				 할만하다고 생각) 조건을 높일때 사용한다.
+ *				 (compaction_ready 참고)
+ *
+ * - direct reclaim
+ *   WMARK_MIN : ZONE_DMA ~ ZONE_NORMAL의 WMARK_MIN 합의 절반보다
+ *               free_page가 작으면 kswapd를 깨운다.
+ *               (allow_direct_reclaim 참고)
+ *               direct reclaim시 throttle 중이였으면 allow_direct_reclaim을 통해
+ *               중단 여부를 판별한다.
+ *               (throttle_direct_reclaim 참고)
+ */
 	WMARK_MIN,
 	WMARK_LOW,
 	WMARK_HIGH,
@@ -694,6 +718,42 @@ struct zone {
 	 * recalculated at runtime if the sysctl_lowmem_reserve_ratio sysctl
 	 * changes.
 	 */
+/*
+ * IAMROOT, 2022.04.25:
+ * - lowmem 영역을 일정부분(default 1/32 or 1/256(0.32%)) 예약해놓아 일반적인
+ *   상황외에 사용하기 위한 제한.
+ *   zone 0번부터 축적되는 개념으로 저장되어 제일 높은 zone에 대한 lowmem_reserve
+ *   를 검사하면 0번부터의 총 lowmem_reserve를 알 수 있다.
+ *   ex) 0번 zone lowmem reserve : 10
+ *       1번 zone lowmem reserve : 20
+ *       2번 zone lowmem reserve : 40
+ *       lowmem_reserve[0] = 10
+ *       lowmem_reserve[1] = lowmem_reserve[0] + 20 = 30
+ *       lowmem_reserve[2] = lowmem_reserve[1] + 40 = 70
+ * - setup함수
+ *   setup_per_zone_lowmem_reserve 참고
+ * - lowmem_reserve_ratio
+ *   Document lowmem_reserve_ratio 참고
+ *
+ * --- lowmem_reserve_ratio 제어
+ *  - 참고
+ *  https://support.hpe.com/hpesc/public/docDisplay?docId=c02742536&docLocale=en_US
+ *  # cat /proc/sys/vm/lowmem_reserve_ratio
+ *  256     256        32
+ *  DMA   Normal    HighMem
+ *  On normal zone, 256 means ½56. Number of protection pages are reserved.
+ *
+ * To reserve 1/32 number of protection pages on normal zone:
+ *
+ * # echo 256 32 32 > /proc/sys/vm/lowmem_reserve_ratio
+ * # cat /proc/sys/vm/lowmem_reserve_ratio 256 32 32
+ * To set the value permanently, edit /etc/sysctl.conf and add the below:
+ *
+ * vm.lowmem_reserve_ratio = 256 32 32
+ * # sysctl -p
+ * # cat /proc/sys/vm/lowmem_reserve_ratio 
+ * 256     32     32
+ */
 	long lowmem_reserve[MAX_NR_ZONES];
 
 #ifdef CONFIG_NUMA
@@ -1169,8 +1229,16 @@ typedef struct pglist_data {
  * IAMROOT, 2021.12.04:
  * - pgdat_init_internals에서 kswapd_wait, pfmemalloc_wait
  *   가 초기화된다.
+ * - kswapd_wait
+ *   kswapd가 잠들거나 깨울때 사용한다. direct reclaim시 free page가
+ *   많이 부족하면 깨운다.(allow_direct_reclaim 참고)
  */
 	wait_queue_head_t kswapd_wait;
+/*
+ * IAMROOT, 2022.04.26:
+ * - throttle_direct_reclaim 에서 wait를 수행한다.
+ *   direct reclaim시  throttle이 필요한경우에 사용한다.
+ */
 	wait_queue_head_t pfmemalloc_wait;
 	struct task_struct *kswapd;	/* Protected by
 					   mem_hotplug_begin/end() */

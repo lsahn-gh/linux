@@ -485,6 +485,16 @@ arch_atomic_long_fetch_add_unless(atomic_long_t *v, long a, long u)
 	return arch_atomic64_fetch_add_unless(v, a, u);
 }
 
+/*
+ * IAMROOT, 2022.04.27:
+ * - arch_atomic_long_add_unless(ptr, 1, 0);
+ *   old = *ptr;
+ *   if (old != 0) {
+ *		*ptr += 1;
+ *		return true;
+ *	 }
+ *	return false;
+ */
 static __always_inline bool
 arch_atomic_long_add_unless(atomic_long_t *v, long a, long u)
 {

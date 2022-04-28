@@ -37,8 +37,9 @@
  */
 /*
  * IAMROOT, 2022.04.16:
- * - scan을 얼나 할것인가에 대한 기준값.
- *   32 * 16 = 512
+ * - scan을 얼마나 할것인가에 대한 기준값. vmscan reclaimer에서 SWAP_CLUSTER_MAX
+ *   단위로 동작하기 때문에 이 단위를 썻다고한다.
+ *   32 * 16 = 512 page
  */
 static const unsigned long vmpressure_win = SWAP_CLUSTER_MAX * 16;
 
@@ -78,6 +79,24 @@ static const unsigned int vmpressure_level_critical = 95;
  */
 /*
  * IAMROOT, 2022.04.16:
+ * - papago
+ *   검색할 페이지가 너무 적으면 페이지 수가 window size보다 작기 때문에
+ *   vmpressure()가 위험 압력을 놓칠 수 있습니다.
+ *   그러나 이 경우 회수자가 LRU를 더 자세히 검색하려고 할 때 vmscan 우선 순위가
+ *   빠르게 상승합니다.
+ *
+ *   vmscan 로직은 다음과 같은 특수 우선 순위를 고려합니다.
+ *
+ *   prio == DEF_PRIORITY(12): 회수기는 해당 값으로 시작합니다.
+ *   prio <= DEF_PRIORITY - 2: kswapd는 다소 압도적이 된다.
+ *   prio == 0: OOM에 가깝게, 커널은 lru의 모든 페이지를 스캔한다
+ *
+ *   이 범위의 모든 값은 이 튜닝 테이블에 대해 허용됩니다(즉, 12 ~ 0).
+ *   vmpressure_level_critical_prio의 현재 값은 경험적으로 선택되지만, 기본적으로
+ *   이 숫자는 스캔 깊이가 lru 크기의 최대 10%일 때 임계 수준을 고려한다는 것을
+ *   의미합니다(vmscan 'lru_size >> prio' 페이지를 스캔하므로 실제로는 12.5% 또는
+ *   8분의 1입니다).
+ *
  * - log2(10) = 3, DEF_PRIORITY는 12
  */
 static const unsigned int vmpressure_level_critical_prio = ilog2(100 / 10);
@@ -139,6 +158,8 @@ static enum vmpressure_levels vmpressure_level(unsigned long pressure)
 /*
  * IAMROOT, 2022.04.16:
  * - @scanned, @reclaimed 값을 enum으로 환산한다.
+ *   @reclaimed가 0으로 옳경우 pressure가 100으로 계산되 가장 높은
+ *   VMPRESSURE_CRITICAL로 return된다.
  */
 static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
 						    unsigned long reclaimed)
@@ -160,6 +181,15 @@ static enum vmpressure_levels vmpressure_calc_level(unsigned long scanned,
 	 * scanned. This makes it possible to set desired reaction time
 	 * and serves as a ratelimit.
 	 */
+/*
+ * IAMROOT, 2022.04.26:
+ * - 일반 수학식이라고 가정했을때
+ *   pressure = pressure * 100 / scale
+ *            = (scale - (reclaimed * scale / scanned)) * 100 / scale
+ *            = 100 * (1 - (reclaimed / scanned))
+ * - scanned가 높을수록 100에 가깝다.
+ *   reclaimed가 높을수록 0에 가깝다.
+ */
 	pressure = scale - (reclaimed * scale / scanned);
 	pressure = pressure * 100 / scale;
 
@@ -224,7 +254,8 @@ static bool vmpressure_event(struct vmpressure *vmpr,
 
 /*
  * IAMROOT, 2022.04.16:
- * - tree_scanned,  tree_reclaimed값으로 vmpressure level을 계산하고, signal을 보낸다.
+ * - tree_scanned,  tree_reclaimed값으로 vmpressure level을 계산하고,
+ *   signal을 보낸다.
  */
 static void vmpressure_work_fn(struct work_struct *work)
 {
@@ -294,6 +325,8 @@ static void vmpressure_work_fn(struct work_struct *work)
 /*
  * IAMROOT, 2022.04.16:
  * - @tree값에 따라 work queue를 동작할지, socket_pressure를 갱신할지 선택한다.
+ * - 누적 scanned, reclaimed 에 따라 vmpressure를 monitoring하고있는 task들한테
+ *   signal을 보낸다.
  * - 누적 scanned가 vmpressure_win보다 작다면 누적만 시킨다.
  */
 void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
@@ -428,6 +461,8 @@ void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 /*
  * IAMROOT, 2022.04.16:
  * - @prio가 vmpressure_level_critical_prio 이하일때 vmpressure에서 work를 동작시킨다.
+ * - 누적 scanned, reclaimed 에 따라 vmpressure를 monitoring하고있는 task들한테
+ *   signal을 보낸다.
  */
 void vmpressure_prio(gfp_t gfp, struct mem_cgroup *memcg, int prio)
 {

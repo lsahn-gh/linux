@@ -1736,6 +1736,16 @@ atomic_long_fetch_add_unless(atomic_long_t *v, long a, long u)
 	return arch_atomic_long_fetch_add_unless(v, a, u);
 }
 
+/*
+ * IAMROOT, 2022.04.27:
+ * - atomic_long_add_unless(ptr, 1, 0);
+ *   old = *ptr;
+ *   if (old != 0) {
+ *		*ptr += 1;
+ *		return true;
+ *	 }
+ *	return false;
+ */
 static __always_inline bool
 atomic_long_add_unless(atomic_long_t *v, long a, long u)
 {
@@ -1799,6 +1809,12 @@ atomic_long_dec_if_positive(atomic_long_t *v)
 	arch_xchg_relaxed(__ai_ptr, __VA_ARGS__); \
 })
 
+/*
+ * IAMROOT, 2022.04.27:
+ * - cmpxchg(ptr, old, new)
+ *   if (ptr == old)
+ *		ptf = new;
+ */
 #define cmpxchg(ptr, ...) \
 ({ \
 	typeof(ptr) __ai_ptr = (ptr); \

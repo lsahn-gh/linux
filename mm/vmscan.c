@@ -3652,12 +3652,20 @@ again:
 /*
  * IAMROOT, 2022.04.16:
  * @return true면 compaction 가능한 상황. false면 reclaim을 해야되는 상황.
+ * - constly order에 대해서 reclaim을 하기전에 compact를 할 수 있는지 검사한다.
  */
 static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 {
 	unsigned long watermark;
 	enum compact_result suitable;
 
+/*
+ * IAMROOT, 2022.04.26:
+ * - alloc_flags 인자를 0으로 넘긴다.(일반 상황, 일반적이지 않은 예: GFP_ATOMIC)
+ *   watermark는 min으로 사용하겠다는것.
+ *   ALLOC_HIGH, ALLOC_OOM, ALLOC_CMA요청등을 안함으로 watermark min을 줄이거나
+ *   CMA, HIGHATOMIC buddy를 탐색하지 않는다.
+ */
 	suitable = compaction_suitable(zone, sc->order, 0, sc->reclaim_idx);
 	if (suitable == COMPACT_SUCCESS)
 		/* Allocation should succeed already. Don't reclaim. */
@@ -3666,20 +3674,34 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
 		/* Compaction cannot yet proceed. Do reclaim. */
 		return false;
 
-/*
- * IAMROOT, 2022.04.16:
- * - suitable == COMPACT_CONTINUE 
- *   watermark를 기준으로 확인한다.
- */
 	/*
-	 * Compaction is already possible, but it takes time to run and there
-	 * are potentially other callers using the pages just freed. So proceed
+	 * compaction is already possible, but it takes time to run and there
+	 * are potentially other callers using the pages just freed. so proceed
 	 * with reclaim to make a buffer of free pages available to give
 	 * compaction a reasonable chance of completing and allocating the page.
-	 * Note that we won't actually reclaim the whole buffer in one attempt
-	 * as the target watermark in should_continue_reclaim() is lower. But if
+	 * note that we won't actually reclaim the whole buffer in one attempt
+	 * as the target watermark in should_continue_reclaim() is lower. but if
 	 * we are already above the high+gap watermark, don't reclaim at all.
 	 */
+/*
+ * IAMROOT, 2022.04.16:
+ * - papago
+ *   compaction은 이미 가능하지만 실행하는데 시간이 걸리고 방금 해방된 페이지를
+ *   사용하는 다른 발신자가 있을 수 있습니다. 따라서 reclaim 작업을 진행하여
+ *   페이지를 완료하고 할당할 수 있는 적절한 기회를 compaction 할 수 있는
+ *   사용 가능한 페이지의 버퍼를 만드십시오.
+ *   should_continue_reclaim의 target watermark가 더 낮기 때문에 실제로
+ *   전체 버퍼를 한 번에 회수하지는 않습니다. 그러나 이미 high+gap watermark
+ *   위에 있는 경우에는 전혀 회수하지 마십시오.
+ *
+ * - suitable == COMPACT_CONTINUE 
+ *   compaction을 해야되는 상황이긴 한데, reclaim을 안하기 위해 다시 한번
+ *   high wmarkmark를 사용해 조건을 완화해보고 검사를 해본다.
+ *   reclaim이 오래걸리는 작업이다 보니 현재 상황이 low ~ high 사이 근처라면
+ *   그 사이에 memory가 풀릴수도 있으니 다음 검사 주기때는 compact로 할 수도
+ *   있다고 생각하기 때문에 최대한 reclaim을 안해볼려고 이렇게 조건을 높여
+ *   skip 시도를 해본다.
+ */
 	watermark = high_wmark_pages(zone) + compact_gap(sc->order);
 
 	return zone_watermark_ok_safe(zone, 0, watermark, sc->reclaim_idx);
@@ -3726,7 +3748,8 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 		if (!cgroup_reclaim(sc)) {
 /*
  * IAMROOT, 2022.04.16:
- * - __GFP_HARDWALL을 요청하고 cpuset_zone_allowed를 확인한다. 다음의 상황에서
+ * - __GFP_HARDWALL을 요청하고(현재 task에 대해서만 확인한다는것.)
+ *   cpuset_zone_allowed를 확인한다. 다음의 상황에서
  *   for문을 계속진행하고 아니면 continue가 된다. (__cpuset_node_allowed 참고)
  *   1. intrrupt context인 경우
  *   2. zone이 속한 node가 현재 task에서 허락한 node인 경우
@@ -3859,6 +3882,10 @@ retry:
 		 * If we're getting trouble reclaiming, start doing
 		 * writepage even in laptop mode.
 		 */
+/*
+ * IAMROOT, 2022.04.26:
+ * - vmpressure_level_critical_prio 주석 참고
+ */
 		if (sc->priority < DEF_PRIORITY - 2)
 			sc->may_writepage = 1;
 	} while (--sc->priority >= 0);
@@ -3921,6 +3948,7 @@ retry:
 /*
  * IAMROOT, 2022.04.16:
  * - direct reclaim 허락 여부를 판단한다.
+ *   direct reclaim 을 못한는 상황(memory가 꽤 부족)이면 kswapd를 깨운다.
  */
 static bool allow_direct_reclaim(pg_data_t *pgdat)
 {
@@ -4058,7 +4086,8 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 	 */
 /*
  * IAMROOT, 2022.04.16:
- * - 사용 가능한 ZONE_NORMAL 또는 그보다 낮은 존을 가진 첫 번째 노드를 찾아
+ * - papago
+ *   사용 가능한 ZONE_NORMAL 또는 그보다 낮은 존을 가진 첫 번째 노드를 찾아
  *   pfmemalloc reserve가 정상인지 확인한다. 네트워크를 통해 스왑할 때
  *   네트워크 버퍼를 할당하기 위해 GFP_KERNEL이 필요하므로 ZONE_HIGHMEM을
  *   사용할 수 없습니다.
@@ -4067,9 +4096,9 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
  *   kswapd가 진행하여 절전 모드를 해제할 때까지 대기열에 대기합니다.
  *   프로세스 웨이크업과 프로세스가 동일한 노드에서 웨이크업한다고 가정했을 때
  *   회수 진행 상황 사이에는 유사성이 있습니다.
- *   더 중요한 것은 remote 노드에서 실행되는 프로세스가 remote pfmemalloc reserve에
- *   대해 경쟁하지 않을 것이며 다른 노드에서 프로세스가 합리적으로 진행되어야
- *   한다는 것이다. 
+ *   더 중요한 것은 remote 노드에서 실행되는 프로세스가 remote pfmemalloc
+ *   reserve에 대해 경쟁하지 않을 것이며 다른 노드에서 프로세스가 합리적으로
+ *   진행되어야 한다는 것이다. 
  *
  * - ZONE_NORMAL이하를 가진 첫번째 node를 찾아가 direct reclaim을
  *   허용했으면 제한을 안둔다.
@@ -4124,9 +4153,16 @@ static bool throttle_direct_reclaim(gfp_t gfp_mask, struct zonelist *zonelist,
 
 /*
  * IAMROOT, 2022.04.16:
- * - throttle을 하고나서 fatal signal을 받았다면 direct reclaim을 한다.
- *   task가 죽었으면 해당 task가 사용하던 memory가 회수될것이므로 한번
- *   reclaim을 시도 해보겠다는 의미이다.
+ *
+ * - throttle 중에 signal을 받아 중지 됬다면 direct reclaim을 하지않는다.
+ *   true 리턴 될경우 상위에서 progress가 1로 시작한다.
+ *
+ * - Git blame에서 process가 throttle상태에서 kill을 당한다면 OOM killer를
+ *   촉발하지 않아야 된다고 한다. system에 OOM인 상황에서 프로세스가
+ *   종료되는 경우 __alloc_pages_slowpath에서 loop하며 loop도중 direct reclaim을
+ *   호출 할수 있다고 한다.
+ *   return값을 true로 함으로써 progress를 1로 전진시킴으로써 이러한 deadlock을
+ *   빠져나갈수 있다고 한다.
  */
 	if (fatal_signal_pending(current))
 		return true;

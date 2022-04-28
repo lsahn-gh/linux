@@ -3115,13 +3115,16 @@ static enum compact_result __compaction_suitable(struct zone *zone, int order,
  * - compaction 가능한 상황인지 확인한다.
  * - COMPACT_CONTINUE
  *   1. proc에서 요청한 경우.
- *   2. comapct를 위한 order 0 page공간이 확보된경우.
+ *   2. order에 대한 즉시 할당이 안되는 상황이라 compact를 해야되며,
+ *   comapct를 위한 order 0 page공간이 확보된경우.
  *
  * - COMPACT_SUCCESS
- *   1. 다른 cpu나 기타의 이유로 free memory가 확보되어 있는 경우.
+ *   1. 다른 cpu나 기타의 이유로 free memory가 확보되어 compact를 할 필요가 없는
+ *   경우.
  *
  * - COMPACT_SKIPPED
  *   1. compact를 하기 위한 order 0 page도 확보가 불가능한경우.
+ *   compact가 불가능한경우
  *
  * - COMPACT_CONTINUE요건에서 order가 costly_order보다 높은 경우
  *   fragmentation_index가 compaction에 비적합인 경우 COMPACT_SKIPPED로
@@ -3158,6 +3161,7 @@ enum compact_result compaction_suitable(struct zone *zone, int order,
  *   fragment index를 구해온다. 0 <= idx <= sysctl_extfrag_threshold 사이면
  *   compaction으로 해결을 못하는 상황으로 간주하여 return값을
  *   COMPACT_NOT_SUITABLE_ZONE로 해서 후에 COMPACT_SKIPPED가 된다.
+ *   fragindex가 -값이면 할당가능 상태이므로 COMPACT_CONTINUE를 그대로 유지한다.
  */
 	if (ret == COMPACT_CONTINUE && (order > PAGE_ALLOC_COSTLY_ORDER)) {
 		fragindex = fragmentation_index(zone, order);
@@ -3591,6 +3595,17 @@ static enum compact_result compact_zone_order(struct zone *zone, int order,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.26:
+ * -요청 order에 대한 buddy가 없는 경우, __fragmentation_index을 통해서
+ *  현재 system이 fragment때문에 실패하는지, memory 부족으로 실패했는지
+ *  예상한다. 이 예측값을 토대로 compaction_suitable등의 함수를 통해서
+ *  compaction을 할지 reclaim을 할지, 그냥 실패처리로 할지등을 정하는데
+ *  정하는데, 그 기준값으로 사용하는게 이 변수이다. 
+ *  order 할당 실패 상황에서 이 값이 0에 가까울수록 compact를 안하며,
+ *  1000에 가까울수록 compact를 잘 수행한다.
+ * - compaction_ready, __fragmentation_index함수 참고.
+ */
 int sysctl_extfrag_threshold = 500;
 
 /**

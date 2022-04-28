@@ -920,6 +920,12 @@ void psi_memstall_enter(unsigned long *flags)
 	 * changes to the task's scheduling state, otherwise we can
 	 * race with CPU migration.
 	 */
+/*
+ * IAMROOT, 2022.04.21:
+ * - in_memstall 설정 & accounting은 작업의 스케줄링 상태에 대한
+ *   atomic write 변경이어야 합니다. 그렇지
+ *   않으면 CPU 마이그레이션과 경쟁할 수 있습니다.
+ */
 	rq = this_rq_lock_irq(&rf);
 
 	current->in_memstall = 1;

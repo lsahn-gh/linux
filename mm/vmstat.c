@@ -1067,6 +1067,8 @@ struct contig_page_info {
  */
 /*
  * IAMROOT, 2022.03.19:
+ * @suitable_order @suitable_order > PAGE_ALLOC_COSTLY_ORDER
+ * - @suitable_order이상의 buddy가 존재하면 @info->free_blocks_suitable에 넣는다.
  * - @zone의 각 order별 free_area free page개수로 @info를 만든다.
  */
 static void fill_contig_page_info(struct zone *zone,
@@ -1109,10 +1111,19 @@ static void fill_contig_page_info(struct zone *zone,
  */
 /*
  * IAMROOT, 2022.03.19:
+ * -papago
  * 플래그멘테이션인덱스는 요청된 크기의 할당이 실패할 경우에만 의미가 있습니다.
  * 이것이 사실일 경우 플래그멘테이션인덱스는 외부 플래그멘테이션 또는
  * 메모리 부족이 문제였는지를 나타냅니다.
  * 이 값을 사용하여 페이지 reclaim 또는 compaction 사용 여부를 결정할 수 있습니다.
+ *
+ * - @order에 대한 메모리할당이 1차적으로 실패(buddy에서 그냥 가져오기 실패)
+ *   했을때 기준값(sysctl_extfrag_threshold)과 비교되어 compact를 계속
+ *   할지에 대한 값을 산정한다. 
+ * @return -1000 할당 가능 상태.
+ *          0에 가까움 : memory가 실제로 부족해보이는 상태
+ *          1000에 가까움 : memory는 있지만 fragment가 많이 발생해보이는 상태.
+ *            
  */
 static int __fragmentation_index(unsigned int order, struct contig_page_info *info)
 {
@@ -1127,7 +1138,8 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
 	/* Fragmentation index only makes sense when a request would fail */
 /*
  * IAMROOT, 2022.03.19:
- * - 할당가능한 상태임으로 -1000으로 return한다.
+ *   info->free_blocks_suitable이 있다는것은 @order 이상의 buddy가 있다는
+ *   의미이고 이는 즉 fragment없이 할당가능한 상태임으로 -1000으로 return한다.
  */
 	if (info->free_blocks_suitable)
 		return -1000;
@@ -1140,8 +1152,8 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
 	 */
 /*
  * IAMROOT, 2022.03.19:
- * - 1000에 가까울수록 fragment때문에 실패, 0에 가까울수록 memory 부족 실패로
- *   생각한다.
+ * - return값이 1000에 가까울수록 fragment때문에 실패, 0에 가까울수록 memory
+ *   부족 실패로 생각한다.
  *
  *   1000 - (1000 + (info->free_pages * 1000) / 2^order) / info->free_blocks_total
  *              ==
@@ -1152,6 +1164,18 @@ static int __fragmentation_index(unsigned int order, struct contig_page_info *in
  *   free_blocks_total이 작다는 상황에서는 메모리 부족으로 실패 라고 간주된다.
  *
  * - free_blocks_total이 동일한 상황에서 free_pages가 커지면 return값이 작아진다.
+ *
+ * ----
+ *  - info->free_blocks_total이 많음
+ *  => 1000 - (1000 + .. ) / (많음) =  1000
+ *  => 1000에 가까운상태. free block이 많다는건 order에 대해서 할당을 못하는
+ *  상황이지만 군데군데 빈 블럭이 많다는것. 즉 단편화가 많다는 의미로 추정한다.
+ *
+ *  - info->free_pages / 2^order의 값이 info->free_blocks_total에 비해 상대적으로
+ *     매우 높은 상태
+ *  => 1000 - (높음) => 0
+ *  => 0에 가까운상태. order를 기준으로 free page가 많은데 0에 가깝다는건 이동해볼
+ *	   free block수는 적다는것이고 이는 free block을 compact하기 힘든 상황을 의미.
  */
 	return 1000 - div_u64( (1000+(div_u64(info->free_pages * 1000ULL, requested))), info->free_blocks_total);
 }
@@ -1175,6 +1199,10 @@ unsigned int extfrag_for_order(struct zone *zone, unsigned int order)
 }
 
 /* Same as __fragmentation index but allocs contig_page_info on stack */
+/*
+ * IAMROOT, 2022.04.26:
+ * @order @order > PAGE_ALLOC_COSTLY_ORDER
+ */
 int fragmentation_index(struct zone *zone, unsigned int order)
 {
 	struct contig_page_info info;

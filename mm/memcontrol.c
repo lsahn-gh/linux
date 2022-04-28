@@ -527,7 +527,7 @@ static void __mem_cgroup_insert_exceeded(struct mem_cgroup_per_node *mz,
 
 /*
  * IAMROOT, 2022.04.16:
- * - @mz가 rightmost라면 righmost를 @mz이전으로 갱신한다.
+ * - @mz가 rightmost라면 righmost를 @mz previous value node로 갱신한다.
  * - @mz를 @mctz에서 제거한다.
  */
 static void __mem_cgroup_remove_exceeded(struct mem_cgroup_per_node *mz,
@@ -623,8 +623,8 @@ static void mem_cgroup_remove_from_trees(struct mem_cgroup *memcg)
 
 /*
  * IAMROOT, 2022.04.16:
- * - rb_rightmost로 cache되있던 node중에 soft_limit보다 사용량이 높은 node를
- *   한개 빼온다. 없으면 null.
+ * - rb_rightmost로 cache되있던 @mctz의 mz중에 soft_limit보다 사용량이 높은
+ *   mz를 한개 빼온다. 없으면 null.
  */
 static struct mem_cgroup_per_node *
 __mem_cgroup_largest_soft_limit_node(struct mem_cgroup_tree_per_node *mctz)
@@ -647,6 +647,8 @@ retry:
 /*
  * IAMROOT, 2022.04.16:
  * - memory 사용량이 sotf_limit을 안넘었거나 css참조를 실패한경우 retry.
+ * - tree에서만 제거되고 후에 이벤트등으로 인해 mem_cgroup_update_tree()등이
+ *   호출되어 mem_cgroup에 있는게 다시 tree에 insert 될일이 생긴다.
  */
 	if (!soft_limit_excess(mz->memcg) ||
 	    !css_tryget(&mz->memcg->css))
@@ -998,6 +1000,81 @@ static __always_inline bool memcg_kmem_bypass(void)
 /*
  * IAMROOT, 2022.04.16:
  * - cgroup의 dir구조를 iterate한다.
+ * - @prev가 존재하면 @prev refcnt drop을 병행한다.
+ * - @reclaim인자가 주어질경우(!= NULL) 특정 node에 대해서 동시에 여러 reclaimer
+ *   가 동작하는 경우, generation 어떤 reclaimer에서 더이상 reclaim할수없다는것을
+ *   알려(generation++) 다른 reclaimer들이 탐색을 더이상 안하도록 멈춘다.
+ *
+ * ---
+ *  ex) node 0에 reclaim중인 task가 1개인경우(css1 부터 cssN까지 iter한다는 가정)
+ *
+ * 1. iter 시작. node 0 mz에 대한 cookie 획득. 
+ *
+ *    node 0 mz		  -------------->	task
+ *    generation = 0   cookie얻음    generation = 0
+ *                     css1 refup    css1 get
+ *                   
+ * 2. css2 진행
+ *
+ *    node 0 mz		  -------------->	task
+ *    generation = 0   css2 refup     generation = 0
+ *                     css1 refdrop   css2 get.
+ *
+ * 3. css3 ~ cssN 진행
+ *
+ *    node 0 mz		  -------------->	task
+ *    generation = 0   css3 refup     generation = 0
+ *                     css2 refdrop   css3 get.
+ *                       ..
+ *
+ * 3. iter종료
+ *
+ *    node 0 mz		  -------------->	task
+ *                     css 획득실패     generation = 0
+ *                     cssN refdrop     
+ *    generation = 1 <--------------
+ *                     generation증가
+ *
+ * ex2) node 0에 reclaim중인 task가 2개인경우 종료과정
+ *      task1은 먼저 css3부터 시작해 generation = 1로 cookie를 얻어 진행중
+ *
+ * 1. task2가 css3부터 시작.
+ *
+ *  + node 0 mz -----+                +	task1 -------------+
+ *  | generation = 1 |                | generation = 1     |
+ *  |                |                | css3 reclaim 진행중| 
+ *  |                |                +--------------------+ 
+ *  |                |                
+ *  |                | -------------> + task2 -------------+
+ *  |                | cookie얻음     | generation = 1     |
+ *  |                | css1 refup     | css1 get 및 cssN   |
+ *  |                |                | 까지 진행          |
+ *  +----------------+                +--------------------+
+ *
+ * 2. task2가 어쨋든 먼저 css1 ~ cssN까지 전부완료후 먼저 종료
+ *
+ *  + node 0 mz -----+                +	task1 -------------+
+ *  | generation = 2 |                | generation = 1     |
+ *  |                |                | css3 reclaim 진행중| 
+ *  |                |                +--------------------+ 
+ *  |                |                
+ *  |                | <------------  + task2 -------------+
+ *  |                | generation증가 | generation = 1     |
+ *  |                |                | css1 ~ cssN 진행끝 |
+ *  +----------------+                +--------------------+
+ *
+ * 3. task1이 css3을 끝내고 css4를 할려고 하는데 generation이 변경된것을
+ * 보고 즉시 종료.
+ *
+ *  + node 0 mz -----+ -------------> +	task1 -------------+
+ *  | generation = 2 |  css4시작전    | generation = 1     |
+ *  |                |  cookie        +--------------------+ 
+ *  |                |  비교. 서로 맞지 않으므로 css3 refdrop후 종료
+ *  |                |                                      
+ *  |                |                                      
+ *  |                |                                      
+ *  |                |                                      
+ *  +----------------+                                      
  */
 struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 				   struct mem_cgroup *prev,
@@ -1018,18 +1095,37 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 		pos = prev;
 
 	rcu_read_lock();
-
+/*
+ * IAMROOT, 2022.04.27:
+ * - @reclaim 인자가 있을경우 해당 memcgroup node에 중복으로 reclaim이 동작하지
+ *   않도록 수행한다.
+ */
 	if (reclaim) {
 		struct mem_cgroup_per_node *mz;
-
+/*
+ * IAMROOT, 2022.04.27:
+ * - node에 맞는 mz를 구해오도 iter를 설정한다.
+ */
 		mz = root->nodeinfo[reclaim->pgdat->node_id];
 		iter = &mz->iter;
-
+/*
+ * IAMROOT, 2022.04.27:
+ * - 2번째 mem_cgroup_iter진입부터 확인하는 if문.
+ * - prev가 존재한다는것은 reclaim중이 였다는것. 현재 진행중인 node에서의
+ *   reclaim cookie값이 node에 있는 cookie값과 일치하지 않는다는것은 어딘가
+ *   해당 node에서 더이상 reclaime할게 없다고 알린것이므로 중단한다.
+ */
 		if (prev && reclaim->generation != iter->generation)
 			goto out_unlock;
 
 		while (1) {
 			pos = READ_ONCE(iter->position);
+/*
+ * IAMROOT, 2022.04.27:
+ * - pos == NULL이면 root부터시작한다.
+ *   pos->css 참조를 얻는데 실패했다는것은 memcg의 참조가 풀린, 즉 release중
+ *   등의 상황이다.
+ */
 			if (!pos || css_tryget(&pos->css))
 				break;
 			/*
@@ -1040,6 +1136,12 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 			 * might block it. So we clear iter->position right
 			 * away.
 			 */
+/*
+ * IAMROOT, 2022.04.27:
+ * - 다른데서 @iter->position을 clear 해버려 참조를 얻는데 실패 하였는데
+ *   (refcnt == 0) clear어 중일수도 있으므로 이전 pos값과 같으면
+ *   NULL로 초기화 한다는것이다.
+ */
 			(void)cmpxchg(&iter->position, pos, NULL);
 		}
 	}
@@ -1048,6 +1150,10 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 		css = &pos->css;
 
 	for (;;) {
+/*
+ * IAMROOT, 2022.04.27:
+ * - child -> sibling -> parent 순으로 root까지 탐색해간다.
+ */
 		css = css_next_descendant_pre(css, &root->css);
 		if (!css) {
 			/*
@@ -1071,6 +1177,10 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 		if (css == &root->css)
 			break;
 
+/*
+ * IAMROOT, 2022.04.27:
+ * - css 참조를 얻는다. 실패하면 next iter
+ */
 		if (css_tryget(css))
 			break;
 
@@ -1088,6 +1198,14 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 		if (pos)
 			css_put(&pos->css);
 
+/*
+ * IAMROOT, 2022.04.27:
+ * - if(!memcg)
+ *   현재 탐색이 실패혹은 종료되었다는 의미에서 generation을 증가 시킨다.
+ * - else if (!prev)
+ *   memcg를 찾았고(참조가 성공했고) 이번이 reclaim 처음이라면 cookie값을
+ *   일치 시켜준다.
+ */
 		if (!memcg)
 			iter->generation++;
 		else if (!prev)
@@ -1096,6 +1214,10 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 
 out_unlock:
 	rcu_read_unlock();
+/*
+ * IAMROOT, 2022.04.27:
+ * - 이전에 참조했던 css가 있다면 ref drop
+ */
 	if (prev && prev != root)
 		css_put(&prev->css);
 
@@ -1644,6 +1766,10 @@ static int mem_cgroup_soft_reclaim(struct mem_cgroup *root_memcg,
 
 	while (1) {
 		victim = mem_cgroup_iter(root_memcg, victim, &reclaim);
+/*
+ * IAMROOT, 2022.04.27:
+ * - victim이 NULL인 상황
+ */
 		if (!victim) {
 			loop++;
 			if (loop >= 2) {
@@ -3417,6 +3543,36 @@ static int mem_cgroup_resize_max(struct mem_cgroup *memcg,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.04.28:
+ * - @pgdat에 대한 soft_limit reclaim을 진행한다.
+ *   @pgdat의 mctz(soft_limit_tree_node)에서 가장 초과된 memcg를 시작으로
+ *   memcg dir tree구조로 iter하며 reclaim을 수행한다.
+ *
+ * ----
+ *
+ * mz는 node에 속한 각 memcg중에 soft_limit을 초과했을수 있는 memcg들을 의미한다.
+ * (mem_cgroup_update_tree()참고)
+ * memcg를 task기준으로만 예를 들면 다음과 같다.
+ *
+ * - node 0에 task 1, 2, 3, 4의 soft_limit을 30, 20, 10, 0을 넘었다고 했을때
+ *   node0 mz의 rbtree(색표시는 굳이 안함)
+ *
+ *           task3(10)
+ *            /      \
+ *        task2(20)  task1(30. rightmost)
+ *  task4는 없다.
+ *
+ * - task끼리의 memcg dir구조는 다음과 같다고 가정했을때 memcg iter 순서.
+ *
+ * task1 +-> task2 -> task3
+ *       `-> task4
+ *
+ * 이렇게 되면 rightmost로 task1을 먼저 뽑아오고 child -> sibling -> parent
+ * 순으로 memcg를 iter(하며 reclaim을 시도하므로
+ * (mem_cgroup_iter(), css_next_descendant_pre() 참고)
+ * task1 -> tas2k2 -> task3 -> task4의 순으로 동작할 것이다.
+ */
 unsigned long mem_cgroup_soft_limit_reclaim(pg_data_t *pgdat, int order,
 					    gfp_t gfp_mask,
 					    unsigned long *total_scanned)

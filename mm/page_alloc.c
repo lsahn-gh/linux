@@ -4814,13 +4814,14 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
  * IAMROOT, 2022.03.05:
  * - lowmem reserved까지 고려했을때 free_pages가 부족하면 false return.
  * - memory가 정말 부족한 상황이라 buddy system을 확인할 필요도 없다.
+ * - 0 ~ highest_zoneidx lowmem_reserve 총 합 + min과 비교한다.
  */
 	if (free_pages <= min + z->lowmem_reserve[highest_zoneidx])
 		return false;
 
 /*
  * IAMROOT, 2022.03.05:
- * - single order인 경우 watermark가 충분하단것을 확인한 시점에서 어딘가에 무조건 
+ * - single order인 경우 watermark가 충분하단것을 확인한 시점에서 어딘가에 무조건
  *   free page가 있을 것이므로 바로 true로 return한다.
  */
 	/* If this is an order-0 request then the watermark is fine */
@@ -4875,7 +4876,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 /*
  * IAMROOT, 2022.03.05:
  * - 가장 기본 형태의 free page 확인 함수.
- *   러프한 값을 가지고 free page를 확인한다.
+ *   러프한 값을 가지고 @order에 대한 free page를 확인한다.
  */
 bool zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 		      int highest_zoneidx, unsigned int alloc_flags)
@@ -4958,7 +4959,7 @@ static inline bool zone_watermark_fast(struct zone *z, unsigned int order,
 /*
  * IAMROOT, 2022.03.05:
  * - zone_watermark_ok 시리즈중에 더 정확하게 확인한다. drift_mark가 존재하고
- *   drift_mark보다 frr_pages가 작으면 vm_stat +
+ *   drift_mark보다 free_pages가 작으면 vm_stat +
  *   pcpu stat까지 전부 더해 정확한 free_pages를 산출해서 고려한다.
  * - drift_mark는 watermark 기준값보다 좀 더 높은 값이라 snapshot을 보통은
  *   안하고 러프하게만 검사하지만 free_pages가 drift_mark 근처에 있게될 경우

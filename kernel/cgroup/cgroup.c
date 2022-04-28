@@ -4323,6 +4323,11 @@ struct cgroup_subsys_state *css_next_child(struct cgroup_subsys_state *pos,
  * ->css_offline() may show up during traversal.  It's each subsystem's
  * responsibility to synchronize against on/offlining.
  */
+/*
+ * IAMROOT, 2022.04.27:
+ * - child -> sibling -> parent -> parent의 child -> parent의 silbing
+ *   -> parent의 parent .. 의 순서대로 탐색한다.(dfs)
+ */
 struct cgroup_subsys_state *
 css_next_descendant_pre(struct cgroup_subsys_state *pos,
 			struct cgroup_subsys_state *root)

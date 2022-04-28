@@ -350,7 +350,11 @@ static inline void css_get_many(struct cgroup_subsys_state *css, unsigned int n)
  */
 /*
  * IAMROOT, 2022.04.16:
+ * @return true : CSS_NO_REF요청
+ *                refcnt 증가(refcnt가 2이상.)
+ *         false : refcnt 증가 실패(refcnt == 0. 즉 참조가 없었던경우)
  * - @css ref를 증가시킨다. ref제어가 필요없을경우 그냥 true return.
+ *   2이상의 refcnt 경우에만 성공한다.
  */
 static inline bool css_tryget(struct cgroup_subsys_state *css)
 {
