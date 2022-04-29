@@ -2256,7 +2256,7 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
 		}
 /*
  * IAMROOT, 2022.04.23:
- * - 따른 thread가 isolate를 해버렸다. 성공하게 되면 lru flag를 clear한다.
+ * - 다른 thread가 isolate를 해버렸다. 성공하게 되면 lru flag를 clear한다.
  */
 		if (!TestClearPageLRU(page)) {
 			/* Another thread is already isolating this page */
@@ -2360,7 +2360,15 @@ int isolate_lru_page(struct page *page)
  */
 /*
  * IAMROOT, 2022.04.23:
+ * - papago
+ *   직접 회수자는 SWAP_CLUSTER_MAX 페이지를 LRU 목록에서 분리한 다음 다시
+ *   예약할 수 있습니다. 페이지 할당을 수행하는 엄청난 수의 태스크가 있을 때,
+ *   이러한 슬립 다이렉트 회수기는 각 CPU에 계속 쌓일 수 있으며, LRU 목록은
+ *   작아지고 필요 이상으로 빠르게 스캔되어 불필요한 스왑, 스레싱 및 OOM으로
+ *   이어진다.
  * - isolate > inactive 이면 isolate가 많다고 판단한다.
+ * - 많은 page alloc등의 상황이 일어나고 있을시 reclaim이 쓸모없는 일을 할수있다.
+ *   그것을 isolate page개수와 비교해 감지하는 역할을 수행한다.
  */
 static int too_many_isolated(struct pglist_data *pgdat, int file,
 		struct scan_control *sc)
@@ -2388,6 +2396,9 @@ static int too_many_isolated(struct pglist_data *pgdat, int file,
 	 */
 /*
  * IAMROOT, 2022.04.23:
+ * - papago
+ *   GFP_NIO/GFP_NOFS 호출자는 더 많은 페이지를 분리할 수 있으므로 일반적인
+ *   직접 회수자에 의해 차단되지 않고 순환 교착 상태를 형성합니다.
  * - __GFP_IO, __GFP_FS둘다 있으면 inactive를 1/8로 줄인다.
  */
 	if ((sc->gfp_mask & (__GFP_IO | __GFP_FS)) == (__GFP_IO | __GFP_FS))
@@ -2516,8 +2527,8 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 
 /*
  * IAMROOT, 2022.04.23:
- * - isolate 된 page가 inactvie page에 비해 많으면 0.1초 지연시킨다.
- *   2번이상 지연되면 return.
+ * - isolate 된 page가 inactvie page에 비해 많으면(page alloc등의 일이 많은상태)
+ *   0.1초 지연시킨다. 2번이상 지연되면 return.
  */
 	while (unlikely(too_many_isolated(pgdat, file, sc))) {
 		if (stalled)
