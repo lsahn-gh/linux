@@ -176,6 +176,16 @@ static inline void dax_unlock_page(struct page *page, dax_entry_t cookie)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - fs/Kconfig 의 config FS_DAX 참고
+ * - DRAM보다는 느리지만 SSD보다는 빠른 memory.
+ *   disk는 ahead방식으로 page cache를 미리 더가지고 오는데 DAX의 경우엔
+ *   필요한 page만 가져온다.
+ * - 어떤 지점을 direct access을 빠르게 수행할수 있다.
+ * - 가상공간에 code를 mapping하여 수행할수도 있다.
+ * - memory 와 비슷하게 고속으로 동작해야되는 환경에서도 사용할수잇다.
+ */
 #if IS_ENABLED(CONFIG_DAX)
 int dax_read_lock(void);
 void dax_read_unlock(int id);

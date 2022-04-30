@@ -1015,6 +1015,14 @@ void drop_slab(void)
 		drop_slab_node(nid);
 }
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - buffer head를 가지고 있지 않은 free 가능한 page cache인지 확인한다.
+ * - page_cache_pins = 1 or 512
+ *   page_count(page) - (0 or 1) = 1 + (1 or 512)
+ * - ex) page_count == 2, buffer head를 안가지고 있음.
+ *   2 - (0) = 1 + (1)
+ */
 static inline int is_page_cache_freeable(struct page *page)
 {
 	/*
@@ -1022,6 +1030,10 @@ static inline int is_page_cache_freeable(struct page *page)
 	 * that isolated the page, the page cache and optional buffer
 	 * heads at page->private.
 	 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - isolate할때 private(buffer head를 가진 page)는 buffer를 풀어버렸을것이다.
+ */
 	int page_cache_pins = thp_nr_pages(page);
 	return page_count(page) - page_has_private(page) == 1 + page_cache_pins;
 }
@@ -1074,6 +1086,12 @@ typedef enum {
  * pageout is called by shrink_page_list() for each dirty page.
  * Calls ->writepage().
  */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - disk에 write를 수행한다.
+ *   dirty page면 write수행후 success, dirty가 아니면 clean return.
+ */
 static pageout_t pageout(struct page *page, struct address_space *mapping)
 {
 	/*
@@ -1113,6 +1131,10 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 	if (!may_write_to_inode(mapping->host))
 		return PAGE_KEEP;
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - dirty set이면 reclaim설정후 write를 수행한다.
+ */
 	if (clear_page_dirty_for_io(page)) {
 		int res;
 		struct writeback_control wbc = {
@@ -1132,6 +1154,10 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 			return PAGE_ACTIVATE;
 		}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - write가 끝나고 나올수도있고(sync), 그냥 요청 or 진행상태로 나올수도(async)있다.
+ */
 		if (!PageWriteback(page)) {
 			/* synchronous write or broken a_ops? */
 			ClearPageReclaim(page);
@@ -1147,6 +1173,11 @@ static pageout_t pageout(struct page *page, struct address_space *mapping)
 /*
  * Same as remove_mapping, but if the page is removed from the mapping, it
  * gets returned with a refcount of 0.
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim등의 이유로 inactive page들이 disk에 쓰여지면서 page cache(shadow)에
+ *   관련정보를 기록한다.
  */
 static int __remove_mapping(struct address_space *mapping, struct page *page,
 			    bool reclaimed, struct mem_cgroup *target_memcg)
@@ -1192,15 +1223,33 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
 		goto cannot_free;
 	}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - anon page
+ */
 	if (PageSwapCache(page)) {
 		swp_entry_t swap = { .val = page_private(page) };
 		mem_cgroup_swapout(page, swap);
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim 중에 들어왔고, mapping이 안되있다면 shadow를 구해서 기록한다.
+ */
 		if (reclaimed && !mapping_exiting(mapping))
 			shadow = workingset_eviction(page, target_memcg);
+/*
+ * IAMROOT, 2022.04.30:
+ * - disk에 다옮겼으니 @page의 xarray에 swap_cache를 삭제하고 그 공간에 shadow를
+ *   넣는다.
+ */
 		__delete_from_swap_cache(page, swap, shadow);
 		xa_unlock_irq(&mapping->i_pages);
 		put_swap_page(page, swap);
 	} else {
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - file page
+ */
 		void (*freepage)(struct page *);
 
 		freepage = mapping->a_ops->freepage;
@@ -1220,6 +1269,12 @@ static int __remove_mapping(struct address_space *mapping, struct page *page,
 		 * exceptional entries and shadow exceptional entries in the
 		 * same address_space.
 		 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - anon_page와 비슷한 처리를 한다.
+ * - DAX는 disk에 비해 빠르므로 workingset 작업을 안한다. 즉 refault란
+ *   개념은 없고 fault만 있게 된다.
+ */
 		if (reclaimed && page_is_file_lru(page) &&
 		    !mapping_exiting(mapping) && !dax_mapping(mapping))
 			shadow = workingset_eviction(page, target_memcg);
@@ -1292,12 +1347,14 @@ enum page_references {
  * IAMROOT, 2022.04.23:
  * - PAGEREF_RECLAIM
  *   page가 Mlock등의 이유로 VM_LOCK이 된상태.거나 아래 경우들이 아니면.
- * - PAGEREF_ACTIVATE(referenced set.)
- *   mapping count가 존재.
- *   이전에 reference되있거나 mapping count가 2군데 이상인경우.
- *   실행가능한 code이면. 
- * - PAGEREF_KEEP(referenced set.)
- *   mapping count가 1개 존재. 이전에 reference 된적이 없음. 실행code가 아님.
+ * - PAGEREF_ACTIVATE(실제 참조가 일어난 상황.)
+ *   set PG_referenced를 수행한다.
+ *   1. 참조 pte가 2개 이상인 상황.
+ *   2. 참조 pte가 1개이면서 이전에 PG_referenced가 존재했던상황. 
+ *   3. 참조 pte가 1개이면서 실행가능 code
+ * - PAGEREF_KEEP(실제 참조가 일어난 상황.)
+ *   set PG_referenced를 수행한다.
+ *   참조 pte가 1 and 이전에 reference 된적이 없음 and 실행code가 아님.
  * - PAGEREF_RECLAIM_CLEAN
  *   이전에 reference되있었고 file or clean anon page 이면.
  */
@@ -1307,6 +1364,13 @@ static enum page_references page_check_references(struct page *page,
 	int referenced_ptes, referenced_page;
 	unsigned long vm_flags;
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - referenced_ptes
+ *   af가 set된 pte들(실제 참조가 일어난) 개수.
+ * - referenced_pages
+ *   PG_referenced set여부
+ */
 	referenced_ptes = page_referenced(page, 1, sc->target_mem_cgroup,
 					  &vm_flags);
 	referenced_page = TestClearPageReferenced(page);
@@ -1455,6 +1519,12 @@ static unsigned int demote_page_list(struct list_head *demote_pages,
 
 /*
  * shrink_page_list() returns the number of reclaimed pages
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim을 한다.
+ * @page_list[in/out] in : recalim 대상 isolate된 pages.
+ *                    out : keep or activate된 pages
  */
 static unsigned int shrink_page_list(struct list_head *page_list,
 				     struct pglist_data *pgdat,
@@ -1656,6 +1726,10 @@ retry:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - 참조 ptes개수와 PG_referenced를 조사해서 page를 어떻게 할지 결정한다.
+ */
 		if (!ignore_references)
 			references = page_check_references(page, sc);
 
@@ -1674,6 +1748,10 @@ retry:
 		 * Before reclaiming the page, try to relocate
 		 * its contents to another node.
 		 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - PASS
+ */
 		if (do_demote_pass &&
 		    (thp_migration_supported() || !PageTransHuge(page))) {
 			list_add(&page->lru, &demote_pages);
@@ -1687,6 +1765,10 @@ retry:
 		 * Lazyfree page could be freed directly
 		 */
 		if (PageAnon(page) && PageSwapBacked(page)) {
+/*
+ * IAMROOT, 2022.04.30:
+ * - 
+ */
 			if (!PageSwapCache(page)) {
 				if (!(sc->gfp_mask & __GFP_IO))
 					goto keep_locked;
@@ -1706,7 +1788,15 @@ retry:
 								    page_list))
 						goto activate_locked;
 				}
+/*
+ * IAMROOT, 2022.04.30:
+ * - swap 수행.
+ */
 				if (!add_to_swap(page)) {
+/*
+ * IAMROOT, 2022.04.30:
+ * - swap이 실패한경우.
+ */
 					if (!PageTransHuge(page))
 						goto activate_locked_split;
 					/* Fallback to swap normal pages */
@@ -1763,6 +1853,11 @@ retry:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - 여기부턴 unmap file, swap요청 성공한 anon page(clean anon은 당연히 swap안함)만
+ *   존재(swap요청 성공한 anon page는 dirty set 상태.).
+ */
 		if (PageDirty(page)) {
 			/*
 			 * Only kswapd can writeback filesystem pages
@@ -1774,6 +1869,11 @@ retry:
 			 * the rest of the LRU for clean pages and see
 			 * the same dirty pages again (PageReclaim).
 			 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - kswpad요청이 아니고, page가 reclaim중이지 않으며 node가 recalim이유로 busy가
+ *   아니면 recalim을 set하고 activation한다.
+ */
 			if (page_is_file_lru(page) &&
 			    (!current_is_kswapd() || !PageReclaim(page) ||
 			     !test_bit(PGDAT_DIRTY, &pgdat->flags))) {
@@ -1802,6 +1902,10 @@ retry:
 			 * starts and then write it out here.
 			 */
 			try_to_unmap_flush_dirty();
+/*
+ * IAMROOT, 2022.04.30:
+ * - dirty page를 disk에 기록한다.
+ */
 			switch (pageout(page, mapping)) {
 			case PAGE_KEEP:
 				goto keep_locked;
@@ -1815,6 +1919,11 @@ retry:
 				if (PageDirty(page))
 					goto keep;
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - async였으면 위 writeback이나 dirty가 아직 set됫을수도있다. 위에 두 bit가
+ *   없다는건 완전히 완료했다는것을 예상하고 이는 sync write일것이다.
+ */
 				/*
 				 * A synchronous write - probably a ramdisk.  Go
 				 * ahead and try to reclaim the page.
@@ -1854,6 +1963,10 @@ retry:
 		if (page_has_private(page)) {
 			if (!try_to_release_page(page, sc->gfp_mask))
 				goto activate_locked;
+/*
+ * IAMROOT, 2022.04.30:
+ * - page를 사용하고 있는 user가 있는지 한번검사. 없으면 free.
+ */
 			if (!mapping && page_count(page) == 1) {
 				unlock_page(page);
 				if (put_page_testzero(page))
@@ -1872,6 +1985,11 @@ retry:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - 여기까지 왔으면 clean page들만이 존재.
+ * - clean anon page. 할게 딱히 없으니 바로 풀어버린다.
+ */
 		if (PageAnon(page) && !PageSwapBacked(page)) {
 			/* follow __remove_mapping for reference */
 			if (!page_ref_freeze(page, 1))
@@ -1886,6 +2004,10 @@ retry:
 			 */
 			count_vm_event(PGLAZYFREED);
 			count_memcg_page_event(page, PGLAZYFREED);
+/*
+ * IAMROOT, 2022.04.30:
+ * - clean page들은 mapping만 remove시켜주면된다.
+ */
 		} else if (!mapping || !__remove_mapping(mapping, page, true,
 							 sc->target_mem_cgroup))
 			goto keep_locked;
@@ -1920,7 +2042,7 @@ activate_locked_split:
 activate_locked:
 /*
  * IAMROOT, 2022.04.23:
- * - 모종의 이유로 실패하였을 경우 active로 되돌린다.
+ * - recalim을 하지 않고, activation으로 돌려야되는 경우.
  */
 		/* Not a candidate for swapping, so reclaim swap space. */
 		if (PageSwapCache(page) && (mem_cgroup_swap_full(page) ||
@@ -1951,12 +2073,20 @@ keep:
 		goto retry;
 	}
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - anon activate + file activate
+ */
 	pgactivate = stat->nr_activate[0] + stat->nr_activate[1];
 
 	mem_cgroup_uncharge_list(&free_pages);
 	try_to_unmap_flush();
 	free_unref_page_list(&free_pages);
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim못한것들은 되돌려 놓는다.
+ */
 	list_splice(&ret_pages, page_list);
 	count_vm_events(PGACTIVATE, pgactivate);
 
@@ -2565,6 +2695,10 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	nr_reclaimed = shrink_page_list(&page_list, pgdat, sc, &stat, false);
 
 	spin_lock_irq(&lruvec->lru_lock);
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim을 못한 나머지들을 되돌린다.
+ */
 	move_pages_to_lru(lruvec, &page_list);
 
 	__mod_node_page_state(pgdat, NR_ISOLATED_ANON + file, -nr_taken);
@@ -2575,6 +2709,10 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	__count_vm_events(PGSTEAL_ANON + file, nr_reclaimed);
 	spin_unlock_irq(&lruvec->lru_lock);
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - reclaim을 하면서 pageout된 page개수를 cost로 넣는다.
+ */
 	lru_note_cost(lruvec, file, stat.nr_pageout);
 	mem_cgroup_uncharge_list(&page_list);
 	free_unref_page_list(&page_list);
@@ -3022,6 +3160,8 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
  * 적어도 3분의 1의 압력이 가해질 때, 휘청거린다.
  *
  * swappiness가 100인 경우, annon 및 file의 IO 비용은 동일합니다.*
+ *
+ * - 이전에 refault activate 및 pageout을 했던 file or anon 의 cost 비율을 반영한다.
  */
 	total_cost = sc->anon_cost + sc->file_cost;
 	anon_cost = total_cost + sc->anon_cost;

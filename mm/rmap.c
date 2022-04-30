@@ -835,6 +835,10 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
  * - mapping이 되있는 경우
  */
 		if (pvmw.pte) {
+/*
+ * IAMROOT, 2022.04.30:
+ * - af(access flag)를 읽고 clear한다.
+ */
 			if (ptep_clear_flush_young_notify(vma, address,
 						pvmw.pte)) {
 				/*
@@ -845,6 +849,13 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 				 * already gone, the unmap path will have set
 				 * PG_referenced or activated the page.
 				 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - sequence file
+ *   한번읽고 없어지는 file.
+ * - sequence read file이 아닌 경우만 reference증가. 즉 한번만 읽고 버리기 때문에
+ *   굳이 reference를 증가시키지 않는다.
+ */
 				if (likely(!(vma->vm_flags & VM_SEQ_READ)))
 					referenced++;
 			}
@@ -911,6 +922,7 @@ static bool invalid_page_referenced_vma(struct vm_area_struct *vma, void *arg)
 /*
  * IAMROOT, 2022.04.23:
  * - 해당 page를 참조하고 있는 ptes 개수를 return한다.
+ * - reference를 구하는 과정에서 pte의 af는 clear해준다.
  * - pra에 검색범위(mapcount) 및 target memcg를 설정하고
  *   rmap_walk함수를 통해서 해당 page를 참조하고 있는 count를 pra.referenced에
  *   누적시킨다.
@@ -1735,6 +1747,11 @@ static int page_not_mapped(struct page *page)
  *
  * It is the caller's responsibility to check if the page is still
  * mapped when needed (use TTU_SYNC to prevent accounting races).
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - TODO
+ *   unmap 수행
  */
 void try_to_unmap(struct page *page, enum ttu_flags flags)
 {

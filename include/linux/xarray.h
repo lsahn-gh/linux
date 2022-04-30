@@ -49,6 +49,12 @@
  * Context: Any context.
  * Return: An entry suitable for storing in the XArray.
  */
+/*
+ * IAMROOT, 2022.04.30:
+ * - value는 0bit를 1로 set한다. 또한 value는 1bit를 left shift해서 저장하기 때문에
+ *   최상위 비트가 set되있으면(음수등) 나중에 빼올때 손실이 일어날수있어
+ *   사용할수없다.
+ */
 static inline void *xa_mk_value(unsigned long v)
 {
 	WARN_ON((long)v < 0);
@@ -91,6 +97,10 @@ static inline bool xa_is_value(const void *entry)
  *
  * Context: Any context.
  * Return: An XArray entry.
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - 주소는 0번 bit를 0으로 사용하니 그냥 넣는다.
  */
 static inline void *xa_tag_pointer(void *p, unsigned long tag)
 {

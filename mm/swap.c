@@ -290,6 +290,11 @@ void rotate_reclaimable_page(struct page *page)
 	}
 }
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - @nr_pages를 cost로 반영한다.
+ * - page가 activate
+ */
 void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 {
 	do {

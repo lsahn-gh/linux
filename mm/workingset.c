@@ -27,6 +27,18 @@
  * are promoted to the active list, to protect them from reclaim,
  * whereas active pages are demoted to the inactive list when the
  * active list grows too big.
+ */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - papgo
+ *   노드당 파일 페이지에 대해 두 개의 클럭 목록이 유지됩니다.
+ *   비활성 및 활성 목록입니다. 새로 결함이 발생한 페이지는 비활성 목록의 선두에서
+ *   시작하여 페이지 회수 검색 페이지를 꼬리에서 검색합니다. 비활성 목록에서
+ *   여러 번 액세스한 페이지는 회수로부터 보호하기 위해 활성 목록으로 승격되는
+ *   반면 활성 페이지는 활성 목록이 너무 커지면 비활성 목록으로 강등됩니다.
+ */
+/*
  *
  *   fault ------------------------+
  *                                 |
@@ -52,7 +64,25 @@
  * inactive list, yet smaller than the size of memory.  In this case,
  * the set could fit into memory if it weren't for the currently
  * active pages - which may be used more, hopefully less frequently:
+ */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - papgo
+ * 페이지는 자주 사용되지만 다른 액세스로 페이지가 활성 목록으로 승격되기 전에
+ * 매번 비활성 목록에서 eviction이 됩니다.
  *
+ * 스래싱 페이지 간의 평균 액세스 거리가 메모리 크기보다 큰 경우, 할 수 있는 일은
+ * 없습니다. - 스래싱 세트가 어떤 상황에서도 메모리에 들어가지 않을 수 있습니다.
+ * (평균 액세스 거리가 메모리 크기보다 큰 경우라는것은 지금 상황이 현재 메모리보다
+ * 큰 용량을 사용하고 있다는 얘기. 즉 disk에서 reload까지 하면서  쓰고 있는데
+ * 전체 메모리가 계속 사용 중이라 어쩔수없이 thrashing이 일어나고 있다는 뜻이다.)
+ *
+ * 그러나 평균 액세스 거리는 비활성 목록보다 크지만 메모리 크기보다 작을 수 있습니다.
+ * 이 경우, 현재 활성 페이지가 없었다면 이 집합은 메모리에 들어갈 수 있었는데, 
+ * 이 페이지들은 더 많이, 더 적게 사용되었으면 좋겠다.
+ */
+/*
  *      +-memory available to cache-+
  *      |                           |
  *      +-inactive------+-active----+
@@ -76,7 +106,26 @@
  *    also slides all inactive pages that were faulted into the cache
  *    more recently than the activated page towards the tail of the
  *    inactive list.
+ */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - papgo
+ *   페이지의 액세스 빈도를 정확하게 추적하는 것은 엄청나게 비싸다. 그러나 비활성
+ *   목록에서 스래싱을 측정하기 위해 합리적인 근사치를 만들 수 있으며, 그 후 리폴트
+ *   페이지를 최적화하여 기존 활성 페이지와 경쟁할 수 있다.
  *
+ * 비활성 페이지 액세스 빈도 근사 - 관찰:
+ * 
+ * 1. 페이지가 처음 액세스되면 비활성 목록의 맨 앞에 추가되고, 모든 비활성 페이지를
+ * 하나의 슬롯만큼 꼬리 쪽으로 슬라이드하고, 현재 테일 페이지를 메모리 밖으로
+ * 밀어냅니다.
+ *
+ * 2. 페이지가 두 번째로 액세스되면 활성 목록으로 승격되어 비활성 목록이 한 슬롯씩
+ * 줄어듭니다. 또한 활성화된 페이지보다 최근에 fault가 발생한 모든 비활성 페이지를
+ * 비활성 목록의 꼬리 쪽으로 밀어 넣습니다.
+ */
+ /*
  * Thus:
  *
  * 1. The sum of evictions and activations between any two points in
@@ -97,6 +146,35 @@
  *    reading (R) at the time the page faults back into memory tells
  *    the minimum number of accesses while the page was not cached.
  *    This is called the refault distance.
+ */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - papgo
+ *   따라서:
+ *
+ *   1. 두 시점 사이의 eviction들 및 activation들 합계는 그 사이에 액세스된 최소
+ *   비활성 페이지 수를 나타냅니다.
+ *   (inacive 이지만 access가 이루어졌던 page들의 합이 eviction + activation)
+ *   
+ *   2. 비활성 페이지 N개의 페이지 슬롯을 목록의 꼬리 쪽으로 이동하려면 N개 이상의
+ *   비활성 페이지 액세스가 필요합니다.
+ *   (inactive 이지만 access를 했다는것을 판정할때마다 inacive list내에서의 이동이
+ *   일어난다.)
+ *
+ * 이러한 조합:
+ *
+ * 1. 페이지가 최종적으로 메모리에서 eviction될 때 페이지가 캐시되어 있는 동안
+ * 액세스된 비활성 페이지 수는 비활성 목록의 페이지 슬롯 수 이상입니다.
+ *
+ * 2. 또한 페이지 eviction 시점에 eviction들 과 activation들의 합계(E)를 측정하고,
+ * page fault가 다시 메모리에 저장될 때 다른 판독치(R. refault)와 비교하면 페이지가
+ * 캐시되지 않은 동안 최소 액세스 수를 알 수 있습니다.
+ * 이를 refault distance라고 합니다.
+ * (R은 refault 시점의 eviction들과 activation들의 합계. E가 R값에 비해 과거이기
+ * 때문에 R값은 E보다 항상 크다. refault distacne = R - E)
+ */
+/*
  *
  * Because the first access of the page was the fault and the second
  * access the refault, we combine the in-cache distance with the
@@ -120,7 +198,38 @@
  * had (R - E) more page slots, the page would not have been evicted
  * in between accesses, but activated instead.  And on a full system,
  * the only thing eating into inactive list space is active pages.
+ */
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - papgo 
+ *   페이지의 첫 번째 액세스는 fault이고 두 번째 액세스는 refault이기 때문에 캐시
+ *   내 거리(NR_inactive) 와 캐시 외 거리(refault distance. R - E)를 결합하여
+ *   이 페이지의 complete minimum access distance를 얻습니다.
+ *   (cache는 NR_active + NR_inactive 둘다 포함하지만 여기선 NR_active는 idle상태
+ *   일수도 있기때문에(정확한 측정이 거의 불가능) minimum의 개념으로 NR_inactive만을
+ *   포함해서 설명한다.)
  *
+ *	NR_inactive + (R - E) = complete minimum access distance
+ *
+ * 또한 페이지의 minimum access distance를 알고 있기 때문에 캐시의 모든 페이지 슬롯을
+ * 사용할 수 있다고 가정할 때 페이지가 캐시에 유지되는지 여부를 쉽게 알 수 있습니다.
+ *
+ *   NR_inactive + (R - E)              <= NR_inactive + NR_active
+ *   (complete minimum access distance) <= memory(cache)
+ *
+ * 더 단순화할 수 있는 것은
+ *
+ *   (R - E) <= NR_active
+ *
+ * 다시 말해 리폴트 거리(out-of-cache)는 비활성 목록 공간(in-cache)의 부족으로 볼 수
+ * 있습니다. 비활성 목록에 (R - E) 더 많은 페이지 슬롯이 있는 경우, 페이지는 액세스
+ * 사이에 제거되지 않고 대신 활성화되었을 것입니다. 전체 시스템에서 비활성 목록
+ * 공간을 잠식하는 유일한 것은 활성 페이지입니다.
+ * (refault distance가 active list에 비해 더 짧다는것은 결국 active list에 있는
+ * page들과 경쟁을 하여 실제 active list에 있는 inactive page들을 걸러내기 위함이다.)
+ */
+/*
  *
  *		Refaulting inactive pages
  *
@@ -145,7 +254,31 @@
  *
  * But if this is right, the stale pages will be pushed out of memory
  * and the used pages get to stay in cache.
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - papago
  *
+ *		Refaulting inactive pages
+ *
+ * 활성 목록에 대해 알려진 모든 내용은 페이지에 과거에 두 번 이상 액세스했다는
+ * 것입니다. 즉, 언제든지 활성 목록에 있는 페이지가 더 이상 활성 상태로 사용되지
+ * 않을 가능성이 높습니다.
+ *
+ * 따라서 (R - E)의 리폴트 거리가 관찰되고 적어도 (R - E) 활성 페이지가 있을 때,
+ * (R - E) 활성 페이지가 리폴트 페이지보다 실제로 덜 사용되거나 심지어 더 이상
+ * 사용되지 않도록 하기 위해 리폴트 페이지가 최적으로 활성화됩니다.
+ *
+ * 즉, 비활성 캐시가 적절한 리폴트 거리로 리폴트되는 경우 캐시 workingset이 전환되고
+ * 있다고 가정하고 현재 활성 목록에 압력을 가합니다.
+ *
+ * 만약 이것이 잘못되어 강등이 시작되면, 실제로 더 자주 사용되는 페이지는 다시
+ * 활성화되고 덜 자주 사용되는 페이지는 memory에서 eviction될 것이다.
+ * 
+ * 그러나 이것이 맞다면 오래된 페이지는 메모리에서 밀려나고 사용된 페이지는 캐시에
+ * 남게 됩니다.
+ */
+ /*
  *		Refaulting active pages
  *
  * If on the other hand the refaulting pages have recently been
@@ -167,6 +300,29 @@
  * On cache misses for which there are shadow entries, an eligible
  * refault distance will immediately activate the refaulting page.
  */
+/*
+ * IAMROOT, 2022.04.30:
+ * - papago
+ *
+ *		Refaulting active pages
+ *
+ * 반면에 refaulting 페이지가 최근에 비활성화되면 활성 목록이 더 이상 활성 캐시
+ * 회수를 방지하지 않음을 의미합니다.
+ * (refault 되어 active됬던 page가 또 inactive가 되면 recalim이 될수있다)
+ * 캐시가 다른 workingset으로 전환되지 않습니다.
+ * 기존 workingset은 페이지 캐시에 할당된 공간을 스래싱하고 있습니다.
+ *
+ *		Implementation
+ *
+ * 각 노드의 LRU 목록에 대해 inactive evictions 및 activations 카운터가 유지됩니다
+ * (node->nonresident_age).
+ *
+ * eviction 시 이 카운터의 스냅샷(노드를 식별하기 위한 일부 비트와 함께)이 제거된
+ * 페이지의 빈 페이지 캐시 슬롯에 저장됩니다. 이를 shadow entry라고 합니다.
+ * 
+ * shadow entries이 있는 cache misses 시 적합한 리폴트 거리(짧은)는 리폴트 페이지를
+ * 즉시 활성화합니다.
+ */
 
 #define WORKINGSET_SHIFT 1
 #define EVICTION_SHIFT	((BITS_PER_LONG - BITS_PER_XA_VALUE) +	\
@@ -181,8 +337,25 @@
  * not be enough left to represent every single actionable refault. In
  * that case, we have to sacrifice granularity for distance, and group
  * evictions into coarser buckets by shaving off lower timestamp bits.
+ *j
+/*
+ * IAMROOT, 2022.04.30:
+ * - 제거 타임스탬프는 실행 가능한 모든 장애 범위를 커버할 수 있어야 합니다.
+ *   그러나 xarray 엔트리에서 비트가 빠듯하며, lruvec의 식별자를 저장한 후에는 모든
+ *   실행 가능한 리폴트를 나타내기에 충분하지 않을 수 있다. 이 경우 거리에 대한
+ *   세분성을 희생하고 더 낮은 타임스탬프 비트를 제거하여 더 거친 버킷으로 evictions를
+ *   그룹화해야 한다.
  */
 static unsigned int bucket_order __read_mostly;
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - 만들어지는 eviction
+ * - bit     =   31    21         5        1   0
+ *   evicion =  |     age | memcgid | nodeid | workingset
+ * - return value
+ *   return eviction << 1 | 1
+ */
 
 static void *pack_shadow(int memcgid, pg_data_t *pgdat, unsigned long eviction,
 			 bool workingset)
@@ -196,6 +369,10 @@ static void *pack_shadow(int memcgid, pg_data_t *pgdat, unsigned long eviction,
 	return xa_mk_value(eviction);
 }
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - pack_shadow에서 조립된상태대로 unpack한다.
+ */
 static void unpack_shadow(void *shadow, int *memcgidp, pg_data_t **pgdat,
 			  unsigned long *evictionp, bool *workingsetp)
 {
@@ -236,6 +413,8 @@ static void unpack_shadow(void *shadow, int *memcgidp, pg_data_t **pgdat,
  *   메모리 내 치수와 비슷해지려면 비거주 페이지도 에이징해야 합니다.
  *   이 기능을 통해 회수 및 LRU 작업을 통해 비거주자 노화를 병렬로 진행할 수
  *   있습니다.
+ *
+ * - root까지 @nr_pages만큼 nonresident_age를 증가시킨다.
  */
 void workingset_age_nonresident(struct lruvec *lruvec, unsigned long nr_pages)
 {
@@ -274,6 +453,11 @@ void workingset_age_nonresident(struct lruvec *lruvec, unsigned long nr_pages)
  * Return: a shadow entry to be stored in @page->mapping->i_pages in place
  * of the evicted @page so that a later refault can be detected.
  */
+/*
+ * IAMROOT, 2022.04.30:
+ * - @page에 대한 shadow를 만들고 xarray value 결과값을 return받는다.
+ *   @target_memcg에서 root까지 lruvec의 nonresident_age를 page수만큼 증가시킨다.
+ */
 void *workingset_eviction(struct page *page, struct mem_cgroup *target_memcg)
 {
 	struct pglist_data *pgdat = page_pgdat(page);
@@ -289,7 +473,15 @@ void *workingset_eviction(struct page *page, struct mem_cgroup *target_memcg)
 	lruvec = mem_cgroup_lruvec(target_memcg, pgdat);
 	/* XXX: target_memcg can be NULL, go through lruvec */
 	memcgid = mem_cgroup_id(lruvec_memcg(lruvec));
+/*
+ * IAMROOT, 2022.04.30:
+ * - 증가시키전의 nonresident_age를 evction으로 가져온다.
+ */
 	eviction = atomic_long_read(&lruvec->nonresident_age);
+/*
+ * IAMROOT, 2022.04.30:
+ * - root까지 page count만큼 nonresident_age를 증가시켜준다.
+ */
 	workingset_age_nonresident(lruvec, thp_nr_pages(page));
 	return pack_shadow(memcgid, pgdat, eviction, PageWorkingset(page));
 }
@@ -302,6 +494,14 @@ void *workingset_eviction(struct page *page, struct mem_cgroup *target_memcg)
  * Calculates and evaluates the refault distance of the previously
  * evicted page in the context of the node and the memcg whose memory
  * pressure caused the eviction.
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - @page가 refault됬음을 확인하고 @shadow의 데이터를 가져와 refault distance를
+ *   구한후 현재 workingset_size값을 구한다. refault distance가 workingset_size에
+ *   비해 클 경우 자주사용하지 않은 page라 간주하고, 그게 아닐 경우 activation한다.
+ *   (activation을 할때 @shadow에 workingset bit가 set으로 기록되있었다면 set을
+ *   시킨다.)
  */
 void workingset_refault(struct page *page, void *shadow)
 {
@@ -337,10 +537,22 @@ void workingset_refault(struct page *page, void *shadow)
 	 * would be better if the root_mem_cgroup existed in all
 	 * configurations instead.
 	 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - eviction당시의 memcg를 가져온다.
+ */
 	eviction_memcg = mem_cgroup_from_id(memcgid);
 	if (!mem_cgroup_disabled() && !eviction_memcg)
 		goto out;
+/*
+ * IAMROOT, 2022.04.30:
+ * - eviction당시의 lruvec을 가져온다.
+ */
 	eviction_lruvec = mem_cgroup_lruvec(eviction_memcg, pgdat);
+/*
+ * IAMROOT, 2022.04.30:
+ * - 현재의 eviction값(R)을 가져온다.
+ */
 	refault = atomic_long_read(&eviction_lruvec->nonresident_age);
 
 	/*
@@ -359,6 +571,11 @@ void workingset_refault(struct page *page, void *shadow)
 	 * longest time, so the occasional inappropriate activation
 	 * leading to pressure on the active list is not a problem.
 	 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - evicion : eviction당시의 nonresident_age값.(E)
+ * - refault_distance = R - E
+ */
 	refault_distance = (refault - eviction) & EVICTION_MASK;
 
 	/*
@@ -382,11 +599,47 @@ void workingset_refault(struct page *page, void *shadow)
 	 * workingset competition needs to consider anon or not depends
 	 * on having swap.
 	 */
+/*
+ * IAMROOT, 2022.04.30:
+ * workingset_size를 구하는 방법.
+ * (refault된 page가 속한 영역(file inactive or anon inactive)을 제외한 영역들의
+ * size.)
+ *
+ * - file인 경우.
+ *   file inactive를 제외한 나머지 3개.
+ *   swap page가 부족한 경우 : file active만.
+ *                             swap공간이 부족한 경우 anon측은 건드리지 않는다.
+ *
+ * - anon인 경우.
+ *   anon inactive를 제외한 나머지 3개.
+ *   swap page가 부족한경우 : file active + file inactive
+ *                            swap공간이 부족한 경우 anon측은 건드리지 않는다.
+ *
+ * ---
+ * - 제일 위 주석에서는 (R - E) + NR_inactive <= NR_active + NR_inactive를 기본으로
+ *   설명하는데 실제 code에서는 상대방(file <=> anone)의 active / inactive까지
+ *   고려한다.
+ *   
+ * - file
+ *   (R - E) + NR_INACTIVE_FILE <= NR_ACTIVE_FILE + NR_INACTIVE_FILE +
+ *                                 NR_ACTIVE_ANON + NR_INACTIVE_ANON
+ *  => (R -E) <= NR_ACTIVE_FILE + NR_ACTIVE_ANON + NR_INACTIVE_ANON
+ *   
+ * - anon
+ *   (R - E) + NR_INACTIVE_ANON <= NR_ACTIVE_FILE + NR_INACTIVE_FILE +
+ *                                 NR_ACTIVE_ANON + NR_INACTIVE_ANON
+ *  => (R -E) <= NR_ACTIVE_ANON + NR_ACTIVE_FILE + NR_INACTIVE_FILE
+ */
 	workingset_size = lruvec_page_state(eviction_lruvec, NR_ACTIVE_FILE);
 	if (!file) {
 		workingset_size += lruvec_page_state(eviction_lruvec,
 						     NR_INACTIVE_FILE);
 	}
+
+/*
+ * IAMROOT, 2022.04.30:
+ * - swap공간이 존재하면 anon을 고려한다.
+ */
 	if (mem_cgroup_get_nr_swap_pages(memcg) > 0) {
 		workingset_size += lruvec_page_state(eviction_lruvec,
 						     NR_ACTIVE_ANON);
@@ -395,9 +648,23 @@ void workingset_refault(struct page *page, void *shadow)
 						     NR_INACTIVE_ANON);
 		}
 	}
+/*
+ * IAMROOT, 2022.04.30:
+ * - refault distacne가 길면 사용시간이 길엇던 page라고 간주한다.
+ */
 	if (refault_distance > workingset_size)
 		goto out;
 
+/*
+ * IAMROOT, 2022.04.30:
+ * - nonresident_age가 증가되는 상황.
+ *   1. active할때의 상황.
+ *	inactive -> active (이때 workingset이 set된다.)
+ *	disk(refault) -> active
+ *
+ *   2. eviction할때의 상황.
+ *	inactive -> disk(eviction)
+ */
 	SetPageActive(page);
 	workingset_age_nonresident(lruvec, thp_nr_pages(page));
 	inc_lruvec_state(lruvec, WORKINGSET_ACTIVATE_BASE + file);
@@ -416,6 +683,11 @@ out:
 /**
  * workingset_activation - note a page activation
  * @page: page that is being activated
+ */
+/*
+ * IAMROOT, 2022.04.30:
+ * - @page를 activation할때 호출된다. @page가 속한 memcg ~ root까지 lruvec의
+ *   nonresident_age를 page 수만큼 증가시킨다.
  */
 void workingset_activation(struct page *page)
 {
@@ -626,8 +898,25 @@ static int __init workingset_init(void)
 	 * some more pages at runtime, so keep working with up to
 	 * double the initial memory by using totalram_pages as-is.
 	 */
+/*
+ * IAMROOT, 2022.04.30:
+ * - timestamp_bits = nonresident_age에 사용될 bits
+ * - max_order = memory pages를 표현할 최대 bit수
+ * ex) 32bit, node 4 memcg 16, workingset 1, xarray 1
+ * 32 - 22 = 10
+ * ex) 64bit, node 0 memcg 16, workingset 1, xarray 1
+ * 64 - 18 = 46
+ * ex) 64bit, node 10 memcg 16, workingset 1, xarray 1
+ * 64 - 28 = 36
+ */
 	timestamp_bits = BITS_PER_LONG - EVICTION_SHIFT;
 	max_order = fls_long(totalram_pages() - 1);
+/*
+ * IAMROOT, 2022.04.30:
+ * - memory page수가 nonresident_age에 다 집어넣을수 없는 경우에 이를 적당히
+ *   자른다.
+ * ex) workingset: timestamp_bits=36 max_order=21 bucket_order=0
+ */
 	if (max_order > timestamp_bits)
 		bucket_order = max_order - timestamp_bits;
 	pr_info("workingset: timestamp_bits=%d max_order=%d bucket_order=%u\n",

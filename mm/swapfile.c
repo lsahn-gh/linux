@@ -1345,6 +1345,10 @@ void swap_free(swp_entry_t entry)
 /*
  * Called after dropping swapcache to decrease refcnt to swap entries.
  */
+/*
+ * IAMROOT, 2022.04.30:
+ * - @entry에 대한 refcnt를 감소시킨다.
+ */
 void put_swap_page(struct page *page, swp_entry_t entry)
 {
 	unsigned long offset = swp_offset(entry);

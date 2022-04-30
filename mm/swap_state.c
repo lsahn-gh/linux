@@ -181,6 +181,11 @@ void __delete_from_swap_cache(struct page *page,
  * Allocate swap space for the page and add the page to the
  * swap cache.  Caller needs to hold the page lock. 
  */
+/*
+ * IAMROOT, 2022.04.30:
+ * - TODO
+ * - swap 요청 후 dirty set.
+ */
 int add_to_swap(struct page *page)
 {
 	swp_entry_t entry;
