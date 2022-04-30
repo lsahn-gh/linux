@@ -224,3 +224,7 @@
 - 2022.04.23, Zoom 온라인(8명 참석)
 - alloc_page() 진행중 ... direct-reclaim
 
+### 49주차
+- 2022.04.30, Zoom 온라인(7명 참석)
+- alloc_page() 진행중 ... direct-reclaim
+
