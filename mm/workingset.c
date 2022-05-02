@@ -337,7 +337,7 @@
  * not be enough left to represent every single actionable refault. In
  * that case, we have to sacrifice granularity for distance, and group
  * evictions into coarser buckets by shaving off lower timestamp bits.
- *j
+ */
 /*
  * IAMROOT, 2022.04.30:
  * - 제거 타임스탬프는 실행 가능한 모든 장애 범위를 커버할 수 있어야 합니다.
@@ -617,18 +617,18 @@ void workingset_refault(struct page *page, void *shadow)
  *
  * ---
  * - 제일 위 주석에서는 (R - E) + NR_inactive <= NR_active + NR_inactive를 기본으로
- *   설명하는데 실제 code에서는 상대방(file <=> anone)의 active / inactive까지
+ *   설명하는데 실제 code에서는 상대방(file <=> anon)의 active / inactive까지
  *   고려한다.
  *   
  * - file
  *   (R - E) + NR_INACTIVE_FILE <= NR_ACTIVE_FILE + NR_INACTIVE_FILE +
  *                                 NR_ACTIVE_ANON + NR_INACTIVE_ANON
- *  => (R -E) <= NR_ACTIVE_FILE + NR_ACTIVE_ANON + NR_INACTIVE_ANON
+ *  => (R - E) <= NR_ACTIVE_FILE + NR_ACTIVE_ANON + NR_INACTIVE_ANON
  *   
  * - anon
  *   (R - E) + NR_INACTIVE_ANON <= NR_ACTIVE_FILE + NR_INACTIVE_FILE +
  *                                 NR_ACTIVE_ANON + NR_INACTIVE_ANON
- *  => (R -E) <= NR_ACTIVE_ANON + NR_ACTIVE_FILE + NR_INACTIVE_FILE
+ *  => (R - E) <= NR_ACTIVE_ANON + NR_ACTIVE_FILE + NR_INACTIVE_FILE
  */
 	workingset_size = lruvec_page_state(eviction_lruvec, NR_ACTIVE_FILE);
 	if (!file) {
@@ -659,11 +659,15 @@ void workingset_refault(struct page *page, void *shadow)
  * IAMROOT, 2022.04.30:
  * - nonresident_age가 증가되는 상황.
  *   1. active할때의 상황.
- *	inactive -> active (이때 workingset이 set된다.)
+ *	inactive -> active
+ *	(mark_page_accessed())
  *	disk(refault) -> active
  *
  *   2. eviction할때의 상황.
  *	inactive -> disk(eviction)
+ *
+ *	3. reclaim시 deactive를 안한 active pages
+ *	(shrink_active_list()참고)
  */
 	SetPageActive(page);
 	workingset_age_nonresident(lruvec, thp_nr_pages(page));

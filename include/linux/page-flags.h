@@ -554,7 +554,13 @@ PAGEFLAG(Active, active, PF_HEAD) __CLEARPAGEFLAG(Active, active, PF_HEAD)
 	TESTCLEARFLAG(Active, active, PF_HEAD)
 /*
  * IAMROOT, 2022.04.23:
- * - active 
+ * - set
+ *   reclaim중 active page를 deactive할때 set된다.(shrink_active_list())
+ * - clear
+ *   한번 set되면 이후 clear안된다.
+ * - test
+ *   refault시 page가 active에 성공하고 workingset set이였다면 lru cost를
+ *   증가시킨다. (workingset_refault())
  */
 PAGEFLAG(Workingset, workingset, PF_HEAD)
 	TESTCLEARFLAG(Workingset, workingset, PF_HEAD)

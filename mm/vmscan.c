@@ -3161,7 +3161,13 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
  *
  * swappiness가 100인 경우, annon 및 file의 IO 비용은 동일합니다.*
  *
- * - 이전에 refault activate 및 pageout을 했던 file or anon 의 cost 비율을 반영한다.
+ * - 이전에 refault activate 및 pageout을 했던 file or anon 의 cost 비율을
+ *   반영한다. (lru_note_cost())
+ *   만약 file cost가 높다면 anon쪽으로 비율이 많이 잡힐것이다.
+ * ex) anon_cost = 10, file_cost = 20, swappiness = 100
+ * ap = (100 * 31) / 11 = 약 300
+ * fp = (100 * 31)) / 21 = 약 200
+ * 즉 역비율이 된다.
  */
 	total_cost = sc->anon_cost + sc->file_cost;
 	anon_cost = total_cost + sc->anon_cost;

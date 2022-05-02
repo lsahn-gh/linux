@@ -294,6 +294,28 @@ void rotate_reclaimable_page(struct page *page)
  * IAMROOT, 2022.04.30:
  * - @nr_pages를 cost로 반영한다.
  * - page가 activate
+ *
+ * ---
+ *  lru_note_cost 증가
+ *  1. page refault 시 activate 될때, page가 workingset set이였다면.
+ *  (workingset_refault())
+ *  2. reclaim중(shrink_inactive_list())에서 pageout(eviction 과정중)된 page 개수.
+ *
+ *  lru cost의 사용
+ *  1. get_scan_count() 시 reclaim을 위한 page 개수산정에 사용한다.
+ *
+ * ---
+ *  cost가 높다는 의미.(reclaim대상이 되는 lru가 많다는 의미.)
+ *  해당 lru를 reclaim시 좀 덜 선택하게 해보기 위함이다.
+ *
+ *  1. refault시 workingset인 page가 많다
+ *  => demote경험이 있는 page중에, refault로 복귀하는 page가 많다.
+ *  => 현재 lru에 refault된 page들이 많다 -> 다른 lru를 탐색시키고 싶다.
+ *
+ *  2. reclaim중 pageout되는 page가 많다.
+ *  => 햐당 lru에 disk에 써진 page가 많다 -> 다른 lru도 시도를 해보겠다. 
+ *
+ *  이게 없으면 특정 lru에 대해서만 reclaim이 일어나 death spiral이 이럴날수있다.
  */
 void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 {
@@ -326,7 +348,10 @@ void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 			  lruvec_page_state(lruvec, NR_ACTIVE_ANON) +
 			  lruvec_page_state(lruvec, NR_INACTIVE_FILE) +
 			  lruvec_page_state(lruvec, NR_ACTIVE_FILE);
-
+/*
+ * IAMROOT, 2022.05.02:
+ * - 결국 lru간 비율의 문제이기 때문에 값이 적당히 높아지면 반씩 나눠놓는 개념.
+ */
 		if (lruvec->file_cost + lruvec->anon_cost > lrusize / 4) {
 			lruvec->file_cost /= 2;
 			lruvec->anon_cost /= 2;
