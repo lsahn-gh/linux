@@ -2285,7 +2285,7 @@ void vma_adjust_trans_huge(struct vm_area_struct *vma,
  * IAMROOT, 2022.04.09:
  * - @page가 anon일 경우 migrate(unmap + copy + map)까지 진행을하고 아니면
  *   unmmap만하고 끝난다.
- * - unmap만 하는 @page들은 page fault기반같것들이다.(원본이 disk등 다른곳에
+ * - unmap만 하는 @page들은 page fault기반같은 것들이다.(원본이 disk등 다른곳에
  *   있고 fault로 생기게 되는 page들)
  */
 static void unmap_page(struct page *page)

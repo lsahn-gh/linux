@@ -22,6 +22,36 @@ int sysctl_vm_numa_stat_handler(struct ctl_table *table, int write,
 #endif
 
 struct reclaim_stat {
+/*
+ * IAMROOT, 2022.05.03:
+ *  로직이 복잡해 한줄 정리로는 정확하진 않을수있어 rough하게만 참고하고
+ *  shrink_page_list()함수를 보는게 더 정확하다.
+ *
+ * - nr_dirty
+ *   file page가 writeback or dirty일때 reclaim하러 온 page 개수.
+ * - nr_unqueued_dirty
+ *   file page가 dirty && !writeback일때 reclaim하러 온 page 개수.
+ * - nr_congested
+ *   page가 너무빠르게 reclaim중이거나 BDI(Backing Device Info)가 congest인 page
+ *   개수.
+ * - nr_writeback
+ *   page가 writeback인상태에서 reclaim을 들어 왔을시
+ *   1. reclaim을 안하고 있다.
+ *   2. __GFP_FS or GFP_IO 요청이 없다.
+ *   3. global or new memcg reclaim 동작중
+ *   이면 pg reclaim set하고 activate로 전환한 page 개수.
+ * - nr_immediate
+ *   kswapd에서 reclaim && writeback인 page를 다시 reclaim하러 왔는데
+ *   page 소속 node가 busy여서 page를 다시 activate시켰던 page 개수.
+ * - nr_ref_keep
+ *   set PG_referenced를 수행하여
+ *   참조 pte가 1 and unreference and not exec code인 page 개수.
+ *   reclaim에 진입했지만 위 조건에 의해 원래 list로 돌아간 page개수.
+ * - nr_unmap_fail
+ *   unmap 실패.
+ * - nr_lazyfree_fail
+ *   unmap 실패했는데 lazyfree로 실패한것처럼 보이는것.
+ */
 	unsigned nr_dirty;
 	unsigned nr_unqueued_dirty;
 	unsigned nr_congested;

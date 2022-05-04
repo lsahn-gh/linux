@@ -21,12 +21,45 @@
  */
 /*
  * IAMROOT, 2022.04.23:
- * - 일반 anon page들은 SwapBacked flag가 set되있다.
- * - SwapBacked flag가 unset인 경우
- *   clean anon page인 경우(lazy free)
- *   정말 file page인 경우
- * - return이 true여도 anon인 경우가 있다. anon page판단히 확실해야될 경우
- *   PageAnon(page) 조건으로 anon임을 확실시한다.
+ * @return true  : file lru or clean anon page(lazy free)
+ *         false : normal anon pages
+ * - 이 함수를 사용해서 anon page를 판별하는 용도로도 사용한다.
+ *   anon page를 고를 경우 (return false)의 경우나 (return true)에서 file page를
+ *   제외하면 된다.
+ *
+ *   if ((return false) || ((return true) && !(file page)))
+ *   => if (!page_is_file_lru(page) || (page_is_file_lru(page) && PageAnon(page)))
+ *      (page_is_file_lru()로 true를 받았는데 anon인지 검사하는건 보기 이상하므로
+ *      않으므로 함수를 안쓰고 그냥 !PageSwapBacked로 쓰는거 같다.)
+ *   => if (!page_is_file_lru(page) || (!PageSwapBacked(page) && PageAnon(page)))
+ *
+ *   ---
+ *   ex)
+ *   if (!page_is_file_lru(page))
+ *   {
+ *		// normal anon pages
+ *   }
+ *
+ *   if (page_is_file_lru(page)) // == !PageSwapBacked(page)
+ *   {
+ *		// clean anon page + file page
+ *   }
+ *
+ *   if (PageAnon(page) && !PageSwapBacked(page)))
+ *   {
+ *		// clean anon page
+ *   }
+ *
+ *   if (!page_is_file_lru(page) || (PageAnon(page) && !PageSwapBacked(page)))
+ *   {
+ *		// real anon pages + clean anon page
+ *   }
+ *
+ * ----
+ * - 일반 anon page들은 SwapBacked flag가 set되있다.(return false)
+ * - SwapBacked flag가 unset인 경우(return true)
+ *   1. clean anon page인 경우(lazy free)
+ *   2. 정말 file page인 경우
  */
 static inline int page_is_file_lru(struct page *page)
 {

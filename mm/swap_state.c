@@ -185,6 +185,9 @@ void __delete_from_swap_cache(struct page *page,
  * IAMROOT, 2022.04.30:
  * - TODO
  * - swap 요청 후 dirty set.
+ *   swap cache(xas)에 기록
+ *   page ref가 thp_nr_pages(page)만큼 증가
+ *   SetPageSwapCache(page);
  */
 int add_to_swap(struct page *page)
 {

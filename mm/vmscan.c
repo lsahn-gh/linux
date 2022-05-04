@@ -463,7 +463,7 @@ static bool cgroup_reclaim(struct scan_control *sc)
  */
 /*
  * IAMROOT, 2022.04.23:
- * - dirty throttling
+ * - normal dirty throttling mechanism이 적용되는 상태인지 확인한다.
  */
 static bool writeback_throttling_sane(struct scan_control *sc)
 {
@@ -1017,11 +1017,24 @@ void drop_slab(void)
 
 /*
  * IAMROOT, 2022.04.30:
+ * - @page가 freeable page cache page인지 확인힌다. @page는 isolate되어있을
+ *   것이고 page cache와 optional buffer를 page->private에 가지고있을것이다.
  * - buffer head를 가지고 있지 않은 free 가능한 page cache인지 확인한다.
  * - page_cache_pins = 1 or 512
  *   page_count(page) - (0 or 1) = 1 + (1 or 512)
  * - ex) page_count == 2, buffer head를 안가지고 있음.
  *   2 - (0) = 1 + (1)
+ *
+ * --- page cache가 있을 경우
+ *  page ref | page_has_private | page ref 해석
+ *  2        | false            | 1(page isolate) + 1(page cache)
+ *  3        | true             | 1(page isolate) + 1(page cache) + 1(private)
+ *  513      | false            | 512(huse page isolate) + 1(page cache)
+ *  514      | true             | 512(huse page isolate) + 1(page cache) +
+ *                              | 1(private)
+ *
+ *  - private를 얻을때 get ref도 하기때문에 private를 가지고있으면 ref가 없을때보다
+ *  1높아야된다.(attach_page_private(), detach_page_private() 참고)
  */
 static inline int is_page_cache_freeable(struct page *page)
 {
@@ -1032,7 +1045,11 @@ static inline int is_page_cache_freeable(struct page *page)
 	 */
 /*
  * IAMROOT, 2022.04.30:
- * - isolate할때 private(buffer head를 가진 page)는 buffer를 풀어버렸을것이다.
+ *  isolate page에 대한 refcnt는 다음과 같이 예상한다.
+ *
+ *  page_count(page) = (page isolate ref) + (page cache ref) +
+ *                     (private ref)
+ *                   = thr_nr_pages(page) + 1 + page_has_private(page)
  */
 	int page_cache_pins = thp_nr_pages(page);
 	return page_count(page) - page_has_private(page) == 1 + page_cache_pins;
@@ -1345,18 +1362,29 @@ enum page_references {
 
 /*
  * IAMROOT, 2022.04.23:
- * - PAGEREF_RECLAIM
- *   page가 Mlock등의 이유로 VM_LOCK이 된상태.거나 아래 경우들이 아니면.
  * - PAGEREF_ACTIVATE(실제 참조가 일어난 상황.)
  *   set PG_referenced를 수행한다.
  *   1. 참조 pte가 2개 이상인 상황.
+ *    => 여러군데서 참조하고있으니 reclaim, inactive 안하겠다는것.
  *   2. 참조 pte가 1개이면서 이전에 PG_referenced가 존재했던상황. 
  *   3. 참조 pte가 1개이면서 실행가능 code
+ *
  * - PAGEREF_KEEP(실제 참조가 일어난 상황.)
  *   set PG_referenced를 수행한다.
- *   참조 pte가 1 and 이전에 reference 된적이 없음 and 실행code가 아님.
+ *   참조 pte가 1 and unreference and not exec code.
+ *    => inactive면 inactive로, active면 active로 keep 한다는것.
+ *
  * - PAGEREF_RECLAIM_CLEAN
- *   이전에 reference되있었고 file or clean anon page 이면.
+ *   clear PG_referenced를 수행한다.
+ *   참조 pte가 0, reference, exec file or clean anon page 이면.
+ *   => 참조가 없는 실행 code나 dirty된적이 없는 anon page.
+ *
+ * - PAGEREF_RECLAIM
+ *   1. VM_LOCKED
+ *   2. unreferenced, pte 0, pte == 1 and not exec file
+ *
+ * ---
+ *
  */
 static enum page_references page_check_references(struct page *page,
 						  struct scan_control *sc)
@@ -1436,6 +1464,8 @@ static void page_check_dirty_writeback(struct page *page,
 	 */
 /*
  * IAMROOT, 2022.04.23:
+ * - anon page인지 확인한다. anon page이면 dirty, writeback을 하고 있지
+ *   않을것이므로 false로 처리한다.
  * - !page_is_file_lru에서 대부분의 anon page가 찾아지고, anon page 임에도
  *   page_is_file_lru로 true가 나오는 조건에선(clean anon page)
  *   (PageAnon(page) && !PageSwapBacked(page)) 로 clean anon page임을 확인한다.
@@ -1446,7 +1476,10 @@ static void page_check_dirty_writeback(struct page *page,
 		*writeback = false;
 		return;
 	}
-
+/*
+ * IAMROOT, 2022.05.03:
+ * ------------------------ file page --------------------------------------
+ */
 	/* By default assume that the page flags are accurate */
 	*dirty = PageDirty(page);
 	*writeback = PageWriteback(page);
@@ -1541,6 +1574,11 @@ static unsigned int shrink_page_list(struct list_head *page_list,
 
 	memset(stat, 0, sizeof(*stat));
 	cond_resched();
+/*
+ * IAMROOT, 2022.05.04:
+ * - demote를 skip하겠다는게아니라 demote로 pass하겠다는뜻.
+ * -
+ */
 	do_demote_pass = can_demote(pgdat->node_id, sc);
 
 retry:
@@ -1563,7 +1601,11 @@ retry:
  */
 		if (!trylock_page(page))
 			goto keep;
-
+/*
+ * IAMROOT, 2022.05.03:
+ * -------- 남겨진 page 상태 -------------
+ * locked
+ */
 		VM_BUG_ON_PAGE(PageActive(page), page);
 
 		nr_pages = compound_nr(page);
@@ -1579,8 +1621,13 @@ retry:
 			goto activate_locked;
 
 /*
+ * IAMROOT, 2022.05.03:
+ * -------- 남겨진 page 상태 -------------
+ * locked, evicatable
+ */
+/*
  * IAMROOT, 2022.04.23:
- * - 요청(@sc)에서 unmap page만을 하라고 했는데 page가 mapped상태일 경우
+ * - 요청(@sc)에서 unmap disable 했는데 page가 mapped상태일 경우.
  *   pass한다.
  */
 		if (!sc->may_unmap && page_mapped(page))
@@ -1611,6 +1658,8 @@ retry:
 /*
  * IAMROOT, 2022.04.23:
  * - 이미 이 page를 다른 쪽에서 reclaim하고 있는 상태면 nr_congested로 누적.
+ *   => 너무 빨리 reclaim중이라는것.
+ * - dirty or writeback인데 BDI(backing devcie info)가 congested인 경우.
  */
 		mapping = page_mapping(page);
 		if (((dirty || writeback) && mapping &&
@@ -1686,7 +1735,8 @@ retry:
  *
  * - kswapd에서 실행되었고 해당 page가 이미 reclaim중이며 해당 node가 writeback
  *   상태라면(many pages writeback) nr_immediate를 증가시키고 activate_locked로
- *   이동한다.
+ *   이동한다. 즉 node가 바쁜데 reclaim예약된 page가 한번더 온경우 그냥 activate
+ *   해놓는다는것.
  */
 			if (current_is_kswapd() &&
 			    PageReclaim(page) &&
@@ -1718,6 +1768,13 @@ retry:
 
 			/* Case 3 above */
 			} else {
+/*
+ * IAMROOT, 2022.05.03:
+ * - writeback이 완료될때까지 기다린다. 
+ *   dirty page throttle 조절기능이 없고, 현재 reclaim중일 것으로 예상되는 page
+ *   들인 경우 이 else문으로 진입하게 된다. throttle기능이 없으므로 너무많은
+ *   page가 writeback이 된경우 OOM이 동작할수있어 기다린다는것 같다.
+ */
 				unlock_page(page);
 				wait_on_page_writeback(page);
 				/* then go back and try same page again */
@@ -1726,6 +1783,11 @@ retry:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.05.03:
+ * -------- 남겨진 page 상태 -------------
+ * locked, evicatable, !writeback
+ */
 /*
  * IAMROOT, 2022.04.30:
  * - 참조 ptes개수와 PG_referenced를 조사해서 page를 어떻게 할지 결정한다.
@@ -1764,14 +1826,26 @@ retry:
 		 * Try to allocate it some swap space here.
 		 * Lazyfree page could be freed directly
 		 */
-		if (PageAnon(page) && PageSwapBacked(page)) {
 /*
  * IAMROOT, 2022.04.30:
- * - 
+ * - backing store를 가진 anon page.
+ */
+		if (PageAnon(page) && PageSwapBacked(page)) {
+/*
+ * IAMROOT, 2022.05.04:
+ * - swapcache가 없는것은 swap cache에 기록을 해야한다.
  */
 			if (!PageSwapCache(page)) {
+/*
+ * IAMROOT, 2022.05.04:
+ * - swap요청이 없다. kepp.
+ */
 				if (!(sc->gfp_mask & __GFP_IO))
 					goto keep_locked;
+/*
+ * IAMROOT, 2022.05.04:
+ * - dma pinned는 안한다.
+ */
 				if (page_maybe_dma_pinned(page))
 					goto keep_locked;
 				if (PageTransHuge(page)) {
@@ -1790,12 +1864,12 @@ retry:
 				}
 /*
  * IAMROOT, 2022.04.30:
- * - swap 수행.
+ * - swap cache에 page 정보 추가시도.
  */
 				if (!add_to_swap(page)) {
 /*
  * IAMROOT, 2022.04.30:
- * - swap이 실패한경우.
+ * - swap이 실패한경우. thp가 아니면 scan개수를 경감시키고 activate시킨다.
  */
 					if (!PageTransHuge(page))
 						goto activate_locked_split;
@@ -1821,6 +1895,13 @@ retry:
 				goto keep_locked;
 		}
 
+/*
+ * IAMROOT, 2022.05.03:
+ * -------- 남겨진 page 상태 -------------
+ * 공통 : locked, evicatable, !writeback
+ * anon && swapback : swap cache 기록 성공.
+ * (!swapback || !anon) && thp : split 실패
+ */
 		/*
 		 * THP may get split above, need minus tail pages and update
 		 * nr_pages to avoid accounting tail pages twice.
@@ -1852,7 +1933,13 @@ retry:
 				goto activate_locked;
 			}
 		}
-
+/*
+ * IAMROOT, 2022.05.04:
+ * -------- 남겨진 page 상태 -------------
+ * 공통 : locked, evicatable, !writeback, unmap
+ * anon && swapback : swap cache 기록 성공.
+ * (!swapback || !anon) && thp : split 실패
+ */
 /*
  * IAMROOT, 2022.04.30:
  * - 여기부턴 unmap file, swap요청 성공한 anon page(clean anon은 당연히 swap안함)만
@@ -1871,8 +1958,42 @@ retry:
 			 */
 /*
  * IAMROOT, 2022.04.30:
- * - kswpad요청이 아니고, page가 reclaim중이지 않으며 node가 recalim이유로 busy가
- *   아니면 recalim을 set하고 activation한다.
+ * dirty page여도 최대한 write를 다음에 미루기 위한 조건 검사를 한다.
+ * file에 대해서는 kswapd가 reclaim중 writeback을 할 수 있는 상태일때
+ * 2번이상 reclaim인 page에 대해서만 writebakc을 수행한다.
+ *
+ * - page_is_file_lru
+ *   clean anon page or file page인지를 먼저 확인한다. 
+ *
+ * - !current_is_kswapd()
+ *   kswapd만 writeback시에 stackoverflow risk를 피할수있다. 즉 kswapd만
+ *   writebac을 수행하며 reclaimer인경우 PageReclaim만 set하고
+ *   activate시켜놓는다.
+ *
+ * - !PageReclaim(page)
+ *   lru를 두번 순회할때까진 기다린다는것. PageReclaim을 set하고 다음 루틴에서도
+ *   dirty이면 page write를 수행하겠다는것이다.
+ *
+ * - !test_bit(PGDAT_DIRTY, &pgdat->flags)
+ *   kswapd가 reclaim중에 writeback을 할수있는 상태에 대한 확인. write할게
+ *   많거나 하는 등일때 한번에 수행한다.
+ *
+ * ---
+ *  reclaim중 dirty page write를 미루는 여러 이유
+ *
+ * 1. write를 한번 미뤄본다.
+ * write 할 page가 메모리 너무 여기저기(inode, bdi등의 차이점에 따른)에
+ * 분포하고 있을 경우 write가 엄청나게 오래걸리고 이는 reclaim완료가 늦는다는
+ * 것이기 때문이다.
+ *
+ * 2. back store가 다른 page를 write하고 있을 수 있다.
+ * reclaimer에서의 write요청이 다른 page write를(flushers) 중단하고 reclaim한
+ * page를 먼저 write 시킬수있다. 그런데 만약 reclaim page가 single order page만
+ * 여러개있으면 엄청 오래걸릴수잇을것이다. (reclaim때문에 다른 write가 취소되는
+ * 비용 + single order를 여기저기 wrtie하는 비용) 이 경우 reclaim을 한번
+ * 지연 시키고 다른 clean page를 찾는게 낫다.
+ *
+ * 3. kswapd가 writeback의 stackoverflow 회피 기능이 있다.
  */
 			if (page_is_file_lru(page) &&
 			    (!current_is_kswapd() || !PageReclaim(page) ||
@@ -1891,6 +2012,10 @@ retry:
 
 			if (references == PAGEREF_RECLAIM_CLEAN)
 				goto keep_locked;
+/*
+ * IAMROOT, 2022.05.04:
+ * - fs가 아니거나 위에서 write 요청을 안했다면 keep
+ */
 			if (!may_enter_fs)
 				goto keep_locked;
 			if (!sc->may_writepage)
@@ -1904,7 +2029,7 @@ retry:
 			try_to_unmap_flush_dirty();
 /*
  * IAMROOT, 2022.04.30:
- * - dirty page를 disk에 기록한다.
+ * - dirty page를 back store(disk)에 기록한다.
  */
 			switch (pageout(page, mapping)) {
 			case PAGE_KEEP:
@@ -1938,7 +2063,6 @@ retry:
 				; /* try to free the page below */
 			}
 		}
-
 		/*
 		 * If the page has buffers, try to free the buffer mappings
 		 * associated with this page. If we succeed we try to free
@@ -1960,6 +2084,7 @@ retry:
 		 * process address space (page_count == 1) it can be freed.
 		 * Otherwise, leave the page on the LRU so it is swappable.
 		 */
+
 		if (page_has_private(page)) {
 			if (!try_to_release_page(page, sc->gfp_mask))
 				goto activate_locked;
@@ -1984,7 +2109,6 @@ retry:
 				}
 			}
 		}
-
 /*
  * IAMROOT, 2022.04.30:
  * - 여기까지 왔으면 clean page들만이 존재.
@@ -2064,6 +2188,10 @@ keep:
 	/* 'page_list' is always empty here */
 
 	/* Migrate pages selected for demotion */
+/*
+ * IAMROOT, 2022.05.04:
+ * - demote page들은 demote next node에서 migrate 한다.
+ */
 	nr_reclaimed += demote_page_list(&demote_pages, pgdat);
 	/* Pages that could not be demoted are still in @demote_pages */
 	if (!list_empty(&demote_pages)) {
@@ -3162,7 +3290,7 @@ static void get_scan_count(struct lruvec *lruvec, struct scan_control *sc,
  * swappiness가 100인 경우, annon 및 file의 IO 비용은 동일합니다.*
  *
  * - 이전에 refault activate 및 pageout을 했던 file or anon 의 cost 비율을
- *   반영한다. (lru_note_cost())
+ *   반영한다. (lru_note_cost()). cost가 높은쪽이 비율이 적게 잡힌다.
  *   만약 file cost가 높다면 anon쪽으로 비율이 많이 잡힐것이다.
  * ex) anon_cost = 10, file_cost = 20, swappiness = 100
  * ap = (100 * 31) / 11 = 약 300

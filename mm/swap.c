@@ -315,7 +315,7 @@ void rotate_reclaimable_page(struct page *page)
  *  2. reclaim중 pageout되는 page가 많다.
  *  => 햐당 lru에 disk에 써진 page가 많다 -> 다른 lru도 시도를 해보겠다. 
  *
- *  이게 없으면 특정 lru에 대해서만 reclaim이 일어나 death spiral이 이럴날수있다.
+ *  이게 없으면 특정 lru에 대해서만 reclaim이 일어나 death spiral이 일어날수있다.
  */
 void lru_note_cost(struct lruvec *lruvec, bool file, unsigned int nr_pages)
 {
