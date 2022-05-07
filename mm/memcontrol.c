@@ -1284,6 +1284,10 @@ static void invalidate_reclaim_iterators(struct mem_cgroup *dead_memcg)
  *
  * This function must not be called for the root memory cgroup.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @memcg를 root로 tree구조로 iterate하며 @fn을 실행한다.
+ */
 int mem_cgroup_scan_tasks(struct mem_cgroup *memcg,
 			  int (*fn)(struct task_struct *, void *), void *arg)
 {

@@ -143,6 +143,10 @@ bool freeze_task(struct task_struct *p)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @p가 frozen 상태이면 wakeup.
+ */
 void __thaw_task(struct task_struct *p)
 {
 	unsigned long flags;

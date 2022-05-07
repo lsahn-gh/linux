@@ -539,6 +539,10 @@ struct mm_struct {
 		 * @mm_count (which may then free the &struct mm_struct if
 		 * @mm_count also drops to 0).
 		 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - mm을 사용하고있는 process나 thread 수.
+ */
 		atomic_t mm_users;
 
 		/**

@@ -279,6 +279,11 @@ void pm_restrict_gfp_mask(void)
 	gfp_allowed_mask &= ~(__GFP_IO | __GFP_FS);
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 절전모드면 gfp_allowed_mask에서 __GFP_IO, __GFP_FS가 제한된다.
+ *   즉 reclaim에 대해서 disk 이용 가능 여부를 확인한다.
+ */
 bool pm_suspended_storage(void)
 {
 	if ((gfp_allowed_mask & (__GFP_IO | __GFP_FS)) == (__GFP_IO | __GFP_FS))
@@ -850,6 +855,10 @@ static inline unsigned int order_to_pindex(int migratetype, int order)
 	return (MIGRATE_PCPTYPES * base) + migratetype;
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - pindex = order * MIGRATE_PCPTYPES + migratetype
+ */
 static inline int pindex_to_order(unsigned int pindex)
 {
 	int order = pindex / MIGRATE_PCPTYPES;
@@ -1461,6 +1470,10 @@ static const char *page_bad_reason(struct page *page, unsigned long flags)
 	return bad_reason;
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - bad page인지 확인.
+ */
 static void check_free_page_bad(struct page *page)
 {
 	bad_page(page,
@@ -1685,12 +1698,20 @@ static bool free_pcp_prepare(struct page *page, unsigned int order)
 		return free_pages_prepare(page, order, false, FPI_NONE);
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - bad page인지 확인.
+ */
 static bool bulkfree_pcp_prepare(struct page *page)
 {
 	return check_free_page(page);
 }
 #endif /* CONFIG_DEBUG_VM */
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @page의 buddy page를 prefetch한다.
+ */
 static inline void prefetch_buddy(struct page *page)
 {
 	unsigned long pfn = page_to_pfn(page);
@@ -1710,6 +1731,10 @@ static inline void prefetch_buddy(struct page *page)
  *
  * And clear the zone's pages_scanned counter, to hold off the "all pages are
  * pinned" detection logic.
+ */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @zone에 따라 pcp가 있는 cpu들의 pcp를 @count만큼 buddy로 보낸다.
  */
 static void free_pcppages_bulk(struct zone *zone, int count,
 					struct per_cpu_pages *pcp)
@@ -1738,6 +1763,10 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 		 * off fuller lists instead of spinning excessively around empty
 		 * lists
 		 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 비어있지 않은 pcp list를 찾는다.
+ */
 		do {
 			batch_free++;
 			if (++pindex == NR_PCP_LISTS)
@@ -1758,6 +1787,10 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 			nr_freed += 1 << order;
 			count -= 1 << order;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - bad page인지 확인.
+ */
 			if (bulkfree_pcp_prepare(page))
 				continue;
 
@@ -1765,6 +1798,10 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 			page->index <<= NR_PCP_ORDER_WIDTH;
 			page->index |= order;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - pcp에서 빼서 index를 encode후 local list에 넣어놓는다.
+ */
 			list_add_tail(&page->lru, &head);
 
 			/*
@@ -1776,6 +1813,10 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 			 * avoid excessive prefetching due to large count, only
 			 * prefetch buddy for the first pcp->batch nr of pages.
 			 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - buddy를 prefetch_nr만큼 prefetch한다.
+ */
 			if (prefetch_nr) {
 				prefetch_buddy(page);
 				prefetch_nr--;
@@ -1795,6 +1836,10 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 	 * Use safe version since after __free_one_page(),
 	 * page->lru.next will not point to original list.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - local list에 모아놓은 page를 buddy로 돌려보낸다.
+ */
 	list_for_each_entry_safe(page, tmp, &head, lru) {
 		int mt = get_pcppage_migratetype(page);
 
@@ -3516,6 +3561,11 @@ out_unlock:
  * If @force is true, try to unreserve a pageblock even though highatomic
  * pageblock is exhausted.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - force == true일때는 1block이상, 아니면 2block이상 highatomic을 가진 zone
+ *   을 찾아 존재하면 @ac type으로 변경후 가져온다.
+ */
 static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 						bool force)
 {
@@ -3533,6 +3583,10 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 		 * Preserve at least one pageblock unless memory pressure
 		 * is really high.
 		 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 1block 초과로 reseve된 highatomic을 찾는다.
+ */
 		if (!force && zone->nr_reserved_highatomic <=
 					pageblock_nr_pages)
 			continue;
@@ -3552,6 +3606,10 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 			 * from highatomic to ac->migratetype. So we should
 			 * adjust the count once.
 			 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - fallback으로 가져올수도있어서 가져와고서도 한번 확인해본다.
+ */
 			if (is_migrate_highatomic_page(page)) {
 				/*
 				 * It should never happen but changes to
@@ -3574,6 +3632,10 @@ static bool unreserve_highatomic_pageblock(const struct alloc_context *ac,
 			 * of pageblocks that cannot be completely freed
 			 * may increase.
 			 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 요청 type으로 변경.
+ */
 			set_pageblock_migratetype(page, ac->migratetype);
 			ret = move_freepages_block(zone, page, ac->migratetype,
 									NULL);
@@ -3872,7 +3934,7 @@ void drain_zone_pages(struct zone *zone, struct per_cpu_pages *pcp)
  */
 /*
  * IAMROOT, 2022.04.09:
- * - pcplist를 drain시킨다.
+ * - pcplist를 bulk drain시킨다.(pcp를 buddy로 돌려보낸다.)
  */
 static void drain_pages_zone(unsigned int cpu, struct zone *zone)
 {
@@ -3957,6 +4019,12 @@ static void drain_local_pages_wq(struct work_struct *work)
  * that need the guarantee that every CPU has drained can disable the
  * optimizing racy check.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * @force_all_cpus true면 무조건 drain 시도.
+ * @zone NULL이면 모든 zone, 아니면 @zone에 대해서 수행한다.
+ * - 모든 cpu에 대하여 @zone 및 @force_all_cpus에 따라 pcp를 bulk drain한다.
+ */
 static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 {
 	int cpu;
@@ -3991,6 +4059,19 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 	 * cpu to drain that CPU pcps and on_each_cpu_mask
 	 * disables preemption as part of its processing
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - online cpu만큼 iterate를 하며 pcp에 page가 있는 cpu를 cpus_with_pcps cpumask에
+ *   기록한다.
+ * 1. force_all_cpus = true
+ *  모든 cpu에 대해서 set.
+ *
+ * 2. zone != NULL
+ *  해당 zone에 대한 pcp를 가진 모든 cpu.
+ *
+ * 3. zone == NULL
+ *  cpu마다 모든 zone의 범위 에대해서 pcp가 있는 cpu.
+ */
 	for_each_online_cpu(cpu) {
 		struct per_cpu_pages *pcp;
 		struct zone *z;
@@ -4022,6 +4103,11 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
 			cpumask_clear_cpu(cpu, &cpus_with_pcps);
 	}
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - cpus_with_pcps에 기록된 cpu를 iterate하며 worker thread를 동작시켜
+ *   pcp를 drain한다.
+ */
 	for_each_cpu(cpu, &cpus_with_pcps) {
 		struct pcpu_drain *drain = per_cpu_ptr(&pcpu_drain, cpu);
 
@@ -4041,6 +4127,10 @@ static void __drain_all_pages(struct zone *zone, bool force_all_cpus)
  * When zone parameter is non-NULL, spill just the single zone's pages.
  *
  * Note that this can be extremely slow as the draining happens in a workqueue.
+ */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @zone에 대해여 pcp drain을 시도한다.
  */
 void drain_all_pages(struct zone *zone)
 {
@@ -5432,6 +5522,10 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 * Acquire the oom lock.  If that fails, somebody else is
 	 * making progress for us.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - cpu들이 동시에 oom처리하고잇는 경우를 확인한다.
+ */
 	if (!mutex_trylock(&oom_lock)) {
 		*did_some_progress = 1;
 		schedule_timeout_uninterruptible(1);
@@ -5445,6 +5539,10 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 * attempt shall not depend on __GFP_DIRECT_RECLAIM && !__GFP_NORETRY
 	 * allocation which will never fail due to oom_lock already held.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - high watermark를 기준으로 할당을 시도한다.
+ */
 	page = get_page_from_freelist((gfp_mask | __GFP_HARDWALL) &
 				      ~__GFP_DIRECT_RECLAIM, order,
 				      ALLOC_WMARK_HIGH|ALLOC_CPUSET, ac);
@@ -5452,6 +5550,10 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 		goto out;
 
 	/* Coredumps can quickly deplete all memory reserves */
+/*
+ * IAMROOT, 2022.05.07:
+ * - core dump 중이면 out. 현재 task가 죽고 있다는것이다.
+ */
 	if (current->flags & PF_DUMPCORE)
 		goto out;
 	/* The OOM killer will not help higher order allocs */
@@ -5465,9 +5567,17 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 *
 	 * The OOM killer may not free memory on a specific node.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 현재 노드만 특정을 하거나 retry may fail이 존재하면 out.
+ */
 	if (gfp_mask & (__GFP_RETRY_MAYFAIL | __GFP_THISNODE))
 		goto out;
 	/* The OOM killer does not needlessly kill tasks for lowmem */
+/*
+ * IAMROOT, 2022.05.07:
+ * - DMA 요청이면 out.
+ */
 	if (ac->highest_zoneidx < ZONE_NORMAL)
 		goto out;
 	if (pm_suspended_storage())
@@ -5787,6 +5897,11 @@ EXPORT_SYMBOL_GPL(fs_reclaim_release);
 #endif
 
 /* Perform direct synchronous page reclaim */
+/*
+ * IAMROOT, 2022.05.07:
+ * @return reclaim 성공 page 개수
+ * - reclaim을 수행한다.
+ */
 static unsigned long
 __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 					const struct alloc_context *ac)
@@ -5819,6 +5934,11 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 }
 
 /* The really slow allocator path where we enter direct reclaim */
+/*
+ * IAMROOT, 2022.05.07:
+ * - reclaim을 실행한다. reclaim후에 buddy에서 할당이 실패했다면
+ *   1개 초과를 가진 highatomic에 대한 unreserve시도 및 pcp drain까지 수행한다.
+ */
 static inline struct page *
 __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 		unsigned int alloc_flags, const struct alloc_context *ac,
@@ -5831,6 +5951,10 @@ __alloc_pages_direct_reclaim(gfp_t gfp_mask, unsigned int order,
 	if (unlikely(!(*did_some_progress)))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 회수를 했으니 buddy에서 가져와본다.
+ */
 retry:
 	page = get_page_from_freelist(gfp_mask, order, alloc_flags, ac);
 
@@ -5839,8 +5963,16 @@ retry:
 	 * pages are pinned on the per-cpu lists or in high alloc reserves.
 	 * Shrink them and try again
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - reclaim했는데도 페이지 할당이 실패한경우 pcpu cache까지 한번 지워보고 시도한다.
+ */
 	if (!page && !drained) {
 		unreserve_highatomic_pageblock(ac, false);
+/*
+ * IAMROOT, 2022.05.07:
+ * - 모든 zone에 대해서 pcp drain을 시도한다.
+ */
 		drain_all_pages(NULL);
 		drained = true;
 		goto retry;
@@ -6036,6 +6168,14 @@ bool gfp_pfmemalloc_allowed(gfp_t gfp_mask)
  *
  * Returns true if a retry is viable or false to enter the oom path.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * @did_some_progress 이전 reclaim 성공여부
+ * - no_progress_loops를 갱신한다. 만약 한계를 초과하면 마지막 highatomic까지
+ *   사용한다.
+ *   그게 아니라면 min watermark와 비교를 하여 reclaim 가능여부를 결정한다.
+ *   (미래 회수 가능한 memory까지 고려)
+ */
 static inline bool
 should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 		     struct alloc_context *ac, int alloc_flags,
@@ -6050,6 +6190,11 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 * their order will become available due to high fragmentation so
 	 * always increment the no progress counter for them
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 직전 reclaim에서 성공을 했고 order가 costly_order이내라면 no_progress_loops를
+ *   초기화한다.
+ */
 	if (did_some_progress && order <= PAGE_ALLOC_COSTLY_ORDER)
 		*no_progress_loops = 0;
 	else
@@ -6059,6 +6204,10 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 * Make sure we converge to OOM if we cannot make any progress
 	 * several times in the row.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - no_progress_loops가 한계를 초과하면 마지막 남은 highatomic까지 사용해버린다.
+ */
 	if (*no_progress_loops > MAX_RECLAIM_RETRIES) {
 		/* Before OOM, exhaust highatomic_reserve */
 		return unreserve_highatomic_pageblock(ac, true);
@@ -6084,6 +6233,10 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 		 * Would the allocation succeed if we reclaimed all
 		 * reclaimable pages?
 		 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - min watermark에 대해서 available과 비교한다.
+ */
 		wmark = __zone_watermark_ok(zone, order, min_wmark,
 				ac->highest_zoneidx, alloc_flags, available);
 		trace_reclaim_retry_zone(z, order, reclaimable,
@@ -6095,6 +6248,11 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 			 * an IO to complete to slow down the reclaim and
 			 * prevent from pre mature OOM
 			 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 이전 reclaim이 실패를 했어도 write중인 page가 reclaimable의 2배이상이면
+ *   0.1 sec만 쉬고 true return.
+ */
 			if (!did_some_progress) {
 				unsigned long write_pending;
 
@@ -6120,6 +6278,10 @@ out:
 	 * looping without ever sleeping. Therefore we have to do a short sleep
 	 * here rather than calling cond_resched().
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - current가 worker thread인 경우 interrupt무관 1 sec sleep
+ */
 	if (current->flags & PF_WQ_WORKER)
 		schedule_timeout_uninterruptible(1);
 	else
@@ -6408,9 +6570,16 @@ retry:
 	if (page)
 		goto got_pg;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 여기까지 왔다는건. reclaim을 시도해도 실패하고, highatomic 여유분 사용 및
+ *   pcp drain을 했는데도 실패했다는것이다.
+ */
+
 	/* Try direct compaction and then allocating */
 /*
  * IAMROOT, 2022.04.09:
+ * - compact를 한번 실행해본다.
  * - retry등을 할때는 compact_priority에 따라서 수행한다.
  */
 	page = __alloc_pages_direct_compact(gfp_mask, order, alloc_flags, ac,
@@ -6418,6 +6587,10 @@ retry:
 	if (page)
 		goto got_pg;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - retry 금지를 확인한다.
+ */
 	/* Do not loop if specifically requested */
 	if (gfp_mask & __GFP_NORETRY)
 		goto nopage;
@@ -6426,9 +6599,17 @@ retry:
 	 * Do not retry costly high order allocations unless they are
 	 * __GFP_RETRY_MAYFAIL
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - costly_order같은 경우엔 retry가 있어도 실패로 간주한다.
+ */
 	if (costly_order && !(gfp_mask & __GFP_RETRY_MAYFAIL))
 		goto nopage;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - no_progress_loops를 갱신하고 reclaim 재시도 여부를 확인한다.
+ */
 	if (should_reclaim_retry(gfp_mask, order, ac, alloc_flags,
 				 did_some_progress > 0, &no_progress_loops))
 		goto retry;
@@ -6439,13 +6620,20 @@ retry:
 	 * implementation of the compaction depends on the sufficient amount
 	 * of free memory (see __compaction_suitable)
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - compact retry 여부 확인을 하며 retries, priority--를 갱신한다.
+ */
 	if (did_some_progress > 0 &&
 			should_compact_retry(ac, order, alloc_flags,
 				compact_result, &compact_priority,
 				&compaction_retries))
 		goto retry;
 
-
+/*
+ * IAMROOT, 2022.05.07:
+ * - 현재 task에 사용 가능 noide가 변경되었는지 확인한다. 변경되었으면 재시도한다.
+ */
 	/* Deal with possible cpuset update races before we start OOM killing */
 	if (check_retry_cpuset(cpuset_mems_cookie, ac))
 		goto retry_cpuset;

@@ -31,6 +31,10 @@ extern struct mm_struct *mm_alloc(void);
  * See also <Documentation/vm/active_mm.rst> for an in-depth explanation
  * of &mm_struct.mm_count vs &mm_struct.mm_users.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @mm에 대한 refcnt(pin)를 증가시킨다.
+ */
 static inline void mmgrab(struct mm_struct *mm)
 {
 	atomic_inc(&mm->mm_count);

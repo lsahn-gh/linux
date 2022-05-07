@@ -940,6 +940,10 @@ static unsigned long shrink_slab_memcg(gfp_t gfp_mask, int nid,
  *
  * Returns the number of reclaimed slab objects.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - TODO
+ */
 static unsigned long shrink_slab(gfp_t gfp_mask, int nid,
 				 struct mem_cgroup *memcg,
 				 int priority)
@@ -2641,6 +2645,11 @@ static int current_may_throttle(void)
  * shrink_inactive_list() is a helper for shrink_node().  It returns the number
  * of reclaimed pages
  */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - reclaim을 수행한다.
+ */
 static unsigned long
 shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 		     struct scan_control *sc, enum lru_list lru)
@@ -2728,6 +2737,18 @@ shrink_inactive_list(unsigned long nr_to_scan, struct lruvec *lruvec,
 	 * the flushers simply cannot keep up with the allocation
 	 * rate. Nudge the flusher threads in case they are asleep.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - papago
+ *   IO를 위해 대기열에 있지 않은 더러운 페이지가 검색되면 플러셔가 작업을 수행하지
+ *   않고 있음을 의미합니다. 메모리 압력이 더티 한계를 위반하고 더티 데이터가
+ *   만료되기 전에 더티 페이지를 LRU의 끝으로 밀어넣을 때 발생할 수 있습니다.
+ *   또한 쓰기가 아닌 모든 클린 캐시를 회수하는 메모리 압력으로 인해 dirty page의
+ *   비율이 증가할 때 발생할 수 있습니다. 그리고 어떤 경우에는, 플러셔가 단순히
+ *   할당 비율을 따라가지 못한다. 잠들어 있을 때를 대비해서 밀어라
+ * - unqueue
+ *   dirty && !writeback.
+ */
 	if (stat.nr_unqueued_dirty == nr_taken)
 		wakeup_flusher_threads(WB_REASON_VMSCAN);
 
@@ -3001,6 +3022,26 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
  *    1TB     101        10GB
  *   10TB     320        32GB
  */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - papago
+ * inactive anon list는 VM이 너무 많은 작업을 수행할 필요가 없을 정도로 작아야
+ * 합니다.
+ *
+ * 비활성 파일 목록은 대부분의 메모리를 검사 방지 활성 목록에 설정된 workingsets에
+ * 남겨둘 수 있을 만큼 작아야 하지만, 전체 읽기 미리 실행된 창이 스레싱되지 않도록
+ * 충분히 커야 합니다.
+ *
+ * 또한 두 비활성 목록은 각 비활성 페이지가 회수되기 전에 다시 참조될 수 있을
+ * 정도로 충분히 커야 합니다.
+ * 
+ * 이 작업이 실패하여 재장애가 관찰되면 비활성 목록이 증가합니다.
+ *
+ * inactive_ratio는 이 LRU의 ACTIVE 페이지와 ICTIVE 페이지의 목표 비율이며,
+ * 페이지아웃 코드에 의해 유지된다. 3의 inactive_ratio는 3을 의미한다.
+ * 페이지의 1 또는 25%가 비활성 목록에 보관됩니다.
+ */
 static bool inactive_is_low(struct lruvec *lruvec, enum lru_list inactive_lru)
 {
 	enum lru_list active_lru = inactive_lru + LRU_ACTIVE;
@@ -3012,11 +3053,27 @@ static bool inactive_is_low(struct lruvec *lruvec, enum lru_list inactive_lru)
 	active = lruvec_page_state(lruvec, NR_LRU_BASE + active_lru);
 
 	gb = (inactive + active) >> (30 - PAGE_SHIFT);
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - int_sqrt(10 * gb) = root(10 * gb)
+ */
 	if (gb)
 		inactive_ratio = int_sqrt(10 * gb);
 	else
 		inactive_ratio = 1;
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 1GB 미만으로 차이나면 inactive < active
+ * - 1GB 이상 차이나면 inactive * root(10 * gb) < active
+ *   ex) gb 
+ *       1    inactive : active = 1 : 3
+ *       2    inactive : active = 1 : 4
+ *       3    inactive : active = 1 : 5
+ *       10   inactive : active = 1 : 10
+ *       16   inactive : active = 1 : 12
+ */
 	return inactive * inactive_ratio < active;
 }
 
@@ -3325,6 +3382,11 @@ out:
  * Anonymous LRU management is a waste if there is
  * ultimately no way to reclaim the memory.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @pgdat에 대해서 anon page에 대해 page가 swap할 공간이 있거나
+ *   demote가 가능한지 알아온다.
+ */
 static bool can_age_anon_pages(struct pglist_data *pgdat,
 			       struct scan_control *sc)
 {
@@ -3336,6 +3398,10 @@ static bool can_age_anon_pages(struct pglist_data *pgdat,
 	return can_demote(pgdat->node_id, sc);
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @lruvec에 대해서 reclaim을 수행한다.
+ */
 static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 {
 	unsigned long nr[NR_LRU_LISTS];
@@ -3450,6 +3516,12 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 		 * Recalculate the other LRU scan count based on its original
 		 * scan target and the percentage scanning already complete
 		 */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - 위에서 정해진 lru의 반대(file <=> anon)의 nr을 산정한다. 최소 lru를 기준으로
+ *   반대측의 lru와 비율을 조정한다.
+ */
 		lru = (lru == LRU_FILE) ? LRU_BASE : LRU_FILE;
 		nr_scanned = targets[lru] - nr[lru];
 		nr[lru] = targets[lru] * (100 - percentage) / 100;
@@ -3469,6 +3541,12 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	 * Even if we did not try to evict anon pages at all, we want to
 	 * rebalance the anon lru active/inactive ratio.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - anon page에 대해서 inactive가 active에 비해 비율이 적으면 deactive 시도를한다.
+ *   SWAP_CLUSTER_MAX개씩만 reclaim을 하기때문에 anon page에 대해서만 조금더
+ *   신경 쓰는 개념.
+ */
 	if (can_age_anon_pages(lruvec_pgdat(lruvec), sc) &&
 	    inactive_is_low(lruvec, LRU_INACTIVE_ANON))
 		shrink_active_list(SWAP_CLUSTER_MAX, lruvec,
@@ -3476,6 +3554,13 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 }
 
 /* Use reclaim/compaction for costly allocs or under memory pressure */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - @sc의 order와 priority에 대해서 reclaim중 compaction을 할지에 대해 정한다.
+ * - compaction은 order가 1이상이며 order가 costly_order보다 크거나 priority가 낮을때
+ *   (4번째 시도 이상) true로 return한다.
+ */
 static bool in_reclaim_compaction(struct scan_control *sc)
 {
 	if (IS_ENABLED(CONFIG_COMPACTION) && sc->order &&
@@ -3492,6 +3577,11 @@ static bool in_reclaim_compaction(struct scan_control *sc)
  * true if more pages should be reclaimed such that when the page allocator
  * calls try_to_compact_pages() that it will have enough free pages to succeed.
  * It will give up earlier than that if there is difficulty reclaiming pages.
+ */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @sc에 대해서 reclaim을 더 해야되는건지를 결정한다.
+ *   (모든 zone에 대해서 compaction을 못하는 상황에서만 reclaim 수행.)
  */
 static inline bool should_continue_reclaim(struct pglist_data *pgdat,
 					unsigned long nr_reclaimed,
@@ -3515,6 +3605,10 @@ static inline bool should_continue_reclaim(struct pglist_data *pgdat,
 	 * scan, but that approximation was wrong, and there were corner cases
 	 * where always a non-zero amount of pages were scanned.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 직전 reclaim에서 성공한게 하나도 없으면 false
+ */
 	if (!nr_reclaimed)
 		return false;
 
@@ -3534,6 +3628,10 @@ static inline bool should_continue_reclaim(struct pglist_data *pgdat,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 모든 zone이 COMPACT_SKIPPED이면 진입.
+ */
 	/*
 	 * If we have not reclaimed enough pages for compaction and the
 	 * inactive lists are large enough, continue reclaiming
@@ -3543,9 +3641,17 @@ static inline bool should_continue_reclaim(struct pglist_data *pgdat,
 	if (can_reclaim_anon_pages(NULL, pgdat->node_id, sc))
 		inactive_lru_pages += node_page_state(pgdat, NR_INACTIVE_ANON);
 
+/*
+ * IAMROOT, 2022.05.07:
+ * inactive file + swap가능한 anon > pages_for_compaction
+ */
 	return inactive_lru_pages > pages_for_compaction;
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @sc->target_mem_cgroup의 @pgdat의 memcg들에 대해 reclaim을 수행한다.
+ */
 static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 {
 	struct mem_cgroup *target_memcg = sc->target_mem_cgroup;
@@ -3603,6 +3709,10 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 	} while ((memcg = mem_cgroup_iter(target_memcg, memcg, NULL)));
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @pgdat에 대해 reclaim을 수행한다.
+ */
 static void shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 {
 	struct reclaim_state *reclaim_state = current->reclaim_state;
@@ -3642,6 +3752,14 @@ again:
 
 		refaults = lruvec_page_state(target_lruvec,
 				WORKINGSET_ACTIVATE_ANON);
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - refault != target refaults(snpashot_refaults() 참고)
+ *   새로운 workingset activate가 있는경우 deactive(밀어내기)를 하겠다는것.
+ * - incative_is_low
+ *   inactive가 너무 적은경우 deactive를 하겠다는것.
+ */
 		if (refaults != target_lruvec->refaults[0] ||
 			inactive_is_low(target_lruvec, LRU_INACTIVE_ANON))
 			sc->may_deactivate |= DEACTIVATE_ANON;
@@ -3746,6 +3864,23 @@ again:
 		 * immediate reclaim and stall if any are encountered
 		 * in the nr_immediate check below.
 		 */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - papgo
+ *   reclaim가 writeback에서 dirty page를 isolate하는 경우, 오래 지속되는 페이지
+ *   할당률이 페이지 laundering 속도를 초과하고 있음을 의미합니다. 영역 전체에 페이지
+ *   배포로 인해 조정 프로세스에서 전역 제한이 효과적이지 않거나 느린 backing device
+ *   가 많이 사용되고 있습니다. 유일한 옵션은 회수 컨텍스트에서 조정되는 것인데,
+ *   더티 프로세스가 balance_dirty_pages()가 관리하는 것과 동일한 방식으로
+ *   조정된다는 보장이 없기 때문에 이상적이지 않습니다.
+ *
+ *  노드에 PGDAT_WRITHBACK 플래그가 지정되면 kswapd는 즉시 회수 플래그가 지정된
+ *  페이지 아래의 페이지 수를 세고 아래의 nr_immediate 검사에서 해당 페이지 수가
+ *  발견되면 중지합니다.
+ *
+ * - backing device속도가 느리거나 요청등이 많은 이유로 node가 busy인것을 표시한다.
+ */
 		if (sc->nr.writeback && sc->nr.writeback == sc->nr.taken)
 			set_bit(PGDAT_WRITEBACK, &pgdat->flags);
 
@@ -3759,6 +3894,10 @@ again:
 		 * implies that pages are cycling through the LRU
 		 * faster than they are written so also forcibly stall.
 		 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - rotate이후에도 node가 너무 바쁘다. 현재 task(kswpad)를 0.1 sec sleep
+ */
 		if (sc->nr.immediate)
 			congestion_wait(BLK_RW_ASYNC, HZ/10);
 	}
@@ -3771,6 +3910,12 @@ again:
 	 * Legacy memcg will stall in page writeback so avoid forcibly
 	 * stalling in wait_iff_congested().
 	 */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - reclaimer가 kswpad이거나 writeback_throttling_sane을 지원하는 reclaimer일때
+ *   congested상태(rotate중인 상황)이면 lruvec에다가 LRUVEC_CONGESTED를 set한다.
+ */
 	if ((current_is_kswapd() ||
 	     (cgroup_reclaim(sc) && writeback_throttling_sane(sc))) &&
 	    sc->nr.dirty && sc->nr.dirty == sc->nr.congested)
@@ -3782,6 +3927,12 @@ again:
 	 * starts encountering unqueued dirty pages or cycling through
 	 * the LRU too quickly.
 	 */
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - direct reclaim이고, current_may_throttle상태, 절전모드가 아니고, lruvec이
+ *   congested상태라면 0.1초를 쉰다.
+ */
 	if (!current_is_kswapd() && current_may_throttle() &&
 	    !sc->hibernation_mode &&
 	    test_bit(LRUVEC_CONGESTED, &target_lruvec->flags))
@@ -3871,6 +4022,10 @@ static inline bool compaction_ready(struct zone *zone, struct scan_control *sc)
  *
  * If a zone is deemed to be full of pinned pages then just give it a light
  * scan then give up on it.
+ */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @zonelist에 대해서 reclaim을 수행한다.
  */
 static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 {
@@ -3978,6 +4133,11 @@ static void shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 	sc->gfp_mask = orig_mask;
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @target_memcg, @pgdat에 대한 lruvec에 refault 통계값을 적용한다.
+ *   refault가 변경됬는지에 대한 여부를 검사하는데 사용한다.
+ */
 static void snapshot_refaults(struct mem_cgroup *target_memcg, pg_data_t *pgdat)
 {
 	struct lruvec *target_lruvec;
@@ -4005,6 +4165,10 @@ static void snapshot_refaults(struct mem_cgroup *target_memcg, pg_data_t *pgdat)
  *
  * returns:	0, if no pages reclaimed
  * 		else, the number of pages reclaimed
+ */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @zonelist에 대한 reclaim을 수행한다.
  */
 static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 					  struct scan_control *sc)
@@ -4083,6 +4247,15 @@ retry:
 	 * entire cgroup subtree up front, we assume the estimates are
 	 * good, and retry with forcible deactivation if that fails.
 	 */
+/*
+ * IAMROOT, 2022.05.07:
+ * - papgo
+ *   노드의 메모리 구성을 기반으로 inactive:active 비율을 결정하지만 제한적인
+ *   reclaim_idx 또는 memory.low cgroup 설정은 많은 양의 메모리를 회수할 수 없게
+ *   할 수 있습니다. 둘 다 매우 흔하지 않기 때문에 전체 cgroup 하위 트리에 대해
+ *   비용이 많이 드는 적격성 계산을 수행하는 대신 추정치가 양호하다고 가정하고
+ *   실패하면 강제 비활성화를 통해 재시도한다.
+ */
 	if (sc->skipped_deactivate) {
 		sc->priority = initial_priority;
 		sc->force_deactivate = 1;
@@ -4330,6 +4503,7 @@ out:
 
 /*
  * IAMROOT, 2022.04.16:
+ * @return reclaim 한 page 개수
  * - direct reclaim을 수행하는데, 만약 memory가 너무 적을 경우 throttle을 수행한다.
  */
 unsigned long try_to_free_pages(struct zonelist *zonelist, int order,

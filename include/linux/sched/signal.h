@@ -218,6 +218,13 @@ struct signal_struct {
 	 * oom
 	 */
 	bool oom_flag_origin;
+/*
+ * IAMROOT, 2022.05.07:
+ * - lagacy 방식으로 -17 ~ 15의 제어로 /proc/${pid}/oom_adj 으로 사용했으며
+ *   현재는 -1000 ~ 1000까지의 숫자로 /proc/${pid}/oom_score_adj으로 사용한다.
+ *   (oom_adj_write(), oom_socre_adj_write() 참고)
+ *   lagacy방식으로 사용할경우 현재 score로 변환하여 고쳐주긴한다.
+ */
 	short oom_score_adj;		/* OOM kill score adjustment */
 	short oom_score_adj_min;	/* OOM kill score adjustment min value.
 					 * Only settable by CAP_SYS_RESOURCE. */
@@ -600,6 +607,10 @@ extern void flush_itimer_signals(void);
 #define next_task(p) \
 	list_entry_rcu((p)->tasks.next, struct task_struct, tasks)
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - init_task부터 모든 process를 iterate한다.
+ */
 #define for_each_process(p) \
 	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
 
@@ -615,13 +626,25 @@ extern bool current_is_single_threaded(void);
 #define while_each_thread(g, t) \
 	while ((t = next_thread(t)) != g)
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - signal을 공유하고 있는 list iteration.
+ */
 #define __for_each_thread(signal, t)	\
 	list_for_each_entry_rcu(t, &(signal)->thread_head, thread_node)
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - p(process)에 대한 thread들을 iterate한다.
+ */
 #define for_each_thread(p, t)		\
 	__for_each_thread((p)->signal, t)
 
 /* Careful: this is a double loop, 'break' won't work as expected. */
+/*
+ * IAMROOT, 2022.05.07:
+ * - 모든 process의 모든 thread를 순회한다.
+ */
 #define for_each_process_thread(p, t)	\
 	for_each_process(p) for_each_thread(p, t)
 
