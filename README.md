@@ -227,3 +227,8 @@
 ### 49주차
 - 2022.04.30, Zoom 온라인(7명 참석)
 - alloc_page() 진행중 ... direct-reclaim (Workingset Detection)
+
+### 50주차
+- 2022.05.07, Zoom 온라인(8명 참석)
+- alloc_page() 진행중 ... direct-reclaim (oom)
+
