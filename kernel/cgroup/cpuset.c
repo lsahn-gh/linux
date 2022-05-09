@@ -3643,6 +3643,10 @@ EXPORT_SYMBOL_GPL(cpuset_mem_spread_node);
  * to the other.
  **/
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @tas1의 node가 @task2의 node에 속해있는지 확인한다.
+ */
 int cpuset_mems_allowed_intersects(const struct task_struct *tsk1,
 				   const struct task_struct *tsk2)
 {

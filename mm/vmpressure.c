@@ -328,6 +328,8 @@ static void vmpressure_work_fn(struct work_struct *work)
  * - 누적 scanned, reclaimed 에 따라 vmpressure를 monitoring하고있는 task들한테
  *   signal을 보낸다.
  * - 누적 scanned가 vmpressure_win보다 작다면 누적만 시킨다.
+ * - android등에서 이 기능을 사용한다.(vmpressure, psi)
+ *   app측에서 memory 상태등을 확인해서 안쓰는 app등을 죽이는 용도등
  */
 void vmpressure(gfp_t gfp, struct mem_cgroup *memcg, bool tree,
 		unsigned long scanned, unsigned long reclaimed)

@@ -18,9 +18,25 @@
 /* Policies */
 enum {
 	MPOL_DEFAULT,
+/*
+ * IAMROOT, 2022.05.07:
+ * - 선호 node(반드시는 아님)
+ */
 	MPOL_PREFERRED,
+/*
+ * IAMROOT, 2022.05.07:
+ * - 특정 node에 memory를 할당할수있는.
+ */
 	MPOL_BIND,
+/*
+ * IAMROOT, 2022.05.07:
+ * - 2개 이상의 node에서 교대로 할당.
+ */
 	MPOL_INTERLEAVE,
+/*
+ * IAMROOT, 2022.05.07:
+ * - cpu가 있는 node에서만 할당.
+ */
 	MPOL_LOCAL,
 	MPOL_PREFERRED_MANY,
 	MPOL_MAX,	/* always last member of enum */

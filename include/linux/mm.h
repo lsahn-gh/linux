@@ -2056,6 +2056,10 @@ static inline bool get_user_page_fast_only(unsigned long addr,
 /*
  * per-process(per-mm_struct) statistics.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @member에 대한 실제 사용 phy memory를 구한다.
+ */
 static inline unsigned long get_mm_counter(struct mm_struct *mm, int member)
 {
 	long val = atomic_long_read(&mm->rss_stat.count[member]);
@@ -2109,6 +2113,10 @@ static inline int mm_counter(struct page *page)
 	return mm_counter_file(page);
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - 실제 할당되어 사용되는 page 수를 구한다.
+ */
 static inline unsigned long get_mm_rss(struct mm_struct *mm)
 {
 	return get_mm_counter(mm, MM_FILEPAGES) +

@@ -391,6 +391,10 @@ static inline int bitmap_intersects(const unsigned long *src1,
 		return __bitmap_intersects(src1, src2, nbits);
 }
 
+/*
+ * IAMROOT, 2022.05.07:
+ * - @src1이 @src2에 모두 포함되어있는지 판별한다.
+ */
 static inline int bitmap_subset(const unsigned long *src1,
 			const unsigned long *src2, unsigned int nbits)
 {

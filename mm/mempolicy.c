@@ -2012,6 +2012,10 @@ bool init_nodemask_of_mempolicy(nodemask_t *mask)
  *
  * Takes task_lock(tsk) to prevent freeing of its mempolicy.
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - @task가 MPOL_BIND 일때 @mask node에 속해있는지의 여부를 확인한다.
+ */
 bool mempolicy_in_oom_domain(struct task_struct *tsk,
 					const nodemask_t *mask)
 {
@@ -2022,6 +2026,12 @@ bool mempolicy_in_oom_domain(struct task_struct *tsk,
 		return ret;
 
 	task_lock(tsk);
+
+/*
+ * IAMROOT, 2022.05.07:
+ * - task의 mempolicy를 가져온다. 해당 task가 bind policy라면 mempolicy에 속한 node가
+ *   mask에 포함이 되있는지를 확인한다.
+ */
 	mempolicy = tsk->mempolicy;
 	if (mempolicy && mempolicy->mode == MPOL_BIND)
 		ret = nodes_intersects(mempolicy->nodes, *mask);

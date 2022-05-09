@@ -9,7 +9,7 @@
 
 ## History
 
-- 첫 모임: 2015년 5월 22일 (총인원 약 90여명 - 약 50여명 zoom 접속)
+- 첫 모임: 2021년 5월 22일 (50여명 zoom online 접속)
 
 - [https://band.us/@iamroot18][#band] | iamroot18 밴드
 
@@ -19,7 +19,7 @@
 
 
 ### 0주차
-2021.05.22, Zoom 온라인(5x명 접속 / 총인원 9x명)
+2021.05.22, Zoom 온라인(5x명 접속)
 - Orientation (3시간)
 
 ### 1주차
@@ -218,13 +218,17 @@
 
 ### 47주차
 - 2022.04.16, Zoom 온라인(7명 참석)
-- alloc_page() 진행중 ... direct-reclaim
+- alloc_page() 진행중 ... direct-reclaim (LRU, pagevecs)
 
 ### 48주차
 - 2022.04.23, Zoom 온라인(8명 참석)
-- alloc_page() 진행중 ... direct-reclaim
+- alloc_page() 진행중 ... direct-reclaim (scan & isolation)
 
 ### 49주차
 - 2022.04.30, Zoom 온라인(7명 참석)
-- alloc_page() 진행중 ... direct-reclaim
+- alloc_page() 진행중 ... direct-reclaim (Workingset Detection)
+
+### 50주차
+- 2022.05.07, Zoom 온라인(8명 참석)
+- alloc_page() 진행중 ... direct-reclaim (oom)
 

@@ -205,6 +205,24 @@ struct alloc_context {
  *
  * Assumption: *_mem_map is contiguous at least up to MAX_ORDER
  */
+/*
+ * IAMROOT, 2022.05.07:
+ * - buddy page를 찾는다.
+ * ex) order 0에 대한 pair page
+ *   3 -> 2
+ *   2 -> 3
+ *   1 -> 0
+ *   0 -> 1
+ * ex) order 1에 대한 pair page
+ *   7 -> X
+ *   6 -> 4
+ *   5 -> X
+ *   4 -> 6
+ *   3 -> X
+ *   2 -> 0
+ *   1 -> X
+ *   0 -> 2
+ */
 static inline unsigned long
 __find_buddy_pfn(unsigned long page_pfn, unsigned int order)
 {
