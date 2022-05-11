@@ -544,6 +544,124 @@ static const struct file_operations proc_lstats_operations = {
 
 #endif
 
+/*
+ * IAMROOT, 2022.05.11:
+ *
+ * ------------- 범위가 [0, 2000]인 이유
+ * m = rss + swap + pgtable
+ * badness = adj * (totalpages / 1000) + m
+ * point   = (1000 + badness * 1000 / totalpages) * 2 / 3
+ *         = (1000 + (adj * (totalpages / 1000) + m) * 1000 / totalpages) * 2 / 3
+ *         = (1000 + adj + m * 1000 / totalpages) * 2 / 3
+ *                   ---  ----------------------
+ *                   ^-- -999 ~ 1000          ^-- 0 ~ 1000
+ *
+ * -999 <= adj <= 1000, 0 < m <= totalpages 이다.
+ *
+ * adj = -999, m = 0(0에 가까움) 일때 최소값이므로
+ * point = (1000 + -999 + 0) * 2 / 3 = 0
+ *
+ * adj = 1000, m = totalpages 일때 최대값이므로
+ * point = (1000 + 1000 + 1000) * 2 / 3 = 2000
+ *
+ * 즉 [0, 2000]의 범위를 가진다.
+ *
+ * --------------- adj, memory에 따른 /proc/${pid}/oom_score
+ *
+ * point 수식은 다음과 같이 정리된다.
+ * point = (1000 + adj + m * 1000/ totalpages) * 2 / 3
+ * (m = rss + swap + pgtable)
+ *
+ * 이 수식만 봤을때 기본값(1000), adj, m * 1000 / totalpages의 비율에
+ * 따라 0 ~ 3000이 나오고 이걸 0 ~ 2000의 값으로 환산을 하는것임을
+ * 알 수 있다. 이걸 비율로 표시해보면
+ *
+ * 기본값(1000) : adj : m 
+ *
+ * 와 같이 표시가 되며 0 ~ 3000의 범위에서 최소 ~ 최대 비율이
+ *
+ * 1000 : -1000 : 0 ~ 1000 : 1000 : 1000
+ *
+ * 와 같고 이걸 0 ~ 2000의 범위로 환산하면 대략
+ *
+ * 666 : -666 : 0 ~ 666 : 666 : 666
+ *
+ * 최종적으로 비율은 다음과 같다.
+ *
+ * (proc/${pid}/oom_score)
+ * 기본값(666) : adj(-666 ~ 666) : m(0 ~ 666)
+ *                 
+ *                 ||
+ * 
+ * (oom_badness())
+ * 기본값(1000) : adj'(-1000 ~ 1000) : m'(0 ~ 1000)
+ *
+ * ps) 1000 / 3으로 적당히 나눈 비율이라 실제 1 ~ 2차이가 날수있다.
+ *
+ * ---------------- proc/${pid}/oom_score의 개념
+ *
+ * (proc/${pid}/oom_score)
+ * 기본값(666) : adj(-666 ~ 666) : m(0 ~ 666)
+ *                 
+ *                 ||
+ * 
+ * (oom_badness())
+ * 기본값(1000) : adj'(-1000 ~ 1000) : m'(0 ~ 1000)
+ *
+ * 1. oom_score = 기본값(666) + adj(-666 ~ 666) + m(0 ~ 666)
+ * 2. oom_score는 기본적으로 666의 값을 가진다.
+ * 3. adj에 따라서 -666 ~ 666의 값이 oom_score에 가산된다.
+ * 4. m(task의 실제 memory사용량)에 따라서 0 ~ 666에 가산된다.
+ * 5. adj와 m의 관계를 따졋을때 adj가 결국 메모리 사용량을 얼마나 더 
+ * 사용하고 있는지에 대한 가중치임이 확인된다.
+ * (adj'가 100인것과 m'이 100인것과 같다. 즉 adj를 100으로 쓰면
+ * totalpages의 10%의 사용량을 oom에 추가하겠다는것이다.)
+ *
+ * ex) adj = 0, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * oom_score = 666 + 0 + 333 = 999
+ *
+ * ex) adj = 1000, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * oom_score = 666 + 666 + 333 = 1665
+ *
+ * ---- adj 따른 예제(rss + swap + pgtable = 100, totalpages = 200000)
+ *
+ * adj  | badness | point
+ * -999 | -199700 | 1
+ * 1    | 300     | 667
+ * 10   | 2100    | 673
+ * 500  | 100100  | 1000
+ * 1000 | 1333    | 1333
+ *
+ * - adj = 1
+ * badness = 1 * (200000 / 1000) + 100
+ *         = 300
+ * point   = (1000 + 300 * 1000 / 200000) * 2 / 3
+ *         = 667
+ *
+ * - adj = 10
+ * badness = 10 * (200000 / 1000) + 100
+ *         = 2100
+ * point   = (1000 + 2100 * 1000 / 200000) * 2 / 3
+ *         = 673
+ *
+ * - adj = 500
+ * badness = 500 * (200000 / 1000) + 100
+ *         = 100100
+ * point   = (1000 + 100100 * 1000 / 200000) * 2 / 3
+ *         = 1000
+ *
+ * - adj = -999
+ * badness = -999 * (200000 / 1000) + 100
+ *         = -199700
+ * point   = (1000 + -199700 * 1000 / 200000) * 2 / 3
+ *         = 1
+ *
+ * - adj = 11000
+ * badness = 1000 * (200000 / 1000) + 100
+ *         = 200100
+ * point   = (1000 + 200100 * 1000 / 200000) * 2 / 3
+ *         = 1333
+ */
 static int proc_oom_score(struct seq_file *m, struct pid_namespace *ns,
 			  struct pid *pid, struct task_struct *task)
 {
@@ -1148,6 +1266,10 @@ err_unlock:
  *
  * oom_adj cannot be removed since existing userspace binaries use it.
  */
+/*
+ * IAMROOT, 2022.05.11:
+ * - legacy
+ */
 static ssize_t oom_adj_write(struct file *file, const char __user *buf,
 			     size_t count, loff_t *ppos)
 {
@@ -1186,6 +1308,10 @@ out:
 	return err < 0 ? err : count;
 }
 
+/*
+ * IAMROOT, 2022.05.11:
+ * - legacy. (참고 proc_oom_score_adj_operations())
+ */
 static const struct file_operations proc_oom_adj_operations = {
 	.read		= oom_adj_read,
 	.write		= oom_adj_write,

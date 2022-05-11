@@ -306,7 +306,7 @@ long oom_badness(struct task_struct *p, unsigned long totalpages)
 	 */
 /*
  * IAMROOT, 2022.05.07:
- * - 실제 사용 memory + swap한 memory + pgtable 사용 memory 
+ * - 실제 사용 memory(rss) + swap한 memory + pgtable 사용 memory 
  */
 	points = get_mm_rss(p->mm) + get_mm_counter(p->mm, MM_SWAPENTS) +
 		mm_pgtables_bytes(p->mm) / PAGE_SIZE;

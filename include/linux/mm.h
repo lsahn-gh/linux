@@ -2116,6 +2116,9 @@ static inline int mm_counter(struct page *page)
 /*
  * IAMROOT, 2022.05.07:
  * - 실제 할당되어 사용되는 page 수를 구한다.
+ * --- RSS(Regident Set Size)
+ * - 참고
+ *   https://stackoverflow.com/questions/7880784/what-is-rss-and-vsz-in-linux-memory-management
  */
 static inline unsigned long get_mm_rss(struct mm_struct *mm)
 {
