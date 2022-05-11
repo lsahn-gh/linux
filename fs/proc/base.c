@@ -547,7 +547,30 @@ static const struct file_operations proc_lstats_operations = {
 /*
  * IAMROOT, 2022.05.11:
  *
- * ------------- 범위가 [0, 2000]인 이유
+ * - 666(기본값) + adj(-666 ~ 666) + process memory 사용률(0 ~ 666) 값을
+ *   return한다.
+ *
+ * - adj
+ *   process 메모리사용율에 보정값을 추가한다.
+ *   oom_score_adj와 3 : 2 비율로 환산된다.
+ *
+ *   ex) memory 사용량의 10%를 추가
+ *   oom_score_adj = 100, adj = 66
+ *   ex) 50% 추가
+ *   oom_score_adj = 500, adj = 333
+ *
+ * - process memory 사용률
+ *   소수점 첫째자리 0.0 ~ 100.0%값이 3 : 2의 비율로 환산된다.
+ *   process가 전체 memory 대비 10%사용하고 있으면 66,
+ *   50% 사용하고 있으면 333이 된다.
+ *
+ * ex) adj = 0, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * oom_score = 666 + 0 + 333 = 999
+ *
+ * ex) adj = 1000, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * oom_score = 666 + 666 + 333 = 1665
+ *
+ * ------------- proc_oom_score()의 범위가 [0, 2000]인 이유
  * m = rss + swap + pgtable
  * badness = adj * (totalpages / 1000) + m
  * point   = (1000 + badness * 1000 / totalpages) * 2 / 3
@@ -556,7 +579,9 @@ static const struct file_operations proc_lstats_operations = {
  *                   ---  ----------------------
  *                   ^-- -999 ~ 1000          ^-- 0 ~ 1000
  *
- * -999 <= adj <= 1000, 0 < m <= totalpages 이다.
+ * adj 범위 : -999 <= adj <= 1000
+ * m * 1000/ totalpages의 범위 :
+ * 0 <= m <= totalpages 이므로 0 <= m * 1000 / totalpages <= 1000
  *
  * adj = -999, m = 0(0에 가까움) 일때 최소값이므로
  * point = (1000 + -999 + 0) * 2 / 3 = 0
@@ -566,101 +591,88 @@ static const struct file_operations proc_lstats_operations = {
  *
  * 즉 [0, 2000]의 범위를 가진다.
  *
+ * -------------- m * 1000 / totalpages의 의미
+ * m은 process가 사용하고 있는 memory이므로 total memory에 대한 process의
+ * memory 사용율 (0.0 ~ 100.0%)이 된다. 이를 여기서 그냥 usage 치환한다.
+ *
+ * usage = m * 1000 / totalpages 
+ *
+ * 결국 usage의 범위는 0 <= usage <= 1000이 되며 이는 소수점 첫번째까지
+ * 표현한 사용률이랑 동일하다.
+ *
+ * 만약 process memory 사용량이 10%라면 usage는 100, 50.1%라면 501이
+ * 될것이다.
+ *
+ * 그런데 proc_oom_score()에서는 0 ~ 2000의 범위로 사용하므로 usage도
+ * proc_oom_score()에서는 0 <= usage <= 666이 된다.
+ * 예를들어 memory사용량이 10%라면 66, 50%라면 333이 될것이다.
+ *
  * --------------- adj, memory에 따른 /proc/${pid}/oom_score
  *
  * point 수식은 다음과 같이 정리된다.
- * point = (1000 + adj + m * 1000/ totalpages) * 2 / 3
- * (m = rss + swap + pgtable)
+ * point = (1000 + adj + usage) * 2 / 3
  *
- * 이 수식만 봤을때 기본값(1000), adj, m * 1000 / totalpages의 비율에
- * 따라 0 ~ 3000이 나오고 이걸 0 ~ 2000의 값으로 환산을 하는것임을
- * 알 수 있다. 이걸 비율로 표시해보면
+ * 이 수식만 봤을때 기본값(1000), adj, usage의 비율에 따라 0 ~ 3000이
+ * 나오고 이걸 0 ~ 2000의 값으로 환산을 하는것임을 알 수 있다.
+ * 이걸 비율로 표시해보면.
  *
- * 기본값(1000) : adj : m 
+ * 기본값(1000) : adj : usage
  *
  * 와 같이 표시가 되며 0 ~ 3000의 범위에서 최소 ~ 최대 비율이
  *
- * 1000 : -1000 : 0 ~ 1000 : 1000 : 1000
+ * 기본값(1000) : adj(-1000 ~ 1000) : usage(0 ~ 1000)
  *
- * 와 같고 이걸 0 ~ 2000의 범위로 환산하면 대략
+ * 와 같고 이걸 0 ~ 2000의 범위로 환산하면 대략다음과 같다.
  *
- * 666 : -666 : 0 ~ 666 : 666 : 666
+ * 기본값(666) : adj(-666 ~ 666) : usage(0 ~ 666)
  *
- * 최종적으로 비율은 다음과 같다.
+ * 최종적으로 proc_oom_score()와 oom_badness()의 비율은 다음과 같다.
  *
  * (proc/${pid}/oom_score)
- * 기본값(666) : adj(-666 ~ 666) : m(0 ~ 666)
+ * 기본값(666) : adj(-666 ~ 666) : usage(0 ~ 666)
  *                 
  *                 ||
  * 
  * (oom_badness())
- * 기본값(1000) : adj'(-1000 ~ 1000) : m'(0 ~ 1000)
+ * 기본값(1000) : adj'(oom_score_adj, -1000 ~ 1000) : usage'(0 ~ 1000)
  *
  * ps) 1000 / 3으로 적당히 나눈 비율이라 실제 1 ~ 2차이가 날수있다.
  *
  * ---------------- proc/${pid}/oom_score의 개념
  *
  * (proc/${pid}/oom_score)
- * 기본값(666) : adj(-666 ~ 666) : m(0 ~ 666)
+ * 기본값(666) : adj(-666 ~ 666) : usage(0 ~ 666)
  *                 
  *                 ||
  * 
  * (oom_badness())
- * 기본값(1000) : adj'(-1000 ~ 1000) : m'(0 ~ 1000)
+ * 기본값(1000) : adj'(-1000 ~ 1000) : usage'(0 ~ 1000)
+ *		          (oom_score_adj)
  *
- * 1. oom_score = 기본값(666) + adj(-666 ~ 666) + m(0 ~ 666)
+ * 1. oom_score = 기본값(666) + adj(-666 ~ 666) + usage(0 ~ 666)
  * 2. oom_score는 기본적으로 666의 값을 가진다.
  * 3. adj에 따라서 -666 ~ 666의 값이 oom_score에 가산된다.
- * 4. m(task의 실제 memory사용량)에 따라서 0 ~ 666에 가산된다.
- * 5. adj와 m의 관계를 따졋을때 adj가 결국 메모리 사용량을 얼마나 더 
+ * 4. usage에 따라서 0 ~ 666에 가산된다.
+ * 5. adj와 usage의 관계를 따졋을때 adj가 결국 메모리 사용량을 얼마나 더 
  * 사용하고 있는지에 대한 가중치임이 확인된다.
- * (adj'가 100인것과 m'이 100인것과 같다. 즉 adj를 100으로 쓰면
+ * (adj'가 100인것과 usage'이 100인것과 같다. 즉 adj'를 100으로 쓰면
  * totalpages의 10%의 사용량을 oom에 추가하겠다는것이다.)
  *
- * ex) adj = 0, 전체 memory의 50%를 사용하고 있는 process일 경우
- * oom_score = 666 + 0 + 333 = 999
+ * ex) oom_score_adj = 0, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * oom_score = 666 + oom_score_adj * 2 / 3 + usage * 10 * 2 / 3
+ *           = 666 + 0 + 50 * 10 * 2 / 3 = 666 + 0 + 333 = 999
+ * (oom_score_adj값으로부터 사용자가 전체 memory의 0%에 대한 oom 점수
+ * 보정값을 넣은것을 알수있다.)
  *
- * ex) adj = 1000, 전체 memory의 50%를 사용하고 있는 process일 경우
+ * ex) oom_score_adj = 500, 전체 memory의 50%를 사용하고 있는 경우
+ * oom_score = 666 + 333 + 333 = 1332
+ * (oom_score_adj값으로부터 사용자가 전체 memory의 50%에 대한 oom 점수
+ * 보정값을 넣은것을 알수있다.)
+ *
+ * ex) oom_score_adj = 1000, 전체 memory의 50%를 사용하고 있는 경우
  * oom_score = 666 + 666 + 333 = 1665
- *
- * ---- adj 따른 예제(rss + swap + pgtable = 100, totalpages = 200000)
- *
- * adj  | badness | point
- * -999 | -199700 | 1
- * 1    | 300     | 667
- * 10   | 2100    | 673
- * 500  | 100100  | 1000
- * 1000 | 1333    | 1333
- *
- * - adj = 1
- * badness = 1 * (200000 / 1000) + 100
- *         = 300
- * point   = (1000 + 300 * 1000 / 200000) * 2 / 3
- *         = 667
- *
- * - adj = 10
- * badness = 10 * (200000 / 1000) + 100
- *         = 2100
- * point   = (1000 + 2100 * 1000 / 200000) * 2 / 3
- *         = 673
- *
- * - adj = 500
- * badness = 500 * (200000 / 1000) + 100
- *         = 100100
- * point   = (1000 + 100100 * 1000 / 200000) * 2 / 3
- *         = 1000
- *
- * - adj = -999
- * badness = -999 * (200000 / 1000) + 100
- *         = -199700
- * point   = (1000 + -199700 * 1000 / 200000) * 2 / 3
- *         = 1
- *
- * - adj = 11000
- * badness = 1000 * (200000 / 1000) + 100
- *         = 200100
- * point   = (1000 + 200100 * 1000 / 200000) * 2 / 3
- *         = 1333
+ * (oom_score_adj값으로부터 사용자가 전체 memory의 100%에 대한 oom 점수
+ * 보정값을 넣은것을 알수있다.)
  */
 static int proc_oom_score(struct seq_file *m, struct pid_namespace *ns,
 			  struct pid *pid, struct task_struct *task)
