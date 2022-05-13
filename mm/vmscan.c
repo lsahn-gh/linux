@@ -5653,6 +5653,11 @@ static int __node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned in
 	return sc.nr_reclaimed >= nr_pages;
 }
 
+/*
+ * IAMROOT, 2022.05.13:
+ * - TODO
+ *   papago만 돌려놓음.
+ */
 int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 {
 	int ret;
@@ -5667,6 +5672,17 @@ int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 	 * if less than a specified percentage of the node is used by
 	 * unmapped file backed pages.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   정의된 제한을 초과하면 노드 회수는 매핑되지 않은 파일 백업 페이지와
+ *   슬래브 페이지를 회수합니다.
+ *
+ *   매핑되지 않은 파일 백업 페이지의 일부가 파일 I/O에 필요합니다. 그렇지 않으면
+ *   노드가 과도하게 할당되면 파일 I/O에서 읽은 페이지가 즉시 삭제됩니다. 따라서
+ *   매핑되지 않은 파일 백업 페이지에서 지정된 비율 미만의 노드가 사용되는 경우
+ *   회수하지 않습니다.
+ */
 	if (node_pagecache_reclaimable(pgdat) <= pgdat->min_unmapped_pages &&
 	    node_page_state_pages(pgdat, NR_SLAB_RECLAIMABLE_B) <=
 	    pgdat->min_slab_pages)
@@ -5684,6 +5700,13 @@ int node_reclaim(struct pglist_data *pgdat, gfp_t gfp_mask, unsigned int order)
 	 * over remote processors and spread off node memory allocations
 	 * as wide as possible.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   로컬 노드 또는 연결된 프로세서가 없는 노드에서만 노드 회수 실행 이것은
+ *   원격 프로세서보다 로컬 프로세서를 선호하고 가능한 한 넓게 노드 메모리
+ *   할당을 분산시킬 것이다.
+ */
 	if (node_state(pgdat->node_id, N_CPU) && pgdat->node_id != numa_node_id())
 		return NODE_RECLAIM_NOSCAN;
 

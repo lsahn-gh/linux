@@ -135,6 +135,8 @@ static inline bool compaction_made_progress(enum compact_result result)
 /*
  * IAMROOT, 2022.04.09:
  * - compaction이 실패했다면 return true, 아니면 false
+ * - compaction이 complete다 == compaction 범위를 다해본상태
+ *                           == compaction 이제 할게 없다.(실패다)
  */
 static inline bool compaction_failed(enum compact_result result)
 {
@@ -146,6 +148,10 @@ static inline bool compaction_failed(enum compact_result result)
 }
 
 /* Compaction needs reclaim to be performed first, so it can continue. */
+/*
+ * IAMROOT, 2022.05.13:
+ * - compact가 skipped이다 == compact를 못하는 상황이니 reclaim이 필요하다.
+ */
 static inline bool compaction_needs_reclaim(enum compact_result result)
 {
 	/*
@@ -163,6 +169,13 @@ static inline bool compaction_needs_reclaim(enum compact_result result)
  * at all. It might be throttling or lock contention. Retrying might be still
  * worthwhile, but with a higher priority if allowed.
  */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   어떤 작업을 하거나 전혀 하지 않은 후 어떤 이유로 압축이 철회되었습니다.
+ *   제한 또는 잠금 경합일 수 있습니다. 재시도할 수 있지만 허용될 경우
+ *   우선 순위가 더 높습니다. 
+ */
 static inline bool compaction_withdrawn(enum compact_result result)
 {
 	/*
@@ -172,6 +185,14 @@ static inline bool compaction_withdrawn(enum compact_result result)
 	 * to heavily disrupt the system, so we fail the allocation
 	 * instead of entering direct reclaim.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   고차 할당에 대해 압축이 지연되는 경우 동기화 압축이 최근에 실패했기
+ *   때문입니다. 이 경우 호출자가 THP 할당을 요청한 경우 시스템을 크게
+ *   중단시키지 않기 때문에 직접 회수를 입력하는 대신 할당에 실패합니다.
+ * - compaction_deferred(), try_to_compact_pages() 참고
+ */
 	if (result == COMPACT_DEFERRED)
 		return true;
 
@@ -179,6 +200,13 @@ static inline bool compaction_withdrawn(enum compact_result result)
 	 * If compaction in async mode encounters contention or blocks higher
 	 * priority task we back off early rather than cause stalls.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   비동기 모드의 압축이 경합에 부딪히거나 더 높은 우선 순위 작업을 차단하는
+ *   경우 정지하지 않고 조기에 뒤로 물러난다.
+ * - signal을 받았거나 lock try가 지연된 경우.(compact_lock_irqsave() 참고)
+ */
 	if (result == COMPACT_CONTENDED)
 		return true;
 
@@ -186,6 +214,13 @@ static inline bool compaction_withdrawn(enum compact_result result)
 	 * Page scanners have met but we haven't scanned full zones so this
 	 * is a back off in fact.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   페이지 스캐너는 충족되었지만 전체 영역을 스캔하지 않았기 때문에 이는 사실
+ *   백오프입니다.
+ * - __compact_finished() 참고
+ */
 	if (result == COMPACT_PARTIAL_SKIPPED)
 		return true;
 

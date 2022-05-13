@@ -4598,22 +4598,22 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
  *   buddy에서 받아온다.(pcplist + buddy)
  * - @preferred_zone 은 통계용으로만 사용한다.
  * - 함수 진입 및 lock 정리
- *  rmqueue
- *  {	rmqueue_pcplist
+ *  rmqueue()
+ *  {	rmqueue_pcplist()
  *		{
  *			local_lock(pagesets.lock)
- *			__rmqueue_pcplist
+ *			__rmqueue_pcplist()
  *			{
- *				rmqueue_bulk
+ *				rmqueue_bulk()
  *				{
  *					spin_lock(zone->lock)
  *					__rmqueue
  *					{
- *						__rmqueue_cma_fallback
+ *						__rmqueue_cma_fallback()
  *						{
- *							__rmqueue_smallest
+ *							__rmqueue_smallest()
  *						}
- *						__rmqueue_smallest
+ *						__rmqueue_smallest()
  *					}
  *					spin_unlock(zone->lock)
  *				}
@@ -4621,8 +4621,8 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
  *			local_unlock(pagesets.lock)
  *		}
  *		spin_lock(zone->lock)
- *		__rmqueue_smallest
- *		__rmqueue
+ *		__rmqueue_smallest()
+ *		__rmqueue()
  *		spin_unlock(zone->lock)
  *	}
  */
@@ -5503,6 +5503,10 @@ __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.05.13:
+ * @did_some_progress[out] oom kill을 한경우 return 1, 아니면 return 0
+ */
 static inline struct page *
 __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	const struct alloc_context *ac, unsigned long *did_some_progress)
@@ -5541,6 +5545,12 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 */
 /*
  * IAMROOT, 2022.05.07:
+ * - papago
+ *   다시 한 번 지역 목록을 살펴보세요. 워터마크를 높게 유지하세요. 평행하게
+ *   oom killing을 하기 위해서죠. 만약 우리가 여전히 심한 압박을 받고 있다면,
+ *   우리는 실패해야만 합니다. 그러나 이 회수 시도는
+ *   __GFP_DIRECT_RECLAIM &!_GFP_NORETRY 할당에 의존하지 않아야 합니다.
+ *   이 할당은 이미 oom_lock으로 인해 실패하지 않습니다.
  * - high watermark를 기준으로 할당을 시도한다.
  */
 	page = get_page_from_freelist((gfp_mask | __GFP_HARDWALL) &
@@ -5593,6 +5603,16 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 */
 
 	/* Exhausted what can be done so it's blame time */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papgo
+ *   XXX:GFP_NOFS 할당은 앞으로 진행하기 위해 다른 요청에 의존하기 보다는
+ *   실패해야 한다. 
+ *   우리는 out_of_memory가 이 컨텍스트에 대해 많은 것을 할 수 없는 불행한
+ *   상황에 처해 있지만, 현재 작업이 중단될 경우 최소한 예약된 메모리에
+ *   액세스하도록 시도해보자(out_of_memory 참조). 파일 시스템이 할당 실패를
+ *   보다 적절하게 처리할 준비가 되면 우리는 여기서 벗어나야 한다:
+ */
 	if (out_of_memory(&oc) || WARN_ON_ONCE(gfp_mask & __GFP_NOFAIL)) {
 		*did_some_progress = 1;
 
@@ -5691,11 +5711,24 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 
 /*
  * IAMROOT, 2022.04.09:
+ *
  * - compact가 실패했을경우 compact priority를 재조정해보기 위해 진입한다.
  * - false인경우
  *   1. order = 0
  *   2. signal 받음
- *   3. 
+ *   3. result에 따른 처리
+ *   -- COMPACT_DEFERRED, COMPACT_CONTENDED, COMPACT_PARTIAL_SKIPPED,
+ *		COMPACT_COMPLETE
+ *		우선순위 증가. retry 횟수초기화. return true.
+ *		우선순위가 min값이하가 될경우 return false.
+ *   -- COMPACT_SKIPPED
+ *		모든 존 확인.
+ *		user 요청 / order 0 확보 / free 확보: return true
+ *		그외(order 0 공간도없음) : return false
+ *	 -- 그외(COMPACT_CONTINUE, COMPACT_SUCCESS)
+ *		COMPACT_SUCCESS일 경우 retry 횟수 증가.
+ *		order > costly_order일 경우 max_retry/4(16 -> 4)
+ *		retry <= max_retry 일경우 return true. 아니면 false
  */
 static inline bool
 should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
@@ -5750,6 +5783,14 @@ should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
 	 * But the next retry should use a higher priority if allowed, so
 	 * we don't just keep bailing out endlessly.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papgo
+ *   우리가 포기해야 한다고 선언하기 전에 압축이 연기되지 않았거나 잠금
+ *   경합으로 인해 일찍 해제되지 않았는지 확인하십시오. 
+ *   하지만 다음 재시도는 허용될 경우 더 높은 우선순위를 사용해야 합니다.
+ *   그래서 우리는 끝없이 계속 도망치지 않습니다.
+ */
 	if (compaction_withdrawn(compact_result)) {
 		goto check_priority;
 	}
@@ -5762,6 +5803,15 @@ should_compact_retry(struct alloc_context *ac, int order, int alloc_flags,
 	 * would need much more detailed feedback from compaction to
 	 * make a better decision.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papgo
+ *   !costly 요청은 __GFP_RETRY_MAYFAIL costly 요청보다 훨씬 더 중요합니다.
+ *   왜냐하면 costly 요청이 실패할 수 있고 사용자가 이에 대처할 준비가 되어 있는
+ *   동안 실제로는 OOM 킬러를 호출하여 계속 진행하기 때문입니다. 
+ *   1/4 재시도는 다소 임의적이지만 더 나은 결정을 내리기 위해서는 압축에서
+ *   훨씬 더 자세한 피드백이 필요합니다.
+ */
 	if (order > PAGE_ALLOC_COSTLY_ORDER)
 		max_retries /= 4;
 	if (*compaction_retries <= max_retries) {
@@ -6193,7 +6243,8 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 /*
  * IAMROOT, 2022.05.07:
  * - 직전 reclaim에서 성공을 했고 order가 costly_order이내라면 no_progress_loops를
- *   초기화한다.
+ *   초기화한다. 직전 reclaim이 실패했거나 costly_order보다 큰 order였다면
+ *   loop증가
  */
 	if (did_some_progress && order <= PAGE_ALLOC_COSTLY_ORDER)
 		*no_progress_loops = 0;
@@ -6601,7 +6652,7 @@ retry:
 	 */
 /*
  * IAMROOT, 2022.05.07:
- * - costly_order같은 경우엔 retry가 있어도 실패로 간주한다.
+ * - costly_order같은 경우엔 retry가 없으면 실패로 간주한다.
  */
 	if (costly_order && !(gfp_mask & __GFP_RETRY_MAYFAIL))
 		goto nopage;
@@ -6609,6 +6660,8 @@ retry:
 /*
  * IAMROOT, 2022.05.07:
  * - no_progress_loops를 갱신하고 reclaim 재시도 여부를 확인한다.
+ * - did_some_progress > 0
+ *   이전에 성공한 reclaim개수가 잇으면 true 아니면 false
  */
 	if (should_reclaim_retry(gfp_mask, order, ac, alloc_flags,
 				 did_some_progress > 0, &no_progress_loops))
@@ -6623,6 +6676,9 @@ retry:
 /*
  * IAMROOT, 2022.05.07:
  * - compact retry 여부 확인을 하며 retries, priority--를 갱신한다.
+ * - should_compact_retry()에서 order 0에한 확인을 수행할때 false를 return한다.
+ *   order 0에 대한 요청인데 여기까지 왔으면 compaction retry가 의미없다고
+ *   주석에서 설명한다.
  */
 	if (did_some_progress > 0 &&
 			should_compact_retry(ac, order, alloc_flags,
@@ -6632,7 +6688,7 @@ retry:
 
 /*
  * IAMROOT, 2022.05.07:
- * - 현재 task에 사용 가능 noide가 변경되었는지 확인한다. 변경되었으면 재시도한다.
+ * - 현재 task에 사용 가능 node가 변경되었는지 확인한다. 변경되었으면 재시도한다.
  */
 	/* Deal with possible cpuset update races before we start OOM killing */
 	if (check_retry_cpuset(cpuset_mems_cookie, ac))

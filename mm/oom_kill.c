@@ -73,8 +73,9 @@
  * 일으킨다. memcg 아래서 oom도 발생하며, 전체 시스템이 공황상태에 빠진다. 
  *
  * --- sysctl_oom_kill_allocating_task
- *  oom이 일어날때 사용자가 oom kill을 할 task를 정할때 사용한다. 설정이 되면
- *  oom score를 할 필요없이 설정된 task로 oom kill을 한다.
+ *  oom이 일어날때 alloc을 시도했던 current를 최우선으로 죽일지를 정한다.
+ *  설정이 되면 oom score를 할 필요없이 할당을 시도했던 current를 oom kill을 한다.
+ *  (Documentation oom_kill_allocating_task 참고)
  */
 int sysctl_panic_on_oom;
 int sysctl_oom_kill_allocating_task;
@@ -116,8 +117,8 @@ static inline bool is_memcg_oom(struct oom_control *oc)
  */
 /*
  * IAMROOT, 2022.05.07:
- * - @start process의 thread들을 iterate하며 oc->nodemask에 따라 같은 node영역을 가진
- *   thread를 찾는다.
+ * - @start process의 thread들을 iterate하며 oc->nodemask에 따라 같은
+ *   node영역을 가진 thread를 찾는다.
  * - 같은 node영역을 찾는다는 것은 현재 memory가 모자르는 node를 사용하는 다른 thread
  *   를 찾아 해당 thread를 죽이면 node에 free memory가 생기므로 node를 찾는것이다.
  */
@@ -261,6 +262,19 @@ static bool should_dump_unreclaim_slab(void)
  */
 /*
  * IAMROOT, 2022.05.07:
+ * @return adj가중치 + @p의 실제 메모리사용량.
+ *
+ * --- return값
+ *  @p의 memory 사용값을 points라고 하면 return값은 다음과 같다.
+ *
+ *  adj[-1000, 1000] * totalpages / 1000 + points
+ *
+ *  즉 totalpage의 값의 @p의 adj(100.0% 단위)%의 비율값을 가중하여
+ *  @p의 oom point에 더한다.
+ *
+ *  (사용량 가중치 + @p의 실제 메모리 사용량)
+ * ---
+ *
  * - @p에 대해서 oom_score_adj 및 memory 사용등을 적용해 point를 계산한다.
  *
  * ---
@@ -319,10 +333,14 @@ long oom_badness(struct task_struct *p, unsigned long totalpages)
  * ex) points = 100, adj = 10, totalpages = 200000
  * return = 10 * (200000 / 1000) + 100
  *        = 2100
+ * @p의 실제 메모리사용량 100에 totalpage의 10%(adj)인 2000만큼 가중되어 2100이
+ * 된다.
  *
  * ex) points = 100, adj = 500, totalpages = 200000
  * return = 500 * (200000 / 1000) + 100
  *        = 100100
+ * @p의 실제 메모리사용량 100에 totalpage의 50%(adj)인 100000만큼 가중되어
+ * 100100이 된다.
  */
 	adj *= totalpages / 1000;
 	points += adj;
@@ -343,6 +361,7 @@ static const char * const oom_constraint_text[] = {
 /*
  * IAMROOT, 2022.05.07:
  * - @oc에 따라 oom에 어떻게 동작할지를 정한다.
+ *   memcg > node > cpu 순의 우선순위로 동작한다.
  */
 static enum oom_constraint constrained_alloc(struct oom_control *oc)
 {
@@ -370,6 +389,13 @@ static enum oom_constraint constrained_alloc(struct oom_control *oc)
 	 * to kill current.We have to random task kill in this case.
 	 * Hopefully, CONSTRAINT_THISNODE...but no way to handle it, now.
 	 */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papago
+ *   __GFP_NOFAIL이 사용된 경우에만 여기에 도달하십시오. 그래서, 우리는 current를
+ *   죽이는 것을 피해야 한다.이 경우엔 무작위로 과업살인을 해야 한다.
+ *   바라건대, CONTRESTRECT_THISNODE... 하지만 지금은 처리할 방법이 없습니다.
+ */
 	if (oc->gfp_mask & __GFP_THISNODE)
 		return CONSTRAINT_NONE;
 
@@ -382,10 +408,11 @@ static enum oom_constraint constrained_alloc(struct oom_control *oc)
  * IAMROOT, 2022.05.07:
  * - papgo
  *   이것은 __GFP_THISNODE 할당이 아니므로 페이지 할당기에서 잘린 노드 마스크는
- *   mem 정책이 적용됨을 의미합니다. CPUet 정책은 get_page_from_freeelist()에
+ *   mem 정책이 적용됨을 의미합니다. CPUset 정책은 get_page_from_freeelist()에
  *   적용됩니다.
- * - @oc->nodemask에 memory node가 전부 포함이 안되있으면 memory policy를 따른다.
- *   (numactl 설정에 따른다.)
+ * - @oc->nodemask에 memory node가 전부 포함이 안되있으면 @oc->nodemask
+ *   에 설정된 node에서 pages개수 + total_swap_pages를 가져오고 memory policy를
+ *   따른다. (numactl 설정에 따른다.)
  */
 	if (oc->nodemask &&
 	    !nodes_subset(node_states[N_MEMORY], *oc->nodemask)) {
@@ -456,6 +483,8 @@ static int oom_evaluate_task(struct task_struct *task, void *arg)
  *   이 작업은 이미 메모리 예약에 액세스할 수 있으므로 중지되고 있습니다.
  *   작업에 MMF_OOM_SKIP가 없는 한 다른 작업이 예약에 액세스할 수 있도록
  *   허용하지 마십시오. 메모리를 방출할 가능성이 매우 낮기 때문입니다.
+ * - kernel에서 직접 발생한 oom상황에서 @task가 이미 oom 중이다.
+ *   oom이 발생예정이니 현재 oom을 중단시킨다.
  */
 	if (!is_sysrq_oom(oc) && tsk_is_oom_victim(task)) {
 		if (test_bit(MMF_OOM_SKIP, &task->signal->oom_mm->flags))
@@ -469,7 +498,8 @@ static int oom_evaluate_task(struct task_struct *task, void *arg)
 	 */
 /*
  * IAMROOT, 2022.05.07:
- * - origin flag가 set되있으면 많은 memory를 사용중으로 예상하며, 첫번째 타겟으로한다.
+ * - origin flag가 set되있으면 많은 memory를 사용중으로 예상하며,
+ *   첫번째 타겟으로한다.
  */
 	if (oom_task_origin(task)) {
 		points = LONG_MAX;
@@ -485,6 +515,10 @@ static int oom_evaluate_task(struct task_struct *task, void *arg)
 		goto next;
 
 select:
+/*
+ * IAMROOT, 2022.05.13:
+ * - 선택되있던 task를 refdrop하고 새로운 task로 갱신한다.
+ */
 	if (oc->chosen)
 		put_task_struct(oc->chosen);
 	get_task_struct(task);
@@ -637,6 +671,14 @@ static bool oom_killer_disabled __read_mostly;
  * determine whether the task is using a particular mm, we examine all the
  * task's threads: if one of those is using this mm then this task was also
  * using it.
+ */
+/*
+ * IAMROOT, 2022.05.13:
+ * - papgo
+ *   작업이 종료된 그룹 리더인 경우 task->mm는 NULL일 수 있습니다.
+ *   따라서 작업이 특정 mm를 사용하고 있는지 확인하기 위해 모든 작업의 스레드를
+ *   검사합니다.
+ *   그 중 하나가 이 mm를 사용하고 있다면, 이 작업도 그것을 사용하고 있었다.
  */
 bool process_shares_mm(struct task_struct *p, struct mm_struct *mm)
 {
@@ -994,6 +1036,12 @@ static inline bool __task_will_free_mem(struct task_struct *task)
  */
 /*
  * IAMROOT, 2022.05.07:
+ * - papgo
+ *   지정된 작업이 exit 중인지 die 중인지, 주소 공간이 해제될 가능성이 있는지
+ *   확인합니다. 즉, 동일한 mm를 공유하는 모든 스레드 및 프로세스를 중지하거나
+ *   종료해야 합니다.
+ *   호출자는 task->mm가 안정적인지 확인해야 합니다(task_lock을 유지하거나
+ *   current에서 작동합니다).
  * - @task가 죽어가면서 free memrory를 반환할수있는 상태인지 확인한다.
  */
 static bool task_will_free_mem(struct task_struct *task)
@@ -1044,13 +1092,23 @@ static bool task_will_free_mem(struct task_struct *task)
 	rcu_read_lock();
 /*
  * IAMROOT, 2022.05.07:
+ * - @task의 mm을 공유하는 모든 process와 thread가 죽고있는지 확인한다.
+ *   하나라도 살아있으면 return false.
  * - 모든 process를 iterate한다.
  *   mm을 share 하고, 같은 thread group이 아닌 process를 찾아서
  *   __task_will_free_mem()으로 확인한다.
  */
 	for_each_process(p) {
+/*
+ * IAMROOT, 2022.05.13:
+ * - @task와 mm을 share하고 있는 process를 찾는다.
+ */
 		if (!process_shares_mm(p, mm))
 			continue;
+/*
+ * IAMROOT, 2022.05.13:
+ * - @task와 @p가 같은 thread group인지 확인한다.
+ */
 		if (same_thread_group(task, p))
 			continue;
 		ret = __task_will_free_mem(p);
@@ -1285,6 +1343,11 @@ bool out_of_memory(struct oom_control *oc)
 	if (oom_killer_disabled)
 		return false;
 
+/*
+ * IAMROOT, 2022.05.13:
+ * - oom notify를 알린다. 만약 이미 oom으로 등록되있다면 notify를 한번 날렸을것
+ *   이므로 수행안한다.
+ */
 	if (!is_memcg_oom(oc)) {
 /*
  * IAMROOT, 2022.05.07:
@@ -1322,7 +1385,8 @@ bool out_of_memory(struct oom_control *oc)
 	 */
 /*
  * IAMROOT, 2022.05.07:
- * - OOM 킬러는 IO가 없는 회수를 보상하지 않습니다.
+ * - papgo
+ *   OOM 킬러는 IO가 없는 회수를 보상하지 않습니다.
  *   pagefault_out_of_memory가 gfp 컨텍스트를 손실했기 때문에 0 마스크를 제외해야
  *   합니다. 다른 모든 사용자는 __GFP_DIRECT_RECLAIM을 가지고 있어야 합니다.
  *   그러나 mem_cgroup_oom()은 GFP_NOFS 할당인 경우에도 OOM 킬러를 호출해야 합니다. 
@@ -1342,8 +1406,20 @@ bool out_of_memory(struct oom_control *oc)
 /*
  * IAMROOT, 2022.05.07:
  * - check_panic_on_oom()에서 panic이 안일어났다면 oom을 준비한다.
- * - sysctl_oom_kill_allocating_task이 설정되있고, 아직 종료가 안됬으며, 죽일수가없는
- *   task이며 
+ * - current를 oom대상으로 할지에 대한 여부를 판단해서 맞으면 수행한다.
+ *   -- !is_memcg_oom(oc)
+ *		memcg 요청이 아닌 경우에만.
+ *   -- sysctl_oom_kill_allocating_task
+ *		사용자가 alloc을 할려했던 task가 oom을 일으키라고 설정했을 경우.
+ *	 -- current->mm
+ *		아직 종료중이 아닌경우. 즉 current가 아직 memory 회수를 안하고 있을경우
+ *		죽여버리기 위해.
+ *	 -- !oom_unkillable_task(current)
+ *		current가 죽일수없는 task이면 목죽이니 확인.
+ *	 -- oom_cpuset_eligible(current, oc)
+ *		current가 oom 요청 node 범위에 포함되는 node를 가지고 있는지 확인.
+ *	 -- current->signal->oom_score_adj != OOM_SCORE_ADJ_MIN
+ *		oom disable로 해놨는지 확인.
  */
 
 	if (!is_memcg_oom(oc) && sysctl_oom_kill_allocating_task &&
@@ -1360,6 +1436,11 @@ bool out_of_memory(struct oom_control *oc)
 		return true;
 	}
 
+/*
+ * IAMROOT, 2022.05.13:
+ * - current는 oom point 계산없이는 못죽이는 task다. oom point 계산으로
+ *   죽일 process를 process를 찾아서 oom을 하러간다.
+ */
 	select_bad_process(oc);
 	/* Found nothing?!?! */
 	if (!oc->chosen) {

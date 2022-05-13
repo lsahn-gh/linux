@@ -15,6 +15,10 @@ struct notifier_block;
 struct mem_cgroup;
 struct task_struct;
 
+/*
+ * IAMROOT, 2022.05.13:
+ * - constrained_alloc() 참고
+ */
 enum oom_constraint {
 	CONSTRAINT_NONE,
 	CONSTRAINT_CPUSET,
@@ -46,6 +50,18 @@ struct oom_control {
 	const int order;
 
 	/* Used by oom implementation, do not set */
+/*
+ * IAMROOT, 2022.05.13:
+ * - constraint == CONSTRAINT_MEMCG
+ *   oc가 memcg로 제한된경우. memcg에서 가져올수있는 page를 가져온다.
+ * - constraint == CONSTRAINT_MEMORY_POLICY
+ *   oc가 node로 제한된경우.
+ *   total_swap_pages + nodemask에 set된 node의 present_pages 합산값.
+ * - constraint == CONSTRAINT_CPUSET
+ *   oc가 cpu로 제한된경우.
+ *   nodemask에 제한은 없지만 cpu가 제한된 상태.
+ *   total_swap_pages + 허락된 cpu가 존재하는 node에서의 present_pages 합산값
+ */
 	unsigned long totalpages;
 	struct task_struct *chosen;
 	long chosen_points;

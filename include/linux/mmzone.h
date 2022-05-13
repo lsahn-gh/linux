@@ -474,6 +474,7 @@ typedef unsigned __bitwise isolate_mode_t;
 enum zone_watermarks {
 /*
  * IAMROOT, 2022.04.26:
+ * - __setup_per_zone_wmarks()에서 설정된다.
  * - compact에서 watermark사용
  *   WMARK_MIN : compact를 해야되는 상황에서
  *				 order <= PAGE_ALLOC_COSTLY_ORDER 인 order에 대해서 주로 사용.
@@ -495,6 +496,11 @@ enum zone_watermarks {
  *               direct reclaim시 throttle 중이였으면 allow_direct_reclaim을 통해
  *               중단 여부를 판별한다.
  *               (throttle_direct_reclaim 참고)
+ *
+ * - oom
+ *   WMARK_HIGH : oom을 하기전에 최후에 WMARK_HIGH로 buddy로 부터 page를 얻는걸
+ *				  시도해본다.
+ *				  (__alloc_pages_may_oom() 참고)
  */
 	WMARK_MIN,
 	WMARK_LOW,
@@ -843,7 +849,7 @@ struct zone {
  *----
  * calculate_node_totalpages, zone_init_internals 에서 설정된다.
  * - spanned_pages : hole을 포함한 해당 node및 zone의 page수
- * - present_pages : hole을 제외한 해당 node zone읜 page수
+ * - present_pages : hole을 제외한 해당 node zone의 page수
  * - present_early_pages : 일단 present_pages와 같게 설정된다.
 */
 	atomic_long_t		managed_pages;

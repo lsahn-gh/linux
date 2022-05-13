@@ -633,7 +633,7 @@ static const struct file_operations proc_lstats_operations = {
  *                 
  *                 ||
  * 
- * (oom_badness())
+ * (oom_badness() (oom_badness() * 1000 / total_pages + 1000)
  * 기본값(1000) : adj'(oom_score_adj, -1000 ~ 1000) : usage'(0 ~ 1000)
  *
  * ps) 1000 / 3으로 적당히 나눈 비율이라 실제 1 ~ 2차이가 날수있다.
@@ -645,7 +645,7 @@ static const struct file_operations proc_lstats_operations = {
  *                 
  *                 ||
  * 
- * (oom_badness())
+ * (oom_badness() (oom_badness() * 1000 / total_pages + 1000)
  * 기본값(1000) : adj'(-1000 ~ 1000) : usage'(0 ~ 1000)
  *		          (oom_score_adj)
  *
