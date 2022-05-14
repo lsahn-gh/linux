@@ -232,3 +232,7 @@
 - 2022.05.07, Zoom 온라인(8명 참석)
 - alloc_page() 진행중 ... direct-reclaim (oom)
 
+### 51주차
+- 2022.05.14, Zoom 온라인(6명 참석)
+- alloc_pages_vma() 진행중
+
