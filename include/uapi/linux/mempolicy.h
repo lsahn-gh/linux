@@ -38,6 +38,10 @@ enum {
  * - cpu가 있는 node에서만 할당.
  */
 	MPOL_LOCAL,
+/*
+ * IAMROOT, 2022.05.14:
+ * - 선호
+ */
 	MPOL_PREFERRED_MANY,
 	MPOL_MAX,	/* always last member of enum */
 };

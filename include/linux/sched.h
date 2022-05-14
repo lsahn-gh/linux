@@ -1235,6 +1235,13 @@ struct task_struct {
 #ifdef CONFIG_NUMA
 	/* Protected by alloc_lock: */
 	struct mempolicy		*mempolicy;
+/*
+ * IAMROOT, 2022.05.14:
+ * - il_prev(interleave prev)
+ *   numa policy에서 사용한다.
+ *   interlev_nodes()에서 node를 순회할때 이전에 순회했던 node가 뭐였는지
+ *   nid형태로 기록한다.
+ */
 	short				il_prev;
 	short				pref_node_fork;
 #endif

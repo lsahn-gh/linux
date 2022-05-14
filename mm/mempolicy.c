@@ -159,6 +159,12 @@ int numa_map_to_online_node(int node)
 }
 EXPORT_SYMBOL_GPL(numa_map_to_online_node);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @p에서 mempolicy를 가져온다.
+ *   만약 없다면 현재 numa에 지정된 preferred_node_policy에서 가져온다.
+ *   그것도 없다면 default_policy에서 가져온다.
+ */
 struct mempolicy *get_task_policy(struct task_struct *p)
 {
 	struct mempolicy *pol = p->mempolicy;
@@ -1675,11 +1681,19 @@ bool vma_migratable(struct vm_area_struct *vma)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @vma->ops나 @vma->vm_policy에서 mempolicy를 가져온다.
+ */
 struct mempolicy *__get_vma_policy(struct vm_area_struct *vma,
 						unsigned long addr)
 {
 	struct mempolicy *pol = NULL;
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - vm_ops 에서 우선적으로 가져와보고 아니면 vm_policy를 사용한다.
+ */
 	if (vma) {
 		if (vma->vm_ops && vma->vm_ops->get_policy) {
 			pol = vma->vm_ops->get_policy(vma, addr);
@@ -1711,6 +1725,15 @@ struct mempolicy *__get_vma_policy(struct vm_area_struct *vma,
  * count--added by the get_policy() vm_op, as appropriate--to protect against
  * freeing by another task.  It is the caller's responsibility to free the
  * extra reference for shared policies.
+ */
+/*
+ * IAMROOT, 2022.05.14:
+ * - 다음 우선순위로 mempolicy를 가져온다.
+ *   1. vma->ops
+ *   2. vma->vm_policy
+ *   3. current task의 mempolicy
+ *   4. preferred_node_policy에서 mode가 있는 경우.
+ *   5. default_policy
  */
 static struct mempolicy *get_vma_policy(struct vm_area_struct *vma,
 						unsigned long addr)
@@ -1745,6 +1768,15 @@ bool vma_policy_mof(struct vm_area_struct *vma)
 	return pol->flags & MPOL_F_MOF;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - policy_zone에는 최상위 zone(64bit면 normal)이 들어 있을것이다.
+ *   policy_nodes가 high_memory에 없는 node범위라면 비교대상을 normal에서 movable로
+ *   변경한다.
+ *   즉 64bit에서는 highmem이 없으므로 항상 movable과 비교될것이다.
+ *   정말 왠간한 경우엔 movable만이되고 특별한 경우에 zone device가 포함된다.
+ * - @zone이 dynamic_policy_zone보다 같거나 높으면 true.
+ */
 static int apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
 {
 	enum zone_type dynamic_policy_zone = policy_zone;
@@ -1769,16 +1801,32 @@ static int apply_policy_zone(struct mempolicy *policy, enum zone_type zone)
  * Return a nodemask representing a mempolicy for filtering nodes for
  * page allocation
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @policy->mode에 따라 policy->nodes를 가져올지 null을 return할지 결정한다.
+ *   MPOL_BIND면 현재 task와 겹치는 node가 있는지와 gfp가 policy
+ */
 nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *policy)
 {
 	int mode = policy->mode;
 
 	/* Lower zones don't get a nodemask applied for MPOL_BIND */
+/*
+ * IAMROOT, 2022.05.14:
+ * - bind인 경우엔 gfp에서 허락하는 zone보다 policy가 같거나 높은경우
+ *   (64bit에서는 보통 movable)와 current에서 허락하는 node와 겹치는 경우에만
+ *   policy_nodes를 사용한다.
+ */
 	if (unlikely(mode == MPOL_BIND) &&
 		apply_policy_zone(policy, gfp_zone(gfp)) &&
 		cpuset_nodemask_valid_mems_allowed(&policy->nodes))
 		return &policy->nodes;
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - many에서는 bind처럼 zone과 current를 비교하는 것과는 다르게 policy node로
+ *   return시킨다.
+ */
 	if (mode == MPOL_PREFERRED_MANY)
 		return &policy->nodes;
 
@@ -1809,6 +1857,11 @@ static int policy_node(gfp_t gfp, struct mempolicy *policy, int nd)
 }
 
 /* Do dynamic interleaving for a process */
+/*
+ * IAMROOT, 2022.05.14:
+ * - 이전에 조회했던 node에서 @policy에 허락된 node list에서 next를 골라서
+ *   il_prev에 기록하고 return 한다.
+ */
 static unsigned interleave_nodes(struct mempolicy *policy)
 {
 	unsigned next;
@@ -1872,6 +1925,10 @@ unsigned int mempolicy_slab_node(void)
  * node in pol->nodes (starting from n=0), wrapping around if n exceeds the
  * number of present nodes.
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @p에 따라 node를 선택한다.
+ */
 static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 {
 	nodemask_t nodemask = pol->nodes;
@@ -1890,6 +1947,25 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 	nnodes = nodes_weight(nodemask);
 	if (!nnodes)
 		return numa_node_id();
+/*
+ * IAMROOT, 2022.05.14:
+ * - nodemask에 set된 node개수로 나눈 나머지를 target으로 하여
+ *   그 개수번째에 있는 nid를 선택한다.
+ * - vma address에 따라 node를 선택하게 하기 위함이다.
+ * - ex) nnodes = 3, nodemask = 0b111 일때
+ *   n  target nid
+ *   0  0      0
+ *   1  1      1
+ *   2  2      2
+ *   3  0      0
+ *    
+ * - ex) nnodes = 2, nodemask = 0b101 일때
+ *   n  target nid
+ *   0  0      0
+ *   1  1      2
+ *   2  0      0
+ *   3  1      2
+ */
 	target = (unsigned int)n % nnodes;
 	nid = first_node(nodemask);
 	for (i = 0; i < target; i++)
@@ -1898,6 +1974,11 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 }
 
 /* Determine a node number for interleave */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @pol에 대한 interleave node를 결정한다. vma가 있을경우 page 할당 단위로,
+ *   아니면 current에 기록된 이전 node를 참고하여 다음 node를 결정한다.
+ */
 static inline unsigned interleave_nid(struct mempolicy *pol,
 		 struct vm_area_struct *vma, unsigned long addr, int shift)
 {
@@ -1912,6 +1993,12 @@ static inline unsigned interleave_nid(struct mempolicy *pol,
 		 * a useful offset.
 		 */
 		BUG_ON(shift < PAGE_SHIFT);
+/*
+ * IAMROOT, 2022.05.14:
+ * linear_page_index() 주석참고.
+ * (shift - PAGE_SHIFT)의 만큼 더 SHIFT시킨다는게 차이점이다.
+ * page 할당 단위로 node가 바뀌게 하기위함이다.
+ */
 		off = vma->vm_pgoff >> (shift - PAGE_SHIFT);
 		off += (addr - vma->vm_start) >> shift;
 		return offset_il_node(pol, off);
@@ -2042,6 +2129,10 @@ bool mempolicy_in_oom_domain(struct task_struct *tsk,
 
 /* Allocate a page in interleaved policy.
    Own path because it needs to do special accounting. */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @nid에서 alloc이 성공했으면 hit count를 증가시켜준다.
+ */
 static struct page *alloc_page_interleave(gfp_t gfp, unsigned order,
 					unsigned nid)
 {
@@ -2059,6 +2150,12 @@ static struct page *alloc_page_interleave(gfp_t gfp, unsigned order,
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @nid에서 nofail, reclaim을 뺀채로 시도(nid에서 실패한다면  pol->nodes)
+ *   해보고 실패한다면 모든 node제한 및 gfp를 원복하고 현재 node로 다시한번
+ *   시도해본다.
+ */
 static struct page *alloc_pages_preferred_many(gfp_t gfp, unsigned int order,
 						int nid, struct mempolicy *pol)
 {

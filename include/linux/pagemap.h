@@ -562,6 +562,10 @@ static inline pgoff_t page_to_pgoff(struct page *page)
 /*
  * Return byte-offset into filesystem object for page.
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - page index(file page offset)를 byte단위로 변환한다.
+ */
 static inline loff_t page_offset(struct page *page)
 {
 	return ((loff_t)page->index) << PAGE_SHIFT;
@@ -575,12 +579,45 @@ static inline loff_t page_file_offset(struct page *page)
 extern pgoff_t linear_hugepage_index(struct vm_area_struct *vma,
 				     unsigned long address);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @vma의 address로 대한 file에 대한 pgoff를 구한다.
+ */
 static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
 					unsigned long address)
 {
 	pgoff_t pgoff;
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - pass
+ */
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		return linear_hugepage_index(vma, address);
+/*
+ * IAMROOT, 2022.05.14:
+ * - 현재 vm_offset(byte) >> PAGE_SHIFT => vm_offset(page).
+ *   vm_pgoff + vm_offset = page offset
+ *
+ * - ex) file 기준 설명
+ *
+ *               FILE                           VMA
+ *             +-----+ 
+ *             |     |
+ *             |=====| ------ mapping ------> +=====+ vm_end
+ *             |     |                        |     |
+ *             |     |                        |-----| <-- address
+ *             |     |                        |     | ^         
+ *             |     |                        |     | | address - vm_start
+ *             |     |                        |     | v
+ *             |=====| ------ mapping ------> +=====+ vm_start
+ *             |     | ^                        
+ *             |     | |                        
+ *             |     | |<- vm_pgoff                       
+ * pgoff = 0   +-----+ +                        
+ *
+ * 즉 vm_pgoff + (address - vm_start)를 하면 file에 대한 pgoff가 구해진다.
+ */
 	pgoff = (address - vma->vm_start) >> PAGE_SHIFT;
 	pgoff += vma->vm_pgoff;
 	return pgoff;

@@ -1284,6 +1284,10 @@ __group_send_sig_info(int sig, struct kernel_siginfo *info, struct task_struct *
 	return send_signal(sig, info, p, PIDTYPE_TGID);
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @p한테 sig를 보낸다.
+ */
 int do_send_sig_info(int sig, struct kernel_siginfo *info, struct task_struct *p,
 			enum pid_type type)
 {

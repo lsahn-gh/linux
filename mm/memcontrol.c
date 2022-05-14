@@ -2084,6 +2084,10 @@ cleanup:
  *
  * Caller has to call mem_cgroup_put() on the returned non-NULL memcg.
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @victim의 mem_cgroup을 찾는다.
+ */
 struct mem_cgroup *mem_cgroup_get_oom_group(struct task_struct *victim,
 					    struct mem_cgroup *oom_domain)
 {
@@ -2107,6 +2111,11 @@ struct mem_cgroup *mem_cgroup_get_oom_group(struct task_struct *victim,
 	 * memory cgroup, we might end up killing tasks outside oom_domain.
 	 * In this case it's better to ignore memory.group.oom.
 	 */
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - cgroup 조회전 task의 cgroup이 변경되있는지 확인한다.
+ */
 	if (unlikely(!mem_cgroup_is_descendant(memcg, oom_domain)))
 		goto out;
 
@@ -2115,6 +2124,11 @@ struct mem_cgroup *mem_cgroup_get_oom_group(struct task_struct *victim,
 	 * cgroup up to the OOMing cgroup (or root) to find the
 	 * highest-level memory cgroup with oom.group set.
 	 */
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - @oom_domain과 일치하는 parent memcg를 찾는다.
+ */
 	for (; memcg; memcg = parent_mem_cgroup(memcg)) {
 		if (memcg->oom_group)
 			oom_group = memcg;

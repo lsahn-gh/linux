@@ -263,6 +263,13 @@ static bool should_dump_unreclaim_slab(void)
 /*
  * IAMROOT, 2022.05.07:
  * @return adj가중치 + @p의 실제 메모리사용량.
+ * --- badness의 범위
+ *
+ *  [LONG_MIN, totalpages * adj / 1000 + point]
+ *
+ * LOING_MIN은 대상이 아니거나 adj가 -1000일때 return하므로 이것을 예외사항이라 치면
+ *
+ *  [0, totalpages * adj / 1000 + point]
  *
  * --- return값
  *  @p의 memory 사용값을 points라고 하면 return값은 다음과 같다.
@@ -798,6 +805,11 @@ out_unlock:
 }
 
 #define MAX_OOM_REAP_RETRIES 10
+/*
+ * IAMROOT, 2022.05.14:
+ * - lock때문에 못죽이는 process들에 대해서 해제될까지 기다리며 잘 죽었는지에 대해
+ *   최대 1초동안 감시한다.
+ */
 static void oom_reap_task(struct task_struct *tsk)
 {
 	int attempts = 0;
@@ -829,6 +841,10 @@ done:
 	put_task_struct(tsk);
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - oom_reaper_list에 member가 있으면 oom_reap_task를 호출한다.
+ */
 static int oom_reaper(void *unused)
 {
 	while (true) {
@@ -1120,12 +1136,22 @@ static bool task_will_free_mem(struct task_struct *task)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @victim을 포함하여 관련있는 process에 sig kill을 보낸다.
+ */
 static void __oom_kill_process(struct task_struct *victim, const char *message)
 {
 	struct task_struct *p;
 	struct mm_struct *mm;
 	bool can_oom_reap = true;
 
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - @victim에 속한 task중에 아직 종료중이 아닌걸 찾는다. 자기자신이 종료중이 아니면
+ *   자기가 대상이 될것이다.(p == victim)
+ */
 	p = find_lock_task_mm(victim);
 	if (!p) {
 		pr_info("%s: OOM victim %d (%s) is already exiting. Skip killing the task\n",
@@ -1178,7 +1204,23 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	 * That thread will now get access to memory reserves since it has a
 	 * pending fatal signal.
 	 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - papgo
+ *   다른 스레드 그룹에서 victim->mm를 공유하는 모든 사용자 프로세스를 삭제합니다
+ *   (있는 경우). 하지만 그들은 모든 기억의 고갈을 피하기 위해 기억 보유량에
+ *   접근하지 못한다. 이것은 oom killed 스레드를 종료할 수 없을 때 mm->mmap_lock
+ *   라이브락을 방지한다. 왜냐하면 메모리 자체를 할당하려는 다른 스레드와
+ *   세마포어가 필요하기 때문이다.
+ *   이 스레드는 대기 중인 치명적인 신호를 가지고 있으므로 이제 메모리 예약에
+ *   액세스할 수 있습니다.
+ */
 	rcu_read_lock();
+	
+/*
+ * IAMROOT, 2022.05.14:
+ * - mm을 공유하고있는 process를 찾아 SIGKILL을 보낸다.
+ */
 	for_each_process(p) {
 		if (!process_shares_mm(p, mm))
 			continue;
@@ -1202,6 +1244,10 @@ static void __oom_kill_process(struct task_struct *victim, const char *message)
 	}
 	rcu_read_unlock();
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - init process와 mm을 공유하고 있지 않았을때만 reaper를 호출한다.
+ */
 	if (can_oom_reap)
 		wake_oom_reaper(victim);
 
@@ -1224,10 +1270,19 @@ static int oom_kill_memcg_member(struct task_struct *task, void *message)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @oc->chosen 및 관련 process들을 죽인다.
+ */
 static void oom_kill_process(struct oom_control *oc, const char *message)
 {
 	struct task_struct *victim = oc->chosen;
 	struct mem_cgroup *oom_group;
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - 너무 자주 print를 안하기 위한 방어. static변수.
+ */
 	static DEFINE_RATELIMIT_STATE(oom_rs, DEFAULT_RATELIMIT_INTERVAL,
 					      DEFAULT_RATELIMIT_BURST);
 
@@ -1236,6 +1291,11 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	 * its children or threads, just give it access to memory reserves
 	 * so it can die quickly
 	 */
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - oom kill을 하기전에 victim이 이미 죽고 있는 task라면 mark, puit을 하고 끝낸다.
+ */
 	task_lock(victim);
 	if (task_will_free_mem(victim)) {
 		mark_oom_victim(victim);
@@ -1246,6 +1306,11 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	}
 	task_unlock(victim);
 
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - print가 자주 출력이 안되게 조정.
+ */
 	if (__ratelimit(&oom_rs))
 		dump_header(oc, victim);
 
@@ -1261,6 +1326,10 @@ static void oom_kill_process(struct oom_control *oc, const char *message)
 	/*
 	 * If necessary, kill all tasks in the selected memory cgroup.
 	 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - memcg에 속한 task들에 대해서 oom_kill_memcg_member()를 실행한다.
+ */
 	if (oom_group) {
 		mem_cgroup_print_oom_group(oom_group);
 		mem_cgroup_scan_tasks(oom_group, oom_kill_memcg_member,
@@ -1335,6 +1404,12 @@ EXPORT_SYMBOL_GPL(unregister_oom_notifier);
  * killing a random task (bad), letting the system crash (worse)
  * OR try to be smart about which process to kill. Note that we
  * don't have to be perfect here, we just have to be good.
+ */
+/*
+ * IAMROOT, 2022.05.14:
+ * @return kill등의 이유로 memory가 확보됬다고 예상되면 true. 아니면 false
+ *
+ * - oom 대상 process를 찾고 oom kill을 수행한다.
  */
 bool out_of_memory(struct oom_control *oc)
 {

@@ -246,6 +246,10 @@ static inline int __nodes_full(const nodemask_t *srcp, unsigned int nbits)
 }
 
 #define nodes_weight(nodemask) __nodes_weight(&(nodemask), MAX_NUMNODES)
+/*
+ * IAMROOT, 2022.05.14:
+ * - set된 bit 개수
+ */
 static inline int __nodes_weight(const nodemask_t *srcp, unsigned int nbits)
 {
 	return bitmap_weight(srcp->bits, nbits);

@@ -3109,6 +3109,11 @@ static inline bool page_poisoning_enabled_static(void)
 {
 	return static_branch_unlikely(&_page_poisoning_enabled);
 }
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - poison.
+ */
 static inline void kernel_poison_pages(struct page *page, int numpages)
 {
 	if (page_poisoning_enabled_static())
@@ -3354,6 +3359,11 @@ static inline bool vma_is_special_huge(const struct vm_area_struct *vma)
 
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE || CONFIG_HUGETLBFS */
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - page alloc debug. alloc을 받을때마다 1 page를 guard page로 더 할당 받는다.
+ *   memory 침해 여부등을 판별할때 사용한다.
+ */
 #ifdef CONFIG_DEBUG_PAGEALLOC
 extern unsigned int _debug_guardpage_minorder;
 DECLARE_STATIC_KEY_FALSE(_debug_guardpage_enabled);
@@ -3368,6 +3378,12 @@ static inline bool debug_guardpage_enabled(void)
 	return static_branch_unlikely(&_debug_guardpage_enabled);
 }
 
+
+/*
+ * IAMROOT, 2022.05.14:
+ * ex) order 3 page를 할당받앗을때 guard page가 1page가 추가 될수있다.
+ * (debug등의 이유) 이런 경우 merge가 안될수있다.
+ */
 static inline bool page_is_guard(struct page *page)
 {
 	if (!debug_guardpage_enabled())

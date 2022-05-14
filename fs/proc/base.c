@@ -673,6 +673,18 @@ static const struct file_operations proc_lstats_operations = {
  * oom_score = 666 + 666 + 333 = 1665
  * (oom_score_adj값으로부터 사용자가 전체 memory의 100%에 대한 oom 점수
  * 보정값을 넣은것을 알수있다.)
+ *
+ * ex) A task가 빨리 죽이고 싶을때, 전체 memory는 1GB.
+ * 
+ * 예를들어 A task는 30%(300MB)를 쓰고 있고
+ * B task가 전체 memory의 70%(700MB)상황에서 oom이 발생했다.
+ * 이 상황에서 B task를 안죽일려면 B와 A 사용량의 차이 이상(400MB+. 즉 40.0%이상)
+ * 에 한 oom_score_adj값을 A의 oom_score_adj에 넣어야되며,
+ * 이값을 400이상이 될것이다.
+ * 
+ *	 oom_score_adj  memory사용량            oom_score
+ * A      410            300MBs       666 + 6.66*41.0 + 666*0.3 = 1161
+ * B      0              700MB        666 + 0 + 666*0.7         = 1132
  */
 static int proc_oom_score(struct seq_file *m, struct pid_namespace *ns,
 			  struct pid *pid, struct task_struct *task)

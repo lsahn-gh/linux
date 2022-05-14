@@ -470,6 +470,11 @@ struct vm_area_struct {
 	const struct vm_operations_struct *vm_ops;
 
 	/* Information about our backing store: */
+/*
+ * IAMROOT, 2022.05.14:
+ *   어떤 start로부터의 page offset.
+ *   file일 경우 file 내의 offset이 될것이다.
+ */
 	unsigned long vm_pgoff;		/* Offset (within vm_file) in PAGE_SIZE
 					   units */
 	struct file * vm_file;		/* File we map to (can be NULL). */

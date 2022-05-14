@@ -66,6 +66,11 @@ static inline int get_dumpable(struct mm_struct *mm)
 
 #define MMF_HAS_UPROBES		19	/* has uprobes */
 #define MMF_RECALC_UPROBES	20	/* MMF_HAS_UPROBES can be wrong */
+/*
+ * IAMROOT, 2022.05.14:
+ * - oom_reap_task()등에서 set된다. lock등의 이유로 process가 oom kill이 안될때,
+ *   반복적으로 해당 process가 oom대상이 되는것을 방지한다.
+ */
 #define MMF_OOM_SKIP		21	/* mm is of no interest for the OOM killer */
 #define MMF_UNSTABLE		22	/* mm is unstable for copy_from_user */
 #define MMF_HUGE_ZERO_PAGE	23      /* mm has ever used the global huge zero page */

@@ -3,6 +3,11 @@
 #include <linux/module.h>
 #include <linux/random.h>
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @srcp에서 @node의 next를 찾아서 return한다. @srcp를 끝까지 조회한경우
+ *   @srcp의 first return.
+ */
 int __next_node_in(int node, const nodemask_t *srcp)
 {
 	int ret = __next_node(node, srcp);

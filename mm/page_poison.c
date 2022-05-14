@@ -24,6 +24,10 @@ static int __init early_page_poison_param(char *buf)
 }
 early_param("page_poison", early_page_poison_param);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - posion
+ */
 static void poison_page(struct page *page)
 {
 	void *addr = kmap_atomic(page);

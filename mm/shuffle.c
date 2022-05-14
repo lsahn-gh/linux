@@ -159,6 +159,11 @@ void __meminit __shuffle_free_memory(pg_data_t *pgdat)
 		shuffle_zone(z);
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - 64번마다 한번씩만 get_random_u64()를 호출한다.
+ * - 홀짝만 구할때 사용한다.
+ */
 bool shuffle_pick_tail(void)
 {
 	static u64 rand;

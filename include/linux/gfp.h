@@ -790,6 +790,12 @@ static inline struct page *alloc_pages(gfp_t gfp_mask, unsigned int order)
 	alloc_pages(gfp_mask, order)
 #endif
 #define alloc_page(gfp_mask) alloc_pages(gfp_mask, 0)
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - gfp_mask : GFP_HIGHUSER_MOVABLE
+ *   user app용 vma에 mapping되있는 anon memory alloc.(do_cow_fault() 참고)
+ */
 #define alloc_page_vma(gfp_mask, vma, addr)			\
 	alloc_pages_vma(gfp_mask, 0, vma, addr, numa_node_id(), false)
 
@@ -824,6 +830,11 @@ static inline void *page_frag_alloc(struct page_frag_cache *nc,
 extern void page_frag_free(void *addr);
 
 #define __free_page(page) __free_pages((page), 0)
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - order 0로 free_pages 수행
+ */
 #define free_page(addr) free_pages((addr), 0)
 
 void page_alloc_init(void);

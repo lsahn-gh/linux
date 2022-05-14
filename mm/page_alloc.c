@@ -890,6 +890,11 @@ static inline bool pcp_allowed_order(unsigned int order)
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @page를 order 만큼 free 수행한다.
+ *   order에 따라 head / tail에 들어갈지 결정된다.
+ */
 static inline void free_the_page(struct page *page, unsigned int order)
 {
 	if (pcp_allowed_order(order))		/* Via pcp? */
@@ -1135,9 +1140,29 @@ static inline void set_buddy_order(struct page *page, unsigned int order)
  *
  * For recording page's order, we use page_private(page).
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - papago
+ *   이 함수는 페이지가 비어 있는지 확인합니다. 그리고 다음 경우 페이지와 해당
+ *   버디를 병합할 수 있는 버디인지 확인합니다.
+ *   (a) 버디가 hole에 있지 않습니다(호출하기 전에 확인하세요!). &&
+ *   (b) 버디가 버디 시스템에 있는지 확인한다. &&
+ *   (c) 한 페이지와 그 버디는 같은 order를 가지고 있다. &&
+ *   (d) 페이지와 해당 버디가 같은 zone에 있습니다.
+ *
+ *   페이지가 버디 시스템에 있는지 여부를 기록하기 위해 페이지 버디를 설정합니다.
+ *   페이지 버디의 설정, 지우기 및 테스트는 영역->잠금별로 직렬화됩니다.
+ *   페이지 순서를 기록할 때는 page_private(page)를 사용합니다.
+ *
+ * - merge가 가능한 buddy인지 확인한다.
+ */
 static inline bool page_is_buddy(struct page *page, struct page *buddy,
 							unsigned int order)
 {
+/*
+ * IAMROOT, 2022.05.14:
+ * - guard page면 못한다.(alloc debug를 켜놓으면 merge가 안되는 상황이 생길수있다.)
+ */
 	if (!page_is_guard(buddy) && !PageBuddy(buddy))
 		return false;
 
@@ -1167,6 +1192,13 @@ static inline struct capture_control *task_capc(struct zone *zone)
 		capc->cc->zone == zone ? capc : NULL;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - capture 요청이 왔을때, capture 요청에 대한 order와 @page가 일치하면
+ *   @capc에 매달아 놓는다.
+ *   이때 cma, isolate는 capture 대상에서 제외하며
+ *   @page가 movable이라면 pageblock_order 이상인 경우에만 달아놓는다.
+ */
 static inline bool
 compaction_capture(struct capture_control *capc, struct page *page,
 		   int order, int migratetype)
@@ -1278,6 +1310,16 @@ static inline void del_page_from_free_list(struct page *page, struct zone *zone,
  * so it's less likely to be used soon and more likely to be merged
  * as a higher order page
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - papgo
+ *   가장 큰 페이지가 아닌 경우, 차순위 버디가 무료인지 확인하십시오. 
+ *   만약 그렇다면, 페이지들은 곧 합쳐질 자유로워질 가능성이 있다.
+ *   그런 경우 목록의 맨 끝에 무료 페이지를 추가하여 곧 사용되지 않고
+ *   상위 페이지로 병합될 가능성이 높습니다.
+ * - next order의 page가 buddy에 있는지 확인한다. buddy에 있으면 다음에 merge가
+ *   될 가능성이 높아지므로 tail에 넣어놔 할당이 잘 안되게한다.
+ */
 static inline bool
 buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
 		   struct page *page, unsigned int order)
@@ -1320,6 +1362,10 @@ buddy_merge_likely(unsigned long pfn, unsigned long buddy_pfn,
  * -- nyc
  */
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - buddy를 찾아 merge가 가능하면 merge를 한다.
+ */
 static inline void __free_one_page(struct page *page,
 		unsigned long pfn,
 		struct zone *zone, unsigned int order,
@@ -1345,30 +1391,77 @@ static inline void __free_one_page(struct page *page,
 	VM_BUG_ON_PAGE(bad_range(zone, page), page);
 
 continue_merging:
+/*
+ * IAMROOT, 2022.05.14:
+ * - buddy가 free상태면 merge를 한다.
+ */
 	while (order < max_order) {
 		if (compaction_capture(capc, page, order, migratetype)) {
 			__mod_zone_freepage_state(zone, -(1 << order),
 								migratetype);
 			return;
 		}
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - @page의 buddy를 구한다.
+ */
 		buddy_pfn = __find_buddy_pfn(pfn, order);
 		buddy = page + (buddy_pfn - pfn);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - buddy
+ */
 		if (!page_is_buddy(page, buddy, order))
 			goto done_merging;
 		/*
 		 * Our buddy is free or it is CONFIG_DEBUG_PAGEALLOC guard page,
 		 * merge with it and move up one order.
 		 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - pagealloc debug가 켜진경우
+ *   -- !buddy && guard => guard만 푼다. buddy는 buddy list에 없으므로 delete불필요.
+ *   -- buddy && !guard => buddy list에 있으므로 buddy list에서 buddy삭제
+ *   -- buddy && guard  => (존재안함)
+ */
 		if (page_is_guard(buddy))
 			clear_page_guard(zone, buddy, order, migratetype);
 		else
 			del_page_from_free_list(buddy, zone, order);
+/*
+ * IAMROOT, 2022.05.14:
+ * - buddy_pfn & pfn
+ *   둘중 낮은 주소가 나온다.
+ *   combined_pfn = buddy_pfn < pfn ? buddy_pfn : pfn
+ *
+ * - ex) buddy_pfn = 0, pfn = 1
+ *   combined_pfn = 0
+ *   page = page + (0 - 1) = page - 1
+ *
+ * - ex) buddy_pfn = 0, pfn = 2
+ *   combined_pfn = 0
+ *   page = page + (0 - 2) = page - 2
+ *
+ * - ex) buddy_pfn = 2, pfn = 0
+ *   combined_pfn = 0
+ *   page = page + (0 - 0) = page - 0
+ *
+ *   order 0 : (0, 1) (2, 3), (4, 5) ..
+ *   order 1 : (0, 2) (4, 6), (8, 10) ..
+ *   order 2 : (0, 4),(8, 12), (16, 20) ..
+ */
 		combined_pfn = buddy_pfn & pfn;
 		page = page + (combined_pfn - pfn);
 		pfn = combined_pfn;
 		order++;
 	}
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - max_order <= order < MAX_ORDER - 1
+ */
 	if (order < MAX_ORDER - 1) {
 		/* If we are here, it means order is >= pageblock_order.
 		 * We want to prevent merge between freepages on isolate
@@ -1378,6 +1471,11 @@ continue_merging:
 		 * We don't want to hit this code for the more frequent
 		 * low-order merging.
 		 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - zone이 isolate를 가지고 있는상황에서, 두개의 migratetype이 다른 상태에서
+ *   둘중 하라나라도 isolate면 merge를 종료한다.
+ */
 		if (unlikely(has_isolate_pageblock(zone))) {
 			int buddy_mt;
 
@@ -1390,6 +1488,10 @@ continue_merging:
 						is_migrate_isolate(buddy_mt)))
 				goto done_merging;
 		}
+/*
+ * IAMROOT, 2022.05.14:
+ * - 위의 경우가 아니면 max_order를 1증가해서 merge를 한번더 수행한다.
+ */
 		max_order = order + 1;
 		goto continue_merging;
 	}
@@ -1397,6 +1499,13 @@ continue_merging:
 done_merging:
 	set_buddy_order(page, order);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * 1. flag로 tail넣으라는경우 tail
+ * 2. order == 10인 경우. random
+ * 3. order == 9인 경우 head
+ * 4. 그외
+ */
 	if (fpi_flags & FPI_TO_TAIL)
 		to_tail = true;
 	else if (is_shuffle_order(order))
@@ -1490,6 +1599,11 @@ static inline int check_free_page(struct page *page)
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - mapping, compound head를 초기화한다.
+ * - debug가 켜져있ㅎ을 경우 compound tail page의 data가 맞는지 검사한다.
+ */
 static int free_tail_pages_check(struct page *head_page, struct page *page)
 {
 	int ret = 1;
@@ -1565,6 +1679,18 @@ static void kernel_init_free_pages(struct page *page, int numpages, bool zero_ta
 	kasan_enable_current();
 }
 
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - free를 하기 적당한 page인지 검사한다.
+ *   1. order 0 posison 검사
+ *   2. mapping 해제
+ *   3. tail page 검사
+ *   4. hwpoison flag clear
+ *   5. reset page owner
+ *   6. free poison 기록.
+ *   7. memset 0 여부 확인.
+ */
 static __always_inline bool free_pages_prepare(struct page *page,
 			unsigned int order, bool check_free, fpi_t fpi_flags)
 {
@@ -1575,6 +1701,15 @@ static __always_inline bool free_pages_prepare(struct page *page,
 
 	trace_mm_page_free(page, order);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - hw poison이 식별됬는데 order 0면 skip.
+ *   migrate수행중이라는 page라고 예상하며 해당 page가 migrate종료 후 자동으로
+ *   buddy등에 돌아갈것이라 여기서 종료시킨다.
+ *
+ * - Git blame
+ *   page_handle_poison sets the HWPoison flag and does the last put_page.
+ */
 	if (unlikely(PageHWPoison(page)) && !order) {
 		/*
 		 * Do not let hwpoison pages hit pcplists/buddy
@@ -1590,6 +1725,11 @@ static __always_inline bool free_pages_prepare(struct page *page,
 	 * Check tail pages before head page information is cleared to
 	 * avoid checking PageCompound for order-0 pages.
 	 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - order가 존재하는 page에 대해서 다음을 수행한다.
+ *   DoubleMap, HasHWPoisoned를 cler.
+ */
 	if (unlikely(order)) {
 
 		bool compound = PageCompound(page);
@@ -1645,6 +1785,11 @@ static __always_inline bool free_pages_prepare(struct page *page,
 		if (!skip_kasan_poison)
 			kasan_free_pages(page, order);
 	} else {
+
+/*
+ * IAMROOT, 2022.05.14:
+ * - free후 0으로 clear할지를 정한다.
+ */
 		bool init = want_init_on_free();
 
 		if (init)
@@ -1689,6 +1834,10 @@ static bool bulkfree_pcp_prepare(struct page *page)
  * moving from pcp lists to free list in order to reduce overhead. With
  * debug_pagealloc enabled, they are checked also immediately when being freed
  * to the pcp lists.
+ */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @page가 free 가능한지를 검사하고, 가능하면 free를 위한 초기화를 수행한다.
  */
 static bool free_pcp_prepare(struct page *page, unsigned int order)
 {
@@ -1859,6 +2008,12 @@ static void free_pcppages_bulk(struct zone *zone, int count,
 	spin_unlock(&zone->lock);
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - buddy로 free.
+ * - @zone에 isolate pageblock이 존재하거나, @page가 isolate일 경우
+ *   대표 migratetype으로 변경한다.
+ */
 static void free_one_page(struct zone *zone,
 				struct page *page, unsigned long pfn,
 				unsigned int order,
@@ -1979,7 +2134,7 @@ void __meminit reserve_bootmem_region(phys_addr_t start, phys_addr_t end)
 
 /*
  * IAMROOT, 2022.03.22:
- * - TODO
+ * - buddy에 넣는다.
  */
 static void __free_pages_ok(struct page *page, unsigned int order,
 			    fpi_t fpi_flags)
@@ -1995,6 +2150,11 @@ static void __free_pages_ok(struct page *page, unsigned int order,
 	migratetype = get_pfnblock_migratetype(page, pfn);
 
 	spin_lock_irqsave(&zone->lock, flags);
+/*
+ * IAMROOT, 2022.05.14:
+ * - @page가 isolate migrate이거나 @zone이 isolate를 가지고 있을 경우
+ *   migratetype을 @page의 대표 migrate로 바꾼다.
+ */
 	if (unlikely(has_isolate_pageblock(zone) ||
 		is_migrate_isolate(migratetype))) {
 		migratetype = get_pfnblock_migratetype(page, pfn);
@@ -2765,6 +2925,16 @@ static inline void expand(struct zone *zone, struct page *page,
 		 * Corresponding page table entries will not be touched,
 		 * pages will stay not present in virtual address space
 		 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - papago
+ *   버디가 해방될 때 할당자에 다시 병합할 수 있도록 가드 페이지(또는 페이지)로
+ *   표시합니다.
+ *   해당 페이지 테이블 항목은 터치되지 않으며 페이지는 가상 주소 공간에 존재하지
+ *   않습니다.
+ * - debug alloc이 켜져있고 debug minorder 보다 작은 경우엔 guard page로 만들고
+ *   buddy에 안넣는다.
+ */
 		if (set_page_guard(zone, &page[size], high, migratetype))
 			continue;
 
@@ -4192,6 +4362,10 @@ void mark_free_pages(struct zone *zone)
 }
 #endif /* CONFIG_PM */
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - free를 위한 설정을 진행하고 migratetype을 @page->index에 set한다.
+ */
 static bool free_unref_page_prepare(struct page *page, unsigned long pfn,
 							unsigned int order)
 {
@@ -4200,11 +4374,20 @@ static bool free_unref_page_prepare(struct page *page, unsigned long pfn,
 	if (!free_pcp_prepare(page, order))
 		return false;
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - pageblock의 migratetype을 가져와 page->index에 set한다.
+ *   pcp를 넣기전에 기준 migratetype으로 전체 block을 통일시킨다.
+ */
 	migratetype = get_pfnblock_migratetype(page, pfn);
 	set_pcppage_migratetype(page, migratetype);
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - @pcp에서 batch만큼 free를 시키지에 대한 개수를 확정한다.
+ */
 static int nr_pcp_free(struct per_cpu_pages *pcp, int high, int batch)
 {
 	int min_nr_free, max_nr_free;
@@ -4221,6 +4404,13 @@ static int nr_pcp_free(struct per_cpu_pages *pcp, int high, int batch)
 	 * Double the number of pages freed each time there is subsequent
 	 * freeing of pages without any allocation.
 	 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - batch가 max_nr_free보다 높은 경우에 한해서 free_factor가 증가한다.
+ *   이후 할당요청이 없는 상태에서 계속 batch요청(pcp<->buddy)이 오면 한번에
+ *   더 많이 하기 위함이다.
+ *   만약 한번이라도 pcp할당(rmqueue_pcplist())이 오면 free_factor가 반씩 감소한다.
+ */
 	batch <<= pcp->free_factor;
 	if (batch < max_nr_free)
 		pcp->free_factor++;
@@ -4229,6 +4419,10 @@ static int nr_pcp_free(struct per_cpu_pages *pcp, int high, int batch)
 	return batch;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - pcplist batch high을 가져온다.
+ */
 static int nr_pcp_high(struct per_cpu_pages *pcp, struct zone *zone)
 {
 	int high = READ_ONCE(pcp->high);
@@ -4246,6 +4440,10 @@ static int nr_pcp_high(struct per_cpu_pages *pcp, struct zone *zone)
 	return min(READ_ONCE(pcp->batch) << 2, high);
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - pcp에 넣고, 만약 pcp overflow면 buddy에 넣는다.
+ */
 static void free_unref_page_commit(struct page *page, unsigned long pfn,
 				   int migratetype, unsigned int order)
 {
@@ -4254,12 +4452,21 @@ static void free_unref_page_commit(struct page *page, unsigned long pfn,
 	int high;
 	int pindex;
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - pcp에 넣는다.
+ */
 	__count_vm_event(PGFREE);
 	pcp = this_cpu_ptr(zone->per_cpu_pageset);
 	pindex = order_to_pindex(migratetype, order);
 	list_add(&page->lru, &pcp->lists[pindex]);
 	pcp->count += 1 << order;
 	high = nr_pcp_high(pcp, zone);
+/*
+ * IAMROOT, 2022.05.14:
+ * - pcp에 넣어봤더니 pcp에 있는 page가 한도(high)를 초과했으면
+ *   batch에 free_factor를 고려한 개수만큼 buddy로 이동시킨다.
+ */
 	if (pcp->count >= high) {
 		int batch = READ_ONCE(pcp->batch);
 
@@ -4269,6 +4476,10 @@ static void free_unref_page_commit(struct page *page, unsigned long pfn,
 
 /*
  * Free a pcp page
+ */
+/*
+ * IAMROOT, 2022.05.14:
+ * - page를 free해서 pcp에 넣는다.
  */
 void free_unref_page(struct page *page, unsigned int order)
 {
@@ -4287,7 +4498,15 @@ void free_unref_page(struct page *page, unsigned int order)
 	 * excessively into the page allocator
 	 */
 	migratetype = get_pcppage_migratetype(page);
+/*
+ * IAMROOT, 2022.05.14:
+ * - UNMOVABLE, MOVABLE, RECLAIMABLE은 바로 pcp로 간다.
+ */
 	if (unlikely(migratetype >= MIGRATE_PCPTYPES)) {
+/*
+ * IAMROOT, 2022.05.14:
+ * - isolate는 buddy로, cma, highatomic은 movable로 변경후 pcp로 보낸다.
+ */
 		if (unlikely(is_migrate_isolate(migratetype))) {
 			free_one_page(page_zone(page), page, pfn, order, migratetype, FPI_NONE);
 			return;
@@ -4577,6 +4796,15 @@ static struct page *rmqueue_pcplist(struct zone *preferred_zone,
 	 * frees.
 	 */
 	pcp = this_cpu_ptr(zone->per_cpu_pageset);
+/*
+ * IAMROOT, 2022.05.14:
+ * - batch가 max_nr_free보다 높은 경우에 한해서 free_factor가 증가한다.
+ *   이후 할당요청이 없는 상태에서 계속 batch요청(pcp<->buddy)이 오면 한번에
+ *   더 많이 하기 위함이다.
+ * - batch요청시 free_factor을 보고 더 많이 batch를 하는지에 대한 여부를
+ *   결정하는데 만약 이와같은 pcp 할당요청이 이뤄지면 batch요청을 절반식 줄인다.
+ *   (nr_pcp_free())
+ */
 	pcp->free_factor >>= 1;
 	list = &pcp->lists[order_to_pindex(migratetype, order)];
 	page = __rmqueue_pcplist(zone, order, migratetype, alloc_flags, pcp, list);
@@ -5506,6 +5734,9 @@ __alloc_pages_cpuset_fallback(gfp_t gfp_mask, unsigned int order,
 /*
  * IAMROOT, 2022.05.13:
  * @did_some_progress[out] oom kill을 한경우 return 1, 아니면 return 0
+ *
+ * - 최종적으로 watermark high로 alloc을 시도하고, 그게 실패하면 costly order이내에
+ *   한해서 oom을 실행한다.
  */
 static inline struct page *
 __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
@@ -5620,6 +5851,10 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 		 * Help non-failing allocations by giving them access to memory
 		 * reserves
 		 */
+/*
+ * IAMROOT, 2022.05.14:
+ * - __GFP_NOFAIL이 있으면 no watermark로 할당시도를 한다.
+ */
 		if (gfp_mask & __GFP_NOFAIL)
 			page = __alloc_pages_cpuset_fallback(gfp_mask, order,
 					ALLOC_NO_WATERMARKS, ac);
@@ -6390,6 +6625,14 @@ check_retry_cpuset(int cpuset_mems_cookie, struct alloc_context *ac)
 	return false;
 }
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - alloc을 시도한다.
+ * - 실패시 다음을 시도한다.
+ *   -- direct compact 시도
+ *   -- direct reclaim 시도
+ *   -- oom kill
+ */
 static inline struct page *
 __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 						struct alloc_context *ac)
@@ -6706,6 +6949,10 @@ retry:
 		goto nopage;
 
 	/* Retry as long as the OOM killer is making progress */
+/*
+ * IAMROOT, 2022.05.14:
+ * - oom이 실행됬거나 free 공간이 생김.
+ */
 	if (did_some_progress) {
 		no_progress_loops = 0;
 		goto retry;
@@ -7186,6 +7433,10 @@ EXPORT_SYMBOL(get_zeroed_page);
  * Context: May be called in interrupt context or while holding a normal
  * spinlock, but not in NMI context or while holding a raw spinlock.
  */
+/*
+ * IAMROOT, 2022.05.14:
+ * - @page를 order 단위로 free 수행
+ */
 void __free_pages(struct page *page, unsigned int order)
 {
 	if (put_page_testzero(page))
@@ -7196,6 +7447,10 @@ void __free_pages(struct page *page, unsigned int order)
 }
 EXPORT_SYMBOL(__free_pages);
 
+/*
+ * IAMROOT, 2022.05.14:
+ * - order 단위로 free page수행
+ */
 void free_pages(unsigned long addr, unsigned int order)
 {
 	if (addr != 0) {
