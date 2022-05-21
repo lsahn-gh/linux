@@ -532,12 +532,13 @@ anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
 
 /*
  * IAMROOT, 2022.05.21:
- * @pprev[out] 제일 마지막에 right 이동했을때의 parent
- * @rb_link[out] vma가 link될 leaf node가 연결될 parent의 left or right pointer.
+ * @pprev[out] 새로 생길 lead node의 prev node
+ * @rb_link[out] 새로 생길 leaf node가 연결될 parent의 left or right pointer.
  * @rb_parent[out] rb_link의 parent
  *
- * - @addr ~ end까지 겹치는 vma가 있다면 error. 그렇지 않다면 비어있는
- *   out 인자를 완성하고 return 0.
+ * - @addr ~ end까지 겹치는 vma가 있다면 error. 그렇지 않다면 vma가 위치할
+ *   null pointer를 찾아 새로 생길 leaf node의 자리를 구하고(rb_link)
+ *   해당 node의 parent(rb_parent)와 before node(pprev)를 구하고 return 0.
  *
  * --- ()를 rb_link로 찾았다고 했을때.
  * 1)
@@ -547,7 +548,7 @@ anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
  *           B   C
  *          / \   
  *         D  ()
- * () -> rb_link
+ * () -> *rb_link
  * B  -> rb_parent, pprev
  *
  * 2)
@@ -558,7 +559,7 @@ anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
  *          /    /\   
  *         D    () ..
  *
- * () -> rb_link
+ * () -> *rb_link
  * C  -> rb_parent
  * A  -> pprev
  */
@@ -588,6 +589,11 @@ static int find_vma_links(struct mm_struct *mm, unsigned long addr,
 				return -ENOMEM;
 			__rb_link = &__rb_parent->rb_left;
 		} else {
+/*
+ * IAMROOT, 2022.05.21:
+ * - rb_tree에서 right측을 이동하게되는 마지막 pnode가 새로 생길
+ *   leaf node의 before value node가 된다.
+ */
 			rb_prev = __rb_parent;
 			__rb_link = &__rb_parent->rb_right;
 		}
