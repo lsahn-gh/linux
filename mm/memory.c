@@ -1539,6 +1539,10 @@ static inline unsigned long zap_p4d_range(struct mmu_gather *tlb,
 	return addr;
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 해당 영역의 정규 mapping을 unmap
+ */
 void unmap_page_range(struct mmu_gather *tlb,
 			     struct vm_area_struct *vma,
 			     unsigned long addr, unsigned long end,
@@ -1556,10 +1560,17 @@ void unmap_page_range(struct mmu_gather *tlb,
 			continue;
 		next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
 	} while (pgd++, addr = next, addr != end);
+/*
+ * IAMROOT, 2022.05.21:
+ * - @vma에 대한 tlb flush
+ */
 	tlb_end_vma(tlb, vma);
 }
 
-
+/*
+ * IAMROOT, 2022.05.21:
+ * - @vma unmmap
+ */
 static void unmap_single_vma(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, unsigned long start_addr,
 		unsigned long end_addr,
@@ -1620,6 +1631,33 @@ static void unmap_single_vma(struct mmu_gather *tlb,
  * range after unmap_vmas() returns.  So the only responsibility here is to
  * ensure that any thus-far unmapped pages are flushed before unmap_vmas()
  * drops the lock and schedules.
+ */
+
+/*
+ * IAMROOT, 2022.05.21:
+ *
+ * ^ ---- vm_end
+ * |                    <- vma4
+ * |                --- end
+ * |                 ^  <- vma3->next = vma4
+ * v ---- vm_start   |
+ *                   |
+ * ...               ..
+ *                    
+ * ^ ---- vm_end     |
+ * |                 |
+ * |                 | <- vma2->next = vma3
+ * v ---- vm_start   |
+ *                   |
+ * ...              ..
+ *                   |
+ * ^ ---- vm_end     |
+ * |                 v  <- vma->next = vma2
+ * |                --- start
+ * |                 <-- prev
+ * v ---- vm_start
+ * 
+ * vma부터 ~ vma4까지  unmap될것이다.(unmap_vmas())
  */
 void unmap_vmas(struct mmu_gather *tlb,
 		struct vm_area_struct *vma, unsigned long start_addr,
@@ -3716,6 +3754,10 @@ out_release:
  * We enter with non-exclusive mmap_lock (to exclude vma changes,
  * but allow concurrent faults), and pte mapped but not yet locked.
  * We return with mmap_lock still held, but pte unmapped and unlocked.
+ */
+/*
+ * IAMROOT, 2022.05.21:
+ * - anon page fault시 이 함수로 진입하게 될것이다.
  */
 static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 {

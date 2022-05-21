@@ -520,6 +520,10 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 			      &uf);
 		mmap_write_unlock(mm);
 		userfaultfd_unmap_complete(mm, &uf);
+/*
+ * IAMROOT, 2022.05.21:
+ * - populate값이 있으면 mapping을 한다.
+ */
 		if (populate)
 			mm_populate(ret, populate);
 	}

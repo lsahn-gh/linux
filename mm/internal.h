@@ -467,6 +467,11 @@ static inline bool is_stack_mapping(vm_flags_t flags)
 /*
  * Data area - private, writable, not stack
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * stack을 제외한 data 공간.
+ * Data area - private, writable, not stack
+ */
 static inline bool is_data_mapping(vm_flags_t flags)
 {
 	return (flags & (VM_WRITE | VM_SHARED | VM_STACK)) == VM_WRITE;

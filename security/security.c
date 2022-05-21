@@ -731,6 +731,11 @@ static int lsm_superblock_alloc(struct super_block *sb)
 			P->hook.FUNC(__VA_ARGS__);		\
 	} while (0)
 
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - 등록된 security hook 가 있으면 호출한다.
+ */
 #define call_int_hook(FUNC, IRC, ...) ({			\
 	int RC = IRC;						\
 	do {							\
@@ -1574,6 +1579,11 @@ static inline unsigned long mmap_prot(struct file *file, unsigned long prot)
 	return prot;
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * LSM(linux security model)
+ * - memory 할당시 security callback.
+ */
 int security_mmap_file(struct file *file, unsigned long prot,
 			unsigned long flags)
 {

@@ -175,6 +175,10 @@ void unlink_file_vma(struct vm_area_struct *vma)
 /*
  * Close a vm structure and free it, returning the next.
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - @vma를 해제하고 return next vma
+ */
 static struct vm_area_struct *remove_vma(struct vm_area_struct *vma)
 {
 	struct vm_area_struct *next = vma->vm_next;
@@ -526,6 +530,38 @@ anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
 		anon_vma_interval_tree_insert(avc, &avc->anon_vma->rb_root);
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * @pprev[out] 제일 마지막에 right 이동했을때의 parent
+ * @rb_link[out] vma가 link될 leaf node가 연결될 parent의 left or right pointer.
+ * @rb_parent[out] rb_link의 parent
+ *
+ * - @addr ~ end까지 겹치는 vma가 있다면 error. 그렇지 않다면 비어있는
+ *   out 인자를 완성하고 return 0.
+ *
+ * --- ()를 rb_link로 찾았다고 했을때.
+ * 1)
+ *
+ *             A
+ *            / \
+ *           B   C
+ *          / \   
+ *         D  ()
+ * () -> rb_link
+ * B  -> rb_parent, pprev
+ *
+ * 2)
+ *
+ *             A
+ *            / \
+ *           B   C
+ *          /    /\   
+ *         D    () ..
+ *
+ * () -> rb_link
+ * C  -> rb_parent
+ * A  -> pprev
+ */
 static int find_vma_links(struct mm_struct *mm, unsigned long addr,
 		unsigned long end, struct vm_area_struct **pprev,
 		struct rb_node ***rb_link, struct rb_node **rb_parent)
@@ -542,6 +578,10 @@ static int find_vma_links(struct mm_struct *mm, unsigned long addr,
 		__rb_parent = *__rb_link;
 		vma_tmp = rb_entry(__rb_parent, struct vm_area_struct, vm_rb);
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 요청 영역과 겹치는 vma가 있으면 error.
+ */
 		if (vma_tmp->vm_end > addr) {
 			/* Fail if an existing vma overlaps the area */
 			if (vma_tmp->vm_start < end)
@@ -593,12 +633,21 @@ static inline struct vm_area_struct *vma_next(struct mm_struct *mm,
  *
  * Returns: -ENOMEM on munmap failure or 0 on success.
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - start에서 len만큼의 공간에 대한 vma를 할당할수있는지 확인한다.
+ *   영역에 vma가 존재하면 모두 unmap후 제거한다.
+ */
 static inline int
 munmap_vma_range(struct mm_struct *mm, unsigned long start, unsigned long len,
 		 struct vm_area_struct **pprev, struct rb_node ***link,
 		 struct rb_node **parent, struct list_head *uf)
 {
-
+/*
+ * IAMROOT, 2022.05.21:
+ * - vma가 겹친경우 do_munmap을 시도한다. 겹친 vma가 여러개일 경우 여러번
+ *   시도될수있다.
+ */
 	while (find_vma_links(mm, start, start + len, pprev, link, parent))
 		if (do_munmap(mm, start, len, uf))
 			return -ENOMEM;
@@ -1467,6 +1516,10 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	 * to. we assume access permissions have been handled by the open
 	 * of the memory object, so we don't do any here.
 	 */
+/*
+ * IAMROOT, 2022.05.21:
+ * - prot, flags를 vm_flags로 변환하여 추가한다.
+ */
 	vm_flags = calc_vm_prot_bits(prot, pkey) | calc_vm_flag_bits(flags) |
 			mm->def_flags | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
 
@@ -1547,6 +1600,11 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			pgoff = 0;
 			vm_flags |= VM_SHARED | VM_MAYSHARE;
 			break;
+/*
+ * IAMROOT, 2022.05.21:
+ * - anon page
+ *   MAP_PRIVATE|MAP_ANONYMOUS
+ */
 		case MAP_PRIVATE:
 			/*
 			 * Set pgoff according to addr for anon_vma.
@@ -1580,6 +1638,12 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	return addr;
 }
 
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - user에서 호출한 malloc인 경우 if문 해당사항이 없어(file이 아닌경우)
+ *   vm_mmap_pgoff를 바로 호출할것이다.
+ */
 unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 			      unsigned long prot, unsigned long flags,
 			      unsigned long fd, unsigned long pgoff)
@@ -1738,6 +1802,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 			return -ENOMEM;
 	}
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 영역내에 있는 vma들을 unmap후 해제 한다.
+ */
 	/* Clear old maps, set up prev, rb_link, rb_parent, and uf */
 	if (munmap_vma_range(mm, addr, len, &prev, &rb_link, &rb_parent, uf))
 		return -ENOMEM;
@@ -1889,6 +1957,12 @@ unacct_error:
 	return error;
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * @return 찾은 빈공간의 align적용된 시작 주소. or error
+ * - 이진탐색으로 low_limit ~ high_limit 범위내에 vma들 사이에서
+ *   gap(prev vma ~ current vma 사이의 공간)을 찾는다.
+ */
 static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
 {
 	/*
@@ -1904,6 +1978,12 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
 	unsigned long length, low_limit, high_limit, gap_start, gap_end;
 
 	/* Adjust search length to account for worst case alignment overhead */
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - info->align_mask
+ *   length보다 크게(align에 맞춰서) 할당하겠다는것.
+ */
 	length = info->length + info->align_mask;
 	if (length < info->length)
 		return -ENOMEM;
@@ -1924,9 +2004,31 @@ static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
 	if (vma->rb_subtree_gap < length)
 		goto check_highest;
 
+/*
+ * IAMROOT, 2022.05.21:
+ *
+ *              A
+ *            /   \
+ *           B     C
+ *          / \   / \
+ *         D  E  F   G
+ *
+ * 1. B,F의 rb_subtree_gap < length,  나머지는 true
+ * 0x00                                       ULONG_MAX
+ *        D   B   E   A   F     C   G
+ *                  1        2           
+ *                           ^found
+ * A -> B subtree false -> 1(E_A check) -> C -> F subtree false -> 2(F_C check)
+ */
 	while (true) {
 		/* Visit left subtree if it looks promising */
 		gap_end = vm_start_gap(vma);
+/*
+ * IAMROOT, 2022.05.21:
+ * - left subtree_gap의 공간이 있으면 left로 계속 내려간다.
+ *   단 low_limit 밑으로 내려가지 못한다.
+ *   
+ */
 		if (gap_end >= low_limit && vma->vm_rb.rb_left) {
 			struct vm_area_struct *left =
 				rb_entry(vma->vm_rb.rb_left,
@@ -1942,11 +2044,21 @@ check_current:
 		/* Check if current node has a suitable gap */
 		if (gap_start > high_limit)
 			return -ENOMEM;
+/*
+ * IAMROOT, 2022.05.21:
+ * - current vma와 prev vma 사이에 gap이 충분한지 검사한다.
+ *   공간이 충분하면 found.
+ */
 		if (gap_end >= low_limit &&
 		    gap_end > gap_start && gap_end - gap_start >= length)
 			goto found;
 
 		/* Visit right subtree if it looks promising */
+/*
+ * IAMROOT, 2022.05.21:
+ * - left에 gap이 없었다는것은 right tree쪽에 gap이 있을수도있다.
+ *   right 이동이 가능하면 right로 이동한다.
+ */
 		if (vma->vm_rb.rb_right) {
 			struct vm_area_struct *right =
 				rb_entry(vma->vm_rb.rb_right,
@@ -1957,6 +2069,11 @@ check_current:
 			}
 		}
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - left, right에서 gap을 못찾앗으므로 parent로 올라가고
+ *   check_current로 goto한다. 올라간 parent 기준으로 검사를 수행한다.
+ */
 		/* Go back up the rbtree to find next candidate node */
 		while (true) {
 			struct rb_node *prev = &vma->vm_rb;
@@ -1974,8 +2091,17 @@ check_current:
 
 check_highest:
 	/* Check highest gap, which does not precede any rbtree node */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 범위내에서 못찾았다면 highest로 cache되잇는걸 start로 잡는다.
+ *   가장 높은 주소에 있는 빈공간이니 end도 끝점이될것이다.
+ */
 	gap_start = mm->highest_vm_end;
 	gap_end = ULONG_MAX;  /* Only for VM_BUG_ON below */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 가장 끝에 있는데 high_limit을 넘어서면 범위초과이므로 fail
+ */
 	if (gap_start > high_limit)
 		return -ENOMEM;
 
@@ -2100,6 +2226,11 @@ found_highest:
  * - is at least the desired size.
  * - satisfies (begin_addr & align_mask) == (align_offset & align_mask)
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * @info에서 요청한 범위에서 vma를 할당할수있는 빈 공간 시작주소를
+ * 얻어온다.
+ */
 unsigned long vm_unmapped_area(struct vm_unmapped_area_info *info)
 {
 	unsigned long addr;
@@ -2133,6 +2264,10 @@ unsigned long vm_unmapped_area(struct vm_unmapped_area_info *info)
  * This function "knows" that -ENOMEM has the bits set.
  */
 #ifndef HAVE_ARCH_UNMAPPED_AREA
+/*
+ * IAMROOT, 2022.05.21:
+ * - 요청 인자에 따라 vma를 할당할 addr를 구해온다.
+ */
 unsigned long
 arch_get_unmapped_area(struct file *filp, unsigned long addr,
 		unsigned long len, unsigned long pgoff, unsigned long flags)
@@ -2145,12 +2280,46 @@ arch_get_unmapped_area(struct file *filp, unsigned long addr,
 	if (len > mmap_end - mmap_min_addr)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - MAP_FIXED면 검색도 안하고 그냥 들어온 인자로 결정된다.
+ */
 	if (flags & MAP_FIXED)
 		return addr;
 
 	if (addr) {
 		addr = PAGE_ALIGN(addr);
 		vma = find_vma_prev(mm, addr, &prev);
+/*
+ * IAMROOT, 2022.05.21:
+ * - find_vma_prev를 통해서 즉시 vma가 할당이 안된 빈 공간을 찾을수있는
+ *   지 확인한다.
+ * - addr은 유효범위 이지만 vma를 못찾앗거나 찾아온 vma가 vm범위를 넘고.
+ *   prev가 없거나 addr이 vm_end_gap 이상이면 return addr.
+ *
+ * ---
+ *
+ *              addr(vma안에 있을수있고, prev ~ vma 사이에 있을수도있음)
+ *                v
+ *           +-------+
+ *           v       v
+ * | prev |       | vma |
+ *           ^----^
+ *            이 공간안에 len이 충분한지 확인한다.
+ *
+ * ---
+ * - mmap_end - len >= addr && addr >= mmap_min_addr
+ *   mmap공간내에 addr이 유효한지만 판단.
+ *
+ * - prev, vma가 둘다 있다고 가정하면, prev, vma 사이에 gap이 충분한지
+ *   확인한다.
+ *
+ * - prev == NULL, vma == NULL
+ *   memory에 vma에 하나도 없는경우 이므로 어디에나 할당가능
+ *
+ * - prev != NULL, vma == NULL
+ *   addr측에 존재하는 vma가 없다
+ */
 		if (mmap_end - len >= addr && addr >= mmap_min_addr &&
 		    (!vma || addr + len <= vm_start_gap(vma)) &&
 		    (!prev || addr >= vm_end_gap(prev)))
@@ -2225,6 +2394,10 @@ arch_get_unmapped_area_topdown(struct file *filp, unsigned long addr,
 }
 #endif
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 인자에 따라 vma를 할당할 주소를 return한다.
+ */
 unsigned long
 get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 		unsigned long pgoff, unsigned long flags)
@@ -2240,6 +2413,13 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 	if (len > TASK_SIZE)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - file인 경우 f_op에 되있는걸 사용하고, shared인경우엔 shmem_get_unmapped_area를
+ *   사용한다. 그 외의 경우엔 current->mm->get_unmapped_area를 사용하며,
+ *   아마 함수는 arch_get_unmapped_area일 것이다.
+ *   (setup_new_exec(), arch_pick_mmap_layout() 참고)
+ */
 	get_area = current->mm->get_unmapped_area;
 	if (file) {
 		if (file->f_op->get_unmapped_area)
@@ -2270,6 +2450,26 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 EXPORT_SYMBOL(get_unmapped_area);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
+/*
+ * IAMROOT, 2022.05.21:
+ * @return 1. cache에서 바로 찾아지면 경우
+ *	   2. rbtree에서 찾아진경우
+ *	   3. rbtree에서 못찾은 경우
+ *	     3-1 addr보다 큰 vm_end를 가진것들중에서 가장 addr에 가까운 vm_end값을
+ *		 가진 vma
+ *	     3-2 addr보다 큰 vm_end를 가진 vma가 없으면 NULL
+ *
+ * - cache에서 먼저 찾아보고 아니면 rb에서 이진탐색한다.
+ *
+ * ---
+ *           A
+ *         /   \
+ *        B     C
+ *
+ * .. | B | .. | A | .. | C |
+ *  ^ ^ ^ ^ ^  ^ ^ ^  ^ ^ ^ ^
+ *  B B B A A  A A C  C C C NULL <-return
+ */
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
 	struct rb_node *rb_node;
@@ -2289,7 +2489,16 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 		tmp = rb_entry(rb_node, struct vm_area_struct, vm_rb);
 
 		if (tmp->vm_end > addr) {
+/*
+ * IAMROOT, 2022.05.21:
+ * - addr보다 큰 vm_end를 가진 것들중에서 가장 addr에 가까운 vm_end값을 가진
+ *   vma를 고른다.
+ */
 			vma = tmp;
+/*
+ * IAMROOT, 2022.05.21:
+ * - start <= addr < end 이경우. 즉 addr이 vma에 포함되서  찾아짐.
+ */
 			if (tmp->vm_start <= addr)
 				break;
 			rb_node = rb_node->rb_left;
@@ -2307,6 +2516,25 @@ EXPORT_SYMBOL(find_vma);
 /*
  * Same as find_vma, but also return a pointer to the previous VMA in *pprev.
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 1. vma가 찾아진경우
+ *   return vma (찾아진 vma)
+ *   prev = vma의 prev.
+ *   2. vma가 못찾아진경우
+ *   return vma == NULL
+ *   prev = last vma or NULL
+ *
+ * ---
+ *           A
+ *         /   \
+ *        B     C
+ *
+ * .. | B | .. | A | .. | C |
+ *  ^ ^ ^ ^ ^  ^ ^ ^  ^ ^ ^ ^
+ *  B B B A A  A A C  C C C NULL <- vma
+ *  N N N B B  B B A  A A A C    <- pprev
+ */
 struct vm_area_struct *
 find_vma_prev(struct mm_struct *mm, unsigned long addr,
 			struct vm_area_struct **pprev)
@@ -2315,9 +2543,18 @@ find_vma_prev(struct mm_struct *mm, unsigned long addr,
 
 	vma = find_vma(mm, addr);
 	if (vma) {
+/*
+ * IAMROOT, 2022.05.21:
+ * - vma prev를 저장.
+ */
 		*pprev = vma->vm_prev;
 	} else {
 		struct rb_node *rb_node = rb_last(&mm->mm_rb);
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - last가 있으면 prev는 last를 가져온다. return은 NULL이 된다.
+ */
 
 		*pprev = rb_node ? rb_entry(rb_node, struct vm_area_struct, vm_rb) : NULL;
 	}
@@ -2540,6 +2777,10 @@ int expand_downwards(struct vm_area_struct *vma,
 }
 
 /* enforced gap between the expanding stack and other mappings. */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 1MB
+ */
 unsigned long stack_guard_gap = 256UL<<PAGE_SHIFT;
 
 static int __init cmdline_parse_stack_guard_gap(char *p)
@@ -2793,6 +3034,11 @@ unlock_range(struct vm_area_struct *start, unsigned long limit)
  * work.  This now handles partial unmappings.
  * Jeremy Fitzhardinge <jeremy@goop.org>
  */
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - @start에서 len만큼의 영역에 있는 vma들을 해제한다.(split, unmap, detach, free)
+ */
 int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 		struct list_head *uf, bool downgrade)
 {
@@ -2847,10 +3093,89 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	/* Does it split the last one? */
 	last = find_vma(mm, end);
 	if (last && end > last->vm_start) {
+
+/*
+ * IAMROOT, 2022.05.21:
+ * 
+ * 1) vma 한개에 영역이 다 있는 경우
+ *
+ * ----------- vm_end
+ * ^
+ * |     ^ ---- end
+ * |     |
+ * |vma  |
+ * |     v ---- start
+ * v
+ * ----------- vm_start
+ *
+ * 이런경우 split가 두번되야될것이다.
+ *
+ * 2) 영역에 vma가 여러 개있는 경우
+ *
+ * ^ ---- vm_end
+ * |
+ * |                --- end
+ * |                 ^ 
+ * v ---- vm_start   |
+ *                   |
+ * ...               ..
+ *                    
+ * ^ ---- vm_end     |
+ * |                 |
+ * |                 |
+ * v ---- vm_start   |
+ *                   |
+ * ...              ..
+ *                   |
+ * ^ ---- vm_end     |
+ * |                 v
+ * |                --- start
+ * |
+ * v ---- vm_start
+ * 
+ * 이경우 start와 겹치는 vma와 end와 겹치는 vma가 각각 splite 될것이다.
+ */
 		int error = __split_vma(mm, last, end, 1);
 		if (error)
 			return error;
 	}
+
+/*
+ * IAMROOT, 2022.05.21:
+ * 
+ * ----------- vm_end
+ * ^
+ * |     ^ ---- end
+ * |     |         |
+ * |vma  |         | <-- vma 
+ * |     v ---- start
+ * v               | <-- prev
+ * ----------- vm_start
+ *
+ * ----
+ * ^ ---- vm_end
+ * |                    <- vma4
+ * |                --- end
+ * |                 ^  <- vma3->next = vma4
+ * v ---- vm_start   |
+ *                   |
+ * ...               ..
+ *                    
+ * ^ ---- vm_end     |
+ * |                 |
+ * |                 | <- vma2->next = vma3
+ * v ---- vm_start   |
+ *                   |
+ * ...              ..
+ *                   |
+ * ^ ---- vm_end     |
+ * |                 v  <- vma->next = vma2
+ * |                --- start
+ * |                 <-- prev
+ * v ---- vm_start
+ * 
+ * vma부터 ~ vma4까지  unmap될것이다.(unmap_vmas())
+ */
 	vma = vma_next(mm, prev);
 
 	if (unlikely(uf)) {
@@ -2874,6 +3199,10 @@ int __do_munmap(struct mm_struct *mm, unsigned long start, size_t len,
 	if (mm->locked_vm)
 		unlock_range(vma, end);
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 영역 내에 있는 vma만 list에서 제외한다.
+ */
 	/* Detach vmas from rbtree */
 	if (!detach_vmas_to_be_unmapped(mm, vma, prev, end))
 		downgrade = false;
@@ -3304,6 +3633,12 @@ out:
 /*
  * Return true if the calling process may expand its vm space by the passed
  * number of pages
+ */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 가상공간이나 data limit을 초과한 경우 false.
+ * - 단 data limit의 경우 , valgrind를 사용중이거나 ignore 되있는 경우 그냥
+ *   true로 한다.
  */
 bool may_expand_vm(struct mm_struct *mm, vm_flags_t flags, unsigned long npages)
 {

@@ -1840,6 +1840,10 @@ nodemask_t *policy_nodemask(gfp_t gfp, struct mempolicy *policy)
  * policy_node() is always coupled with policy_nodemask(), which
  * secures the nodemask limit for 'bind' and 'prefer-many' policy.
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - @policy->mode 가 MPOL_PREFERRED인 경우 first node를 return한다.
+ */
 static int policy_node(gfp_t gfp, struct mempolicy *policy, int nd)
 {
 	if (policy->mode == MPOL_PREFERRED) {
@@ -2193,6 +2197,14 @@ static struct page *alloc_pages_preferred_many(gfp_t gfp, unsigned int order,
  *
  * Return: The page on success or NULL if allocation fails.
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - numa Policy는 주로 app을 위한 정책이다. policy에 따라 alloc_pages를 호출한다.
+ *
+ * ---
+ * - kernel같은 경우은 local이 preferred 인 개념이되고(나머지는 cost순),
+ *   app같은 경우엔 사용자가 설정한 node policy에 따르게 된다.
+ */
 struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		unsigned long addr, int node, bool hugepage)
 {
@@ -2218,6 +2230,10 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		goto out;
 	}
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - PASS
+ */
 	if (unlikely(IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE) && hugepage)) {
 		int hpage_node = node;
 

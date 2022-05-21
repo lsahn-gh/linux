@@ -434,6 +434,13 @@ struct vm_area_struct {
 	 * VMAs below us in the VMA rbtree and its ->vm_prev. This helps
 	 * get_unmapped_area find a free area of the right size.
 	 */
+/*
+ * IAMROOT, 2022.05.21:
+ * - 이 VMA의 왼쪽에 있는 최대 사용 가능한 메모리 간격(바이트)입니다.
+ *   이 VMA와 vma->vm_prev 사이 또는 VMArbtree에서 아래 VMA 중 하나와
+ *   해당 ->vm_prev 사이입니다. 이렇게 하면 get_unmapped_area가 올바른
+ *   크기의 빈 영역을 찾을 수 있습니다. 
+ */
 	unsigned long rb_subtree_gap;
 
 	/* Second cache line starts here. */
@@ -594,6 +601,11 @@ struct mm_struct {
 		unsigned long total_vm;	   /* Total pages mapped */
 		unsigned long locked_vm;   /* Pages that have PG_mlocked set */
 		atomic64_t    pinned_vm;   /* Refcount permanently increased */
+/*
+ * IAMROOT, 2022.05.21:
+ * - data공간이라 하면 주석과 같이 not stack, not shared를 의미한다.
+ *   (is_data_mapping() 참고)
+ */
 		unsigned long data_vm;	   /* VM_WRITE & ~VM_SHARED & ~VM_STACK */
 		unsigned long exec_vm;	   /* VM_EXEC & ~VM_WRITE & ~VM_STACK */
 		unsigned long stack_vm;	   /* VM_STACK */

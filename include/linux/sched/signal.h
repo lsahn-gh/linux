@@ -751,6 +751,10 @@ static inline unsigned long task_rlimit_max(const struct task_struct *task,
 	return READ_ONCE(task->signal->rlim[limit].rlim_max);
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - 해당 task가 @limit에 해당하는 제한 값을 읽어온다. 
+ */
 static inline unsigned long rlimit(unsigned int limit)
 {
 	return task_rlimit(current, limit);

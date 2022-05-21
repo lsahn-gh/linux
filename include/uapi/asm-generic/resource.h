@@ -13,6 +13,10 @@
  *   then it defines them prior including asm-generic/resource.h. )
  */
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - resource 제한에 대한것들.
+ */
 #define RLIMIT_CPU		0	/* CPU time in sec */
 #define RLIMIT_FSIZE		1	/* Maximum filesize */
 #define RLIMIT_DATA		2	/* max data size */

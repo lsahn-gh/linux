@@ -498,6 +498,11 @@ static inline void tlb_start_vma(struct mmu_gather *tlb, struct vm_area_struct *
 #endif
 
 #ifndef tlb_end_vma
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - tlb flush 
+ */
 static inline void tlb_end_vma(struct mmu_gather *tlb, struct vm_area_struct *vma)
 {
 	if (tlb->fullmm)

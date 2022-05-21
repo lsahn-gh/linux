@@ -403,6 +403,11 @@ out:
  * On success return 0.  On integrity appraisal error, assuming the file
  * is in policy and IMA-appraisal is in enforcing mode, return -EACCES.
  */
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - sys_mmap은 mmap이나 malloc을 통해서 들어온다.
+ */
 int ima_file_mmap(struct file *file, unsigned long prot)
 {
 	u32 secid;

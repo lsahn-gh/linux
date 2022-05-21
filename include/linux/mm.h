@@ -2842,6 +2842,11 @@ extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned lon
  * Returns: The first VMA within the provided range, %NULL otherwise.  Assumes
  * start_addr < end_addr.
  */
+
+/*
+ * IAMROOT, 2022.05.21:
+ * - 겹치는 vma를 찾아온다.
+ */
 static inline
 struct vm_area_struct *find_vma_intersection(struct mm_struct *mm,
 					     unsigned long start_addr,
@@ -2872,6 +2877,10 @@ struct vm_area_struct *vma_lookup(struct mm_struct *mm, unsigned long addr)
 	return vma;
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - @vma가 아래로 내려가는 stack인 경우 보정.
+ */
 static inline unsigned long vm_start_gap(struct vm_area_struct *vma)
 {
 	unsigned long vm_start = vma->vm_start;
@@ -2884,6 +2893,10 @@ static inline unsigned long vm_start_gap(struct vm_area_struct *vma)
 	return vm_start;
 }
 
+/*
+ * IAMROOT, 2022.05.21:
+ * - @vma가 위로 올라가는 stack인 경우 보정.
+ */
 static inline unsigned long vm_end_gap(struct vm_area_struct *vma)
 {
 	unsigned long vm_end = vma->vm_end;

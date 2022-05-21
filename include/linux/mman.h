@@ -130,6 +130,10 @@ static inline bool arch_validate_flags(unsigned long flags)
  * but this version is faster.
  * ("bit1" and "bit2" must be single bits)
  */
+/*
+ * IAMROOT, 2022.05.21:
+ * - bit1이 있으면 bit2 return 이라는뜻.
+ */
 #define _calc_vm_trans(x, bit1, bit2) \
   ((!(bit1) || !(bit2)) ? 0 : \
   ((bit1) <= (bit2) ? ((x) & (bit1)) * ((bit2) / (bit1)) \
@@ -137,6 +141,16 @@ static inline bool arch_validate_flags(unsigned long flags)
 
 /*
  * Combine the mmap "prot" argument into "vm_flags" used internally.
+ */
+/*
+ * IAMROOT, 2022.05.21:
+ * - prot flag를 vm flag로 변환하고 arch 에 따른 flag 추가가 있으면
+ *   추가 한다.
+ * - PROT_READ -> VM_READ
+ *   PROT_WRITE -> VM_WRITE
+ *   PROT_EXEC -> VM_EXEC
+ *   PROT_BTI  -> VM_ARM64_BTI
+ *   PROT_MTE  -> VM_MTE
  */
 static inline unsigned long
 calc_vm_prot_bits(unsigned long prot, unsigned long pkey)
@@ -149,6 +163,14 @@ calc_vm_prot_bits(unsigned long prot, unsigned long pkey)
 
 /*
  * Combine the mmap "flags" argument into "vm_flags" used internally.
+ */
+/*
+ * IAMROOT, 2022.05.21:
+ * - map flags를 vm flags로 변환한다.
+ * - MAP_GROWSDOWN -> VM_GROWSDOWN
+ *   MAP_LOCKED -> VM_LOCKED
+ *   MAP_SYNC -> VM_SYNC
+ *   MAP_ANONYMOUS -> VM_MTE_ALLOWED
  */
 static inline unsigned long
 calc_vm_flag_bits(unsigned long flags)
