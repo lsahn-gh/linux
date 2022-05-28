@@ -289,6 +289,10 @@ void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
 		next->vm_prev = vma;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @mm의 vma list에서 @vma를 제거한다.
+ */
 void __vma_unlink_list(struct mm_struct *mm, struct vm_area_struct *vma)
 {
 	struct vm_area_struct *prev, *next;

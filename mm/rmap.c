@@ -102,6 +102,10 @@ static inline struct anon_vma *anon_vma_alloc(void)
 	return anon_vma;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @anon_vma free.
+ */
 static inline void anon_vma_free(struct anon_vma *anon_vma)
 {
 	VM_BUG_ON(atomic_read(&anon_vma->refcount));
@@ -142,13 +146,27 @@ static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
 	kmem_cache_free(anon_vma_chain_cachep, anon_vma_chain);
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @avc를 avc가 속한 @vma와 @anon_vma에 link한다.
+ *   vma <--(avc)--> anon_vma
+ */
 static void anon_vma_chain_link(struct vm_area_struct *vma,
 				struct anon_vma_chain *avc,
 				struct anon_vma *anon_vma)
 {
 	avc->vma = vma;
 	avc->anon_vma = anon_vma;
+/*
+ * IAMROOT, 2022.05.28:
+ * - 같은 vma를 가리키는 avc끼리는 list.
+ */
 	list_add(&avc->same_vma, &vma->anon_vma_chain);
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - av에 속한 avc는 rb tree로 관리한다.
+ */
 	anon_vma_interval_tree_insert(avc, &anon_vma->rb_root);
 }
 
@@ -236,6 +254,10 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
  * Such anon_vma's should have the same root, so you'd expect to see
  * just a single mutex_lock for the whole traversal.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - @anon_vma가 속한 vma(@root)에서 lock을 획득한다.
+ */
 static inline struct anon_vma *lock_anon_vma_root(struct anon_vma *root, struct anon_vma *anon_vma)
 {
 	struct anon_vma *new_root = anon_vma->root;
@@ -277,6 +299,11 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 	struct anon_vma_chain *avc, *pavc;
 	struct anon_vma *root = NULL;
 
+/*
+ * IAMROOT, 2022.05.28:
+ * 
+ * src => avc3 <-> avc2 <-> avc1
+ */
 	list_for_each_entry_reverse(pavc, &src->anon_vma_chain, same_vma) {
 		struct anon_vma *anon_vma;
 
@@ -289,6 +316,10 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 				goto enomem_failure;
 		}
 		anon_vma = pavc->anon_vma;
+/*
+ * IAMROOT, 2022.05.28:
+ * - anon_vma의 root로부터 lock을 획득하며 anon_vma의 root로 root를 갱신한다.
+ */
 		root = lock_anon_vma_root(root, anon_vma);
 		anon_vma_chain_link(dst, avc, anon_vma);
 
@@ -300,6 +331,19 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 		 * will always reuse it. Root anon_vma is never reused:
 		 * it has self-parent reference and at least one child.
 		 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - papgo
+ *   기존 anon_vma가 2보다 낮은 경우 재사용합니다. 즉, vma에는 vma가 없고 하나의
+ *   anon_vma 자식만 있습니다.
+ *
+ *   부모 anon_vma를 선택하지 마십시오. 즉 첫 번째 자식이 항상 다시 사용됩니다.
+ *   root anon_vma는 재사용되지 않습니다
+ *   자기 부모 참조와 적어도 한 명의 자녀가 있습니다. 
+ *
+ * - src만 anon_vma가 있는 상황에서, src가 root가 아니고 차수가 2미만이라면
+ *   anon_vma를 재활용한다.
+ */
 		if (!dst->anon_vma && src->anon_vma &&
 		    anon_vma != src->anon_vma && anon_vma->degree < 2)
 			dst->anon_vma = anon_vma;
@@ -387,6 +431,11 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 	return -ENOMEM;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma를 anon_vma와 unlink한다. unlink하면서 중간역할을 하는 avc들을 해제한다.
+ *   만약 anon_vma가 비어있다면, anon_vma도 삭제한다.
+ */
 void unlink_anon_vmas(struct vm_area_struct *vma)
 {
 	struct anon_vma_chain *avc, *next;
@@ -396,6 +445,13 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 	 * Unlink each anon_vma chained to the VMA.  This list is ordered
 	 * from newest to oldest, ensuring the root anon_vma gets freed last.
 	 */
+/*
+ * IAMROOT, 2022.05.28:
+ * @vma와 연결된 avc를 순회
+ * 1. av rbtree에서 해당 avc node 삭제.
+ * 2. avc vma list에서 vma node 제거.
+ * 3. avc free
+ */
 	list_for_each_entry_safe(avc, next, &vma->anon_vma_chain, same_vma) {
 		struct anon_vma *anon_vma = avc->anon_vma;
 
@@ -406,6 +462,11 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 		 * Leave empty anon_vmas on the list - we'll need
 		 * to free them outside the lock.
 		 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - 빈 av인경우 parent av의 degree를 감소키고 다음 avc로 이동.
+ *   lock을 푼후에 삭제할것이다.
+ */
 		if (RB_EMPTY_ROOT(&anon_vma->rb_root.rb_root)) {
 			anon_vma->parent->degree--;
 			continue;
@@ -430,10 +491,18 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 	 * anon_vmas, destroy them. Could not do before due to __put_anon_vma()
 	 * needing to write-acquire the anon_vma->root->rwsem.
 	 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - 비어있던 것들을 마저 삭제한다.
+ */
 	list_for_each_entry_safe(avc, next, &vma->anon_vma_chain, same_vma) {
 		struct anon_vma *anon_vma = avc->anon_vma;
 
 		VM_WARN_ON(anon_vma->degree);
+/*
+ * IAMROOT, 2022.05.28:
+ * - 비어있는 것들 이므로 참조를 줄인다.
+ */
 		put_anon_vma(anon_vma);
 
 		list_del(&avc->same_vma);
@@ -2339,6 +2408,10 @@ int make_device_exclusive_range(struct mm_struct *mm, unsigned long start,
 EXPORT_SYMBOL_GPL(make_device_exclusive_range);
 #endif
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @anon_vma 해제. ref가 0라면 root도 같이 해제한다.
+ */
 void __put_anon_vma(struct anon_vma *anon_vma)
 {
 	struct anon_vma *root = anon_vma->root;

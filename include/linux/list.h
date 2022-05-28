@@ -355,6 +355,10 @@ static inline void list_rotate_to_front(struct list_head *list,
  * list_is_singular - tests whether a list has just one entry.
  * @head: the list to test.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - @head가 딱 한개짜리인지 확인한다.
+ */
 static inline int list_is_singular(const struct list_head *head)
 {
 	return !list_empty(head) && (head->next == head->prev);

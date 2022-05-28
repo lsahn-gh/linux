@@ -98,6 +98,11 @@ static inline void mpol_get(struct mempolicy *pol)
 }
 
 extern bool __mpol_equal(struct mempolicy *a, struct mempolicy *b);
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - @a, @b의 memory policy가 일치하는지 확인한다.
+ */
 static inline bool mpol_equal(struct mempolicy *a, struct mempolicy *b)
 {
 	if (a == b)

@@ -1358,6 +1358,12 @@ static int delayed_ref_ctr_inc(struct vm_area_struct *vma)
  * Currently we ignore all errors and always return 0, the callers
  * can't handle the failure anyway.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - 참고
+ *   https://www.brendangregg.com/blog/2015-06-28/linux-ftrace-uprobe.html
+ *   https://docs.kernel.org/trace/uprobetracer.html
+ */
 int uprobe_mmap(struct vm_area_struct *vma)
 {
 	struct list_head tmp_list;

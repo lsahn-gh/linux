@@ -370,6 +370,10 @@ struct vm_area_struct *vm_area_dup(struct vm_area_struct *orig)
 	return new;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma free
+ */
 void vm_area_free(struct vm_area_struct *vma)
 {
 	kmem_cache_free(vm_area_cachep, vma);

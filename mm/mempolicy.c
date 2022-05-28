@@ -2369,6 +2369,11 @@ struct mempolicy *__mpol_dup(struct mempolicy *old)
 }
 
 /* Slow path of a mempolicy comparison */
+/*
+ * IAMROOT, 2022.05.28:
+ * - @a, @b의 mempolicy가 일치하는지 확인한다.
+ *   (mode, flags, user_nodemask, nodes)
+ */
 bool __mpol_equal(struct mempolicy *a, struct mempolicy *b)
 {
 	if (!a || !b)
@@ -2380,7 +2385,10 @@ bool __mpol_equal(struct mempolicy *a, struct mempolicy *b)
 	if (mpol_store_user_nodemask(a))
 		if (!nodes_equal(a->w.user_nodemask, b->w.user_nodemask))
 			return false;
-
+/*
+ * IAMROOT, 2022.05.28:
+ * - @a, @b의 mode는 일치하는 상태. nodes가 일치하는지 확인한다.
+ */
 	switch (a->mode) {
 	case MPOL_BIND:
 	case MPOL_INTERLEAVE:

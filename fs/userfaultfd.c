@@ -47,6 +47,12 @@ static struct kmem_cache *userfaultfd_ctx_cachep __read_mostly;
  * since fd_wqh.lock is taken by aio_poll() while it's holding a lock that's
  * also taken in IRQ context.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - userfaultfd
+ *   참고 : https://blog.daum.net/tlos6733/189
+ * - userland측에서 memory fault시 on-demand paging 구현이 가능하게 하는 기능.
+ */
 struct userfaultfd_ctx {
 	/* waitqueue head for the pending (i.e. not read) userfaults */
 	wait_queue_head_t fault_pending_wqh;

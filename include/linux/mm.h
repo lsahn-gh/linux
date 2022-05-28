@@ -2909,6 +2909,10 @@ static inline unsigned long vm_end_gap(struct vm_area_struct *vma)
 	return vm_end;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma pglen를 구한다.
+ */
 static inline unsigned long vma_pages(struct vm_area_struct *vma)
 {
 	return (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;

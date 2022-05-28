@@ -292,6 +292,10 @@ out:
 	return origbrk;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - gap 재조정
+ */
 static inline unsigned long vma_compute_gap(struct vm_area_struct *vma)
 {
 	unsigned long gap, prev_end;
@@ -446,6 +450,12 @@ RB_DECLARE_CALLBACKS_MAX(static, vma_gap_callbacks,
  * vma->vm_prev->vm_end values changed, without modifying the vma's position
  * in the rbtree.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma의 start나 @vma->prev의 end주소가 변경됬을시 관련값(gap)을
+ *   재조정해줘야된다.
+ * - @vma가 속한 rb부터 시작해 root까지 올라가며 vma_compute_gap()함수를 호출한다.
+ */
 static void vma_gap_update(struct vm_area_struct *vma)
 {
 	/*
@@ -512,6 +522,11 @@ static __always_inline void vma_rb_erase(struct vm_area_struct *vma,
  * The entire update must be protected by exclusive mmap_lock and by
  * the root anon_vma's mutex.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma와 연결되있는 avc list를 iterate하여 avc와 연결되있는 각각의 av rb_tree
+ *   에서 avc를 제거한다.
+ */
 static inline void
 anon_vma_interval_tree_pre_update_vma(struct vm_area_struct *vma)
 {
@@ -521,6 +536,12 @@ anon_vma_interval_tree_pre_update_vma(struct vm_area_struct *vma)
 		anon_vma_interval_tree_remove(avc, &avc->anon_vma->rb_root);
 }
 
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma와 연결되있는 avc list를 iterate하여 avc와 연결되있는 각각의 av rb_tree
+ *   에 avc를 넣는다.
+ */
 static inline void
 anon_vma_interval_tree_post_update_vma(struct vm_area_struct *vma)
 {
@@ -763,6 +784,10 @@ static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
  * Helper for vma_adjust() in the split_vma insert case: insert a vma into the
  * mm's list and rbtree.  It has already been inserted into the interval tree.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - TODO
+ */
 static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 {
 	struct vm_area_struct *prev;
@@ -775,6 +800,12 @@ static void __insert_vm_struct(struct mm_struct *mm, struct vm_area_struct *vma)
 	mm->map_count++;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @mm에서 @vma를 unlink한다.
+ * - @mm이 관리하는 mm rb tree에서 @vma를 제거한다.
+ * - @mm이 관리하는 mm list에서 @vma를 제거한다.
+ */
 static __always_inline void __vma_unlink(struct mm_struct *mm,
 						struct vm_area_struct *vma,
 						struct vm_area_struct *ignore)
@@ -792,6 +823,14 @@ static __always_inline void __vma_unlink(struct mm_struct *mm,
  * are necessary.  The "insert" vma (if any) is to be inserted
  * before we drop the necessary locks.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * @vma adjust 시작 vma
+ * @expand 통합의 기준이 되는 vma
+ *
+ * - @insert는 vma_adjust()에서만 사용한다.
+ *   @expand는 vma_merge()에서만 사용한다.
+ */
 int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	unsigned long end, pgoff_t pgoff, struct vm_area_struct *insert,
 	struct vm_area_struct *expand)
@@ -806,9 +845,17 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	long adjust_next = 0;
 	int remove_next = 0;
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - adjust 시작 vma의 next가 존재
+ */
 	if (next && !insert) {
 		struct vm_area_struct *exporter = NULL, *importer = NULL;
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - next가 adjust 대상이 되는 상황.
+ */
 		if (end >= next->vm_end) {
 			/*
 			 * vma expands, overlapping all the next, and
@@ -816,6 +863,10 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 			 * The only other cases that gets here are
 			 * case 1, case 7 and case 8.
 			 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - next가 기준이 되는 상황.
+ */
 			if (next == expand) {
 				/*
 				 * The only case where we don't expand "vma"
@@ -827,10 +878,43 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 				 * removing "vma" and that to do so we
 				 * swapped "vma" and "next".
 				 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - case8 => remove_next == 3
+ *       AAAA
+ *   PPPPNNNNXXXX -> PPPPXXXXXXXX
+ * 중간에 있는 NNNN(vma)이 삭제되는 상황이다.
+ * code의 흐름상 next 변수를 지워야되기때문에 지워야되는 NNNN(vma)를 next 변수로
+ * swap하는것이다.
+ */
 				remove_next = 3;
 				VM_WARN_ON(file != next->vm_file);
 				swap(vma, next);
 			} else {
+/*
+ * IAMROOT, 2022.05.28:
+ * - 시작 @vma가 기준이 되는 상황.
+ * @vma == PPPP, @expand == PPPP
+ * expoter = NNNN
+ * impoter = PPPP
+ *
+ * - case1 => remove_next == 1
+ *       AAAA    
+ *   PPPP    NNNN -> PPPPPPPPPPPP 
+ *              |end
+ *
+ * - case6 => remove_next == 2
+ *       AAAA 
+ *   PPPPNNNNXXXX -> PPPPPPPPPPPP 
+ *          |   |end
+ *          |next.end
+ *
+ * - case7 => remove_next == 1
+ *       AAAA
+ *   PPPPNNNNXXXX -> PPPPPPPPXXXX
+ *          |end
+ *          |next.end
+ */
 				VM_WARN_ON(expand != vma);
 				/*
 				 * case 1, 6, 7, remove_next == 2 is case 6,
@@ -850,10 +934,30 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 			 * If next doesn't have anon_vma, import from vma after
 			 * next, if the vma overlaps with it.
 			 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - case6 => remove_next == 2
+ *       AAAA 
+ *   PPPPNNNNXXXX -> PPPPPPPPPPPP 
+ *          |   |end
+ *          |next.end
+ *
+ * 이 경우 expoter는 XXXX가 된다.
+ */
 			if (remove_next == 2 && !next->anon_vma)
 				exporter = next->vm_next;
 
 		} else if (end > next->vm_start) {
+/*
+ * IAMROOT, 2022.05.28:
+ * - next의 일부가 겹치는 상황. case5
+ *
+ * - case5
+ *        AAAA
+ *  PPPPPPNNNNNN -> PPPPPPPPPPNN
+ *        |  |
+ *        <-->adjust_next
+ */
 			/*
 			 * vma expands, overlapping part of the next:
 			 * mprotect case 5 shifting the boundary up.
@@ -863,6 +967,19 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 			importer = vma;
 			VM_WARN_ON(expand != importer);
 		} else if (end < vma->vm_end) {
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - case4
+ *    AAAA      
+ *  PPPPPPNNNNNN -> PPNNNNNNNNNN 
+ *    |  |vm_end    
+ *    |end
+ *    <-->adjust_next
+ *
+ * expoter == PPPP
+ * impoter == NNNN
+ */
 			/*
 			 * vma shrinks, and !insert tells it's not
 			 * split_vma inserting another: so it must be
@@ -874,11 +991,28 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 			VM_WARN_ON(expand != importer);
 		}
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - case2
+ *     AAAA     
+ * PPPP    NNNN -> PPPPPPPPNNNN 
+ *
+ * - case3
+ *     AAAA     
+ * PPPP    NNNN -> PPPPNNNNNNNN
+ *
+ * case2, case3의 경우 삭제하는게 없다.
+ * remove_vma == 0
+ */
 		/*
 		 * Easily overlooked: when mprotect shifts the boundary,
 		 * make sure the expanding vma has anon_vma set if the
 		 * shrinking vma had, to cover any anon pages imported.
 		 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - expoter가 anon이고 importer가 anon이 아닌경우 copy
+ */
 		if (exporter && exporter->anon_vma && !importer->anon_vma) {
 			int error;
 
@@ -930,6 +1064,10 @@ again:
 			vma_interval_tree_remove(next, root);
 	}
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma 확장이 시작된다.
+ */
 	if (start != vma->vm_start) {
 		vma->vm_start = start;
 		start_changed = true;
@@ -956,6 +1094,10 @@ again:
 		 * vma_merge has merged next into vma, and needs
 		 * us to remove next before dropping the locks.
 		 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - next가 제거 되는상황. mm에서 next를 unlink해놓는다.
+ */
 		if (remove_next != 3)
 			__vma_unlink(mm, next, next);
 		else
@@ -979,8 +1121,19 @@ again:
 		 */
 		__insert_vm_struct(mm, insert);
 	} else {
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma의 start가 변경됬으면 rb tree의 gap정보를 갱신한다.
+ */
 		if (start_changed)
 			vma_gap_update(vma);
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - @vma end가 바뀌었다면, end vma일 경우 highest_vm_end만 바꾸면되고,
+ *   adjust_next가 있는 상황이면 겹치는 vma를 처리하는 상황이라 gap 정보를
+ *   update할 필요가없다.
+ */
 		if (end_changed) {
 			if (!next)
 				mm->highest_vm_end = vm_end_gap(vma);
@@ -989,6 +1142,10 @@ again:
 		}
 	}
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - 위에서 anon_vma_interval_tree_pre_update_vma()를 상황이면 post를 한다.
+ */
 	if (anon_vma) {
 		anon_vma_interval_tree_post_update_vma(vma);
 		if (adjust_next)
@@ -1004,11 +1161,20 @@ again:
 			uprobe_mmap(next);
 	}
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - 위에서 remove_next잇는 상황에서 @mm에서 vma를 unlink만 했었다.
+ *   실제 삭제를 수행한다.
+ */
 	if (remove_next) {
 		if (file) {
 			uprobe_munmap(next, next->vm_start, next->vm_end);
 			fput(file);
 		}
+/*
+ * IAMROOT, 2022.05.28:
+ * - next에 anon_vma가 존재하면 anon_vma를 unlnk한다.
+ */
 		if (next->anon_vma)
 			anon_vma_merge(vma, next);
 		mm->map_count--;
@@ -1082,6 +1248,12 @@ again:
  * If the vma has a ->close operation then the driver probably needs to release
  * per-vma resources, so we don't attempt to merge those.
  */
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - vma가 merge 가능한지 확인한다.
+ *   (flag, file, ops등 확인)
+ */
 static inline int is_mergeable_vma(struct vm_area_struct *vma,
 				struct file *file, unsigned long vm_flags,
 				struct vm_userfaultfd_ctx vm_userfaultfd_ctx)
@@ -1094,8 +1266,16 @@ static inline int is_mergeable_vma(struct vm_area_struct *vma,
 	 * the kernel to generate new VMAs when old one could be
 	 * extended instead.
 	 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - softdirty를 제외한 flag가 동일한지 확인.
+ */
 	if ((vma->vm_flags ^ vm_flags) & ~VM_SOFTDIRTY)
 		return 0;
+/*
+ * IAMROOT, 2022.05.28:
+ * - anon일경우 file, vma->vm_ops == NULL 일것이다.
+ */
 	if (vma->vm_file != file)
 		return 0;
 	if (vma->vm_ops && vma->vm_ops->close)
@@ -1105,6 +1285,15 @@ static inline int is_mergeable_vma(struct vm_area_struct *vma,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - 해당 vma가 anon으로 만들어졌으면 anon_vma를 가리키게된다.
+ * - anon_vma1과 anon_vma2가 같은지를 return한다.
+ * - 예외 case
+ *   @anon_vma1, @anon_vma2 둘중하나라도 anon이 아니면(NULL이면),
+ *   vma가 한개 이하 인 경우(아직 memory를 할당하지 않은 상황)이거나
+ *   fork가 안된 상황.(fork process가 아닌상황. AV, AVC관련 참고)) return 1.
+ */
 static inline int is_mergeable_anon_vma(struct anon_vma *anon_vma1,
 					struct anon_vma *anon_vma2,
 					struct vm_area_struct *vma)
@@ -1130,6 +1319,14 @@ static inline int is_mergeable_anon_vma(struct anon_vma *anon_vma1,
  * indices (16TB on ia32) because do_mmap() does not permit mmap's which
  * wrap, nor mmaps which cover the final page at index -1UL.
  */
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - 기준 vma가 before에 있을경우에 호출된다. : (기준 vma), (비교대상 vma)
+ *   기준 vma가 before에 있으니 기준 vma의 end주소가 비교대상 vma의 시작주소와
+ *   일치하는지를 확인하면된다.
+ * - mergeable 검사방식은 can_vma_merge_after와 동일한다.
+ */
 static int
 can_vma_merge_before(struct vm_area_struct *vma, unsigned long vm_flags,
 		     struct anon_vma *anon_vma, struct file *file,
@@ -1151,6 +1348,23 @@ can_vma_merge_before(struct vm_area_struct *vma, unsigned long vm_flags,
  * We cannot merge two vmas if they have differently assigned (non-NULL)
  * anon_vmas, nor if same anon_vma is assigned but offsets incompatible.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - papgo
+ *  vma보다 더 높은 가상 주소 및 파일 오프셋에서 이 값(vm_flags,anon_vma,file,
+ *   vm_pgoff)을 병합할 수 있으면 true를 반환합니다.
+ *
+ * 서로 다르게 할당된(NULL이 아닌) 것처럼 두 개의 VM을 병합할 수 없으며, 동일한
+ * non_vma가 할당되었지만 오프셋이 호환되지 않는 경우에도 병합할 수 없습니다. 
+ *
+ * - mmap_region->vma_merge->can_vma_merge_after를 통한 함수 호출시
+ *   @vma : prev, 
+ *   @anon_vma : NULL
+ *   @file : new vma(AAAA (vma_merge 주석에서 표현했던 새로운 vma라는 뜻))
+ *   @vm_userfaultfd_ctx : NULL_VM_UFFD_CTX
+ *
+ * - 기준 vma가 after에 있을경우 : (비교대상 vma), (기준 vma) 
+ */
 static int
 can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
 		    struct anon_vma *anon_vma, struct file *file,
@@ -1161,6 +1375,10 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
 	    is_mergeable_anon_vma(anon_vma, vma->anon_vma, vma)) {
 		pgoff_t vm_pglen;
 		vm_pglen = vma_pages(vma);
+/*
+ * IAMROOT, 2022.05.28:
+ * - file mapping되있는 영역이 연속이 되는 vma인지 확인한다.
+ */
 		if (vma->vm_pgoff + vm_pglen == vm_pgoff)
 			return 1;
 	}
@@ -1230,6 +1448,17 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 
 	next = vma_next(mm, prev);
 	area = next;
+/*
+ * IAMROOT, 2022.05.28:
+ * - next가 존재하고 next end가 @end와 일치하면 next를 갱신한다
+ *   (case 6,7,8)
+ *      AAAA 
+ *  PPPPNNNNXXXX <-- XXXX가 next가 됨.
+ *  might become
+ *  PPPPPPPPPPPP 6
+ *  PPPPPPPPXXXX 7
+ *  PPPPXXXXXXXX 8
+ */
 	if (area && area->vm_end == end)		/* cases 6, 7, 8 */
 		next = next->vm_next;
 
@@ -1241,6 +1470,14 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 	/*
 	 * Can it merge with the predecessor?
 	 */
+/*
+ * IAMROOT, 2022.05.28:
+ * 1. prev와 addr이 연결되있는지 확인.
+ * 2. mpol이 같은지 확인.
+ * 3. merge가 가능하고 @prev와 시작주소(pgoff)가 연속되있는지 확인한다.
+ *
+ * prev <- (closed) -> @vma <- (미확인) -> next
+ */
 	if (prev && prev->vm_end == addr &&
 			mpol_equal(vma_policy(prev), policy) &&
 			can_vma_merge_after(prev, vm_flags,
@@ -1249,6 +1486,20 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 		/*
 		 * OK, it can.  Can we now merge in the successor as well?
 		 */
+/*
+ * IAMROOT, 2022.05.28:
+ * - case 1,6
+ *   P + A + N + X가 전부 merge 되는 상황
+ *
+ * - next && end == nexte->vm_start를 통해서 next와 연결되있는게 맞다면 case 1,6
+ * 의 상황으로, PANX 전부 인접한 상황인것이다.
+ * prev <- (closed) -> @vma <- (close) -> next
+ *
+ * - prev, vma와의 속성비교(anon + flags)를 직전 if문에서 했으니
+ *   prev, next와의 anon속성만 비교를 한다.
+ *   (prev, next의 flag비교는 can_vma_merge_before에서 됬다.)
+ *
+ */
 		if (next && end == next->vm_start &&
 				mpol_equal(policy, vma_policy(next)) &&
 				can_vma_merge_before(next, vm_flags,
@@ -1261,6 +1512,14 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 			err = __vma_adjust(prev, prev->vm_start,
 					 next->vm_end, prev->vm_pgoff, NULL,
 					 prev);
+
+/*
+ * IAMROOT, 2022.05.28:
+ * - case 2,5,7
+ *   P + A 만 merge 되는 상황
+ *
+ * prev <- (closed) -> @vma <- (merge 불가) -> next
+ */
 		} else					/* cases 2, 5, 7 */
 			err = __vma_adjust(prev, prev->vm_start,
 					 end, prev->vm_pgoff, NULL, prev);
@@ -1270,6 +1529,15 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 		return prev;
 	}
 
+
+/*
+ * IAMROOT, 2022.05.28:
+ * 위 if문에 진입을 못했으면 이상황.
+ *
+ * prev <- (merge 불가) -> @vma <- (미확인) -> next
+ *
+ * case 4, 3, 8이 남았다.
+ */
 	/*
 	 * Can this new request be merged in front of next?
 	 */
@@ -1278,10 +1546,22 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
 			can_vma_merge_before(next, vm_flags,
 					     anon_vma, file, pgoff+pglen,
 					     vm_userfaultfd_ctx)) {
+/*
+ * IAMROOT, 2022.05.28:
+ *
+ * - prev 와 겹친상황. 즉 case 4.
+ *
+ * prev <- (겹침) -> @vma <- (closed) -> next
+ */
 		if (prev && addr < prev->vm_end)	/* case 4 */
 			err = __vma_adjust(prev, prev->vm_start,
 					 addr, prev->vm_pgoff, NULL, next);
 		else {					/* cases 3, 8 */
+
+/*
+ * IAMROOT, 2022.05.28:
+ * prev <- (merge 불가) -> @vma <- (closed) -> next
+ */
 			err = __vma_adjust(area, addr, next->vm_end,
 					 next->vm_pgoff - pglen, NULL, next);
 			/*

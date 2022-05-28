@@ -469,6 +469,17 @@ struct vm_area_struct {
 	 * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
 	 * or brk vma (with NULL file) can only be in an anon_vma list.
 	 */
+/*
+ * IAMROOT, 2022.05.28:
+ * 
+ * - vma list 구조
+ *        parent     child
+ *        prcoess    process
+ *         av1      av2 
+ *          |        |  
+ * vma =>  avc1 <-> avc2
+ * (child)
+ */
 	struct list_head anon_vma_chain; /* Serialized by mmap_lock &
 					  * page_table_lock */
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
@@ -515,6 +526,10 @@ struct mm_struct {
 	struct {
 		struct vm_area_struct *mmap;		/* list of VMAs */
 		struct rb_root mm_rb;
+/*
+ * IAMROOT, 2022.05.28:
+ * - vma가 바뀌었다는걸 ++로 해서 표시.
+ */
 		u64 vmacache_seqnum;                   /* per-thread vmacache */
 #ifdef CONFIG_MMU
 		unsigned long (*get_unmapped_area) (struct file *filp,

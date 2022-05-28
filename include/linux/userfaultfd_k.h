@@ -72,6 +72,10 @@ extern int mwriteprotect_range(struct mm_struct *dst_mm,
 			       bool enable_wp, atomic_t *mmap_changing);
 
 /* mm helpers */
+/*
+ * IAMROOT, 2022.05.28:
+ * - userfaultfd를 사용하는 상황에서, 같은 context를 가지고 있는지 확인한다.
+ */
 static inline bool is_mergeable_vm_userfaultfd_ctx(struct vm_area_struct *vma,
 					struct vm_userfaultfd_ctx vm_ctx)
 {

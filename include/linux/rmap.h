@@ -58,6 +58,11 @@ struct anon_vma {
 	 */
 
 	/* Interval tree of private "related" vmas */
+/*
+ * IAMROOT, 2022.05.28:
+ * - av와 연결된 avc들은 rb tree로 관리한다.
+ *   avc는 vma와 1:1로 연결되있으므로, av는 rb tree를 통해 vma를 관리하게된다.
+ */
 	struct rb_root_cached rb_root;
 };
 
@@ -74,10 +79,48 @@ struct anon_vma {
  * The "rb" field indexes on an interval tree the anon_vma_chains
  * which link all the VMAs associated with this anon_vma.
  */
+/*
+ * IAMROOT, 2022.05.28:
+ * - avc --> vma 
+ *   vma 로 직접 연결
+ *
+ * - avc <-- vma
+ *   같은 vma를 가리키는 avc끼리 vma의 anon_vma_chain을 통해 list로 연결.
+ *
+ * - avc --> av
+ *   anon_vma로 직접 연결
+ *
+ * - avc <-- av
+ *   av에 속한 avc를 rb_root를 통해 rb tree로 관리
+ */
 struct anon_vma_chain {
+/*
+ * IAMROOT, 2022.05.28:
+ * - avc와 연결되는 vma.
+ */
 	struct vm_area_struct *vma;
+/*
+ * IAMROOT, 2022.05.28:
+ * - avc와 연결되는 av
+ */
 	struct anon_vma *anon_vma;
+/*
+ * IAMROOT, 2022.05.28:
+ * - same_vma를 통해서 같은 vma를 가리키고있는 avc를 list로 연결한다.
+ *       
+ *                                                            
+ * vma                              avc1       avc2           avc3
+ *  ^   anon_vma_chain =========> same_vma <-> same_vma <-> same_vma
+ *  \--------------------------------vma           vma         vma
+ *   \----------------------------------------------+          |
+ *    \--------------------------------------------------------+
+ */
 	struct list_head same_vma;   /* locked by mmap_lock & page_table_lock */
+/*
+ * IAMROOT, 2022.05.28:
+ * - avc가 속한 av의 rb root에 들어갈 node.
+ *   av는 여러개의 avc를 rb로 관리한다.
+ */
 	struct rb_node rb;			/* locked by anon_vma->rwsem */
 	unsigned long rb_subtree_last;
 #ifdef CONFIG_DEBUG_VM_RB
@@ -109,6 +152,10 @@ static inline void get_anon_vma(struct anon_vma *anon_vma)
 
 void __put_anon_vma(struct anon_vma *anon_vma);
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @anon_vma ref drop
+ */
 static inline void put_anon_vma(struct anon_vma *anon_vma)
 {
 	if (atomic_dec_and_test(&anon_vma->refcount))
@@ -153,6 +200,10 @@ static inline int anon_vma_prepare(struct vm_area_struct *vma)
 	return __anon_vma_prepare(vma);
 }
 
+/*
+ * IAMROOT, 2022.05.28:
+ * - @next와 link되있는 anon_vma에서 unlink한다.
+ */
 static inline void anon_vma_merge(struct vm_area_struct *vma,
 				  struct vm_area_struct *next)
 {
