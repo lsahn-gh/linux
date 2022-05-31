@@ -20,7 +20,7 @@
 
 /*
  * IAMROOT, 2022.05.21:
- * - arm64 sys_mmap
+ * - arm64 sys_mmap()
  *
  * ex) user에서 malloc을 사용했을때 strace 사용결과
  * sh) strace ./test

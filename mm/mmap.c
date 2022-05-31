@@ -1048,6 +1048,18 @@ again:
 	anon_vma = vma->anon_vma;
 	if (!anon_vma && adjust_next)
 		anon_vma = next->anon_vma;
+/*
+ * IAMROOT, 2022.05.31:
+ * - anon_vma(av)가 있을경우 vma에 연결되있는 avc를 av에서 제거해준다.
+ *   후에 vma의 주소 재조정(vm_start, vm_end),이 일어나는데, vma 주소에 따라
+ *   avc rb_tree가 정렬되는 방식
+ *
+ *   (anon_vma_interval_tree_insert()함수 위 INTERVAL_TREE_DEFINE 선언 및
+ *   avc_start_pgoff, avc_last_pgoff참고)
+ *
+ *   이므로 rb_tree에 들어잇는 상태에선 이 조정을 하는것보단 rb tree에서
+ *   제거 -> 조정 -> 삽입 방식이 깔끔하기 때문이다.
+ */
 	if (anon_vma) {
 		VM_WARN_ON(adjust_next && next->anon_vma &&
 			   anon_vma != next->anon_vma);
@@ -1145,6 +1157,8 @@ again:
 /*
  * IAMROOT, 2022.05.28:
  * - 위에서 anon_vma_interval_tree_pre_update_vma()를 상황이면 post를 한다.
+ *   즉 조정을 위해 vma의 avc들을 av의 avc rbtree에서 제거해 놓은 상태이고, 조정이
+ *   끝낫으므로 원래 연결되있던 av rbtree에 넣어놓는것이다.
  */
 	if (anon_vma) {
 		anon_vma_interval_tree_post_update_vma(vma);
@@ -2248,6 +2262,17 @@ unacct_error:
  * @return 찾은 빈공간의 align적용된 시작 주소. or error
  * - 이진탐색으로 low_limit ~ high_limit 범위내에 vma들 사이에서
  *   gap(prev vma ~ current vma 사이의 공간)을 찾는다.
+ * - 최대한 가장 낮은 주소에서 @info에서 요청한 빈공간을 찾을려고 한다.
+ *   1. 가장 left로 가면서 찾는다. 즉 낮은 주소로 최대한 이동.
+ *   2. 실패했다면 right로 이동후 left로 이동해서 찾는다. right로 한번 이동해서 주소를
+ *   한번 증가시키고 거기서 다시 주소를 낮추며 찾는 개념이다.
+ *   3. 여기서 실패한다면 parent로 거슬러 올라간다.
+ *   3-1. left에서 parent로 올라가는경우
+ *   parent에선 조건이 넘어와서 left로 넘어갓을 것이므로 해당 parent가 가장 작은
+ *   주소일수있으므로 검사를 한번 하고 right로 넘어간다.
+ *   3-2. right에서 parent로 올라가는 경우
+ *   parent의 left는 먼저 검사했을것이므로 해당 parent subtree는 검사가 끝낫다. parent의
+ *   parent로 계속 올라간다. 이경우 parent가 left node가 될때까지 올라간다.(3-1)
  */
 static unsigned long unmapped_area(struct vm_unmapped_area_info *info)
 {
@@ -2738,7 +2763,7 @@ EXPORT_SYMBOL(get_unmapped_area);
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
 /*
  * IAMROOT, 2022.05.21:
- * @return 1. cache에서 바로 찾아지면 경우
+ * @return 1. cache에서 바로 찾아진 경우
  *	   2. rbtree에서 찾아진경우
  *	   3. rbtree에서 못찾은 경우
  *	     3-1 addr보다 큰 vm_end를 가진것들중에서 가장 addr에 가까운 vm_end값을

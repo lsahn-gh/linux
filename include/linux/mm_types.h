@@ -525,6 +525,12 @@ struct kioctx_table;
 struct mm_struct {
 	struct {
 		struct vm_area_struct *mmap;		/* list of VMAs */
+/*
+ * IAMROOT, 2022.05.31:
+ * - vma node들이 들어있다.
+ * struct vm_area_struct *tmp;
+ * tmp = rb_entry(rb_node, struct vm_area_struct, vm_rb);
+ */
 		struct rb_root mm_rb;
 /*
  * IAMROOT, 2022.05.28:
