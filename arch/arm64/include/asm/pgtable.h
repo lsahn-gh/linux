@@ -81,6 +81,10 @@
  * ZERO_PAGE is a global shared page that is always zero: used
  * for zero-mapped memory areas etc..
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page.
+ */
 extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define ZERO_PAGE(vaddr)	phys_to_page(__pa_symbol(empty_zero_page))
 
@@ -122,6 +126,10 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 
 /*
  * The following only work if pte_present(). Undefined behaviour otherwise.
+ */
+/*
+ * IAMROOT, 2022.06.04:
+ * - hardware mapping이나 numa fault가 되있으면 mapping이 됬다는것을 의미한다.
  */
 #define pte_present(pte)	(!!(pte_val(pte) & (PTE_VALID | PTE_PROT_NONE)))
 #define pte_young(pte)		(!!(pte_val(pte) & PTE_AF))
@@ -215,6 +223,10 @@ static inline pmd_t set_pmd_bit(pmd_t pmd, pgprot_t prot)
 	return pmd;
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @pte에 PTE_WRITE를 set한다.
+ */
 static inline pte_t pte_mkwrite(pte_t pte)
 {
 	pte = set_pte_bit(pte, __pgprot(PTE_WRITE));
@@ -230,6 +242,10 @@ static inline pte_t pte_mkclean(pte_t pte)
 	return pte;
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @pte에 PTE_DIRTY bit를 set한다.
+ */
 static inline pte_t pte_mkdirty(pte_t pte)
 {
 	pte = set_pte_bit(pte, __pgprot(PTE_DIRTY));
@@ -259,6 +275,11 @@ static inline pte_t pte_mkold(pte_t pte)
 	return clear_pte_bit(pte, __pgprot(PTE_AF));
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - ARM8.0까지는 software적으로 af flag를 설정해줘야되고, 8.1은 hardware
+ *   적으로 해준다.
+ */
 static inline pte_t pte_mkyoung(pte_t pte)
 {
 	return set_pte_bit(pte, __pgprot(PTE_AF));
@@ -473,6 +494,10 @@ static inline pgprot_t mk_pmd_sect_prot(pgprot_t prot)
 #ifdef CONFIG_NUMA_BALANCING
 /*
  * See the comment in include/linux/pgtable.h
+ */
+/*
+ * IAMROOT, 2022.06.04:
+ * - numa balancing으로 인해서 fault가 발생한 상태.
  */
 static inline int pte_protnone(pte_t pte)
 {
@@ -1190,11 +1215,24 @@ static inline bool arch_wants_old_prefaulted_pte(void)
 }
 #define arch_wants_old_prefaulted_pte	arch_wants_old_prefaulted_pte
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - system등에 따라 @prot 변경 여부를 반영한다.
+ */
 static inline pgprot_t arch_filter_pgprot(pgprot_t prot)
 {
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - Enhanced Privileged Access Never 
+ */
 	if (cpus_have_const_cap(ARM64_HAS_EPAN))
 		return prot;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - PAGE_EXECONLY -> PAGE_READONLY_EXEC로 변경.
+ */
 	if (pgprot_val(prot) != pgprot_val(PAGE_EXECONLY))
 		return prot;
 

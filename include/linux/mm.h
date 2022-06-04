@@ -139,6 +139,15 @@ extern int mmap_rnd_compat_bits __read_mostly;
  * s390 does this to prevent multiplexing of hardware bits
  * related to the physical page in case of virtualization.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - papgo
+ *   읽기 오류에 대해 0 페이지 매핑을 설정하는 일반적인 메모리 관리
+ *   코드를 방지합니다.
+ *   이 매크로는 <asm/pgtable> 내에 정의되어야 합니다.
+ *   s390은 가상화 시 물리적 페이지와 관련된 하드웨어 비트의 다중화를
+ *   방지하기 위해 이를 수행한다.
+ */
 #ifndef mm_forbids_zeropage
 #define mm_forbids_zeropage(X)	(0)
 #endif
@@ -685,6 +694,10 @@ struct vm_operations_struct {
 					  unsigned long addr);
 };
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 기본초기화.
+ */
 static inline void vma_init(struct vm_area_struct *vma, struct mm_struct *mm)
 {
 	static const struct vm_operations_struct dummy_vm_ops = {};
@@ -695,6 +708,11 @@ static inline void vma_init(struct vm_area_struct *vma, struct mm_struct *mm)
 	INIT_LIST_HEAD(&vma->anon_vma_chain);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - anon일경우 ops를 null로 한다. 최초 init일때는 dummy_vm_ops와 연결되
+ *   있었을것이다.
+ */
 static inline void vma_set_anonymous(struct vm_area_struct *vma)
 {
 	vma->vm_ops = NULL;
@@ -2413,6 +2431,10 @@ static inline void pgtable_pte_page_dtor(struct page *page)
 	dec_lruvec_page_state(page, NR_PAGETABLE);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @pmd page에서 ptl을 spinlock 걸면서 pte를 return한다.
+ */
 #define pte_offset_map_lock(mm, pmd, address, ptlp)	\
 ({							\
 	spinlock_t *__ptl = pte_lockptr(mm, pmd);	\

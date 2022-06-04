@@ -95,6 +95,10 @@ static inline void force_uaccess_end(mm_segment_t oldfs)
  * as usual) and both source and destination can trigger faults.
  */
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - user영역(@from)을 kernel영역(@to)에 복사한다.
+ */
 static __always_inline __must_check unsigned long
 __copy_from_user_inatomic(void *to, const void __user *from, unsigned long n)
 {

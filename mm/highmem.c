@@ -536,6 +536,10 @@ void *__kmap_local_pfn_prot(unsigned long pfn, pgprot_t prot)
 }
 EXPORT_SYMBOL_GPL(__kmap_local_pfn_prot);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - arm64경우 highmem이 없으므로 page_address(page)로 바로 직행할것이다.
+ */
 void *__kmap_local_page_prot(struct page *page, pgprot_t prot)
 {
 	void *kmap;

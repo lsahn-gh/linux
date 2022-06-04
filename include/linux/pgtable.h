@@ -524,6 +524,19 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long addres
  * To be differentiate with macro pte_mkyoung, this macro is used on platforms
  * where software maintains page access bit.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * -papago
+ *  일부 아키텍처에서는 메모리 페이지에 액세스할 때 하드웨어가 페이지
+ *  액세스 비트를 설정하지 않으며, 소프트웨어가 이 비트를 설정하는 것이
+ *  책임입니다. 페이지 액세스 비트를 추적하기 위해 추가적인 페이지 폴트
+ *  패널티를 발생시킨다. 페이지 최적화를 위해 액세스 비트는 이러한
+ *  아치의 모든 페이지 오류 흐름 중에 설정할 수 있습니다.
+ *  macro pte_mkyoung과 차별화하기 위해, 이 매크로는 소프트웨어가 페이지
+ *  액세스 비트를 유지하는 플랫폼에서 사용된다.
+ *
+ * - mips에서만 사용
+ */
 #ifndef pte_sw_mkyoung
 static inline pte_t pte_sw_mkyoung(pte_t pte)
 {
@@ -1030,6 +1043,10 @@ static inline void ptep_modify_prot_commit(struct vm_area_struct *vma,
 #ifdef CONFIG_MMU
 #ifndef pgprot_modify
 #define pgprot_modify pgprot_modify
+/*
+ * IAMROOT, 2022.06.04:
+ * - @oldprot의 cache속성대로 @newprot에 cache속성을 대입한다.
+ */
 static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
 {
 	if (pgprot_val(oldprot) == pgprot_val(pgprot_noncached(oldprot)))
@@ -1239,6 +1256,10 @@ static inline int is_zero_pfn(unsigned long pfn)
 	return offset_from_zero_pfn <= (zero_page_mask >> PAGE_SHIFT);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page pfn을 가져온다.
+ */
 #define my_zero_pfn(addr)	page_to_pfn(ZERO_PAGE(addr))
 
 #else

@@ -119,6 +119,23 @@ static inline bool mm_is_oom_victim(struct mm_struct *mm)
  *
  * Return 0 when the PF is safe VM_FAULT_SIGBUS otherwise.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - papgo
+ *   지정된 mm의 페이지 결함이 여전히 신뢰할 수 있는지 확인합니다.
+ *   만약 oom reaper가 mm에 설정된 MMF_UNSTABLE 플래그에 의해 반영되는
+ *   주소 공간을 수집하기 시작했다면 이것은 더 이상 사실이 아니다. 이 때
+ *   !shared 매핑은 내용을 잃어버리고 메모리 손상을 일으킬 수 있습니다
+ *   (원래 내용 대신 0페이지).
+ *
+ *   사용자는 !shared 매핑에 대한 페이지 테이블 항목을 설정하기 전에
+ *   적절한 페이지 테이블 잠금 아래에서 이 항목을 호출해야 합니다.
+ *
+ *   그렇지 않으면 PF가 안전한 VM_FAULT_SIGBUS일 때 0을 반환한다.
+ *
+ * - oom 진행중인 @mm인 경우 MMF_UNSTABLE이 set되있을것이다.
+ *   (__oom_reap_task_mm() 참고)
+ */
 static inline vm_fault_t check_stable_address_space(struct mm_struct *mm)
 {
 	if (unlikely(test_bit(MMF_UNSTABLE, &mm->flags)))

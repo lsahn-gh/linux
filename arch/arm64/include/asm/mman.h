@@ -35,6 +35,10 @@ static inline unsigned long arch_calc_vm_flag_bits(unsigned long flags)
 }
 #define arch_calc_vm_flag_bits(flags) arch_calc_vm_flag_bits(flags)
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vm_flags에 더 추가할 arch prot flags가 있으면 추가한다.
+ */
 static inline pgprot_t arch_vm_get_page_prot(unsigned long vm_flags)
 {
 	pteval_t prot = 0;
@@ -74,6 +78,10 @@ static inline bool arch_validate_prot(unsigned long prot,
 }
 #define arch_validate_prot(prot, addr) arch_validate_prot(prot, addr)
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vm_flags validate 검사.
+ */
 static inline bool arch_validate_flags(unsigned long vm_flags)
 {
 	if (!system_supports_mte())

@@ -607,18 +607,73 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
  * PFNMAP mappings in order to support COWable mappings.
  *
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - papgo
+ *   vm_normal_page - 이 함수는 a pte와 연결된 "struct page"를 가져옵니다.
+ *
+ *   "special" 매핑은 "struct page"와 연관되는 것을 원하지 않습니다
+ *   (struct page가 존재하지 않거나 존재하지만 터치하기를 원하지 않습니다).
+ *   이 경우 NULL이 반환됩니다. "일반" 매핑에는 struct page가 있습니다.  
+ *
+ *   두 가지 광범위한 사례가 있습니다. 첫째로, 아키텍처는 a pte_special()
+ *   pte 비트를 정의할 수 있는데, 이 경우 이 함수는 사소하다. 둘째로,
+ *   아키텍처는 예비 pte 비트를 갖지 않을 수 있으며, 이는 아래에서 설명되는
+ *   더 복잡한 체계를 필요로 한다.
+ *
+ *   원시 VM_PFNMAP 매핑(즉, COWed가 아닌 매핑)은 항상 특수 매핑으로
+ *   간주됩니다(기본 및 유효한 "struct page"가 있더라도).
+ *   VM_PFNMAP의 COWed 페이지는 항상 정상입니다.
+ *
+ *   VM_PFNMAP 매핑 내에서 COWed 페이지를 인식하는 방법은
+ *   "remap_pfn_range()"에서 설정한 규칙을 통해 다음과 같이 인식합니다.
+ *   vma는 VM_PFNMAP 비트를 설정하고 vm_pgoff는 매핑된 첫 번째 PFN을
+ *   가리킵니다.
+ *   따라서 모든 특수 매핑은 항상 규
+ *	pfn_of_page == vma->vm_pgoff + ((addr - vma->vm_start) >> PAGE_SHIFT)
+ *   를 준수합니다. 일반 매핑의 경우 이는 false입니다.
+ *
+ *   이렇게 하면 이러한 매핑이 가상 주소에서 PFN으로 선형 변환되는 것으로
+ *   제한됩니다. 이 제한을 피하기 위해 vma가 COW 매핑이 아닌 한 임의 매핑을
+ *   허용한다. 이 경우 모든 pte가 특별하다는 것을 안다(COWed가 될 수 없기
+ *   때문이다).
+ *
+ *   임의 특수 매핑의 COW를 지원하기 위해 VM_MIXEDMAP이 있습니다.
+ *
+ *   VM_MIXEDMAP 매핑도 마찬가지로 "struct page" 백업이 있든 없든 메모리를
+ *   포함할 수 있지만, 차이점은 struct page가 있는 _all_ 페이지
+ *   (즉, pfn_valid가 true인 페이지)가 리카운트되고 VM에서 일반 페이지로
+ *   간주된다는 점입니다. 단점은 페이지 카운트가 재설정된다는 것이다
+ *   (이것은 더 느릴 수 있고 일부 PFNMAP 사용자에게는 옵션이 아닐 수 있다). 
+ *   장점은 COWable 매핑을 지원하기 위해 PFNMAP 매핑의 엄격한 선형성
+ *   규칙을 따를 필요가 없다는 것이다.
+ */
+/*
+ * IAMROOT, 2022.06.04:
+ * - special이 아닌 경우 pfn을 return 한다.
+ * - zero page인 경우 NULL을 retun 한다.
+ * - 나머지는 생략
+ */
 struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 			    pte_t pte)
 {
 	unsigned long pfn = pte_pfn(pte);
 
 	if (IS_ENABLED(CONFIG_ARCH_HAS_PTE_SPECIAL)) {
+/*
+ * IAMROOT, 2022.06.04:
+ * - special이 없으면 check_pfn으로 이동.
+ */
 		if (likely(!pte_special(pte)))
 			goto check_pfn;
 		if (vma->vm_ops && vma->vm_ops->find_special_page)
 			return vma->vm_ops->find_special_page(vma, addr);
 		if (vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP))
 			return NULL;
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page mapping이면 여기서 걸릴것.
+ */
 		if (is_zero_pfn(pfn))
 			return NULL;
 		if (pte_devmap(pte))
@@ -645,6 +700,11 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - CONFIG_ARCH_HAS_PTE_SPECIAL이 없으면, 여기서 zero page mapping일 경우
+ *   걸릴것이다.
+ */
 	if (is_zero_pfn(pfn))
 		return NULL;
 
@@ -2794,6 +2854,10 @@ static inline bool cow_user_page(struct page *dst, struct page *src,
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long addr = vmf->address;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @src가 존재할경우 @dst로 복사하고 끝낸다.
+ */
 	if (likely(src)) {
 		copy_user_highpage(dst, src, addr, vma);
 		return true;
@@ -2805,6 +2869,10 @@ static inline bool cow_user_page(struct page *dst, struct page *src,
 	 * just copying from the original user address. If that
 	 * fails, we just zero-fill it. Live with it.
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - src가 지정되지 않았으면 user address를 dst로 복사한다.
+ */
 	kaddr = kmap_atomic(dst);
 	uaddr = (void __user *)(addr & PAGE_MASK);
 
@@ -3024,10 +3092,19 @@ static inline void wp_page_reuse(struct vm_fault *vmf)
  *   held to the old page, as well as updating the rmap.
  * - In any case, unlock the PTL and drop the reference we took to the old page.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - write fault(2차 fault) 발생시 user page(new page)를 할당하고 copy를
+ *   한다.
+ */
 static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct mm_struct *mm = vma->vm_mm;
+/*
+ * IAMROOT, 2022.06.04:
+ * - do_wp_page()에서 호출시 zero page일 경우 vmf->page는 NULL.
+ */
 	struct page *old_page = vmf->page;
 	struct page *new_page = NULL;
 	pte_t entry;
@@ -3037,6 +3114,11 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page에 mapping됬엇을 경우 zero로 memset하여 할당되고 아니면
+ *   그냥 할당.
+ */
 	if (is_zero_pfn(pte_pfn(vmf->orig_pte))) {
 		new_page = alloc_zeroed_user_highpage_movable(vma,
 							      vmf->address);
@@ -3283,6 +3365,10 @@ static vm_fault_t wp_page_shared(struct vm_fault *vmf)
  * but allow concurrent faults), with pte both mapped and locked.
  * We return with mmap_lock still held, but pte unmapped and unlocked.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - do write protect page
+ */
 static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	__releases(vmf->ptl)
 {
@@ -3301,6 +3387,10 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 		     mm_tlb_flush_pending(vmf->vma->vm_mm)))
 		flush_tlb_page(vmf->vma, vmf->address);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page에 mapping되있었을 경우 NULL.
+ */
 	vmf->page = vm_normal_page(vma, vmf->address, vmf->orig_pte);
 	if (!vmf->page) {
 		/*
@@ -3310,6 +3400,11 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 		 * We should not cow pages in a shared writeable mapping.
 		 * Just mark the pages writable and/or call ops->pfn_mkwrite.
 		 */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - shared일경우 wp_pfn_shared(), 아닐경우 wp_page_copy로 간다.
+ */
 		if ((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
 				     (VM_WRITE|VM_SHARED))
 			return wp_pfn_shared(vmf);
@@ -3758,6 +3853,11 @@ out_release:
 /*
  * IAMROOT, 2022.05.21:
  * - anon page fault시 이 함수로 진입하게 될것이다.
+ * 1. write fault가 아닐 경우(read fault)
+ *   zero page에 mapping된다.
+ * 
+ * 2. write fault일 경우.
+ *   사용자 memory에 할당해주고, rmap에 등록한다.
  */
 static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 {
@@ -3780,6 +3880,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	 *
 	 * Here we only have mmap_read_lock(mm).
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vmf->pmd가 0이면 pte 할당을 한다.
+ */
 	if (pte_alloc(vma->vm_mm, vmf->pmd))
 		return VM_FAULT_OOM;
 
@@ -3788,12 +3892,30 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return 0;
 
 	/* Use the zero-page for reads */
+/*
+ * IAMROOT, 2022.06.04:
+ * - read시 fault.
+ */
 	if (!(vmf->flags & FAULT_FLAG_WRITE) &&
 			!mm_forbids_zeropage(vma->vm_mm)) {
+/*
+ * IAMROOT, 2022.06.04:
+ * - zero page의 pte entry를 구해온다.
+ */
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(vmf->address),
 						vma->vm_page_prot));
+/*
+ * IAMROOT, 2022.06.04:
+ * - pmd ptl에 spinlock을 걸면서 해당 lcok을 vmf->pfl에 넣고, pte를
+ *   가져온다.
+ */
 		vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 				vmf->address, &vmf->ptl);
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - mapping이 되있다면 update_mmu_tlb만 하고 unlock으로 이동한다.
+ */
 		if (!pte_none(*vmf->pte)) {
 			update_mmu_tlb(vma, vmf->address, vmf->pte);
 			goto unlock;
@@ -3802,6 +3924,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		if (ret)
 			goto unlock;
 		/* Deliver the page fault to userland, check inside PT lock */
+/*
+ * IAMROOT, 2022.06.04:
+ * - userfaultfd인지 확인.
+ */
 		if (userfaultfd_missing(vma)) {
 			pte_unmap_unlock(vmf->pte, vmf->ptl);
 			return handle_userfault(vmf, VM_UFFD_MISSING);
@@ -3809,6 +3935,10 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		goto setpte;
 	}
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 이쪽으로 왔다는것은 write fault상태일 것이다.
+ */
 	/* Allocate our own private page. */
 	if (unlikely(anon_vma_prepare(vma)))
 		goto oom;
@@ -3828,6 +3958,11 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	__SetPageUptodate(page);
 
 	entry = mk_pte(page, vma->vm_page_prot);
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - mips를 제외하곤 entry 변동이 없다.
+ */
 	entry = pte_sw_mkyoung(entry);
 	if (vma->vm_flags & VM_WRITE)
 		entry = pte_mkwrite(pte_mkdirty(entry));
@@ -3852,8 +3987,18 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 
 	inc_mm_counter_fast(vma->vm_mm, MM_ANONPAGES);
 	page_add_new_anon_rmap(page, vma, vmf->address, false);
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - file이든 anon이든 inactive부터 시작한다.
+ */
 	lru_cache_add_inactive_or_unevictable(page, vma);
 setpte:
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - entry가 실제 pte에 mapping.
+ */
 	set_pte_at(vma->vm_mm, vmf->address, vmf->pte, entry);
 
 	/* No need to invalidate - it was non-present before */
@@ -4608,6 +4753,11 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 		}
 	}
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 마지막 pte에서 fault가 발생햇을때.
+ *   첫 fault가 발생한 상황으로, pte가 null인, 즉 mapping이 안된상황이다.
+ */
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
@@ -4615,15 +4765,27 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 			return do_fault(vmf);
 	}
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - vmf->pte가 있지만 present가 안된. 즉 invalid. swap 상태라는의미.
+ */
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - numa_balancing으로 fault가 발생한지 확인한다.
+ */
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
 		return do_numa_page(vmf);
 
 	vmf->ptl = pte_lockptr(vmf->vma->vm_mm, vmf->pmd);
 	spin_lock(vmf->ptl);
 	entry = vmf->orig_pte;
+/*
+ * IAMROOT, 2022.06.04:
+ * - 같지 않으면 tlb update 요청.
+ */
 	if (unlikely(!pte_same(*vmf->pte, entry))) {
 		update_mmu_tlb(vmf->vma, vmf->address, vmf->pte);
 		goto unlock;
@@ -4633,6 +4795,11 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 			return do_wp_page(vmf);
 		entry = pte_mkdirty(entry);
 	}
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - af flag set.
+ */
 	entry = pte_mkyoung(entry);
 	if (ptep_set_access_flags(vmf->vma, vmf->address, vmf->pte, entry,
 				vmf->flags & FAULT_FLAG_WRITE)) {

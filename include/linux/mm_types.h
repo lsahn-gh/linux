@@ -106,6 +106,8 @@ struct page {
  * IAMROOT, 2022.02.05:
  * - pcpu에서 사용하는 경우 : 해당 struct page에 대항하는 struct pcpu_chunk가 set된다.
  * - buddy에서 사용하는경우 : migratetype
+ * - anon으로 사용하는 경우 : page가 속한 vma내에서의
+ *                            pgoff(__page_set_anon_rmap() 참고)
  */
 			pgoff_t index;		/* Our offset within mapping. */
 			/**
@@ -416,6 +418,15 @@ struct vm_userfaultfd_ctx {};
  * space that has a special rule for the page-fault handlers (ie a shared
  * library, the executable area etc).
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * ex) vm_start = 0x1000, len = 4k라면
+ *        vm_end(vm_start + len) = 0x2000
+ * -----+  
+ * vma  |
+ * -----+ vm_start = 0x1000
+ */
 struct vm_area_struct {
 	/* The first cache line has the info for VMA tree walking. */
 
@@ -485,6 +496,11 @@ struct vm_area_struct {
 	struct anon_vma *anon_vma;	/* Serialized by page_table_lock */
 
 	/* Function pointers to deal with this struct. */
+/*
+ * IAMROOT, 2022.06.04:
+ * - 최초 초기화시 dummy로 연결되있다.(vma_init() 참고)
+ * - anon일 경우 null(vma_set_anonymous() 참고)
+ */
 	const struct vm_operations_struct *vm_ops;
 
 	/* Information about our backing store: */

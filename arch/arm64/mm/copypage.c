@@ -51,6 +51,10 @@ void copy_highpage(struct page *to, struct page *from)
 }
 EXPORT_SYMBOL(copy_highpage);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - from을 to로 복사후 PG_dcache_clean bit clear
+ */
 void copy_user_highpage(struct page *to, struct page *from,
 			unsigned long vaddr, struct vm_area_struct *vma)
 {

@@ -27,6 +27,10 @@
  * pointing to this anon_vma once its vma list is empty.
  */
 struct anon_vma {
+/*
+ * IAMROOT, 2022.06.04:
+ * - 최초생성시 root는 자기자신.
+ */
 	struct anon_vma *root;		/* Root of this anon_vma tree */
 	struct rw_semaphore rwsem;	/* W: modification, R: walking the list */
 	/*
@@ -44,8 +48,16 @@ struct anon_vma {
 	 * This counter is used for making decision about reusing anon_vma
 	 * instead of forking new one. See comments in function anon_vma_clone.
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - 최초 할당시 1로 시작한ㄷ.(anon_vma_alloc() 참고)
+ */
 	unsigned degree;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 최초 할당시 parent는 자기자신.
+ */
 	struct anon_vma *parent;	/* Parent of this anon_vma */
 
 	/*
@@ -192,6 +204,11 @@ void unlink_anon_vmas(struct vm_area_struct *);
 int anon_vma_clone(struct vm_area_struct *, struct vm_area_struct *);
 int anon_vma_fork(struct vm_area_struct *, struct vm_area_struct *);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vma가 av이면 prepare가 필요없다.
+ *   reuse가능한 av를 찾거나 av를 할당하고 vma에 연결한다.
+ */
 static inline int anon_vma_prepare(struct vm_area_struct *vma)
 {
 	if (likely(vma->anon_vma))

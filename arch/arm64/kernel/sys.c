@@ -54,6 +54,10 @@
  *
  * read, write 권한이 있는 vma라는것을 알수있다.
  * malloc을 호출하면 항상 위와같은 prot, flag를 사용한다.
+ *
+ * - 최종적으로 vma가 새로 생길시 다음과 같은 flag로 완성된다.
+ * VmFlags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE |
+ * VM_MAYEXEC | VM_ACCOUNT | VM_SOFTDIRTY
  */
 SYSCALL_DEFINE6(mmap, unsigned long, addr, unsigned long, len,
 		unsigned long, prot, unsigned long, flags,

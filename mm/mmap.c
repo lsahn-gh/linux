@@ -100,6 +100,12 @@ static void unmap_region(struct mm_struct *mm,
  *								w: (no) no
  *								x: (yes) yes
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - vm_flags의 flags들을 arch prot flag로 변환할때 사용한다.
+ *   작명 : __[Private/Shared][exec, write, read]
+ */
 pgprot_t protection_map[16] __ro_after_init = {
 	__P000, __P001, __P010, __P011, __P100, __P101, __P110, __P111,
 	__S000, __S001, __S010, __S011, __S100, __S101, __S110, __S111
@@ -112,6 +118,10 @@ static inline pgprot_t arch_filter_pgprot(pgprot_t prot)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vm_flags를 arch prot flag로 변환한다.
+ */
 pgprot_t vm_get_page_prot(unsigned long vm_flags)
 {
 	pgprot_t ret = __pgprot(pgprot_val(protection_map[vm_flags &
@@ -122,18 +132,31 @@ pgprot_t vm_get_page_prot(unsigned long vm_flags)
 }
 EXPORT_SYMBOL(vm_get_page_prot);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @oldprot의 cache속성을 return값에 적용한다.
+ */
 static pgprot_t vm_pgprot_modify(pgprot_t oldprot, unsigned long vm_flags)
 {
 	return pgprot_modify(oldprot, vm_get_page_prot(vm_flags));
 }
 
 /* Update vma->vm_page_prot to reflect vma->vm_flags. */
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vma에 page prot를 설정한다.
+ */
 void vma_set_page_prot(struct vm_area_struct *vma)
 {
 	unsigned long vm_flags = vma->vm_flags;
 	pgprot_t vm_page_prot;
 
 	vm_page_prot = vm_pgprot_modify(vma->vm_page_prot, vm_flags);
+/*
+ * IAMROOT, 2022.06.04:
+ * - write가능한 shared memory에 tracking이 필요한경우 shared flag를
+ *   제외한다.
+ */
 	if (vma_wants_writenotify(vma, vm_page_prot)) {
 		vm_flags &= ~VM_SHARED;
 		vm_page_prot = vm_pgprot_modify(vm_page_prot, vm_flags);
@@ -750,6 +773,10 @@ static void __vma_link_file(struct vm_area_struct *vma)
 	}
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @prev와 @vma를 연결하고 rb tree에 vma를 추가한다.
+ */
 static void
 __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	struct vm_area_struct *prev, struct rb_node **rb_link,
@@ -759,6 +786,10 @@ __vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 	__vma_link_rb(mm, vma, rb_link, rb_parent);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vma를 link하고 @mm에 map_count를 증가시킨다.
+ */
 static void vma_link(struct mm_struct *mm, struct vm_area_struct *vma,
 			struct vm_area_struct *prev, struct rb_node **rb_link,
 			struct rb_node *rb_parent)
@@ -830,6 +861,10 @@ static __always_inline void __vma_unlink(struct mm_struct *mm,
  *
  * - @insert는 vma_adjust()에서만 사용한다.
  *   @expand는 vma_merge()에서만 사용한다.
+ *
+ * - vma에 대해 변경(추가 및 확장)이 일어 날시 vma에 관련된 자료구조들을
+ *   갱신한다.  실제 삭제해야될 vma를 삭제하고, vma의 범위를 새로 고치며,
+ *   avc를 새로 정렬한다.
  */
 int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
 	unsigned long end, pgoff_t pgoff, struct vm_area_struct *insert,
@@ -1199,6 +1234,10 @@ again:
 		 * we must remove another next too. It would clutter
 		 * up the code too much to do both in one go.
 		 */
+/*
+ * IAMROOT, 2022.06.04:
+ * remove_next의 값에 따라 next를 정한다.
+ */
 		if (remove_next != 3) {
 			/*
 			 * If "next" was removed and vma->vm_end was
@@ -1220,6 +1259,12 @@ again:
 			 */
 			next = vma;
 		}
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - remove_next 2의 경우 remove_next 1의 방법으로 한번 더 삭제해야된다
+ *   (2개통합)
+ */
 		if (remove_next == 2) {
 			remove_next = 1;
 			end = next->vm_end;
@@ -1442,6 +1487,10 @@ can_vma_merge_after(struct vm_area_struct *vma, unsigned long vm_flags,
  * parameter) may establish ptes with the wrong permissions of NNNN
  * instead of the right permissions of XXXX.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - @addr ~ @end의 범위의 vma를 하나의 기준 vma로 merge를 진행한다.
+ */
 struct vm_area_struct *vma_merge(struct mm_struct *mm,
 			struct vm_area_struct *prev, unsigned long addr,
 			unsigned long end, unsigned long vm_flags,
@@ -1607,6 +1656,33 @@ struct vm_area_struct *vma_merge(struct mm_struct *mm,
  * driver is doing some kind of reference counting. But that doesn't
  * really matter for the anon_vma sharing case.
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - papgo
+ *   anon_vma를 공유할 가치가 있는지 여부를 빠르게 확인할 수 있는 대략적인
+ *   호환성 검사입니다.
+ *
+ *   vm_file이 동일해야 하며 플래그는 mprotect가 변경할 수 있는 항목에서만
+ *   다를 수 있습니다.
+ *
+ *   NOTE! anon_vma를 공유한다는 사실이 두 vma를 병합할 수 있다는 것을
+ *   의미하지는 않습니다. 예를 들어, vm_ops->close() 함수가 있으면
+ *   드라이버가 어떤 종류의 참조 카운트를 수행 중임을 나타내기 때문에 vma
+ *   병합을 거부합니다. 그러나 anon_vma 공유 사례의 경우에는 문제가 되지
+ *   않습니다.
+ *
+ * - @a와 @b를 통합할수있는지 확인한다.
+ * - @a가 before, @b가 after.
+ * 1. a->vm_end = b->vm_stgart
+ *    vma끼리 연속되있는지.
+ * 2. mpol_equal(...)
+ *    memory policy가 같은지 확인
+ * 3. vm_file, vm_flags
+ *    file과 vm_flags가 같은지.
+ * 4. b->vm_pgoff == a->vm_pgoff + ...
+ *    a(before vma)와 b의 pg가 연속되있는지.
+ */
 static int anon_vma_compatible(struct vm_area_struct *a, struct vm_area_struct *b)
 {
 	return a->vm_end == b->vm_start &&
@@ -1638,6 +1714,29 @@ static int anon_vma_compatible(struct vm_area_struct *a, struct vm_area_struct *
  * and with the same memory policies). That's all stable, even with just
  * a read lock on the mm_sem.
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - papago
+ *   'old'의 anon_vma를 다시 사용할 수 있는지 확인하기 위해 몇 가지
+ *   기본적인 건전성 검사를 수행합니다. 'a'/'b' vma는 VM 순서로 되어
+ *   있습니다. 이 중 하나는 '이전'과 같고, 다른 하나는 anon_vma를
+ *   공유하려는 새 VM입니다.
+ *
+ *   NOTE! 읽기 위해 mm_sem이 보류된 상태에서 실행되므로, 'old'의
+ *   anon_vma가 병합하려는 다른 페이지 오류로 인해 동시에 설정될 수
+ *   있습니다. 하지만 괜찮습니다: 설정 중이면 자동으로 병합에 사용할 수
+ *   있는 singleton이 되므로 이 모든 것을 낙관적으로 수행할 수 있습니다.
+ *   그러나 포인터를 다시 로드하지 않도록 하기 위해 READ_ONES()를
+ *   수행합니다.
+ *
+ *   IOW(in other word): anon_vma_chain에 대한 "list_is_vma()" 테스트는
+ *   'follow anon_vma' 사례에 대해서만 문제가 됩니다(즉, 포크를 통과했기
+ *   때문에 "복잡한" anon_vma를 반환하는 것을 방지하고자 합니다.
+ *
+ *   또한 두 vma가 호환되는지(인접적이고 동일한 메모리 정책과) 확인합니다.
+ *   mm_sem에 읽기 잠금만 있어도 안정적입니다.
+ */
 static struct anon_vma *reusable_anon_vma(struct vm_area_struct *old, struct vm_area_struct *a, struct vm_area_struct *b)
 {
 	if (anon_vma_compatible(a, b)) {
@@ -1656,6 +1755,13 @@ static struct anon_vma *reusable_anon_vma(struct vm_area_struct *old, struct vm_
  * sequence of mprotects and faults may otherwise lead to distinct
  * anon_vmas being allocated, preventing vma merge in subsequent
  * mprotect.
+ */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - next가 있으면 next를 기준으로, prev가 있으면 prev를 기준으로 merge가
+ *   가능한지 확인한다.
+ *   가능하면 기존 vma의 av를 재사용한다.
  */
 struct anon_vma *find_mergeable_anon_vma(struct vm_area_struct *vma)
 {
@@ -1750,6 +1856,12 @@ static inline bool file_mmap_ok(struct file *file, struct inode *inode,
 /*
  * The caller must write-lock current->mm->mmap_lock.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - user malloc호출시 flag
+ *   prot = PROT_READ|PROT_WRITE
+ *   flags = MAP_PRIVATE|MAP_ANONYMOUS
+ */
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
 			unsigned long flags, unsigned long pgoff,
@@ -1819,6 +1931,11 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 /*
  * IAMROOT, 2022.05.21:
  * - prot, flags를 vm_flags로 변환하여 추가한다.
+ *
+ * - user malloc호출시 flag
+ *   @prot = PROT_READ|PROT_WRITE 
+ *   @flags = MAP_PRIVATE|MAP_ANONYMOUS
+ *   vm_flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC
  */
 	vm_flags = calc_vm_prot_bits(prot, pkey) | calc_vm_flag_bits(flags) |
 			mm->def_flags | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC;
@@ -1943,6 +2060,10 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
  * IAMROOT, 2022.05.21:
  * - user에서 호출한 malloc인 경우 if문 해당사항이 없어(file이 아닌경우)
  *   vm_mmap_pgoff를 바로 호출할것이다.
+ *
+ * - user malloc호출시 flag
+ *   prot = PROT_READ|PROT_WRITE
+ *   flags = MAP_PRIVATE|MAP_ANONYMOUS
  */
 unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 			      unsigned long prot, unsigned long flags,
@@ -2029,6 +2150,20 @@ SYSCALL_DEFINE1(old_mmap, struct mmap_arg_struct __user *, arg)
  * to the private version (using protection_map[] without the
  * VM_SHARED bit).
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - write event에 대해 tracking을 하기 위해 확인한다.
+ *   (shared memory)
+ *
+ * -- write notify를 하는 상황.
+ * 반드시 VM_WRITE|VM_SHARED가 둘다 존재해야된다.
+ *
+ * 1. vm_ops에 page_mkwrite or pfn_mkwrite가 존재한다.
+ * (이하는 @vm_page_prot와 vma의 cache속성이 같아야됨.)
+ * 2. soft_dirty기능이 있는 상태에서 VM_SOFTDIRTY가 없는 상황
+ * 3. VM_FPNMAP이 없으면서 writeback을 할수잇는 상황.
+ *
+ */
 int vma_wants_writenotify(struct vm_area_struct *vma, pgprot_t vm_page_prot)
 {
 	vm_flags_t vm_flags = vma->vm_flags;
@@ -2077,6 +2212,11 @@ static inline int accountable_mapping(struct file *file, vm_flags_t vm_flags)
 	return (vm_flags & (VM_NORESERVE | VM_SHARED | VM_WRITE)) == VM_WRITE;
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - user malloc호출시 flag
+ *   @vm_flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE | VM_MAYEXEC
+ */
 unsigned long mmap_region(struct file *file, unsigned long addr,
 		unsigned long len, vm_flags_t vm_flags, unsigned long pgoff,
 		struct list_head *uf)
@@ -2112,6 +2252,13 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	/*
 	 * Private writable mapping: check memory availability
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - user malloc호출시 flag
+ *   @vm_flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE |
+ *   VM_MAYEXEC | VM_ACCOUNT
+ * shared memory가 아닌 write가 가능한 memory인 경우 VM_ACCOUNT가 추가된다.
+ */
 	if (accountable_mapping(file, vm_flags)) {
 		charged = len >> PAGE_SHIFT;
 		if (security_vm_enough_memory_mm(mm, charged))
@@ -2132,6 +2279,10 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	 * specific mapper. the address has already been validated, but
 	 * not unmapped, but the maps are removed from the list.
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - merge가 안되는 경우이므로 vma를 새로 만든다.
+ */
 	vma = vm_area_alloc(mm);
 	if (!vma) {
 		error = -ENOMEM;
@@ -2234,6 +2385,13 @@ out:
 	 * then new mapped in-place (which must be aimed as
 	 * a completely new data area).
 	 */
+/*
+ * IAMROOT, 2022.06.04:
+ * - user malloc호출시 flag
+ *   @vm_flags = VM_READ | VM_WRITE | VM_MAYREAD | VM_MAYWRITE |
+ *   VM_MAYEXEC | VM_ACCOUNT | VM_SOFTDIRTY
+ * 최종적으로 vma가 새로 생길시 위와 같은 flag로 완성된다.
+ */
 	vma->vm_flags |= VM_SOFTDIRTY;
 
 	vma_set_page_prot(vma);

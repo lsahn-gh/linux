@@ -507,6 +507,13 @@ int account_locked_vm(struct mm_struct *mm, unsigned long pages, bool inc)
 }
 EXPORT_SYMBOL_GPL(account_locked_vm);
 
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - user malloc호출시 flag
+ *   prot = PROT_READ|PROT_WRITE
+ *   flags = MAP_PRIVATE|MAP_ANONYMOUS
+ */
 unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long pgoff)

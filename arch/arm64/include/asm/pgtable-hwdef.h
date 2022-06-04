@@ -257,6 +257,10 @@
 /*
  * Level 3 descriptor (PTE).
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - hardware mapping이 되있는지 확인.
+ */
 #define PTE_VALID		(_AT(pteval_t, 1) << 0)
 #define PTE_TYPE_MASK		(_AT(pteval_t, 3) << 0)
 #define PTE_TYPE_PAGE		(_AT(pteval_t, 3) << 0)

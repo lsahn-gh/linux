@@ -342,6 +342,10 @@ static struct kmem_cache *vm_area_cachep;
 /* SLAB cache for mm_struct structures (tsk->mm) */
 static struct kmem_cache *mm_cachep;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - @mm에 추가할 vma를 하나 생성한다.
+ */
 struct vm_area_struct *vm_area_alloc(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;

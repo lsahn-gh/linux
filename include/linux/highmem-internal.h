@@ -88,6 +88,10 @@ static inline void __kunmap_local(void *vaddr)
 	kunmap_local_indexed(vaddr);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * return page_address(page);
+ */
 static inline void *kmap_atomic_prot(struct page *page, pgprot_t prot)
 {
 	if (IS_ENABLED(CONFIG_PREEMPT_RT))
@@ -99,6 +103,14 @@ static inline void *kmap_atomic_prot(struct page *page, pgprot_t prot)
 	return __kmap_local_page_prot(page, prot);
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * 32bit에서는 kmap공간을 이용해서 highmem영역을 mapping하고 접근하지만
+ * 64bit에서는 이미 linear mapping이 전부 되있기때문에 별도의 mapping을
+ * 하지 않고 즉시 접근할수있다.
+ *
+ * return page_address(page);
+ */
 static inline void *kmap_atomic(struct page *page)
 {
 	return kmap_atomic_prot(page, kmap_prot);

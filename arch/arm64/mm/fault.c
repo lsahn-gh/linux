@@ -194,6 +194,11 @@ static void show_pte(unsigned long addr)
  *
  * Returns whether or not the PTE actually changed.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - af flag를 set한다. ARM8.1의 경우 자동 기록이 되므로 pte_same을통해서
+ *   skip된다.
+ */
 int ptep_set_access_flags(struct vm_area_struct *vma,
 			  unsigned long address, pte_t *ptep,
 			  pte_t entry, int dirty)
@@ -201,6 +206,10 @@ int ptep_set_access_flags(struct vm_area_struct *vma,
 	pteval_t old_pteval, pteval;
 	pte_t pte = READ_ONCE(*ptep);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - hardware에서 af를 기록했을수도있다. 같으면 skip.
+ */
 	if (pte_same(pte, entry))
 		return 0;
 
@@ -220,6 +229,11 @@ int ptep_set_access_flags(struct vm_area_struct *vma,
 		pteval ^= PTE_RDONLY;
 		pteval |= pte_val(entry);
 		pteval ^= PTE_RDONLY;
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - atomic 기록.
+ */
 		pteval = cmpxchg_relaxed(&pte_val(*ptep), old_pteval, pteval);
 	} while (pteval != old_pteval);
 
@@ -918,6 +932,11 @@ NOKPROBE_SYMBOL(do_debug_exception);
 
 /*
  * Used during anonymous page fault handling.
+ */
+/*
+ * IAMROOT, 2022.06.04:
+ * - anon page의 write fault으로 인해 0으로 초기화된 사용자 메모리를
+ *   할당한다.
  */
 struct page *alloc_zeroed_user_highpage_movable(struct vm_area_struct *vma,
 						unsigned long vaddr)

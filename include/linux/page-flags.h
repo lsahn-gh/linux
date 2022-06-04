@@ -579,6 +579,12 @@ PAGEFLAG(XenRemapped, xen_remapped, PF_NO_COMPOUND)
 PAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
 	__CLEARPAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
 	__SETPAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
+/*
+ * IAMROOT, 2022.06.04:
+ * - anon page들은 일반적으로 만들어질때 SwapBacked가 set된다.
+ *   (page_add_new_anon_rmap() 참고)
+ *   clean anon일 경우 flag가 제거된다.
+ */
 PAGEFLAG(SwapBacked, swapbacked, PF_NO_TAIL)
 	__CLEARPAGEFLAG(SwapBacked, swapbacked, PF_NO_TAIL)
 	__SETPAGEFLAG(SwapBacked, swapbacked, PF_NO_TAIL)
@@ -794,6 +800,10 @@ static inline int PageUptodate(struct page *page)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 최근에 page를 갱신했다는 flag.
+ */
 static __always_inline void __SetPageUptodate(struct page *page)
 {
 	VM_BUG_ON_PAGE(PageTail(page), page);

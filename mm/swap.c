@@ -547,6 +547,12 @@ EXPORT_SYMBOL(lru_cache_add);
  * Place @page on the inactive or unevictable LRU list, depending on its
  * evictability.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - 처음 생성된 page는 file이든 anon이든 inactive부터 시작한다.
+ *   원래는 active부터 시작햇는데 refault distance계산때문에 이렇게
+ *   변경됬다.
+ */
 void lru_cache_add_inactive_or_unevictable(struct page *page,
 					 struct vm_area_struct *vma)
 {

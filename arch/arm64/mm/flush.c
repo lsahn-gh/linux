@@ -66,6 +66,10 @@ EXPORT_SYMBOL_GPL(__sync_icache_dcache);
  * it as dirty for later flushing when mapped in user space (if executable,
  * see __sync_icache_dcache).
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - PG_dcache_clean bit을 clear한다.
+ */
 void flush_dcache_page(struct page *page)
 {
 	if (test_bit(PG_dcache_clean, &page->flags))

@@ -83,6 +83,10 @@
 static struct kmem_cache *anon_vma_cachep;
 static struct kmem_cache *anon_vma_chain_cachep;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - av를 생성한다.
+ */
 static inline struct anon_vma *anon_vma_alloc(void)
 {
 	struct anon_vma *anon_vma;
@@ -198,6 +202,14 @@ static void anon_vma_chain_link(struct vm_area_struct *vma,
  *
  * This must be called with the mmap_lock held for reading.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - av를 만든다.
+ *   만들어진 av와 @vma를 연결하기 위해 avc를 하나 생성해서
+ *   rb tree에 넣는다.
+ *   만약 merge가능한 av가 있다면 merge를 하고 그게 아니면 새로운 av를
+ *   생성한다.
+ */
 int __anon_vma_prepare(struct vm_area_struct *vma)
 {
 	struct mm_struct *mm = vma->vm_mm;
@@ -213,6 +225,10 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 	anon_vma = find_mergeable_anon_vma(vma);
 	allocated = NULL;
 	if (!anon_vma) {
+/*
+ * IAMROOT, 2022.06.04:
+ * - merge가 가능한 av가 없으면 할당을 시도한다.
+ */
 		anon_vma = anon_vma_alloc();
 		if (unlikely(!anon_vma))
 			goto out_enomem_free_avc;
@@ -222,6 +238,10 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 	anon_vma_lock_write(anon_vma);
 	/* page_table_lock to protect against threads */
 	spin_lock(&mm->page_table_lock);
+/*
+ * IAMROOT, 2022.06.04:
+ * - @vma에 연결되있던 av가 없으면 현재 생성되었거나 reuse하는 av로 넣는다.
+ */
 	if (likely(!vma->anon_vma)) {
 		vma->anon_vma = anon_vma;
 		anon_vma_chain_link(vma, avc, anon_vma);
@@ -370,6 +390,14 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
  * the corresponding VMA in the parent process is attached to.
  * Returns 0 on success, non-zero on failure.
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * @vma : @pvma로부터 복사된 새로만들어진 child vma
+ * @pvma : parent vma
+ *
+ * - dup_mmap()에서 부모의 전체 vma수만큼 호출된다.
+ */
 int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 {
 	struct anon_vma_chain *avc;
@@ -510,6 +538,10 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 	}
 }
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 생성자.
+ */
 static void anon_vma_ctor(void *data)
 {
 	struct anon_vma *anon_vma = data;
@@ -1185,6 +1217,12 @@ void page_move_anon_rmap(struct page *page, struct vm_area_struct *vma)
  * @address:	User virtual address of the mapping	
  * @exclusive:	the page is exclusively owned by the current process
  */
+
+/*
+ * IAMROOT, 2022.06.04:
+ * - @page->mapping에 anon_vma + PAGE_MAPPING_ANON을 set하고,
+ *   @page->index에 @page가속한 @vma에서의 pgoff를 set한다.
+ */
 static void __page_set_anon_rmap(struct page *page,
 	struct vm_area_struct *vma, unsigned long address, int exclusive)
 {
@@ -1192,6 +1230,10 @@ static void __page_set_anon_rmap(struct page *page,
 
 	BUG_ON(!anon_vma);
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 이미 되있으면 return.
+ */
 	if (PageAnon(page))
 		return;
 
@@ -1320,12 +1362,20 @@ void do_page_add_anon_rmap(struct page *page,
  * This means the inc-and-test can be bypassed.
  * Page does not have to be locked.
  */
+/*
+ * IAMROOT, 2022.06.04:
+ * - @page가 anon_vma를 가리키게 만든다.
+ */
 void page_add_new_anon_rmap(struct page *page,
 	struct vm_area_struct *vma, unsigned long address, bool compound)
 {
 	int nr = compound ? thp_nr_pages(page) : 1;
 
 	VM_BUG_ON_VMA(address < vma->vm_start || address >= vma->vm_end, vma);
+/*
+ * IAMROOT, 2022.06.04:
+ * - anon page는 SetPageSwapBacked이 set된다.
+ */
 	__SetPageSwapBacked(page);
 	if (compound) {
 		VM_BUG_ON_PAGE(!PageTransHuge(page), page);
@@ -1339,6 +1389,10 @@ void page_add_new_anon_rmap(struct page *page,
 		/* Anon THP always mapped first with PMD */
 		VM_BUG_ON_PAGE(PageTransCompound(page), page);
 		/* increment count (starts at -1) */
+/*
+ * IAMROOT, 2022.06.04:
+ * - page->_mapcount의 초기값은 -1. 사용시 0으로 set.
+ */
 		atomic_set(&page->_mapcount, 0);
 	}
 	__mod_lruvec_page_state(page, NR_ANON_MAPPED, nr);
