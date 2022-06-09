@@ -140,11 +140,19 @@ static inline void anon_vma_free(struct anon_vma *anon_vma)
 	kmem_cache_free(anon_vma_cachep, anon_vma);
 }
 
+/*
+ * IAMROOT, 2022.06.09: 
+ * - avc 할당
+ */
 static inline struct anon_vma_chain *anon_vma_chain_alloc(gfp_t gfp)
 {
 	return kmem_cache_alloc(anon_vma_chain_cachep, gfp);
 }
 
+/*
+ * IAMROOT, 2022.06.09: 
+ * - avc 할당 해제
+ */
 static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
 {
 	kmem_cache_free(anon_vma_chain_cachep, anon_vma_chain);
@@ -153,7 +161,55 @@ static void anon_vma_chain_free(struct anon_vma_chain *anon_vma_chain)
 /*
  * IAMROOT, 2022.05.28:
  * - @avc를 avc가 속한 @vma와 @anon_vma에 link한다.
- *   vma <--(avc)--> anon_vma
+ *
+ *   av와 vma의 연결은 중간 연결자로 avc를 사용하는데,
+ *   다음과 같이 3개의 연결 구조를 사용하여 
+ *    av 관점에서 몇 개의 vma와 연결되어 있는지, 또는
+ *    vma 관점에서 몇 개의 av와 연결되어 있는지를 알 수 있게 하였다.
+ *
+ *   1) 포인터 연결
+ *    AV <------------------ AVC ------------------> VMA
+ *                (*anon_vma)   (*vma)
+ *      중간 연결자 avc는 단방향으로 av와 vma를 가리킨다.
+ *
+ *   2) RB-Tree 자료 구조 사용
+ *      av와 avc와의 연결은 avc->anon_vma 포인터가 av를 가리키고, 
+ *                      av->rb_root에 있는 rb-tree에 avc가 등록된다.
+ *                      즉) av에 소속된 여러 개의 vma를 찾을 수 있다.
+ *             AV
+ *         (rb_root)
+ *           /   \
+ *          /     \
+ *       (rb)     (rb)
+ *       AVC1     AVC2
+ *      (*vma)   (*vma)
+ *         |        |
+ *         v        v
+ *        VMA1     VMA2
+ *
+ *   3) 양방향 리스트 자료 구조 사용
+ *      vma와 avc와의 연결은 avc->vma 포인터가 vma를 가리키고,
+ *                      vma->anon_vma_chain 리스트 헤드에 avc가 연결된다.
+ *                      즉) vma에 연결된 여러 개의 av를 찾을 수 있다.
+ *
+ *                                AV1              AV2
+ *                                 ^                ^
+ *                                 |                |
+ *                            (*anon_vma)      (*anon_vma)
+ *          VMA                   AVC1             AVC2
+ *    (anon_vma_chain) <----->(same_vma)<----->(same_vma)-----+
+ *                ^                                           |
+ *                +-------------------------------------------+
+ *
+ *  위의 두 자료 구조를 간단히 표현하면 다음과 같다.
+ *
+ *   AV <--------- AVC ----------> VMA
+ *        rb-tree          list
+ * 
+ *  더 간단히 표현하면 다음과 같다.
+ * 
+ *   AV <------------------------> VMA
+ *
  */
 static void anon_vma_chain_link(struct vm_area_struct *vma,
 				struct anon_vma_chain *avc,
@@ -164,6 +220,34 @@ static void anon_vma_chain_link(struct vm_area_struct *vma,
 /*
  * IAMROOT, 2022.05.28:
  * - 같은 vma를 가리키는 avc끼리는 list.
+ *   1) 인접한 vma는 몇 가지 flag등이 같은 경우 av를 같이 사용할 수 있다.
+ *   2) fork로 인해 vma를 상속받은 경우 부모(조부모등 그이상도) 프로세스의
+ *      vma와도 연결될 수 있다.
+ *
+ * case 1)
+ *   av <----+----- (avc1)----------> vma1
+ *            \
+ *             \----(avc2)----------> vma2
+ *
+ *   - vma1의 리스트는 avc1만 연결된다.
+ *     즉 vma1은 리스트를 통해 하나의 av와 연결된 것을 알 수 있다.
+ *   - vma2의 리스트는 avc2만 연결된다.
+ *     즉 vma2는 리스트를 통해 하나의 av와 연결된 것을 알 수 있다.
+ * 
+ * case 2)
+ *   av1 <---------(avc1)-----------> vma1
+ *    ^                                |
+ *     \                               |
+ *      \----------(avc2)-----\       fork
+ *                             \       |
+ *                              \      v
+ *   av2 <---------(avc3)-----------> vma2
+ *
+ *   - vma1의 리스트는 avc1만 연결된다. 
+ *     즉 vma1은 리스트를 통해 av1과 연결된 것을 알 수 있다..
+ *   - vma2의 리스트는 avc2와 avc3에 연결된다. 
+ *     즉 vma2는 리스트를 통해 av1과 av2와 연결된 것을 알 수 있다.
+ *
  */
 	list_add(&avc->same_vma, &vma->anon_vma_chain);
 
@@ -222,13 +306,14 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 	if (!avc)
 		goto out_enomem;
 
+/*
+ * IAMROOT, 2022.06.04:
+ * - 인접한 vma를 위해 같이 사용할 수 있는 av가 없고,
+ *   재사용할 수 있는 av도 없으면 할당을 시도한다.
+ */
 	anon_vma = find_mergeable_anon_vma(vma);
 	allocated = NULL;
 	if (!anon_vma) {
-/*
- * IAMROOT, 2022.06.04:
- * - merge가 가능한 av가 없으면 할당을 시도한다.
- */
 		anon_vma = anon_vma_alloc();
 		if (unlikely(!anon_vma))
 			goto out_enomem_free_avc;
@@ -363,6 +448,19 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
  *
  * - src만 anon_vma가 있는 상황에서, src가 root가 아니고 차수가 2미만이라면
  *   anon_vma를 재활용한다.
+ * 
+ * - 아래와 같이 hierarchy하게 fork가 반복되면서 조부모 프로세스가 dead한 경우
+ *   조부모의 av는 fork한 프로세스가 소유한 vma2와도 연결된 상태이다,
+ *   이렇게 하나의 자식 프로세스의 vma에만 연결된 경우 이러한 av를 재활용할 수 
+ *   있다. (재활용하지 않으면 fork할 때마다 연결되므로 반복되는 fork 늪에서
+ *   사라지지 못하고 메모리만 낭비하게 된다)
+ * 
+ *    (reuse)
+ *      av1   (dead grandparent vma1)
+ *       \ \
+ * av2<-----+----------->parent vma2
+ *         \
+ *          \------------>child vma3 
  */
 		if (!dst->anon_vma && src->anon_vma &&
 		    anon_vma != src->anon_vma && anon_vma->degree < 2)

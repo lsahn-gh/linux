@@ -1730,7 +1730,7 @@ static int anon_vma_compatible(struct vm_area_struct *a, struct vm_area_struct *
  *   그러나 포인터를 다시 로드하지 않도록 하기 위해 READ_ONES()를
  *   수행합니다.
  *
- *   IOW(in other word): anon_vma_chain에 대한 "list_is_vma()" 테스트는
+ *   IOW(in other words): anon_vma_chain에 대한 "list_is_vma()" 테스트는
  *   'follow anon_vma' 사례에 대해서만 문제가 됩니다(즉, 포크를 통과했기
  *   때문에 "복잡한" anon_vma를 반환하는 것을 방지하고자 합니다.
  *
@@ -1742,6 +1742,12 @@ static struct anon_vma *reusable_anon_vma(struct vm_area_struct *old, struct vm_
 	if (anon_vma_compatible(a, b)) {
 		struct anon_vma *anon_vma = READ_ONCE(old->anon_vma);
 
+/*
+ * IAMROOT, 2022.06.09: 
+ * - vma가 하나의 avc와 연결이 된 경우
+ *   즉, 현재 프로세스의 av만 연결되고, 부모 프로세스의 av등과는 연결되지 않은 
+ *   상태를 의미한다.
+ */
 		if (anon_vma && list_is_singular(&old->anon_vma_chain))
 			return anon_vma;
 	}
@@ -1759,9 +1765,11 @@ static struct anon_vma *reusable_anon_vma(struct vm_area_struct *old, struct vm_
 
 /*
  * IAMROOT, 2022.06.04:
- * - next가 있으면 next를 기준으로, prev가 있으면 prev를 기준으로 merge가
- *   가능한지 확인한다.
- *   가능하면 기존 vma의 av를 재사용한다.
+ * - next가 있으면 next를 기준으로, prev가 있으면 prev를 기준으로 anon_vma를
+ *   같이 사용할 수 있는지 확인한다.
+ *   가능하면 다음과 같은 관련 av를 재사용한다.
+ *   1) 같은 프로세스내의 인접한 vma로 mergeable av 
+ *   2) 조부모 이상의 프로세스가 dead되어 av가 혼자 남겨진 상태 reuse
  */
 struct anon_vma *find_mergeable_anon_vma(struct vm_area_struct *vma)
 {
