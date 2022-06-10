@@ -1148,6 +1148,8 @@ struct mem_cgroup *mem_cgroup_iter(struct mem_cgroup *root,
 
 	if (pos)
 		css = &pos->css;
+
+	for (;;) {
 /*
  * IAMROOT, 2022.04.27:
  * - child -> sibling -> parent 순으로 root까지 탐색해간다.

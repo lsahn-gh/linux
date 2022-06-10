@@ -50,7 +50,28 @@ struct anon_vma {
 	 */
 /*
  * IAMROOT, 2022.06.04:
- * - 최초 할당시 1로 시작한ㄷ.(anon_vma_alloc() 참고)
+ * -papago
+ *  이 anon_vma를 가리키는 자식 anon_vmas 및 VMA의 수입니다.
+ *
+ *  이 카운터는 새로운 것을 분기하는 대신 anon_vma를 재사용하는 것에 대한
+ *  결정을 내리는 데 사용됩니다. anon_vma_clone 함수의 주석을 참조하십시오.
+ *
+ * - 최초 할당시 1로 시작한다.(anon_vma_alloc() 참고)
+ * - degree = child anon_vma 개수 + vma 개수
+ *
+ * -----
+ *
+ * 1. 자기참조. child 0. vma 1
+ * anon_vma == anon_vma->parent. degree = 2
+ * (parent 자기참조 1 + vma)
+ *
+ * 2. canon_vma(child anon_vma) = 3개. vma 1
+ *
+ * canon_vma1 -> anon_vma
+ * canon_vma2 -/
+ * canon_vma3 -/
+ *
+ * degree = 4. (anon_vma를 parent로보는 것이 3개 + vma)
  */
 	unsigned degree;
 

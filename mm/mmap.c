@@ -1050,7 +1050,11 @@ int __vma_adjust(struct vm_area_struct *vma, unsigned long start,
  */
 		if (exporter && exporter->anon_vma && !importer->anon_vma) {
 			int error;
-
+/*
+ * IAMROOT, 2022.06.10:
+ * - importer의 anon_vma를 exporter->anon_vma로 쓴다. anon_vma의 degree는 anon_vma_clone()에서
+ *   증가할것이다.
+ */
 			importer->anon_vma = exporter->anon_vma;
 			error = anon_vma_clone(importer, exporter);
 			if (error)

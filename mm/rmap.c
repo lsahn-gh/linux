@@ -246,6 +246,11 @@ int __anon_vma_prepare(struct vm_area_struct *vma)
 		vma->anon_vma = anon_vma;
 		anon_vma_chain_link(vma, avc, anon_vma);
 		/* vma reference or self-parent link for new root */
+/*
+ * IAMROOT, 2022.06.10:
+ * - __anon_vma_prepare()를 통해서 생성되면 degree는 2부터 시작할것이다.
+ *   parent를 자기자신으로 생각한다.(기본(1) + 자기자신(1))
+ */
 		anon_vma->degree++;
 		allocated = NULL;
 		avc = NULL;
@@ -314,6 +319,35 @@ static inline void unlock_anon_vma_root(struct anon_vma *root)
  * walker has a good chance of avoiding scanning the whole hierarchy when it
  * searches where page is mapped.
  */
+/*
+ * IAMROOT, 2022.06.07:
+ * - papago
+ *   anon_vmas를 src에서 dst로 첨부합니다.
+ *   성공하면 0을 반환하고 실패하면 -ENOMEM을 반환합니다.
+ *
+ *   anon_vma_clone()은 __vma_adjust(), __split_vma(), copy_vma() 및
+ *   anon_vma_fork()에 의해 호출됩니다. 처음 세 개는 src의 정확한 사본을
+ *   원하지만 마지막 것인 anon_vma_fork()는 anon_vma의 끝없는 성장을
+ *   방지하기 위해 기존 anon_vma를 재사용하려고 할 수 있습니다.
+ *   dst->anon_vma는 호출 전에 NULL로 설정되어 있으므로
+ *   (!dst->anon_vma && src->anon_vma)를 확인하여 이 경우를 식별할 수
+ *   있습니다.
+ *
+ *   (!dst->anon_vma && src->anon_vma)가 참이면 이 함수는 vmas가 없고 자식
+ *   anon_vma가 하나만 있는 기존 anon_vma를 찾아서 재사용하려고 합니다.
+ *   이는 지속적으로 분기되는 작업의 경우 anon_vma 계층이 무한 선형
+ *   체인으로 저하되는 것을 방지합니다. 반면에 하나 이상의 자식이 있는
+ *   anon_vma는 살아있는 vma가 없더라도 재사용되지 않으므로 rmap Walker는
+ *   페이지가 매핑된 위치를 검색할 때 전체 계층을 스캔하는 것을 피할 수
+ *   있는 좋은 기회가 있습니다.
+ *
+ * ----
+ *                 __vma_adjust() __split_vma() copy_vma() anon_vma_fork()
+ *  src->anon_vma   !NULL           NULL          NULL          !NULL
+ *  dst->anon_vma   src->anon_vma   NULL          NULL          NULL
+ *                                                               ^
+ *                                        즉 !dst->anon_vma && src->anon_vma
+ */
 int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 {
 	struct anon_vma_chain *avc, *pavc;
@@ -354,20 +388,29 @@ int anon_vma_clone(struct vm_area_struct *dst, struct vm_area_struct *src)
 /*
  * IAMROOT, 2022.05.28:
  * - papgo
- *   기존 anon_vma가 2보다 낮은 경우 재사용합니다. 즉, vma에는 vma가 없고 하나의
- *   anon_vma 자식만 있습니다.
+ *   차수가 2보다 낮으면 기존 anon_vma를 재사용합니다. 이는 vma가 없고
+ *   anon_vma 자식이 하나만 있음을 의미합니다.
  *
- *   부모 anon_vma를 선택하지 마십시오. 즉 첫 번째 자식이 항상 다시 사용됩니다.
- *   root anon_vma는 재사용되지 않습니다
- *   자기 부모 참조와 적어도 한 명의 자녀가 있습니다. 
+ *   부모 anon_vma를 선택하지 마십시오. 그렇지 않으면 첫 번째 자식이 항상
+ *   이를 재사용합니다. 루트 anon_vma는 재사용되지 않습니다.
+ *   자체 부모 참조와 적어도 하나의 자식이 있습니다.
  *
  * - src만 anon_vma가 있는 상황에서, src가 root가 아니고 차수가 2미만이라면
  *   anon_vma를 재활용한다.
+ *   즉 자기자신을 가리키는 child가 없는 anon_vma라면 1일 것이다.
+ * ----
  */
 		if (!dst->anon_vma && src->anon_vma &&
 		    anon_vma != src->anon_vma && anon_vma->degree < 2)
 			dst->anon_vma = anon_vma;
 	}
+/*
+ * IAMROOT, 2022.06.10:
+ * - dst->anon_vma를 가리키는게 새로 생겼으므로 증가시킨다.
+ *   __vma_adjust에서 불러와있을경우 이미 dst->anon_vma는 src->anon_vma로
+ *   되있으므로 여기서 degree가 증가할것이고,
+ *   anon_vma_fork()에선 위 조건에 의해 dst->anon_vma가 찾아질경우 증가될것이다.
+ */
 	if (dst->anon_vma)
 		dst->anon_vma->degree++;
 	unlock_anon_vma_root(root);
@@ -420,6 +463,10 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 		return error;
 
 	/* An existing anon_vma has been reused, all done then. */
+/*
+ * IAMROOT, 2022.06.07:
+ * - anon_vma_clone()에서 pvma->anon_vma를 재사용했다.
+ */
 	if (vma->anon_vma)
 		return 0;
 
@@ -431,6 +478,13 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 	if (!avc)
 		goto out_error_free_anon_vma;
 
+/*
+ * IAMROOT, 2022.06.10:
+ * - 재사용을 안한 경우. pvma의 degree가 증가하며, vma의 degree는 1을 유지한다.
+ * - 일반적으로 fork없이 anon_vma가 생기고 vma와 링크가 될경우
+ *   (__anon_vma_prepare) degree는 처음부터 2가 될것이다.
+ *   하지만 for가 될경우 parent vma의 측의 degree가 상승되는 식으로 된다.
+ */
 	/*
 	 * The root anon_vma's rwsem is the lock actually used when we
 	 * lock any of the anon_vmas in this anon_vma tree.
@@ -447,6 +501,10 @@ int anon_vma_fork(struct vm_area_struct *vma, struct vm_area_struct *pvma)
 	vma->anon_vma = anon_vma;
 	anon_vma_lock_write(anon_vma);
 	anon_vma_chain_link(vma, avc, anon_vma);
+/*
+ * IAMROOT, 2022.06.10:
+ * - pvma->anon_vma를 parent로 사용했으므로 거기에대한 degree를 1 증가시켜준다.
+ */
 	anon_vma->parent->degree++;
 	anon_vma_unlock_write(anon_vma);
 
@@ -484,18 +542,25 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 		struct anon_vma *anon_vma = avc->anon_vma;
 
 		root = lock_anon_vma_root(root, anon_vma);
+/*
+ * IAMROOT, 2022.05.28:
+ * - 빈 av인경우 parent av의 degree를 감소키고 다음 avc로 이동.
+ *   lock을 푼후에 삭제할것이다.
+ * - rb_root가 비어있다는 의미가 자기참조 상태(parent == anon_vma. degree 2)라서
+ *   자기 자신 degree를 깍거나 child나 vma가 없는 parent만 있는상태라서 
+ *   parent degree에 anon_vma의 차수가 포함되있어 그걸빼주는것이다.
+ *   빼고 남은 잔해들은 현재 foreach를 끝내고 해제한다.
+ */
 		anon_vma_interval_tree_remove(avc, &anon_vma->rb_root);
 
 		/*
 		 * Leave empty anon_vmas on the list - we'll need
 		 * to free them outside the lock.
 		 */
-/*
- * IAMROOT, 2022.05.28:
- * - 빈 av인경우 parent av의 degree를 감소키고 다음 avc로 이동.
- *   lock을 푼후에 삭제할것이다.
- */
 		if (RB_EMPTY_ROOT(&anon_vma->rb_root.rb_root)) {
+/*
+ * IAMROOT, 2022.06.10:
+ */
 			anon_vma->parent->degree--;
 			continue;
 		}
@@ -503,6 +568,10 @@ void unlink_anon_vmas(struct vm_area_struct *vma)
 		list_del(&avc->same_vma);
 		anon_vma_chain_free(avc);
 	}
+/*
+ * IAMROOT, 2022.06.10:
+ * - @vma에 대한 차수도 제거한다.
+ */
 	if (vma->anon_vma) {
 		vma->anon_vma->degree--;
 
