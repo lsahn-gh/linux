@@ -159,6 +159,16 @@
 #define ARCH_KMALLOC_FLAGS SLAB_HWCACHE_ALIGN
 #endif
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * freelist 인덱스 값으로 1바이트를 사용할지 여부를 알아온다.
+ * 다음과 같이 4K 페이지를 사용하는 경우 1바이트 인덱스를 사용하고,
+ * 나머지 16K, 64K 페이지를 사용하는 경우 2바이트 인덱스를 사용한다.
+ * 
+ * 4K:    16 <= SLAB_OBJ_MIN_SIZE(16) ? 1 : 0  -> 1   
+ * 16K:   64 <= SLAB_OBJ_MIN_SIZE(16) ? 1 : 0  -> 0
+ * 64K:  256 <= SLAB_OBJ_MIN_SIZE(16) ? 1 : 0  -> 0
+ */
 #define FREELIST_BYTE_INDEX (((PAGE_SIZE >> BITS_PER_BYTE) \
 				<= SLAB_OBJ_MIN_SIZE) ? 1 : 0)
 
@@ -168,6 +178,11 @@ typedef unsigned char freelist_idx_t;
 typedef unsigned short freelist_idx_t;
 #endif
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 object의 최대 수는 4K 페이지의 경우 최대 255개,
+ *                       그외 페이지의 경우 최대 65535개
+ */
 #define SLAB_OBJ_MAX_NUM ((1 << sizeof(freelist_idx_t) * BITS_PER_BYTE) - 1)
 
 /*
@@ -252,6 +267,11 @@ static void kmem_cache_node_init(struct kmem_cache_node *parent)
 	MAKE_LIST((cachep), (&(ptr)->slabs_free), slabs_free, nodeid);	\
 	} while (0)
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * - OBJFREELIST_SLAB(x): 슬랩 캐시 x가 objfreelist인지 여부를 알아온다.
+ * - OFF_SLAB(x):         슬랩 캐시 x가 off 슬랩 여부를 알아온다.
+ */
 #define CFLGS_OBJFREELIST_SLAB	((slab_flags_t __force)0x40000000U)
 #define CFLGS_OFF_SLAB		((slab_flags_t __force)0x80000000U)
 #define	OBJFREELIST_SLAB(x)	((x)->flags & CFLGS_OBJFREELIST_SLAB)
@@ -398,6 +418,11 @@ static inline struct array_cache *cpu_cache_get(struct kmem_cache *cachep)
 /*
  * Calculate the number of objects and left-over bytes for a given buffer size.
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 요청한 @gfporder 페이지 내에서 오브젝트가 몇 개나 만들 수 있는지 
+ * 대략 산출하여 리턴한다. 출력 인자 @left_over에는 나머지 바이트가 담긴다.
+ */
 static unsigned int cache_estimate(unsigned long gfporder, size_t buffer_size,
 		slab_flags_t flags, size_t *left_over)
 {
@@ -421,6 +446,12 @@ static unsigned int cache_estimate(unsigned long gfporder, size_t buffer_size,
 	 * the slabs are all pages aligned, the objects will be at the
 	 * correct alignment when allocated.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * CFLGS_OBJFREELIST_SLAB 및 CFLGS_OFF_SLAB 플래그를 사용하지 않은 경우는
+ * 전체 사이즈를 (버퍼 사이즈+freelist_idx_t사이즈를)로 나눈 개수를 
+ * 반환한다. 즉 오브젝트마다 1~2바이트의 freelist_idx_t 사이즈가 추가된다.
+ */
 	if (flags & (CFLGS_OBJFREELIST_SLAB | CFLGS_OFF_SLAB)) {
 		num = slab_size / buffer_size;
 		*left_over = slab_size % buffer_size;
@@ -462,6 +493,11 @@ static int __init noaliencache_setup(char *s)
 }
 __setup("noaliencache", noaliencache_setup);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시에 사용할 수 있는 슬랩 페이지의 최대 order를 지정한다.
+ * 커널 파라미터 예) "slab_max_order=3"
+ */
 static int __init slab_max_order_setup(char *str)
 {
 	get_option(&str, &slab_max_order);
@@ -1662,12 +1698,21 @@ static void slabs_destroy(struct kmem_cache *cachep, struct list_head *list)
  *
  * Return: number of left-over bytes in a slab
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시를 만들 때 사용할 슬랩 페이지의 order를 산출한다.
+ * @size, chachep->size, flags가 영향을 준다.
+ */
 static size_t calculate_slab_order(struct kmem_cache *cachep,
 				size_t size, slab_flags_t flags)
 {
 	size_t left_over = 0;
 	int gfporder;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * [0, 11]까지 
+ */
 	for (gfporder = 0; gfporder <= KMALLOC_MAX_ORDER; gfporder++) {
 		unsigned int num;
 		size_t remainder;
@@ -1676,6 +1721,11 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 		if (!num)
 			continue;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 최대  255(4K 페이지) or 65535(16K/64K 페이지)개를 초과하는 
+ * 슬랩 object 수인 경우 break
+ */
 		/* Can't handle number of objects more than SLAB_OBJ_MAX_NUM */
 		if (num > SLAB_OBJ_MAX_NUM)
 			break;
@@ -1684,6 +1734,11 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 			struct kmem_cache *freelist_cache;
 			size_t freelist_size;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * freelist 사이즈를 구하고, freelist 사이즈에 어울리는 freelist 캐시를
+ * kmalloc 캐시로 찾아온다. 발견하지 못한 경우 skip한다.
+ */
 			freelist_size = num * sizeof(freelist_idx_t);
 			freelist_cache = kmalloc_slab(freelist_size, 0u);
 			if (!freelist_cache)
@@ -1693,8 +1748,18 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 			 * Needed to avoid possible looping condition
 			 * in cache_grow_begin()
 			 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 찾아온 freelist_cache가 off 슬랩 상태이면 skip 한다.
+ */
 			if (OFF_SLAB(freelist_cache))
 				continue;
+
+/*
+ * IAMROOT, 2022.06.11: 
+ * 생성 요청한 슬랩 캐시의 사이즈 절반 보다 큰 freelist 캐시의 사이즈이면
+ * skip 한다.
+ */
 
 			/* check if off slab has enough benefit */
 			if (freelist_cache->size > cachep->size / 2)
@@ -1711,6 +1776,10 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 		 * as GFP_NOFS and we really don't want to have to be allocating
 		 * higher-order pages when we are unable to shrink dcache.
 		 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * SLAB_RECLAIM_ACCOUNT 플래그가 있으면 현재 gfporder로 결정
+ */
 		if (flags & SLAB_RECLAIM_ACCOUNT)
 			break;
 
@@ -1718,6 +1787,10 @@ static size_t calculate_slab_order(struct kmem_cache *cachep,
 		 * Large number of objects is good, but very large slabs are
 		 * currently bad for the gfp()s.
 		 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * gfporder가 커널 파라미터로 전달 받은 slab_max_order 이상인 경우 stop
+ */
 		if (gfporder >= slab_max_order)
 			break;
 
@@ -1864,6 +1937,11 @@ static bool set_off_slab_cache(struct kmem_cache *cachep,
 	 * Size is large, assume best to place the slab management obj
 	 * off-slab (should allow better packing of objs).
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * CFLAGS_OFF_SLAB 플래그를 적용하므로서 슬렙 페이지의 order가 바뀔 정도로
+ * 커지는 경우
+ */
 	left = calculate_slab_order(cachep, size, flags | CFLGS_OFF_SLAB);
 	if (!cachep->num)
 		return false;
@@ -1919,6 +1997,12 @@ static bool set_on_slab_cache(struct kmem_cache *cachep,
  *
  * Return: a pointer to the created cache or %NULL in case of error
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩(slab) 캐시를 생성한다.
+ *
+ * 주의: 슬럽(slub) 캐시는 이 코드를 사용하지 않는다.
+ */
 int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 {
 	size_t ralign = BYTES_PER_WORD;
@@ -1934,9 +2018,29 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 	 * above the next power of two: caches with object sizes just above a
 	 * power of two have a significant amount of internal fragmentation.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 디버그를 사용하는 커널인 경우 슬랩 캐시를 생성할 때 가능하면 다음과 같은  
+ * 기능들을 자동으로 추가한다.
+ * 1) redzone
+ * 2) 유저 트래킹
+ * 3) poison
+ *
+ * size가 4K 미만이거나 redzone을 사용했을 때 2의 승수 단위가 바뀌지 않는 
+ * 사이즈인 경우 redzone과 user 트래킹 플래그를 추가한다.
+ * 예) size=120, 24바이트가 추가된 size는 144바이트로 fls에서 변화가 생기므로
+ *     디버그 정보를 사용할 수 없다.
+ *            fls(size-1)=              fls(size-1+24)
+ *          fls(0b1110111)=7           fls(0b10001111)=8
+ */
 	if (size < 4096 || fls(size - 1) == fls(size-1 + REDZONE_ALIGN +
 						2 * sizeof(unsigned long long)))
 		flags |= SLAB_RED_ZONE | SLAB_STORE_USER;
+/*
+ * IAMROOT, 2022.06.11: 
+ * 캐시가 rcu를 사용한 슬랩 오브젝트의 소멸 방법을 사용하는 경우가 아니면
+ * 디버깅을 위해 SLAB_POISON 플래그를 추가한다.
+ */
 	if (!(flags & SLAB_TYPESAFE_BY_RCU))
 		flags |= SLAB_POISON;
 #endif
@@ -1947,8 +2051,16 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 	 * unaligned accesses for some archs when redzoning is used, and makes
 	 * sure any on-slab bufctl's are also correctly aligned.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 사이즈는 워드 단위(64bit 시스템=8)로 정렬한다.
+ */
 	size = ALIGN(size, BYTES_PER_WORD);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * redzone을 사용하는 경우 ralign(8) 단위로 size를 정렬한다.
+ */
 	if (flags & SLAB_RED_ZONE) {
 		ralign = REDZONE_ALIGN;
 		/* If redzoning, ensure that the second redzone is suitably
@@ -1961,6 +2073,10 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 		ralign = cachep->align;
 	}
 	/* disable debug if necessary */
+/*
+ * IAMROOT, 2022.06.11: 
+ * ralign이 8보다 큰 경우 redzone 및 user 트래킹 플래그를 제외시킨다.
+ */
 	if (ralign > __alignof__(unsigned long long))
 		flags &= ~(SLAB_RED_ZONE | SLAB_STORE_USER);
 	/*
@@ -1968,10 +2084,21 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 	 */
 	cachep->align = ralign;
 	cachep->colour_off = cache_line_size();
+/*
+ * IAMROOT, 2022.06.11: 
+ * 캐시의 align이 메모리 캐시 라인 단위보다 큰 경우 
+ * colour_off 값을 캐시의 align 값으로 변경한다.
+ */
 	/* Offset must be a multiple of the alignment. */
 	if (cachep->colour_off < cachep->align)
 		cachep->colour_off = cachep->align;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시가 이미 동작 중인 경우에는 gfp 플래그에 일반 커널 메모리 할당을
+ * 요청하고(특징: 메모리 회수가 동작), 아직 슬랩이 동작하지 않는 부팅 시에는 
+ * GFP_NOWAIT 플래그를 사용한다.
+ */
 	if (slab_is_available())
 		gfp = GFP_KERNEL;
 	else
@@ -1983,11 +2110,24 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 	 * Both debugging options require word-alignment which is calculated
 	 * into align above.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * redzone 사용을 요청한 경우 obj_offset는 8바이트 뒤로 옮긴다.
+ * size는 16바이트를 추가한다. (object 앞뒤로 redzone이 들어가므로)
+ */
 	if (flags & SLAB_RED_ZONE) {
 		/* add space for red zone words */
 		cachep->obj_offset += sizeof(unsigned long long);
 		size += 2 * sizeof(unsigned long long);
 	}
+/*
+ * IAMROOT, 2022.06.11: 
+ * 유저 트래킹 사용을 요청한 경우 redzone 동시 사용유무에 따라 추가되는 
+ * 사이즈가 다음과 같다. (중간에 redzone이 하나 더 들어가므로)
+ * 유저 트래킹 + redzone: size += 8;
+ * 유저 트래킹 only:      size += 8;
+ */
+
 	if (flags & SLAB_STORE_USER) {
 		/* user store requires one word storage behind the end of
 		 * the real object. But if the second red zone needs to be
@@ -2002,11 +2142,20 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 
 	kasan_cache_create(cachep, &size, &flags);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시에서 결정한 align 단위로 size를 재조정한다.
+ */
 	size = ALIGN(size, cachep->align);
 	/*
 	 * We should restrict the number of objects in a slab to implement
 	 * byte sized index. Refer comment on SLAB_OBJ_MIN_SIZE definition.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 4K 페이지이면서 size가 SLAB_OBJ_MIN_SIZE(16)보다 작은 경우 
+ * 슬랩 캐시의 align을 적용한 SLAB_OBJ_MIN_SIZE(16)으로 size를 결정한다.
+ */
 	if (FREELIST_BYTE_INDEX && size < SLAB_OBJ_MIN_SIZE)
 		size = ALIGN(SLAB_OBJ_MIN_SIZE, cachep->align);
 
@@ -2018,6 +2167,15 @@ int __kmem_cache_create(struct kmem_cache *cachep, slab_flags_t flags)
 	 * to check size >= 256. It guarantees that all necessary small
 	 * sized slab is initialized in current slab initialization sequence.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 다음은 캐시 size를 페이지 단위로 증가시키는 조건이다.
+ * - debug pagealloc이 활성화 되었고,
+ * - poison 요청을 하였고,
+ * - 디버그 정보가 포함된 전체 size가 256 이상이고,
+ * - 실제 object_size는 캐시 라인(128)보다 크고,
+ * - size가 페이지 사이즈(4K)보다 작거나 페이지 단위의 size인 경우
+ */
 	if (debug_pagealloc_enabled_static() && (flags & SLAB_POISON) &&
 		size >= 256 && cachep->object_size > cache_line_size()) {
 		if (size < PAGE_SIZE || size % PAGE_SIZE == 0) {

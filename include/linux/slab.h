@@ -23,6 +23,18 @@
  * Flags to pass to kmem_cache_create().
  * The ones marked DEBUG are only valid if CONFIG_DEBUG_SLAB is set.
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시 생성에 사용되는 플래그들
+ * - SLAB_CONSISTENCY_CHECKS: saniny check를 수행
+ * - SLAB_RED_ZONE: 디버그용 red-zone을 구성한다.
+ * - SLAB_POISON: 디버그용 poison을 사용한다.
+ * - SLAB_HWCACHE_ALIGN: 성능을 높이기 위해 하드웨어 캐시 정렬을 요청한다.
+ * - SLAB_CACHE_DMA: DMA 버퍼로 사용할 캐시
+ * - SLAB_CACHE_DMA32: DMA32 버퍼로 사용할 캐시
+ * - SLAB_STORE_USER: 유저 트래킹을 구성한다.
+ * - SLAB_PANIC: 메모리 부족 시 slab panic 요청
+ */
 /* DEBUG: Perform (expensive) checks on alloc/free */
 #define SLAB_CONSISTENCY_CHECKS	((slab_flags_t __force)0x00000100U)
 /* DEBUG: Red zone objs in a cache */
@@ -75,6 +87,13 @@
  * taking the spinlock within the structure expected at that address.
  *
  * Note that SLAB_TYPESAFE_BY_RCU was originally named SLAB_DESTROY_BY_RCU.
+ */
+/*
+ * IAMROOT, 2022.06.11: 
+ * - SLAB_TYPESAFE_BY_RCU:
+ *   캐시가 rcu를 사용한 슬랩 오브젝트의 소멸 방법을 사용하는 경우 사용
+ * - SLAB_NOLEAKTRACE:
+ *   메모리 누수 트레이스를 하지 않도록 할 때 요청할 때 사용
  */
 /* Defer freeing slabs to RCU */
 #define SLAB_TYPESAFE_BY_RCU	((slab_flags_t __force)0x00080000U)
@@ -204,6 +223,16 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
  * alignment larger than the alignment of a 64-bit integer.
  * Setting ARCH_KMALLOC_MINALIGN in arch headers allows that.
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 아키텍처마다 DMA에 사용할 align 바이트 수를 지정할 수 있다.
+ * 이 값이 8보다 큰 경우 kmalloc에도 동일하게 반영하고, 없으면 8로 지정한다.
+ * ARM64의 경우 현재 128 바이트의 정렬을 사용한다.
+ * 즉) ARCH_DMA_MINALIGN=128
+ *     ARCH_KMALLOC_MINALIGN=128
+ *     KMALLOC_MIN_SIZE=128
+ *     KMALLOC_SHIFT_LOW=7
+ */
 #if defined(ARCH_DMA_MINALIGN) && ARCH_DMA_MINALIGN > 8
 #define ARCH_KMALLOC_MINALIGN ARCH_DMA_MINALIGN
 #define KMALLOC_MIN_SIZE ARCH_DMA_MINALIGN
@@ -216,6 +245,10 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
  * Setting ARCH_SLAB_MINALIGN in arch headers allows a different alignment.
  * Intended for arches that get misalignment faults even for 64 bit integer
  * aligned buffers.
+ */
+/*
+ * IAMROOT, 2022.06.11: 
+ * ARM64: 최소 슬랩 align 값은 8바이트이다.
  */
 #ifndef ARCH_SLAB_MINALIGN
 #define ARCH_SLAB_MINALIGN __alignof__(unsigned long long)
@@ -257,6 +290,13 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
  * SLUB directly allocates requests fitting in to an order-1 page
  * (PAGE_SIZE*2).  Larger requests are passed to the page allocator.
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * KMALLOC_SHIFT_HIGH=13(4K 페이지인 경우)
+ * KMALLOC_SHIFT_MAX=22
+ * KMALLOC_SHIFT_LOW=3 (지정되지 않은 경우)
+ */
+
 #define KMALLOC_SHIFT_HIGH	(PAGE_SHIFT + 1)
 #define KMALLOC_SHIFT_MAX	(MAX_ORDER + PAGE_SHIFT - 1)
 #ifndef KMALLOC_SHIFT_LOW
@@ -277,6 +317,14 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
 #endif
 #endif
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * kmalloc()을 통해 할당할 수 있는 최소 사이즈 및 최대 사이즈(바이트)
+ * KMALLOC_MAX_SIZE=2^22=4M
+ * KMALLOC_MAX_CHCHE_SIZE=2^13=8K
+ * KMALLOC_MAX_ORDER=11
+ * KMALLOC_MIN_SIZE=8
+ */
 /* Maximum allocatable size */
 #define KMALLOC_MAX_SIZE	(1UL << KMALLOC_SHIFT_MAX)
 /* Maximum size for which we actually use a slab cache */
@@ -298,6 +346,10 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
  * should be equal or greater to 2^12 / 2^8 = 2^4 = 16.
  * If minimum size of kmalloc is less than 16, we use it as minimum object
  * size and give up to use byte sized index.
+ */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 object의 최소 사이즈는 arm64: 16
  */
 #define SLAB_OBJ_MIN_SIZE      (KMALLOC_MIN_SIZE < 16 ? \
                                (KMALLOC_MIN_SIZE) : 16)

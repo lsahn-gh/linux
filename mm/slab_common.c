@@ -143,6 +143,18 @@ int __kmem_cache_alloc_bulk(struct kmem_cache *s, gfp_t flags, size_t nr,
  * Figure out what the alignment of the objects will be given a set of
  * flags, a user specified alignment and the size of the objects.
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 캐시 오브젝트의 사이즈 산출을 위해 @align과 @size를 사용한다.
+ * 
+ * SLAB_HWCACHE_ALIGN 사용한 경우: 
+ * 예) 캐시 사이즈=128
+ * +-------------------+
+ * |     size          |
+ * | <----24---->|     |                                          
+ * +-------------------+
+ *             ralign=32       <--         64          <--          128
+ */
 static unsigned int calculate_alignment(slab_flags_t flags,
 		unsigned int align, unsigned int size)
 {
@@ -153,6 +165,14 @@ static unsigned int calculate_alignment(slab_flags_t flags,
 	 * The hardware cache alignment cannot override the specified
 	 * alignment though. If that is greater then use it.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 하드웨어 캐시 정렬을 요청한 경우 align 값을 적용하되,
+ * size가 캐시 사이즈보다 작은 경우 인접한 하드웨어 캐시 사이즈의 승수값을 
+ * 절반씩 줄여 가장 인접한 값을 사용한다.
+ * 예) cache_size=128, 요청 size=18, align=8, SLAB_HWCACHE_ALIGN
+ *     align = 32
+ */
 	if (flags & SLAB_HWCACHE_ALIGN) {
 		unsigned int ralign;
 
@@ -162,6 +182,10 @@ static unsigned int calculate_alignment(slab_flags_t flags,
 		align = max(align, ralign);
 	}
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 마지막으로 align 값은 최소 단위(arm64=8)보다 커야 한다.
+ */
 	if (align < ARCH_SLAB_MINALIGN)
 		align = ARCH_SLAB_MINALIGN;
 
@@ -642,11 +666,26 @@ EXPORT_SYMBOL_GPL(kmem_dump_obj);
 
 #ifndef CONFIG_SLOB
 /* Create a cache during boot when no slab services are available yet */
+/*
+ * IAMROOT, 2022.06.11: 
+ * - 부트 타임에 두 개의 캐시를 먼저 만든다.
+ *   1) kmem_cache->name: "kmem_cache_node"
+ *                ->size: sizeof(kmem_cache_node)
+ *
+ *   2) kmem_cache->name: "kmem_cache"
+ *                ->size: sizeof(kmem_cache)가 아니라 내부 node[] 수가 
+ *                                          런타임 node 수로 변경
+ */
+
 void __init create_boot_cache(struct kmem_cache *s, const char *name,
 		unsigned int size, slab_flags_t flags,
 		unsigned int useroffset, unsigned int usersize)
 {
 	int err;
+/*
+ * IAMROOT, 2022.06.11: 
+ * ARM64의 경우 현재 align은 128이된다.
+ */
 	unsigned int align = ARCH_KMALLOC_MINALIGN;
 
 	s->name = name;
@@ -660,6 +699,10 @@ void __init create_boot_cache(struct kmem_cache *s, const char *name,
 		align = max(align, size);
 	s->align = calculate_alignment(flags, align, size);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 최초 부트 타임에 아래 값들은 모두 0이다.
+ */
 	s->useroffset = useroffset;
 	s->usersize = usersize;
 
@@ -734,6 +777,12 @@ static inline unsigned int size_index_elem(unsigned int bytes)
 /*
  * Find the kmem_cache structure that serves a given size of
  * allocation
+ */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 요청한 @size 및 @flags에 어울리는 kmalloc 슬랩 캐시를 반환한다.
+ * 일반 캐시, dma, reclaim 캐시를 구별할 때 flags를 사용한다.
+ * TODO:
  */
 struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 {

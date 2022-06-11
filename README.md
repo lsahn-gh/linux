@@ -248,3 +248,7 @@
 - 2022.06.04, Zoom 온라인(4명 참석)
 - sys_mmap() & do_anonymous_page() 완료
 
+### 55주차
+- 2022.06.11, Zoom 온라인(4명 참석)
+- kmem_cache_init() 진행 중
+

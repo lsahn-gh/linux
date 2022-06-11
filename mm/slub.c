@@ -1412,6 +1412,10 @@ parse_slub_debug_flags(char *str, slab_flags_t *flags, char **slabs, bool init)
 	while (*str && *str == ';')
 		str++;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 처음 부터 플래그 없이 ","가 선택되는 경우 "FZPT"가 추가된다.
+ */
 	if (*str == ',') {
 		/*
 		 * No options but restriction on slabs. This means full
@@ -1459,6 +1463,11 @@ parse_slub_debug_flags(char *str, slab_flags_t *flags, char **slabs, bool init)
 		}
 	}
 check_slabs:
+/*
+ * IAMROOT, 2022.06.11: 
+ * 플래그 다음의 "," 뒤의 문자열을 슬랩 캐시명으로 모두 대입시킨다.
+ * *slabs: "dentry,abc;....."
+ */
 	if (*str == ',')
 		*slabs = ++str;
 	else
@@ -1475,12 +1484,49 @@ check_slabs:
 	if (init && higher_order_disable)
 		disable_higher_order_debug = 1;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * ";" 문자열 다음 문자열을 반환한다.
+ */
 	if (*str)
 		return str;
 	else
 		return NULL;
 }
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 필요한 슬랩캐시를 런타임 디버그를 켤수 있다.
+ * 
+ * slub_debug=<Debug-Options>,<slab name1>,<slab name2>,...
+ * 옵션들:
+ *
+ *      F               Sanity checks on (enables SLAB_DEBUG_CONSISTENCY_CHECKS
+ *                      Sorry SLAB legacy issues)
+ *      Z               Red zoning
+ *      P               Poisoning (object and padding)
+ *      U               User tracking (free and alloc)
+ *      T               Trace (please only use on single slabs)
+ *      A               Enable failslab filter mark for the cache
+ *      O               Switch debugging off for caches that would have
+ *                      caused higher minimum slab orders
+ *      -               Switch all debugging off (useful if the kernel is
+ *                      configured with CONFIG_SLUB_DEBUG_ON)
+ * 
+ * 예) slub_debug=FZ
+ *     slub_debug=,dentry
+ *     slub_debug=P,kmalloc-*,dentry
+ *     slub_debug=F,dentry
+ *
+ * 예) slub_debug
+ *     전체 캐시를 생성할 때 FZPT가 추가된다.
+ *
+ * 예) slub_debug=F;Z,dentry,abc
+ *     전체 캐시를 생성할 때엔 F를 적용하고, dentry와 abc에는 Z를 추가 적용한다.
+ * 
+ * slub_debug 전역 변수에는 global 플래그들이 담긴다.
+ * slub_debug_string에는 전체 문자열이 담긴다.
+ */
 static int __init setup_slub_debug(char *str)
 {
 	slab_flags_t flags;
@@ -1490,6 +1536,14 @@ static int __init setup_slub_debug(char *str)
 	bool global_slub_debug_changed = false;
 	bool slab_list_specified = false;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * DEBUG_DEFAULT_FLAGS:
+ *  SLAB_CONSISTENCY_CHECKS | SLAB_RED_ZONE | SLAB_POISON | SLAB_STORE_USER
+ *            F                    Z               P              T
+ *
+ * "slub_debug"라고만 지정하면 위의 4개 플래그가 자동으로 추가된다.
+ */
 	global_flags = DEBUG_DEFAULT_FLAGS;
 	if (*str++ != '=' || !*str)
 		/*
@@ -1497,9 +1551,19 @@ static int __init setup_slub_debug(char *str)
 		 */
 		goto out;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * "slub_debug="을 제외한 나머지 문자열을 saved_str에 임시로 보관한다. 
+ */
 	saved_str = str;
 	while (str) {
 		str = parse_slub_debug_flags(str, &flags, &slab_list, true);
+
+/*
+ * IAMROOT, 2022.06.11: 
+ * 글로벌 플래그가 지정된 경우 global_slub_debug_changed=true로 변경된다.
+ * 또한 슬랩 캐시 이름이 지정된 경우에는 slab_list_specified도 true로 변경된다.
+ */
 
 		if (!slab_list) {
 			global_flags = flags;
@@ -1516,6 +1580,11 @@ static int __init setup_slub_debug(char *str)
 	 * on CONFIG_SLUB_DEBUG_ON). We can extended that to multiple lists as
 	 * long as there is no option specifying flags without a slab list.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시 이름이 지정된 경우 slub_debug_string에는 보관해뒀던 문자열들이
+ * 지정된다. 또한 글로벌로 지정될 플래그 설정은 global_flags에 담는다.
+ */
 	if (slab_list_specified) {
 		if (!global_slub_debug_changed)
 			global_flags = slub_debug;
@@ -1547,6 +1616,10 @@ __setup("slub_debug", setup_slub_debug);
  * slub_debug=<Debug-Options>,<slab name1>,<slab name2> ...
  * then only the select slabs will receive the debug option(s).
  */
+/*
+ * IAMROOT, 2022.06.11: 
+ * SLUB_DEBUG 커널 옵션이 사용되는 경우 플래그가 추가된다.
+ */
 slab_flags_t kmem_cache_flags(unsigned int object_size,
 	slab_flags_t flags, const char *name)
 {
@@ -1554,6 +1627,10 @@ slab_flags_t kmem_cache_flags(unsigned int object_size,
 	size_t len;
 	char *next_block;
 	slab_flags_t block_flags;
+/*
+ * IAMROOT, 2022.06.11: 
+ * "slub_debug="에서 지정된 글로벌 플래그들을 알아온다.
+ */
 	slab_flags_t slub_debug_local = slub_debug;
 
 	/*
@@ -1561,6 +1638,10 @@ slab_flags_t kmem_cache_flags(unsigned int object_size,
 	 * don't store user (stack trace) information by default,
 	 * but let the user enable it via the command line below.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 누수 트래킹을 하지 않도록 요청한 경우 유저 트래킹 플래그를 제외시킨다.
+ */
 	if (flags & SLAB_NOLEAKTRACE)
 		slub_debug_local &= ~SLAB_STORE_USER;
 
@@ -1568,10 +1649,27 @@ slab_flags_t kmem_cache_flags(unsigned int object_size,
 	next_block = slub_debug_string;
 	/* Go through all blocks of debug options, see if any matches our slab's name */
 	while (next_block) {
+/*
+ * IAMROOT, 2022.06.11: 
+ * 한 블럭을 파싱하여 block_flags에 알아온다. 반환되는 next_block에는 
+ * 다음 블럭이 지정되고, iter에는 지정된 캐시명이 담긴다.
+ */
 		next_block = parse_slub_debug_flags(next_block, &block_flags, &iter, false);
+/*
+ * IAMROOT, 2022.06.11: 
+ * 지정된 캐시가 없는 경우는 해당 블럭을 skip 한다.
+ */
 		if (!iter)
 			continue;
 		/* Found a block that has a slab list, search it */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 캐시명이 지정된 경우 ";"으로 끝날 때까지 요청한 캐시명과 생성할 캐시명이
+ * 같은 경우 해당 플래그를 지정한다.
+ * 
+ * 블럭내 슬랩 캐시 명이 ","로 구분되어서 올 수 있고, "*"를 포함하여 다수의 
+ * 슬랩 캐시를 선택할 수 있다. 
+ */
 		while (*iter) {
 			char *end, *glob;
 			size_t cmplen;
@@ -1621,6 +1719,10 @@ static inline void add_full(struct kmem_cache *s, struct kmem_cache_node *n,
 					struct page *page) {}
 static inline void remove_full(struct kmem_cache *s, struct kmem_cache_node *n,
 					struct page *page) {}
+/*
+ * IAMROOT, 2022.06.11: 
+ * SLUB_DEBUG 커널 옵션이 적용되지 않은 경우 추가되는 플래그가 없다.
+ */
 slab_flags_t kmem_cache_flags(unsigned int object_size,
 	slab_flags_t flags, const char *name)
 {
@@ -4034,6 +4136,11 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * place the free pointer at word boundaries and this determines
 	 * the possible location of the free pointer.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩 object들은 각 object에 FP(Free Pointer)가 사용되므로 모든 객체 간의
+ * 주소 지정은 포인터 사이즈 단위로 정렬하여 사용한다.
+ */
 	size = ALIGN(size, sizeof(void *));
 
 #ifdef CONFIG_SLUB_DEBUG
@@ -4042,6 +4149,11 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * the slab may touch the object after free or before allocation
 	 * then we should never poison the object itself.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 디버그 옵션을 위해 poison 옵션을 사용했더라도, 
+ * rcu free 옵션 또는 슬랩 캐시 생성자를 사용한 경우 poison 옵션을 제거한다.
+ */
 	if ((flags & SLAB_POISON) && !(flags & SLAB_TYPESAFE_BY_RCU) &&
 			!s->ctor)
 		s->flags |= __OBJECT_POISON;
@@ -4049,6 +4161,23 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		s->flags &= ~__OBJECT_POISON;
 
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * redzone이 사용되었고, object_size가 정렬 문제로 인해 size와 다른 경우 
+ * redzone을 위해 8바이트를 추가한다.
+ *
+ * 예) 정렬되지 않고 남은 공간을 사용하여 redzone 데이터를 기록할 수 있는데,
+ *     정렬되어 오브젝트 내에 빈 공간이 없음녀 별도의 redzone을 추가해야 한다.
+ *     +------------------+
+ *     |  obj_size=16 |XXX|
+ *     +__________________+
+ *     <-----size=24------>
+
+ *     +------------------+--------+
+ *     |  obj_size=24     |XXXXXXXX|
+ *     +__________________+--------+
+ *     <-----size=24------>
+ */
 	/*
 	 * If we are Redzoning then check if there is some space between the
 	 * end of the object and the free pointer. If not then add an
@@ -4161,7 +4290,16 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 
 static int kmem_cache_open(struct kmem_cache *s, slab_flags_t flags)
 {
+/*
+ * IAMROOT, 2022.06.11: 
+ * "slub_debug" 커널 옵션에서 지정된 캐시에 대해 디버그 플래그를 추가해 온다.
+ */
 	s->flags = kmem_cache_flags(s->size, flags, s->name);
+/*
+ * IAMROOT, 2022.06.11: 
+ * 보안 향상을 위해 CONFIG_SLAB_FREELIST_HARDENED 커널 옵션을 사용하여 
+ * free 포인터 값들을 encaptualation하여 숨길 수 있다.
+ */
 #ifdef CONFIG_SLAB_FREELIST_HARDENED
 	s->random = get_random_long();
 #endif
@@ -4797,13 +4935,28 @@ void __init kmem_cache_init(void)
 		boot_kmem_cache_node;
 	int node;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 커널이 디버그로 빌드된 경우에는 슬랩 페이지 할당을 single 페이지에서만 
+ * 가능하게 order를 0으로 제한한다.
+ */
 	if (debug_guardpage_minorder())
 		slub_max_order = 0;
 
 	/* Print slub debugging pointers without hashing */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 런타임 slub_debug= 파라미터를 사용한 경우 강제로 no_hash_pointers=true를 
+ * 설정한다. 
+ */
 	if (__slub_debug_enabled())
 		no_hash_pointers_enable(NULL);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * kmem_cache_node 및 kmem_cache 슬래캐시는 전역에 설정되어 있으며, 
+ * 초기화 중 일시적으로 boot_* 구조체를 사용한다.
+ */
 	kmem_cache_node = &boot_kmem_cache_node;
 	kmem_cache = &boot_kmem_cache;
 
@@ -4811,9 +4964,20 @@ void __init kmem_cache_init(void)
 	 * Initialize the nodemask for which we will allocate per node
 	 * structures. Here we don't need taking slab_mutex yet.
 	 */
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬랩캐시에서 관리할 노드를 식별하기 위해 메모리가 있는 NUMA 노드들에 대해
+ * 비트마스크를 전역 slab_nodes에 설정한다.
+ */
 	for_each_node_state(node, N_NORMAL_MEMORY)
 		node_set(node, slab_nodes);
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * kemem_cache_node는 모든 슬랩캐시내에서 많은 액세스가 필요한 구조체이다.
+ * 따라서 hwcache에 맞춰 정렬 요청을 한다.
+ * kmem_cache_node라는 전역 슬랩 캐시에 &boot_kmem_cache_node가 대입되어 있다.
+ */
 	create_boot_cache(kmem_cache_node, "kmem_cache_node",
 		sizeof(struct kmem_cache_node), SLAB_HWCACHE_ALIGN, 0, 0);
 
@@ -4822,6 +4986,11 @@ void __init kmem_cache_init(void)
 	/* Able to allocate the per node structures */
 	slab_state = PARTIAL;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * kmem_cache 구조체를 할당할 때 구조체 내부의 node[]에 사용할 포인터 수를
+ * MAX_NUMNODES(default=16)만큼 만들지 않고, 런타임에 확인된 노드 수 만큼 만든다.
+ */
 	create_boot_cache(kmem_cache, "kmem_cache",
 			offsetof(struct kmem_cache, node) +
 				nr_node_ids * sizeof(struct kmem_cache_node *),
@@ -4876,6 +5045,10 @@ __kmem_cache_alias(const char *name, unsigned int size, unsigned int align,
 	return s;
 }
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 슬럽(slub) 캐시를 생성한다.
+ */
 int __kmem_cache_create(struct kmem_cache *s, slab_flags_t flags)
 {
 	int err;

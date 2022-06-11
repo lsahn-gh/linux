@@ -215,6 +215,47 @@ int __weak cache_setup_acpi(unsigned int cpu)
 
 unsigned int coherency_max_size;
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * 디바이스 트리 또는 ACPI 테이블을 통해 coherency_max_size등을 알아온다.
+ *
+ *       cpus {
+ *              #address-cells = <1>;
+ *              #size-cells = <0>;
+ *
+ *              cpu-map {
+ *                      cluster0 {
+ *                              core0 {
+ *                                      cpu = <&cpu0>;
+ *                              };
+ *                              core1 {
+ *                                      cpu = <&cpu1>;
+ *                              };
+ *                              core2 {
+ *                                      cpu = <&cpu2>;
+ *                              };
+ *                              core3 {
+ *                                      cpu = <&cpu3>;
+ *                              };
+ *                      };
+ *                      ...
+ *              }
+ *
+ *              cpu0: cpu@10000 {
+ *                    device_type = "cpu";
+ *                    compatible = "arm,cortex-a72";
+ *                    reg = <0x10000>;
+ *                    enable-method = "psci";
+ *                    next-level-cache = <&cluster0_l2>;
+ *                    numa-node-id = <0>;
+ *              };
+ *              ...
+ *
+ *              cluster0_l2: l2-cache0 {
+ *                      compatible = "cache";
+ *              };
+ *              ...
+ */
 static int cache_shared_cpu_map_setup(unsigned int cpu)
 {
 	struct cpu_cacheinfo *this_cpu_ci = get_cpu_cacheinfo(cpu);

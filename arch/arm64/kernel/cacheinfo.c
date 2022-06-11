@@ -10,6 +10,11 @@
 #include <linux/cacheinfo.h>
 #include <linux/of.h>
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * ARM64가 지원하는 캐시레벨은 최대 7이다.
+ * 그 정보는 CLIDR 레지스터를 통해 각 레벨의 캐시 사이즈등을 알아올 수 있다.
+ */
 #define MAX_CACHE_LEVEL			7	/* Max 7 level supported */
 /* Ctypen, bits[3(n - 1) + 2 : 3(n - 1)], for n = 1 to 7 */
 #define CLIDR_CTYPE_SHIFT(level)	(3 * (level - 1))
@@ -17,6 +22,10 @@
 #define CLIDR_CTYPE(clidr, level)	\
 	(((clidr) & CLIDR_CTYPE_MASK(level)) >> CLIDR_CTYPE_SHIFT(level))
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * ARM64 아키텍처는 64 or 128을 알아온다.
+ */
 int cache_line_size(void)
 {
 	if (coherency_max_size != 0)

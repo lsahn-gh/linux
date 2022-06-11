@@ -89,6 +89,13 @@ static __always_inline int icache_is_vpipt(void)
 	return test_bit(ICACHEF_VPIPT, &__icache_flags);
 }
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * CWG(Cache Word Granule) 값은 2log(x) 워드 값으로 기록되어 있다. 
+ *
+ * 예) cwg=5
+ *    0b100 << 5 = 0b1000_0000 = 128
+ */
 static inline u32 cache_type_cwg(void)
 {
 	return (read_cpuid_cachetype() >> CTR_CWG_SHIFT) & CTR_CWG_MASK;
@@ -96,6 +103,11 @@ static inline u32 cache_type_cwg(void)
 
 #define __read_mostly __section(".data..read_mostly")
 
+/*
+ * IAMROOT, 2022.06.11: 
+ * cwg 값이 있으면 4 << cwg를 반환하고, 없으면 ARCH_DMA_MINALIGN(arm64=128)을 
+ * 반환한다.
+ */
 static inline int cache_line_size_of_cpu(void)
 {
 	u32 cwg = cache_type_cwg();
