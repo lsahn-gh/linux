@@ -89,6 +89,13 @@ struct kmem_cache_order_objects {
  */
 struct kmem_cache {
 	struct kmem_cache_cpu __percpu *cpu_slab;
+/*
+ * IAMROOT, 2022.06.17:
+ * - debug  : SLAB_CONSISTENCY_CHECKS(f), SLAB_RED_ZONE(z), SLAB_POISON(p)
+ *			  SLAB_STORE_USER(u), SLAB_TRACE(t), SLAB_FAILSLAB(a)
+ *
+ *   slub : __OBJECT_POISON, __CMPXCHG_DOUBLE ..
+ */
 	/* Used for retrieving partial slabs, etc. */
 	slab_flags_t flags;
 	unsigned long min_partial;

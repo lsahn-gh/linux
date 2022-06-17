@@ -1542,7 +1542,7 @@ static int __init setup_slub_debug(char *str)
  *  SLAB_CONSISTENCY_CHECKS | SLAB_RED_ZONE | SLAB_POISON | SLAB_STORE_USER
  *            F                    Z               P              T
  *
- * "slub_debug"라고만 지정하면 위의 4개 플래그가 자동으로 추가된다.
+ * "slub_debug" or "slub_debug="라고만 지정하면 위의 4개 플래그가 자동으로 추가된다.
  */
 	global_flags = DEBUG_DEFAULT_FLAGS;
 	if (*str++ != '=' || !*str)
@@ -4210,6 +4210,19 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		 * freeptr_outside_object() function. If that is no
 		 * longer true, the function needs to be modified.
 		 */
+/*
+ * IAMROOT, 2022.06.17:
+ * - papago
+ *   kmem_cache_free에 있는 개체의 첫 번째 단어를 덮어쓰는 것이 허용되지 않는
+ *   경우 개체 뒤에 free pointer를 재배치합니다.
+ *   
+ *   RCU를 수행하거나 생성자 또는 소멸자가 있거나 개체를 감염시키거나
+ *   sizeof(void *)보다 작은 개체를 redzoning하는 경우입니다.
+ *   
+ *   s->offset >= s->inuse라는 가정은 freeptr_outside_object() 함수에서 사용되는
+ *   free pointer가 객체 외부에 있다는 것을 의미합니다. 그것이 더 이상 사실이
+ *   아니라면 함수를 수정해야 합니다.
+ */
 		s->offset = size;
 		size += sizeof(void *);
 	} else {
@@ -4218,6 +4231,13 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		 * it away from the edges of the object to avoid small
 		 * sized over/underflows from neighboring allocations.
 		 */
+/*
+ * IAMROOT, 2022.06.17:
+ * - papgo
+ *   인접한 할당에서 작은 크기의 오버/언더플로를 방지하기 위해 개체의
+ *   가장자리에서 멀리 유지하기 위해 개체의 중간 근처에 freelist 포인터를
+ *   저장합니다.*
+ */
 		s->offset = ALIGN_DOWN(s->object_size / 2, sizeof(void *));
 	}
 

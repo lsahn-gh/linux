@@ -26,6 +26,16 @@
  *
  * The result is undefined if the size is 0.
  */
+/*
+ * IAMROOT, 2022.06.17:
+ * - size -> memory size order로 변환.
+ * - PAGE_SIZE == 4096일 경우
+ *                          ilog2(size - 1) - PAGE_SHIFT + 1 = result
+ *   size == 0              (예외처리로 52)
+ *	 0    < size <= 4096     11             - 12         + 1 = 0
+ *	 4097 < size <= 8192     12             - 12         + 1 = 1
+ *	 8192 < size <= 16384    13             - 12         + 1 = 2
+ */
 static __always_inline __attribute_const__ int get_order(unsigned long size)
 {
 	if (__builtin_constant_p(size)) {
