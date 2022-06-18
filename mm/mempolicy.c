@@ -1881,6 +1881,11 @@ static unsigned interleave_nodes(struct mempolicy *policy)
  * Depending on the memory policy provide a node from which to allocate the
  * next slab entry.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - interrupt의 경우 : 현재 cpu node
+ *   그외의 경우 task의 numa policy를 적용한다.
+ */
 unsigned int mempolicy_slab_node(void)
 {
 	struct mempolicy *policy;

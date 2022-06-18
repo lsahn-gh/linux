@@ -103,6 +103,10 @@ static inline bool fail_stacktrace(struct fault_attr *attr)
 bool should_fail(struct fault_attr *attr, ssize_t size)
 {
 	if (in_task()) {
+/*
+ * IAMROOT, 2022.06.18:
+ * - fail_nth가 0이되면 실패시킨다.
+ */
 		unsigned int fail_nth = READ_ONCE(current->fail_nth);
 
 		if (fail_nth) {

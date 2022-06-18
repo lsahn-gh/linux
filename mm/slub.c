@@ -189,6 +189,10 @@ static inline bool kmem_cache_debug(struct kmem_cache *s)
 	return kmem_cache_debug_flags(s, SLAB_DEBUG_FLAGS);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - redzone을 사용할경우 fp는 red_left_pad만큼 이동된 위치에 있다.
+ */
 void *fixup_red_left(struct kmem_cache *s, void *p)
 {
 	if (kmem_cache_debug_flags(s, SLAB_RED_ZONE))
@@ -262,6 +266,12 @@ static inline bool kmem_cache_has_cpu_partial(struct kmem_cache *s)
  * Tracking user of a slab.
  */
 #define TRACK_ADDRS_COUNT 16
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - object를 누가 호출해서 할당/해제 했는지를 추적한다.
+ *   할당용 1개, 해제용 1개를 쓴다.
+ */
 struct track {
 	unsigned long addr;	/* Called from address */
 #ifdef CONFIG_STACKTRACE
@@ -306,6 +316,10 @@ static inline void stat(const struct kmem_cache *s, enum stat_item si)
  * differ during memory hotplug/hotremove operations.
  * Protected by slab_mutex.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - memory에 있는 node.
+ */
 static nodemask_t slab_nodes;
 
 /********************************************************************
@@ -316,6 +330,11 @@ static nodemask_t slab_nodes;
  * Returns freelist pointer (ptr). With hardening, this is obfuscated
  * with an XOR of the address where the pointer is held and a per-cache
  * random number.
+ */
+/*
+ * IAMROOT, 2022.06.18:
+ * - CONFIG_SLAB_FREELIST_HARDENED가 on 일경우
+ *   a@s->random값을 이용해 FP(@ptr)을 숨긴다.
  */
 static inline void *freelist_ptr(const struct kmem_cache *s, void *ptr,
 				 unsigned long ptr_addr)
@@ -339,6 +358,11 @@ static inline void *freelist_ptr(const struct kmem_cache *s, void *ptr,
 }
 
 /* Returns the freelist pointer recorded at location ptr_addr. */
+/*
+ * IAMROOT, 2022.06.18:
+ * @ptr_addr FP.
+ * hardened를 사용했을경우 관련 처리를 한다.
+ */
 static inline void *freelist_dereference(const struct kmem_cache *s,
 					 void *ptr_addr)
 {
@@ -346,6 +370,10 @@ static inline void *freelist_dereference(const struct kmem_cache *s,
 			    (unsigned long)ptr_addr);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @object의 FP를 가져온다. hardened를 사용했을경우 관련 처리를 한다.
+ */
 static inline void *get_freepointer(struct kmem_cache *s, void *object)
 {
 	object = kasan_reset_tag(object);
@@ -371,6 +399,10 @@ static inline void *get_freepointer_safe(struct kmem_cache *s, void *object)
 	return freelist_ptr(s, p, freepointer_addr);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @object의 FP에 next object (@fp)를 저장한다.
+ */
 static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
 {
 	unsigned long freeptr_addr = (unsigned long)object + s->offset;
@@ -389,11 +421,27 @@ static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
 		__p < (__addr) + (__objects) * (__s)->size; \
 		__p += (__s)->size)
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - PAGE_SIZE = 4K, order == PAGE_ALLOC_COSTLY_ORDER 일때
+ *   4k * 2^3 / size = return 32k / size
+ */
 static inline unsigned int order_objects(unsigned int order, unsigned int size)
 {
 	return ((unsigned int)PAGE_SIZE << order) / size;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @order, @size로 oo초기값을 구해온다.
+ * - order제한이 MAX_OBJS_PER_PAGE(OO_SHIFT order)값이므로
+ *   
+ *   0          OO_SHIFT(16)      31
+ *   +-------------+---------------+
+ *   | object수    | order         |
+ *   +-------------+---------------+
+ *     oo_objects()  oo_order()
+ */
 static inline struct kmem_cache_order_objects oo_make(unsigned int order,
 		unsigned int size)
 {
@@ -639,6 +687,11 @@ static inline void metadata_access_disable(void)
  */
 
 /* Verify that a pointer has an address that is valid within a slab page */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 주소값들이 정상적으로 있는지 검사.
+ *   @object가 slab page안에 들어가는지 확인다.
+ */
 static inline int check_valid_pointer(struct kmem_cache *s,
 				struct page *page, void *object)
 {
@@ -670,6 +723,11 @@ static void print_section(char *level, char *text, u8 *addr,
 /*
  * See comment in calculate_sizes().
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - FP가 object 밖에 있는지 확인한다.(rcu, posion사용시 FP를 바깥에 빼놓는데
+ *   그 여부를 확인하는것).
+ */
 static inline bool freeptr_outside_object(struct kmem_cache *s)
 {
 	return s->offset >= s->inuse;
@@ -697,6 +755,10 @@ static struct track *get_track(struct kmem_cache *s, void *object,
 	return kasan_reset_tag(p + alloc);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 초기화때는 @addr = 0이여서 memset될것이다.
+ */
 static void set_track(struct kmem_cache *s, void *object,
 			enum track_item alloc, unsigned long addr)
 {
@@ -723,6 +785,10 @@ static void set_track(struct kmem_cache *s, void *object,
 	}
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - alloc, free track을 초기화한다.
+ */
 static void init_tracking(struct kmem_cache *s, void *object)
 {
 	if (!(s->flags & SLAB_STORE_USER))
@@ -881,13 +947,35 @@ static __printf(3, 4) void slab_err(struct kmem_cache *s, struct page *page,
 	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - redzone, poison 값을 기록한다.
+ */
 static void init_object(struct kmem_cache *s, void *object, u8 val)
 {
 	u8 *p = kasan_reset_tag(object);
 
+/*
+ * IAMROOT, 2022.06.18:
+ *
+ *            <----- inuse ----------->
+ * +----------+-----------------+-----+
+ * |    Z     | object          |  Z  |
+ * +----------+-----------------+-----+
+ * <--val---->p                  <-val->
+ * SLUB_RED_INACTIVE, SLUB_RED_ACTIVE
+ */
 	if (s->flags & SLAB_RED_ZONE)
 		memset(p - s->red_left_pad, val, s->red_left_pad);
 
+/*
+ * IAMROOT, 2022.06.18:
+ *
+ * +-----------------++
+ * | object          ||
+ * +-----------------++
+ * p<--POISON_FREE-->^POISON_END(마지막 byte만)
+ */
 	if (s->flags & __OBJECT_POISON) {
 		memset(p, POISON_FREE, s->object_size - 1);
 		p[s->object_size - 1] = POISON_END;
@@ -974,7 +1062,10 @@ skip_bug_print:
  * ignored. And therefore no slab options that rely on these boundaries
  * may be used with merged slabcaches.
  */
-
+/*
+ * IAMROOT, 2022.06.18:
+ * - 남아있는 영역에 POISON_INUSE값이 있는지 검사.
+ */
 static int check_pad_bytes(struct kmem_cache *s, struct page *page, u8 *p)
 {
 	unsigned long off = get_info_end(s);	/* The end of info */
@@ -993,6 +1084,10 @@ static int check_pad_bytes(struct kmem_cache *s, struct page *page, u8 *p)
 }
 
 /* Check the pad bytes at the end of a slab page */
+/*
+ * IAMROOT, 2022.06.18:
+ * - pad공간의 침해여부 검사.(poison check.) error 출력 및 pad값 복구만 해준다.
+ */
 static int slab_pad_check(struct kmem_cache *s, struct page *page)
 {
 	u8 *start;
@@ -1029,6 +1124,10 @@ static int slab_pad_check(struct kmem_cache *s, struct page *page)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - object에 대해서 검사.
+ */
 static int check_object(struct kmem_cache *s, struct page *page,
 					void *object, u8 val)
 {
@@ -1036,6 +1135,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 	u8 *endobject = object + s->object_size;
 
 	if (s->flags & SLAB_RED_ZONE) {
+/*
+ * IAMROOT, 2022.06.18:
+ * - 각각 redzone영역에 val값이 있는지 검사.
+ */
 		if (!check_bytes_and_report(s, page, object, "Left Redzone",
 			object - s->red_left_pad, val, s->red_left_pad))
 			return 0;
@@ -1044,6 +1147,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 			endobject, val, s->inuse - s->object_size))
 			return 0;
 	} else {
+/*
+ * IAMROOT, 2022.06.18:
+ * POISON_INUSE이 padding 자리에 있는지 검사.
+ */
 		if ((s->flags & SLAB_POISON) && s->object_size < s->inuse) {
 			check_bytes_and_report(s, page, p, "Alignment padding",
 				endobject, POISON_INUSE,
@@ -1053,6 +1160,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 
 	if (s->flags & SLAB_POISON) {
 		if (val != SLUB_RED_ACTIVE && (s->flags & __OBJECT_POISON) &&
+/*
+ * IAMROOT, 2022.06.18:
+ * - object에 POISON_FREE, 마지막 byte에 POISON_END값이 있는지 검사.
+ */
 			(!check_bytes_and_report(s, page, p, "Poison", p,
 					POISON_FREE, s->object_size - 1) ||
 			 !check_bytes_and_report(s, page, p, "End Poison",
@@ -1064,6 +1175,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 		check_pad_bytes(s, page, p);
 	}
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 사용중인 object는 FP가 없다. FP check를 안한다.
+ */
 	if (!freeptr_outside_object(s) && val == SLUB_RED_ACTIVE)
 		/*
 		 * Object and freepointer overlap. Cannot check
@@ -1072,6 +1187,10 @@ static int check_object(struct kmem_cache *s, struct page *page,
 		return 1;
 
 	/* Check free pointer validity */
+/*
+ * IAMROOT, 2022.06.18:
+ * - FP가 slab page 영역내에 있는지 검사한다.
+ */
 	if (!check_valid_pointer(s, page, get_freepointer(s, p))) {
 		object_err(s, page, p, "Freepointer corrupt");
 		/*
@@ -1085,6 +1204,13 @@ static int check_object(struct kmem_cache *s, struct page *page,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 1. Slab flag가 있는지 검사.
+ *   2. page->object가 계산된 object보다 큰지 검사.
+ *   3. page->inuse가 계산된 object보다 큰지 검사.
+ *   4. slab pad공간(remainder)에 대한 posion 검사.
+ */
 static int check_slab(struct kmem_cache *s, struct page *page)
 {
 	int maxobj;
@@ -1163,6 +1289,10 @@ static int on_freelist(struct kmem_cache *s, struct page *page, void *search)
 	return search == NULL;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - SLAB_TRACE가 있을경우 alloc시 pr_info 출력.
+ */
 static void trace(struct kmem_cache *s, struct page *page, void *object,
 								int alloc)
 {
@@ -1240,6 +1370,10 @@ static inline void dec_slabs_node(struct kmem_cache *s, int node, int objects)
 }
 
 /* Object debug checks for alloc/free paths */
+/*
+ * IAMROOT, 2022.06.18:
+ * - redzone, poison, user track을 초기화한다.
+ */
 static void setup_object_debug(struct kmem_cache *s, struct page *page,
 								void *object)
 {
@@ -1261,6 +1395,17 @@ void setup_page_debug(struct kmem_cache *s, struct page *page, void *addr)
 	metadata_access_disable();
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 1. Slab flag가 있는지 검사.
+ *   2. page->object가 계산된 object보다 큰지 검사.
+ *   3. page->inuse가 계산된 object보다 큰지 검사.
+ *   4. slab pad공간(remainder)에 대한 posion 검사.
+ *   5. object(FP)가 slab page 안에 있는지 검사.
+ *   6. object에 대해서 검사.
+ *
+ * - alloc일때 여러 검사를 수행한다.
+ */
 static inline int alloc_consistency_checks(struct kmem_cache *s,
 					struct page *page, void *object)
 {
@@ -1278,6 +1423,12 @@ static inline int alloc_consistency_checks(struct kmem_cache *s,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 1. alloc시 검사를 해야되는 사항 수행
+ *   2. alloc user track 기록
+ *   3. object의 redzone에 SLUB_RED_ACTIVE값으로 기록하고 posion정보도 기록한다.
+ */
 static noinline int alloc_debug_processing(struct kmem_cache *s,
 					struct page *page,
 					void *object, unsigned long addr)
@@ -1308,6 +1459,10 @@ bad:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - alloc_consistency_checks과 비슷한 방식으로 free할때 검사를 수행한다.
+ */
 static inline int free_consistency_checks(struct kmem_cache *s,
 		struct page *page, void *object, unsigned long addr)
 {
@@ -1862,6 +2017,10 @@ static void *setup_object(struct kmem_cache *s, struct page *page,
 /*
  * Slab allocation and freeing
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - cache의 order로 page를 할당해온다.
+ */
 static inline struct page *alloc_slab_page(struct kmem_cache *s,
 		gfp_t flags, int node, struct kmem_cache_order_objects oo)
 {
@@ -1911,6 +2070,10 @@ static void __init init_freelist_randomization(void)
 
 	mutex_lock(&slab_mutex);
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 모든 slab cache를 interate하며 random seq를 초기화한다.
+ */
 	list_for_each_entry(s, &slab_caches, list)
 		init_cache_random_seq(s);
 
@@ -1918,6 +2081,11 @@ static void __init init_freelist_randomization(void)
 }
 
 /* Get the next entry on the pre-computed freelist randomized */
+/*
+ * IAMROOT, 2022.06.18:
+ * - @pos를 index로 하여 cache random_seq에서 next 주소를 가져온다.
+ *   만약 limit를 넘는 index가 있다면 재시도.
+ */
 static void *next_freelist_entry(struct kmem_cache *s, struct page *page,
 				unsigned long *pos, void *start,
 				unsigned long page_limit,
@@ -1940,6 +2108,10 @@ static void *next_freelist_entry(struct kmem_cache *s, struct page *page,
 }
 
 /* Shuffle the single linked freelist based on a random pre-computed sequence */
+/*
+ * IAMROOT, 2022.06.18:
+ * - freelist를 random으로 시작점을 정하고, 순서를 섞는다. debug 정보를 초기화한다.
+ */
 static bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 {
 	void *start;
@@ -1951,17 +2123,43 @@ static bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 		return false;
 
 	freelist_count = oo_objects(s->oo);
+/*
+ * IAMROOT, 2022.06.18:
+ * - freelist_count이내의 숫자에서 random number를 가져온다.
+ */
 	pos = get_random_int() % freelist_count;
 
 	page_limit = page->objects * s->size;
 	start = fixup_red_left(s, page_address(page));
 
 	/* First entry is used as the base of the freelist */
+/*
+ * IAMROOT, 2022.06.18:
+ * - pos를 기준으로 random next를 가져온다. pos는 + 1 된다.
+ */
 	cur = next_freelist_entry(s, page, &pos, start, page_limit,
 				freelist_count);
 	cur = setup_object(s, page, cur);
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - 시작지점을 위에서 random으로 구한 cur로 설정한다.
+ */
 	page->freelist = cur;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - cur의 FP에 next를 단방향 list 식으로 연결한다. 맨마지막 object FP엔 null을
+ *   넣는다.
+ *
+ * |     object1             |    object2              |
+ * +---+-----------+---+-----+---+-----------+---+-----+
+ * | Z |   |FP|    | Z | PAD | Z |   |FP|    | Z | PAD |
+ * +---+----v------+---+-----+---^----v------+---+-----+
+ *          \____________________/    NULL
+ *        object의 시작점을 가리킨다.
+ *
+ */
 	for (idx = 1; idx < page->objects; idx++) {
 		next = next_freelist_entry(s, page, &pos, start, page_limit,
 			freelist_count);
@@ -1985,6 +2183,11 @@ static inline bool shuffle_freelist(struct kmem_cache *s, struct page *page)
 }
 #endif /* CONFIG_SLAB_FREELIST_RANDOM */
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab page를 할당받고 debug정보 초기화, fp를 전부 이어 놓는다. 그리고 frozen
+ *   상태를 해놓는다.
+ */
 static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 {
 	struct page *page;
@@ -2003,11 +2206,19 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	 * so we fall-back to the minimum order allocation.
 	 */
 	alloc_gfp = (flags | __GFP_NOWARN | __GFP_NORETRY) & ~__GFP_NOFAIL;
+/*
+ * IAMROOT, 2022.06.18:
+ * - direct recalim 요청, order가 min보다 크면 nofail을 지우고 nomemalloc을 추가한다.
+ */
 	if ((alloc_gfp & __GFP_DIRECT_RECLAIM) && oo_order(oo) > oo_order(s->min))
 		alloc_gfp = (alloc_gfp | __GFP_NOMEMALLOC) & ~(__GFP_RECLAIM|__GFP_NOFAIL);
 
 	page = alloc_slab_page(s, alloc_gfp, node, oo);
 	if (unlikely(!page)) {
+/*
+ * IAMROOT, 2022.06.18:
+ * - 실패하면 order를 줄이고, flags를 완화하여 한번더 시도한다.
+ */
 		oo = s->min;
 		alloc_gfp = flags;
 		/*
@@ -2025,6 +2236,12 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	account_slab_page(page, oo_order(oo), s, flags);
 
 	page->slab_cache = s;
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab flag를 set한다. 만약 비상메모리로 할당받아왔다면 SlabPfmemalloc flag도
+ *   붙인다.
+ */
 	__SetPageSlab(page);
 	if (page_is_pfmemalloc(page))
 		SetPageSlabPfmemalloc(page);
@@ -2038,6 +2255,10 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	shuffle = shuffle_freelist(s, page);
 
 	if (!shuffle) {
+/*
+ * IAMROOT, 2022.06.18:
+ * - shuffle이 아니거나 기능을 안쓰는 경우등일때 순서대로 연결한다.
+ */
 		start = fixup_red_left(s, start);
 		start = setup_object(s, page, start);
 		page->freelist = start;
@@ -2051,6 +2272,12 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	}
 
 	page->inuse = page->objects;
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - frozen은 cpu에 해당 page가 있을 경우 set된다.
+ *   미리 cpu에 바로 연결될 준비를 해놓는 개념.
+ */
 	page->frozen = 1;
 
 out:
@@ -2062,6 +2289,11 @@ out:
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab page를 할당받고 debug정보 초기화, fp를 전부 이어 놓는다. 그리고 frozen
+ *   상태를 해놓는다.
+ */
 static struct page *new_slab(struct kmem_cache *s, gfp_t flags, int node)
 {
 	if (unlikely(flags & GFP_SLAB_BUG_MASK))
@@ -2218,6 +2450,10 @@ static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
 	 * partial slab and there is none available then get_partial()
 	 * will return NULL.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - kmem_cache_node가 없거나 parital도 없으면 return null.
+ */
 	if (!n || !n->nr_partial)
 		return NULL;
 
@@ -2282,10 +2518,37 @@ static void *get_any_partial(struct kmem_cache *s, gfp_t flags,
 	 * may be expensive if we do it every time we are trying to find a slab
 	 * with available objects.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - papago
+ *   조각 모음 비율을 사용하면 노드 간 조각 모음과 노드 로컬 할당 간의 균형을
+ *   구성할 수 있습니다. defrag_ratio가 낮을수록 다른 노드에서 부분 슬래브를
+ *   얻으려고 시도하는 대신 로컬 할당을 수행하는 경향이 높아집니다.
+ *
+ *   defrag_ratio가 0으로 설정되면 kmalloc()은 항상 노드 로컬 객체를 반환합니다.
+ *   비율이 더 높으면 kmalloc()은 다른 노드에서 부분 슬래브를 가져와 채워지기
+ *   때문에 노드 개체를 반환할 수 있습니다.
+ *
+ *   /sys/kernel/slab/xx/remote_node_defrag_ratio가 100으로 설정되면
+ *   (defrag_ratio = 1000이 됨) 모든(거의 거의) 할당이 먼저 다른 노드에서 슬랩
+ *   캐시 조각 모음을 시도합니다.
+ *   이것은 사용 가능한 개체가 있는 슬래브를 찾으려고 할 때마다 비용이 많이 들 수
+ *   있는 부분 슬래브를 찾기 위해 모든 노드를 스캔하는 것을 의미합니다.
+ *
+ * - /sys/kernel/slab/xx/remote_node_defrag_ratio
+ *   유저에서 보면 100(default 100.). kernel에서는 1000로 환산해서 사용한다.
+ *   remote node에서도 가져오는 비율.
+ */
 	if (!s->remote_node_defrag_ratio ||
 			get_cycles() % 1024 > s->remote_node_defrag_ratio)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - task mempolicy에 따라 node를 구해오고 해당 node로 시작하는 zonelist를 구해와
+ *   zone을 iterate한다.
+ *   cache node가 어느 zone에서도 없다면 iterate가 종료되고 return null.
+ */
 	do {
 		cpuset_mems_cookie = read_mems_allowed_begin();
 		zonelist = node_zonelist(mempolicy_slab_node(), flags);
@@ -2411,6 +2674,10 @@ static void init_kmem_cache_cpus(struct kmem_cache *s)
  * unfreezes the slabs and puts it on the proper list.
  * Assumes the slab has been already safely taken away from kmem_cache_cpu
  * by the caller.
+ */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 
  */
 static void deactivate_slab(struct kmem_cache *s, struct page *page,
 			    void *freelist)
@@ -2903,6 +3170,11 @@ slab_out_of_memory(struct kmem_cache *s, gfp_t gfpflags, int nid)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 긴급메모리에서 가져온 page인지 확인하고 맞다면 @gfpflags가 긴급메모리에서
+ *   실제로 요청한 flag인지 확인한다.
+ */
 static inline bool pfmemalloc_match(struct page *page, gfp_t gfpflags)
 {
 	if (unlikely(PageSlabPfmemalloc(page)))
@@ -2988,6 +3260,10 @@ static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 
 reread_page:
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @c에 page가 없는경우 바로 new_slab
+ */
 	page = READ_ONCE(c->page);
 	if (!page) {
 		/*
@@ -3054,6 +3330,11 @@ load_freelist:
 	 * That page must be frozen for per cpu allocations to work.
 	 */
 	VM_BUG_ON(!c->page->frozen);
+/*
+ * IAMROOT, 2022.06.18:
+ * - c->freelist가 다음 object를 가리키게 한다.
+ * - tid += TID_STEP
+ */
 	c->freelist = get_freepointer(s, freelist);
 	c->tid = next_tid(c->tid);
 	local_unlock_irqrestore(&s->cpu_slab->lock, flags);
@@ -3074,6 +3355,10 @@ deactivate_slab:
 
 new_slab:
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - c->paritial page가 있는지 검사. 없다면 new_objects로 진행.
+ */
 	if (slub_percpu_partial(c)) {
 		local_lock_irqsave(&s->cpu_slab->lock, flags);
 		if (unlikely(c->page)) {
@@ -3095,11 +3380,20 @@ new_slab:
 
 new_objects:
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 요청 @node의 parital에서 slab page를 가져와본다.
+ *   n->paritial의 slab page가 없으면 freelist는 null.
+ */
 	freelist = get_partial(s, gfpflags, node, &page);
 	if (freelist)
 		goto check_new_page;
 
 	slub_put_cpu_ptr(s->cpu_slab);
+/*
+ * IAMROOT, 2022.06.18:
+ * - n->partial도 없었으므로 새로운 frozen상태의 slab page를 구해온다.
+ */
 	page = new_slab(s, gfpflags, node);
 	c = slub_get_cpu_ptr(s->cpu_slab);
 
@@ -3112,6 +3406,11 @@ new_objects:
 	 * No other reference to the page yet so we can
 	 * muck around with it freely without cmpxchg
 	 */
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - page->freelist를 null로 끊고 c freelist에 넣을 준비를 한다.
+ */
 	freelist = page->freelist;
 	page->freelist = NULL;
 
@@ -3119,6 +3418,11 @@ new_objects:
 
 check_new_page:
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - debug라면, alloc_debug_processing을 통해 잘못된 slab page라면 새로운 slab을
+ *   할당받도록 new_slab으로 이동한다.
+ */
 	if (kmem_cache_debug(s)) {
 		if (!alloc_debug_processing(s, page, freelist, addr)) {
 			/* Slab failed checks. Next slab needed */
@@ -3132,6 +3436,11 @@ check_new_page:
 		}
 	}
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - page가 긴급메모리에서 가져왔는데 @gfpflags에 긴급요청이 없었으면. 즉
+ *   flag와 맞지 않게 메모리를 가져왔으면 return_single.
+ */
 	if (unlikely(!pfmemalloc_match(page, gfpflags)))
 		/*
 		 * For !pfmemalloc_match() case we don't load freelist so that
@@ -3216,6 +3525,18 @@ static __always_inline void maybe_wipe_obj_freeptr(struct kmem_cache *s,
  *
  * Otherwise we can simply pick the next object from the lockless free list.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - papago
+ *   할당 기능(kmalloc, kmem_cache_alloc)이 해당 기능으로 접힌 fastpath를 갖도록
+ *   인라인된 fastpath. 따라서 빠른 경로에서 충족될 수 있는 요청에 대한 함수
+ *   호출 오버헤드가 없습니다.
+ *
+ *   fastpath는 먼저 lockless freelist를 사용할 수 있는지 확인하여 작동합니다.
+ *   그렇지 않은 경우 느린 처리를 위해 __slab_alloc이 호출됩니다.
+ *
+ *   그렇지 않으면 잠금 없는 자유 목록에서 다음 개체를 간단히 선택할 수 있습니다.*
+ */
 static __always_inline void *slab_alloc_node(struct kmem_cache *s,
 		gfp_t gfpflags, int node, unsigned long addr, size_t orig_size)
 {
@@ -3247,6 +3568,19 @@ redo:
 	 * two reads, it's OK as the two are still associated with the same cpu
 	 * and cmpxchg later will validate the cpu.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - papago
+ *   이 cpu ptr을 통해 kmem_cache cpu 데이터를 읽어야 합니다. 선점이
+ *   활성화되었습니다. 한 CPU 영역에서 읽는 동안 CPU 간에 앞뒤로 전환할 수 있습니다.
+ *   cmpxchg를 수행할 때 원래 CPU에서 다시 종료되는 한 문제가 되지 않습니다.
+ *
+ *   tid 및 kmem_cache_cpu가 동일한 CPU에서 검색되도록 보장해야 합니다.
+ *   먼저 kmem_cache_cpu 포인터를 읽고 tid를 읽는 데 사용합니다.
+ *   우리가 선점되어 두 읽기 사이에 다른 CPU로 전환되는 경우 두 읽기가
+ *   여전히 동일한 CPU와 연결되어 있고 나중에 cmpxchg에서 CPU의 유효성을
+ *   검사하므로 괜찮습니다.
+ */
 	c = raw_cpu_ptr(s->cpu_slab);
 	tid = READ_ONCE(c->tid);
 
@@ -3258,6 +3592,15 @@ redo:
 	 * page could be one associated with next tid and our alloc/free
 	 * request will be failed. In this case, we will retry. So, no problem.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * papago
+ * 여기서 사용되는 Irqless 객체 할당/해제 알고리즘은 cpu_slab의 데이터를 가져오는
+ * 순서에 따라 다릅니다. tid는 이전 tid와 연결된 개체 및 페이지가 현재 tid와 함께
+ * 사용되지 않도록 보장하기 위해 c에서 무엇보다 먼저 가져와야 합니다. tid를 먼저
+ * 가져오면 객체와 페이지가 다음 tid와 연결될 수 있으며 할당/해제 요청이
+ * 실패합니다. 이 경우 다시 시도합니다. 문제 없습니다. 
+ */
 	barrier();
 
 	/*
@@ -3266,6 +3609,12 @@ redo:
 	 * occurs on the right processor and that there was no operation on the
 	 * linked list in between.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 트랜잭션 ID는 CPU별 및 CPU별 대기열의 작업별로 global적으로 고유합니다.
+ *   따라서 cmpxchg_double이 올바른 프로세서에서 발생하고 그 사이에 연결된 목록에
+ *   대한 작업이 없음을 보장할 수 있습니다.
+ */
 
 	object = c->freelist;
 	page = c->page;
@@ -3276,6 +3625,17 @@ redo:
 	 * the slow path which uses local_lock. It is still relatively fast if
 	 * there is a suitable cpu freelist.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - slowpath가 local_lock_irqsave()를 사용하는 경우 irq 처리기의 fastpath 작업에
+ *   대해 보호되지 않기 때문에 PREEMPT_RT에서 잠금 없는 빠른 경로를 사용할 수
+ *   없습니다. 따라서 local_lock을 사용하는 느린 경로를 선택해야 합니다. 적절한
+ *   CPU 여유 목록이 있으면 여전히 상대적으로 빠릅니다.
+ *
+ * - object == NULL : freelist가 하나도 없다.
+ *   page == 0      : page가 없다.
+ *   !node_match    : 요청 node와 cache의 node가 다른 경우. 요청한 node에서 가져온다.
+ */
 	if (IS_ENABLED(CONFIG_PREEMPT_RT) ||
 	    unlikely(!object || !page || !node_match(page, node))) {
 		object = __slab_alloc(s, gfpflags, node, addr, c);
@@ -3296,6 +3656,18 @@ redo:
 		 * against code executing on this cpu *not* from access by
 		 * other cpus.
 		 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - papgo
+ *   cmpxchg는 추가 작업이 없고 올바른 프로세서에 있는 경우에만 일치합니다.
+ *
+ *   cmpxchg는 원자적으로 다음을 수행합니다(잠금 의미 없이!).
+ *   1. 첫 번째 포인터를 현재 CPU당 영역으로 재배치합니다.
+ *   2. tid 및 freelist가 변경되지 않았는지 확인합니다.
+ *   3. 변경되지 않은 경우 tid 및 freelist를 교체합니다.
+ *   이것은 잠금 의미가 없기 때문에 보호는 이 CPU에서 실행되는 코드에 대해서만
+ *   다른 CPU에 의해 액세스되지 않습니다.
+ */
 		if (unlikely(!this_cpu_cmpxchg_double(
 				s->cpu_slab->freelist, s->cpu_slab->tid,
 				object, tid,
@@ -3317,6 +3689,10 @@ out:
 	return object;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 모든 node 대상.
+ */
 static __always_inline void *slab_alloc(struct kmem_cache *s,
 		gfp_t gfpflags, unsigned long addr, size_t orig_size)
 {
@@ -3866,6 +4242,34 @@ static unsigned int slub_min_objects;
  * requested a higher minimum order then we start with that one instead of
  * the smallest order which will fit the object.
  */
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - papgo
+ *  slab object 크기가 주어지면 할당 순서를 계산합니다.
+ *  
+ *  할당 순서는 성능 및 기타 시스템 구성 요소에 상당한 영향을 미칩니다.
+ *  일반적으로 0차 할당은 페이지 할당자에서 조각화를 일으키지 않으므로 0차 할당이
+ *  선호되어야 합니다. 더 큰 개체는 사용하지 않은 공간이 너무 많이 남아 있을 수
+ *  있으므로 순서 0 슬래브에 넣는 데 문제가 있습니다. 슬래브의 1/16 이상이
+ *  낭비되면 더 높은 순서로 이동합니다.
+ *  
+ *  만족스러운 성능에 도달하려면 하나의 슬래브에 최소한의 개체 수를 보장해야 합니다.
+ *  그렇지 않으면 list_lock을 취해야 하는 부분 목록에서 너무 많은 활동을 생성할 수
+ *  있습니다. 이것은 거의 사용되지 않는 대형 슬래브의 경우 덜 우려됩니다.
+ *  
+ *  slub_max_order는 슬래브에 있는 객체의 수를 중요한 것으로 간주하는 것을 중단하기
+ *  시작하는 순서를 지정합니다. slub_max_order에 도달하면 페이지 순서를 가능한 한
+ *  낮게 유지하려고 합니다. 그래서 우리는 작은 페이지 주문에 찬성하여 더 많은 공간
+ *  낭비를 받아들입니다.
+ *
+ *  고차 할당은 또한 슬래브에 더 많은 개체를 배치할 수 있게 하여 개체 처리
+ *  오버헤드를 줄입니다. 사용자가 더 높은 최소 주문을 요청한 경우 개체에 맞는
+ *  최소 주문 대신 해당 주문부터 시작합니다.
+ *
+ * - slab_size / fract의 크기가 unused 보다 큰지를 확인한다. 낭비공간이 적은
+ *   order값을 얻기 위한 작업이다.
+ */
 static inline unsigned int slab_order(unsigned int size,
 		unsigned int min_objects, unsigned int max_order,
 		unsigned int fract_leftover)
@@ -3873,9 +4277,24 @@ static inline unsigned int slab_order(unsigned int size,
 	unsigned int min_order = slub_min_order;
 	unsigned int order;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - min_order에 대해서 object개수가 너무 많으면(min order가 너무 큰 상황)
+ *   MAX_OBJS_PER_PAGE의 기준으로 맞춰서 order를 구한다.
+ *
+ * - ex) size = 16, min_order = 7
+ *   4k * 2^x / 16 >= 32k => 2^x >= 2^7 => x >= 7
+ *   order_objects값이 32k가 나와 MAX_OBJS_PER_PAGE값이 초과.
+ *   즉 min_order값이 너무 크다.
+ *   get_order(16 * 32767) - 1 => 6
+ */
 	if (order_objects(min_order, size) > MAX_OBJS_PER_PAGE)
 		return get_order(size * MAX_OBJS_PER_PAGE) - 1;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - min_order ~ max_order
+ */
 	for (order = max(min_order, (unsigned int)get_order(min_objects * size));
 			order <= max_order; order++) {
 
@@ -3884,6 +4303,10 @@ static inline unsigned int slab_order(unsigned int size,
 
 		rem = slab_size % size;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab_size / fract_leftover보다 적으면. 즉 낭비가 적으면 break.
+ */
 		if (rem <= slab_size / fract_leftover)
 			break;
 	}
@@ -3891,6 +4314,11 @@ static inline unsigned int slab_order(unsigned int size,
 	return order;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @size를 사용해 min_objects를 기준으로 min_order ~ max_order사이의 값으로
+ *   가장 낭비가 적은 order를 구한다. 단 범위를 벗어날수도 있다.
+ */
 static inline int calculate_order(unsigned int size)
 {
 	unsigned int order;
@@ -3920,15 +4348,32 @@ static inline int calculate_order(unsigned int size)
 		nr_cpus = num_present_cpus();
 		if (nr_cpus <= 1)
 			nr_cpus = nr_cpu_ids;
+/*
+ * IAMROOT, 2022.06.18:
+ * - min_objects = 4 * 2log(nr_cpus)
+ * - ex)
+ *   nr_cpus == 4 일때 4 * (3 + 1) = 16
+ */
 		min_objects = 4 * (fls(nr_cpus) + 1);
 	}
 	max_objects = order_objects(slub_max_order, size);
 	min_objects = min(min_objects, max_objects);
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 1. slab order 범위 내 적절한 order 산출
+ *   2. 1개 object가 들어갈 수 있는 slab order 범위 내 산출
+ *   3. 1개 object가 들어갈수 있는 order 산출 (order 무제한)
+ */
 	while (min_objects > 1) {
 		unsigned int fraction;
 
 		fraction = 16;
+/*
+ * IAMROOT, 2022.06.18:
+ * - 1/16(6.25%) -> 1/8(12.5%) -> 1/4(25%) 로 fraction을 확인한다.
+ *   최대 25%낭비까지만 고려한다.
+ */
 		while (fraction >= 4) {
 			order = slab_order(size, min_objects,
 					slub_max_order, fraction);
@@ -3943,6 +4388,18 @@ static inline int calculate_order(unsigned int size)
 	 * We were unable to place multiple objects in a slab. Now
 	 * lets see if we can place a single object there.
 	 */
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - 2.
+ *   min_objects를 무시하고 1개 이상. slub_max_orde는 제한사항 그대로 사용.
+ *   fraction 무시(낭비 무시).
+ *
+ * - 낭비가 1 /4 보다 큰경우 진입하게 된다. 낭비가 얼마되든 상관이 없이 order만을
+ *   고려한다.
+ *
+ * - ex) slub_max_order = 3, size = 20k인경우 50%가까이 낭비되는 상태로 들어올것.
+ */
 	order = slab_order(size, 1, slub_max_order, 1);
 	if (order <= slub_max_order)
 		return order;
@@ -3950,9 +4407,23 @@ static inline int calculate_order(unsigned int size)
 	/*
 	 * Doh this slab cannot be placed using slub_max_order.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 3.
+ *   MAX_ORDER로 계산. fraction 무시.
+ *
+ * - ex) slub_max_order = 3, size = 40k일때.
+ *   max order만으로는 32k까지만 되므로, max order를 4로 키워야된다.
+ */
 	order = slab_order(size, 1, MAX_ORDER, 1);
 	if (order < MAX_ORDER)
 		return order;
+/*
+ * IAMROOT, 2022.06.18:
+ * - MAX_ORDER로도 order를 못구함. system config가 안맞는다.
+ *
+ * - ex) size가 4k * 2^11 보다 큰 경우. MAX_ORDER로도 할당이 안되는 경우.
+ */
 	return -ENOSYS;
 }
 
@@ -4125,6 +4596,11 @@ static void set_cpu_partial(struct kmem_cache *s)
  * calculate_sizes() determines the order and the distribution of data within
  * a slab object.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - size (debug flag, align등을 고려), flags, allocflags, red_left_pad,
+ *   offset, oo(min_order, max_order, @forced_order 고려)등을 결정한다.
+ */
 static int calculate_sizes(struct kmem_cache *s, int forced_order)
 {
 	slab_flags_t flags = s->flags;
@@ -4222,6 +4698,15 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
  *   s->offset >= s->inuse라는 가정은 freeptr_outside_object() 함수에서 사용되는
  *   free pointer가 객체 외부에 있다는 것을 의미합니다. 그것이 더 이상 사실이
  *   아니라면 함수를 수정해야 합니다.
+ *
+ * - if문의 조건에 해당하면 시작주소(offset)을 조정하고 뒤에 long byte를 추가한다.
+ *
+ * - object_size = 20이라고 가정. size는 align되어 24라고 했을대.
+ *     +----------------+-+--+       
+ *     |  obj_size=20   | |fp|       
+ *     +________________+_+--+       
+ *                        ^offset = 24
+ *     <---new_size=32------->
  */
 		s->offset = size;
 		size += sizeof(void *);
@@ -4236,7 +4721,17 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
  * - papgo
  *   인접한 할당에서 작은 크기의 오버/언더플로를 방지하기 위해 개체의
  *   가장자리에서 멀리 유지하기 위해 개체의 중간 근처에 freelist 포인터를
- *   저장합니다.*
+ *   저장합니다.
+ *
+ * - over/under flow 방지를 위해 fp를 중앙으로 이동한다.(offset 추가.)
+ *
+ * - object_size = 20이라고 가정. size는 align되어 24라고 했을대.
+ *               obj_size=20   
+ *           +-------+--+-----+-+          
+ *           |       |fp|     | |          
+ *           +_______+__+_____+_+          
+ *                   ^offset = 8
+ *           <--- size=24------->
  */
 		s->offset = ALIGN_DOWN(s->object_size / 2, sizeof(void *));
 	}
@@ -4247,6 +4742,10 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		 * Need to store information about allocs and frees after
 		 * the object.
 		 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 할당, 해제용으로 총 2개.
+ */
 		size += 2 * sizeof(struct track);
 #endif
 
@@ -4260,6 +4759,20 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		 * corrupted if a user writes before the start
 		 * of the object.
 		 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - long + red_left_pad
+ *  
+ * - s->align을 64라고 가정했을때.
+ *   <- red zone(s->align) -> <-----old size ---------->
+ *   +------------------------+------------------------+---+
+ *   | (8) | (54)             | object                 |(8)|
+ *   +________________________+________________________+___+   
+ *     Z      PAD             ^red_left_pads            Z
+ *   <--------- new size = red_left_pad + old_size + 8  --->
+ *
+ *
+ */
 		size += sizeof(void *);
 
 		s->red_left_pad = sizeof(void *);
@@ -4273,8 +4786,17 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * offset 0. In order to align the objects we have to simply size
 	 * each object to conform to the alignment.
 	 */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 최종적으로 s->align으로 size를 다시 align해준다.
+ */
 	size = ALIGN(size, s->align);
 	s->size = size;
+/*
+ * IAMROOT, 2022.06.18:
+ * - Git blame 참고
+ *   mm: slub: implement SLUB version of obj_to_index()
+ */
 	s->reciprocal_size = reciprocal_value(size);
 	if (forced_order >= 0)
 		order = forced_order;
@@ -4285,15 +4807,31 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 		return 0;
 
 	s->allocflags = 0;
+/*
+ * IAMROOT, 2022.06.18:
+ * - order가 1이상이면 compound_order 처리.
+ */
 	if (order)
 		s->allocflags |= __GFP_COMP;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - dma 영역내 할당.
+ */
 	if (s->flags & SLAB_CACHE_DMA)
 		s->allocflags |= GFP_DMA;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - dma32 영역내 할당.
+ */
 	if (s->flags & SLAB_CACHE_DMA32)
 		s->allocflags |= GFP_DMA32;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - reclaim 가능한 slab을 만들도록 한다.
+ */
 	if (s->flags & SLAB_RECLAIM_ACCOUNT)
 		s->allocflags |= __GFP_RECLAIMABLE;
 
@@ -4301,6 +4839,13 @@ static int calculate_sizes(struct kmem_cache *s, int forced_order)
 	 * Determine the number of objects per slab
 	 */
 	s->oo = oo_make(order, size);
+/*
+ * IAMROOT, 2022.06.18:
+ * - size로 재계산을하여 min oo를 구해놓는다.
+ * - max oo도 s->oo와 비교하여 갱신한다.
+ *   alias cache(size와 flag가 비슷해서 원래 있던 cache를 다른 곳에서 사용하는경우)
+ *   를 open할때 상황에따라 order가 다를 수 잇으므로 max를 갱신해주는것이다.
+ */
 	s->min = oo_make(get_order(size), size);
 	if (oo_objects(s->oo) > oo_objects(s->max))
 		s->max = s->oo;
@@ -4878,6 +5423,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - memory node가 추가되거나 삭제 되거나 할때 callback으로 호출된다.
+ */
 static int slab_memory_callback(struct notifier_block *self,
 				unsigned long action, void *arg)
 {
@@ -4920,6 +5469,10 @@ static struct notifier_block slab_memory_callback_nb = {
  * that may be pointing to the wrong kmem_cache structure.
  */
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - static영역에 만들어진 cache를 동적영역으로 옮긴다.
+ */
 static struct kmem_cache * __init bootstrap(struct kmem_cache *static_cache)
 {
 	int node;
@@ -5001,9 +5554,18 @@ void __init kmem_cache_init(void)
 	create_boot_cache(kmem_cache_node, "kmem_cache_node",
 		sizeof(struct kmem_cache_node), SLAB_HWCACHE_ALIGN, 0, 0);
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - notifier에 slab_memory_callback_nb을 등록한다.
+ */
 	register_hotmemory_notifier(&slab_memory_callback_nb);
 
 	/* Able to allocate the per node structures */
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - kmem_cache_node를 할당할수 있는 상태가 되서 state를 변경한다.
+ */
 	slab_state = PARTIAL;
 
 /*
@@ -5068,6 +5630,7 @@ __kmem_cache_alias(const char *name, unsigned int size, unsigned int align,
 /*
  * IAMROOT, 2022.06.11: 
  * 슬럽(slub) 캐시를 생성한다.
+ * - config가 존재할 경우 sys/kernel/slab, debugfs에 경로가 생긴다.
  */
 int __kmem_cache_create(struct kmem_cache *s, slab_flags_t flags)
 {
@@ -5078,6 +5641,10 @@ int __kmem_cache_create(struct kmem_cache *s, slab_flags_t flags)
 		return err;
 
 	/* Mutex is not taken during early boot */
+/*
+ * IAMROOT, 2022.06.18:
+ * - 부팅중엔(아직 slab이 안만들어지는 상황) 빠져나간다.
+ */
 	if (slab_state <= UP)
 		return 0;
 
@@ -6184,6 +6751,10 @@ static int sysfs_slab_alias(struct kmem_cache *s, const char *name)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - sysfs의 slab
+ */
 static int __init slab_sysfs_init(void)
 {
 	struct kmem_cache *s;

@@ -748,6 +748,11 @@ void kfence_shutdown_cache(struct kmem_cache *s)
 	}
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - PAGE_SIZE 이하의 경우에서, DMA요청이 아닌 경우에, kfence_enabled가 되있다면
+ *   kfence_guarded_alloc()을 호출한다.
+ */
 void *__kfence_alloc(struct kmem_cache *s, size_t size, gfp_t flags)
 {
 	/*

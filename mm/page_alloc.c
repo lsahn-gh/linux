@@ -207,6 +207,11 @@ unsigned long totalcma_pages __read_mostly;
  * - 초기값 0. sysctl로 control한다.
  */
 int percpu_pagelist_high_fraction;
+
+/*
+ * IAMROOT, 2022.06.18:
+ * - boot중에는 reclaim이 제외된채지만. booting이 끝나면 정상적으로 변경된다.
+ */
 gfp_t gfp_allowed_mask __read_mostly = GFP_BOOT_MASK;
 DEFINE_STATIC_KEY_MAYBE(CONFIG_INIT_ON_ALLOC_DEFAULT_ON, init_on_alloc);
 EXPORT_SYMBOL(init_on_alloc);

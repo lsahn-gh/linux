@@ -1818,6 +1818,12 @@ struct address_space *page_mapping(struct page *page);
  * ALLOC_NO_WATERMARKS and the low watermark was not
  * met implying that the system is under some pressure.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - papago
+ *   페이지가 ALLOC_NO_WATERMARKS로 할당되었고 시스템이 약간의 압력을 받고 있음을
+ *   암시하는 로우 워터마크가 충족되지 않은 경우에만 true를 반환합니다.
+ */
 static inline bool page_is_pfmemalloc(const struct page *page)
 {
 	/*

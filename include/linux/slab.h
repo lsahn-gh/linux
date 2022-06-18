@@ -133,6 +133,11 @@
 
 /* The following flags affect the page allocator grouping pages by mobility */
 /* Objects are reclaimable */
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab을 reclaim가능한 cache로 만든다.
+ *   ex) inode
+ */
 #define SLAB_RECLAIM_ACCOUNT	((slab_flags_t __force)0x00020000U)
 #define SLAB_TEMPORARY		SLAB_RECLAIM_ACCOUNT	/* Objects are short-lived */
 
@@ -757,6 +762,10 @@ extern void *__kmalloc_node_track_caller(size_t, gfp_t, int, unsigned long);
 
 /*
  * Shortcuts
+ */
+/*
+ * IAMROOT, 2022.06.18:
+ * - flags + __GFP_ZERO, all node
  */
 static inline void *kmem_cache_zalloc(struct kmem_cache *k, gfp_t flags)
 {

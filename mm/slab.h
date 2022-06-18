@@ -59,6 +59,11 @@ enum slab_state {
 	DOWN,			/* No slab functionality yet */
 	PARTIAL,		/* SLUB: kmem_cache_node available */
 	PARTIAL_NODE,		/* SLAB: kmalloc size for node struct available */
+/*
+ * IAMROOT, 2022.06.18:
+ * - UP : sysfs에는 아직 안보임.
+ *   FULL : sysfs에 보이는 상황.
+ */
 	UP,			/* Slab caches usable but not all extras yet */
 	FULL			/* Everything is working */
 };
@@ -268,6 +273,10 @@ static inline size_t obj_full_size(struct kmem_cache *s)
 /*
  * Returns false if the allocation should fail.
  */
+/*
+ * IAMROOT, 2022.06.18:
+ * - memcg에서 제한을 확인한다.
+ */
 static inline bool memcg_slab_pre_alloc_hook(struct kmem_cache *s,
 					     struct obj_cgroup **objcgp,
 					     size_t objects, gfp_t flags)
@@ -277,6 +286,10 @@ static inline bool memcg_slab_pre_alloc_hook(struct kmem_cache *s,
 	if (!memcg_kmem_enabled())
 		return true;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 둘다 acoount가 없으면 true.(제한이 없는 개념)
+ */
 	if (!(flags & __GFP_ACCOUNT) && !(s->flags & SLAB_ACCOUNT))
 		return true;
 
@@ -284,6 +297,10 @@ static inline bool memcg_slab_pre_alloc_hook(struct kmem_cache *s,
 	if (!objcg)
 		return true;
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 제한을 벗어나면 false.
+ */
 	if (obj_cgroup_charge(objcg, flags, objects * obj_full_size(s))) {
 		obj_cgroup_put(objcg);
 		return false;
@@ -416,6 +433,10 @@ static inline struct kmem_cache *virt_to_cache(const void *obj)
 	return page->slab_cache;
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - memcg와 통계에 기록한다.
+ */
 static __always_inline void account_slab_page(struct page *page, int order,
 					      struct kmem_cache *s,
 					      gfp_t gfp)
@@ -483,6 +504,10 @@ static inline size_t slab_ksize(const struct kmem_cache *s)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - flags 확인 및 memcg 확인.
+ */
 static inline struct kmem_cache *slab_pre_alloc_hook(struct kmem_cache *s,
 						     struct obj_cgroup **objcgp,
 						     size_t size, gfp_t flags)
@@ -560,6 +585,10 @@ struct kmem_cache_node {
 
 };
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - @node에 대한 kmem_cache_node를 가져온다.
+ */
 static inline struct kmem_cache_node *get_node(struct kmem_cache *s, int node)
 {
 	return s->node[node];

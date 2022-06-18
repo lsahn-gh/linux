@@ -49,6 +49,10 @@ struct kmem_cache_cpu {
 	void **freelist;	/* Pointer to next available object */
 	unsigned long tid;	/* Globally unique transaction id */
 	struct page *page;	/* The slab from which we are allocating */
+/*
+ * IAMROOT, 2022.06.18:
+ * - parial page list.
+ */
 #ifdef CONFIG_SLUB_CPU_PARTIAL
 	struct page *partial;	/* Partially allocated frozen slabs */
 #endif
@@ -79,6 +83,14 @@ struct kmem_cache_cpu {
  * Word size structure that can be atomically updated or read and that
  * contains both the order and the number of objects that a slab of the
  * given order would contain.
+ */
+/*
+ * IAMROOT, 2022.06.18:
+ *   0          OO_SHIFT(16)      31
+ *   +-------------+---------------+
+ *   | object수    | order         |
+ *   +-------------+---------------+
+ *     oo_objects()  oo_order()
  */
 struct kmem_cache_order_objects {
 	unsigned int x;
@@ -145,6 +157,10 @@ struct kmem_cache {
 	unsigned int useroffset;	/* Usercopy region offset */
 	unsigned int usersize;		/* Usercopy region size */
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - online node에 대해서만 만들어진다.
+ */
 	struct kmem_cache_node *node[MAX_NUMNODES];
 };
 

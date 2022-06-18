@@ -20,6 +20,20 @@
  * to calculate the division A/B.
  */
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - papago
+ *   이 알고리즘은 Torbjörn Granlund와 Peter L. Montgomery의 곱셈을 사용하는
+ *   불변 정수의 나눗셈 문서를 기반으로 합니다.
+ *
+ *   이 코드의 기반이 되는 Agner Fog의 어셈블러 구현은 다음에서 찾을 수 있습니다.
+ *   http://www.agner.org/optimize/asmlib.zip
+ *   
+ *   A/B에 대한 이 최적화는 제수 B가 대부분 런타임 불변인 경우에 유용합니다.
+ *   B의 역수는 reciprocal_value()를 사용하여 느린 경로에서 계산됩니다.
+ *   그러면 빠른 경로는 변수 배당 A와 함께 훨씬 빠른 곱셈 연산을 사용하여 나누기
+ *   A/B를 계산할 수 있습니다.
+ */
 struct reciprocal_value {
 	u32 m;
 	u8 sh1, sh2;

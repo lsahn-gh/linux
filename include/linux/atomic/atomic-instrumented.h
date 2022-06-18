@@ -1928,6 +1928,10 @@ atomic_long_dec_if_positive(atomic_long_t *v)
 	arch_sync_cmpxchg(__ai_ptr, __VA_ARGS__); \
 })
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 2개를 동시에 바꾼다.
+ */
 #define cmpxchg_double(ptr, ...) \
 ({ \
 	typeof(ptr) __ai_ptr = (ptr); \

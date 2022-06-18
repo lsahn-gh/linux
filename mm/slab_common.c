@@ -1376,6 +1376,10 @@ EXPORT_TRACEPOINT_SYMBOL(kmem_cache_alloc_node);
 EXPORT_TRACEPOINT_SYMBOL(kfree);
 EXPORT_TRACEPOINT_SYMBOL(kmem_cache_free);
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - flag, fault injection등 검사 및 수행.
+ */
 int should_failslab(struct kmem_cache *s, gfp_t gfpflags)
 {
 	if (__should_failslab(s, gfpflags))

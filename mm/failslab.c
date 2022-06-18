@@ -14,6 +14,10 @@ static struct {
 	.cache_filter = false,
 };
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - slab에 사용하지 못하는 flag, fault injection 등을 검사한다.
+ */
 bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
 {
 	/* No fault-injection for bootstrap cache */
@@ -33,6 +37,10 @@ bool __should_failslab(struct kmem_cache *s, gfp_t gfpflags)
 	return should_fail(&failslab.attr, s->object_size);
 }
 
+/*
+ * IAMROOT, 2022.06.18:
+ * - 특정 cache를 못만들도록 일부러 넣는다. (debug용 fault injection)
+ */
 static int __init setup_failslab(char *str)
 {
 	return setup_fault_attr(&failslab.attr, str);

@@ -149,7 +149,13 @@ extern void cpuset_print_current_mems_allowed(void);
  * IAMROOT, 2022.03.19:
  * - /sys/fs/cgroup/cpuset/cpuset.mems 를 보면 할당가능한 numa node mask가
  *   기록되있다.
- * - 이값을 읽어 오기 위해 sequence lock을 한다.
+ * - 이값을 읽어 오기 위해 sequence lock을 한다.(mostly read)
+ *
+ * - 사용법
+ * do {
+ *	cpuset_mems_cookie = read_mems_allowed_begin();
+ *      ...
+ * } while (read_mems_allowed_retry(cpuset_mems_cookie));
  */
 static inline unsigned int read_mems_allowed_begin(void)
 {

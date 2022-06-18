@@ -164,9 +164,20 @@ struct page {
 			struct kmem_cache *slab_cache; /* not slob */
 			/* Double-word boundary */
 			void *freelist;		/* first free object */
+/*
+ * IAMROOT, 2022.06.18:
+ * - slub
+ */
 			union {
 				void *s_mem;	/* slab: first object */
 				unsigned long counters;		/* SLUB */
+/*
+ * IAMROOT, 2022.06.18:
+ * - inuse   : 최초 빈 slab page에는 slab object 수가 들어가있다.(allocate_slab())
+ *   objects : 현재 남은 object수 처음엔 inuse와 같다.
+ *   frozen  : cpu cache에 들어갔을때 1. 그외는 0
+ *
+ */
 				struct {			/* SLUB */
 					unsigned inuse:16;
 					unsigned objects:15;
