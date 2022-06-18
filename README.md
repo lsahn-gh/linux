@@ -252,3 +252,7 @@
 - 2022.06.11, Zoom 온라인(4명 참석)
 - kmem_cache_init() 진행 중
 
+### 56주차
+- 2022.06.18, Zoom 온라인(5명 참석)
+- kmem_cache_init() ... slab object size 및 debug 정보 초기화 완료
+
