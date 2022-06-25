@@ -411,6 +411,17 @@ static inline void __this_cpu_preempt_check(const char *op) { }
  * a double cmpxchg instruction, since it's a cheap requirement, and it
  * avoids breaking the requirement for architectures with the instruction.
  */
+/*
+ * IAMROOT, 2022.06.25:
+ * - cmpxchg_double에 대한 특별 처리. cmpxchg_double에는 두 개의 percpu 변수가
+ *   전달됩니다. 첫 번째는 이중 단어 경계에 맞춰야 하고 두 번째는 바로 그 다음에
+ *   따라야 합니다.
+ *   이중 cmpxchg 명령을 지원하지 않는 경우에도 모든 아키텍처에서 이를 적용합니다.
+ *   이는 저렴한 요구 사항이고 명령으로 아키텍처에 대한 요구 사항을 위반하는 것을
+ *   방지하기 때문입니다. 
+ *
+ * - pcp1 size에 따라 함수를 호출한다.
+ */
 #define __pcpu_double_call_return_bool(stem, pcp1, pcp2, ...)		\
 ({									\
 	bool pdcrb_ret__;						\

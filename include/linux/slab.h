@@ -119,6 +119,10 @@
 # define SLAB_FAILSLAB		0
 #endif
 /* Account to memcg */
+/*
+ * IAMROOT, 2022.06.25:
+ * - memcg용 account
+ */
 #ifdef CONFIG_MEMCG_KMEM
 # define SLAB_ACCOUNT		((slab_flags_t __force)0x04000000U)
 #else
@@ -152,8 +156,22 @@
  * ZERO_SIZE_PTR can be passed to kfree though in the same way that NULL can.
  * Both make kfree a no-op.
  */
+/*
+ * IAMROOT, 2022.06.25:
+ * - papago
+ *   ZERO_SIZE_PTR은 크기가 0인 kmalloc 요청에 대해 반환됩니다. 
+ *
+ *   ZERO_SIZE_PTR을 역참조하면 고유한 액세스 오류가 발생합니다.
+ *
+ *   ZERO_SIZE_PTR은 NULL과 같은 방식으로 kfree에 전달할 수 있습니다.
+ *   둘 다 kfree를 no-op으로 만듭니다.
+ */
 #define ZERO_SIZE_PTR ((void *)16)
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - 0 ~ ZERO_SIZE_PTR까지의 값을 NULL로 취급한다.
+ */
 #define ZERO_OR_NULL_PTR(x) ((unsigned long)(x) <= \
 				(unsigned long)ZERO_SIZE_PTR)
 
@@ -367,6 +385,28 @@ static inline void __check_heap_object(const void *ptr, unsigned long n,
  * is for accounted but unreclaimable and non-dma objects. All the other
  * kmem caches can have both accounted and unaccounted objects.
  */
+
+/*
+ * IAMROOT, 2022.06.25:
+ * - 전부다 있는 경우
+ * enum kmalloc_cache_type {
+ *	KMALLOC_NORMAL = 0,
+ *	KMALLOC_CGROUP,
+ *	KMALLOC_RECLAIM,
+ *	KMALLOC_DMA,
+ *	NR_KMALLOC_TYPES
+ * };
+ *
+ * - 다 없는 경우
+ *   enum kmalloc_cache_type {
+ *	KMALLOC_NORMAL = 0,
+ *	KMALLOC_DMA = KMALLOC_NORMAL,
+ *	KMALLOC_CGROUP = KMALLOC_NORMAL,
+ *	KMALLOC_RECLAIM,
+ *	NR_KMALLOC_TYPES
+ * };
+ * KMALLOC_NORMAL과 KMALLOC_RECLAIM만 남게 될것이다.
+ */
 enum kmalloc_cache_type {
 	KMALLOC_NORMAL = 0,
 #ifndef CONFIG_ZONE_DMA
@@ -396,6 +436,11 @@ kmalloc_caches[NR_KMALLOC_TYPES][KMALLOC_SHIFT_HIGH + 1];
 	(IS_ENABLED(CONFIG_ZONE_DMA)   ? __GFP_DMA : 0) |	\
 	(IS_ENABLED(CONFIG_MEMCG_KMEM) ? __GFP_ACCOUNT : 0))
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - 기본적으로 normal이며, 만약 normal을 사용안한다면 KMALLOC_NOT_NORMAL_BITS가
+ *   있어야된다.
+ */
 static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags)
 {
 	/*
@@ -412,6 +457,10 @@ static __always_inline enum kmalloc_cache_type kmalloc_type(gfp_t flags)
 	 *  2) __GFP_RECLAIMABLE
 	 *  3) __GFP_ACCOUNT
 	 */
+/*
+ * IAMROOT, 2022.06.25:
+ * - DMA -> reclaim -> memcg 순의 우선순위로 판별한다.
+ */
 	if (IS_ENABLED(CONFIG_ZONE_DMA) && (flags & __GFP_DMA))
 		return KMALLOC_DMA;
 	if (!IS_ENABLED(CONFIG_MEMCG_KMEM) || (flags & __GFP_RECLAIMABLE))
@@ -571,6 +620,11 @@ kmalloc_order_trace(size_t size, gfp_t flags, unsigned int order)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - KMALLOC_MAX_CACHE_SIZE보다 큰 size에 대한 kmalloc 요청은 buddy에서
+ *   compound page로 할당받아온다.
+ */
 static __always_inline void *kmalloc_large(size_t size, gfp_t flags)
 {
 	unsigned int order = get_order(size);
@@ -631,8 +685,16 @@ static __always_inline void *kmalloc_large(size_t size, gfp_t flags)
  *	Try really hard to succeed the allocation but fail
  *	eventually.
  */
+/*
+ * IAMROOT, 2022.06.25:
+ * - @flags, @size에 따라 object를 할당받아온다.
+ */
 static __always_inline void *kmalloc(size_t size, gfp_t flags)
 {
+/*
+ * IAMROOT, 2022.06.25:
+ * - @size가 const값이면 compile 타임에 판단해서 함수를 호출한다.
+ */
 	if (__builtin_constant_p(size)) {
 #ifndef CONFIG_SLOB
 		unsigned int index;
@@ -765,7 +827,8 @@ extern void *__kmalloc_node_track_caller(size_t, gfp_t, int, unsigned long);
  */
 /*
  * IAMROOT, 2022.06.18:
- * - flags + __GFP_ZERO, all node
+ * - flags + __GFP_ZERO, all node.
+ *   slab object를 memset하여 할당받는다.
  */
 static inline void *kmem_cache_zalloc(struct kmem_cache *k, gfp_t flags)
 {

@@ -62,6 +62,10 @@ do {								\
 	local_lock_debug_init(lock);				\
 } while (0)
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - preempt_disable만 한다. (PREEMPT_RT가 spin_lock을 하는것과 비교해서 확인)
+ */
 #define __local_lock(lock)					\
 	do {							\
 		preempt_disable();				\
@@ -113,6 +117,10 @@ typedef spinlock_t local_lock_t;
 		local_spin_lock_init((l));			\
 	} while (0)
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - PREEMPT_RT인 경우 spin_lock을 건다.
+ */
 #define __local_lock(__lock)					\
 	do {							\
 		migrate_disable();				\

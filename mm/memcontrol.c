@@ -84,6 +84,10 @@ EXPORT_PER_CPU_SYMBOL_GPL(int_active_memcg);
 static bool cgroup_memory_nosocket __ro_after_init;
 
 /* Kernel memory accounting disabled? */
+/*
+ * IAMROOT, 2022.06.25:
+ * - no kernel memory. accouting diable
+ */
 bool cgroup_memory_nokmem __ro_after_init;
 
 /* Whether the swap controller is active */

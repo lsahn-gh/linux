@@ -47,6 +47,10 @@ enum stat_item {
  */
 struct kmem_cache_cpu {
 	void **freelist;	/* Pointer to next available object */
+/*
+ * IAMROOT, 2022.06.25:
+ * - 초기화시 해당 cpu번호로 초기화된다.
+ */
 	unsigned long tid;	/* Globally unique transaction id */
 	struct page *page;	/* The slab from which we are allocating */
 /*
@@ -117,6 +121,10 @@ struct kmem_cache {
 	unsigned int offset;	/* Free pointer offset */
 #ifdef CONFIG_SLUB_CPU_PARTIAL
 	/* Number of per cpu partial objects to keep around */
+/*
+ * IAMROOT, 2022.06.25:
+ * - cpu partial object수
+ */
 	unsigned int cpu_partial;
 #endif
 	struct kmem_cache_order_objects oo;

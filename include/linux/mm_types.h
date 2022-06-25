@@ -152,6 +152,11 @@ struct page {
 				struct list_head slab_list;
 				struct {	/* Partial pages */
 					struct page *next;
+/*
+ * IAMROOT, 2022.06.25:
+ * - pages   : parital의 이어져있는 slab page수(정확하진 않고 힌트 개념)
+ *   pobject : 대략적인 object수
+ */
 #ifdef CONFIG_64BIT
 					int pages;	/* Nr of pages left */
 					int pobjects;	/* Approximate count */

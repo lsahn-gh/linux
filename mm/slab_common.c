@@ -715,6 +715,10 @@ void __init create_boot_cache(struct kmem_cache *s, const char *name,
 	s->refcount = -1;	/* Exempt from merging for now */
 }
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - kmem_cache를 하나 생성한다.
+ */
 struct kmem_cache *__init create_kmalloc_cache(const char *name,
 		unsigned int size, slab_flags_t flags,
 		unsigned int useroffset, unsigned int usersize)
@@ -741,6 +745,11 @@ EXPORT_SYMBOL(kmalloc_caches);
  * kmalloc array. This is necessary for slabs < 192 since we have non power
  * of two cache sizes there. The size of larger slabs can be determined using
  * fls.
+ */
+/*
+ * IAMROOT, 2022.06.25:
+ * - 192 이하까지 허용한다.
+ * - 기본값 1, 2는 특수 케이스.
  */
 static u8 size_index[24] __ro_after_init = {
 	3,	/* 8 */
@@ -780,9 +789,10 @@ static inline unsigned int size_index_elem(unsigned int bytes)
  */
 /*
  * IAMROOT, 2022.06.11: 
- * 요청한 @size 및 @flags에 어울리는 kmalloc 슬랩 캐시를 반환한다.
- * 일반 캐시, dma, reclaim 캐시를 구별할 때 flags를 사용한다.
- * TODO:
+ * - papago
+ *   요청한 @size 및 @flags에 어울리는 kmalloc 슬랩 캐시를 반환한다.
+ *   일반 캐시, dma, reclaim 캐시를 구별할 때 flags를 사용한다.
+ * - @size와 @flags에 따라 사용할 kmem_cache를 정한다.
  */
 struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 {
@@ -814,6 +824,10 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
 #define KMALLOC_CGROUP_NAME(sz)
 #endif
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - @__shot_size @__size에 대한 짧은 이름.
+ */
 #define INIT_KMALLOC_INFO(__size, __short_size)			\
 {								\
 	.name[KMALLOC_NORMAL]  = "kmalloc-" #__short_size,	\
@@ -827,6 +841,15 @@ struct kmem_cache *kmalloc_slab(size_t size, gfp_t flags)
  * kmalloc_info[] is to make slub_debug=,kmalloc-xx option work at boot time.
  * kmalloc_index() supports up to 2^25=32MB, so the final entry of the table is
  * kmalloc-32M.
+ */
+/*
+ * IAMROOT, 2022.06.25:
+ * - size 1k에 대한 예제
+ *   name[KMALLOC_NORMAL] = kmalloc-1k,
+ *   name[KMALLOC_RECLAIM] = kmalloc-rcl-1k
+ *   name[KMALLOC_DMA] = dma-kmalloc-1k,
+ *   name[KMALLOC_CGROUP] = kmalloc-cg-1k
+ *   size = 1024
  */
 const struct kmalloc_info_struct kmalloc_info[] __initconst = {
 	INIT_KMALLOC_INFO(0, 0),
@@ -868,6 +891,22 @@ const struct kmalloc_info_struct kmalloc_info[] __initconst = {
  * Make sure that nothing crazy happens if someone starts tinkering
  * around with ARCH_KMALLOC_MINALIGN
  */
+
+/*
+ * IAMROOT, 2022.06.25:
+ * - papago
+ *   kmalloc 배열에 대해 이상하게 큰 정렬 요구 사항이 있는 경우 size_index 테이블을
+ *   패치하세요. 이것은 MIPS의 경우에만 해당되는 것 같습니다. 표준 arch는 여기에
+ *   코드를 생성하지 않습니다.
+ *
+ *   더 작은 캐시에 대한 인덱스 결정을 처리하는 방식으로 인해 허용되는 최대 정렬은
+ *   256바이트입니다.
+ *
+ *   누군가 ARCH_KMALLOC_MINALIGN을 만지작거리기 시작하면 미친 일이 일어나지
+ *   않도록 하십시오.
+ *
+ * - size_index를 초기화한다.
+ */
 void __init setup_kmalloc_cache_index_table(void)
 {
 	unsigned int i;
@@ -875,6 +914,15 @@ void __init setup_kmalloc_cache_index_table(void)
 	BUILD_BUG_ON(KMALLOC_MIN_SIZE > 256 ||
 		(KMALLOC_MIN_SIZE & (KMALLOC_MIN_SIZE - 1)));
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - 8 ~ KMALLOC_MIN_SIZE(128) 까지 8byte 단위로 size_index를
+ *   KMALLOC_SHIFT_LOW로 break전까지 초기화한다. 초기화 안된 size_index들은
+ *   기본값을 사용한다.
+ * - MIN_SIZE 까지에 대해서는 최소할당을 지정하는 개념이다.
+ *   ex) MIN_SIZE = 32byte라면 SHIF_LOW는 5가 되고, elem 0 ~ 32까지 5값이 들어가며,
+ *   이는 0 ~ 32byte까지는 32byte를 할당하겠다는것.
+ */
 	for (i = 8; i < KMALLOC_MIN_SIZE; i += 8) {
 		unsigned int elem = size_index_elem(i);
 
@@ -888,6 +936,13 @@ void __init setup_kmalloc_cache_index_table(void)
 		 * The 96 byte size cache is not used if the alignment
 		 * is 64 byte.
 		 */
+/*
+ * IAMROOT, 2022.06.25:
+ * - 72 ~ 96까지는 7로 변경한다. 128byte씩 할당하겠다는 의미.
+ * - 만약 KMALLOC_MIN_SIZE가 64보다 작다면 기본값을 쓰게 되고, 기본값인 1을
+ *   index로 사용하며, 이는 65 ~ 96byte까지의 할당요청은 96byte으로 할당하겠다는것을
+ *   의미 할것이다.
+ */
 		for (i = 64 + 8; i <= 96; i += 8)
 			size_index[size_index_elem(i)] = 7;
 
@@ -899,17 +954,35 @@ void __init setup_kmalloc_cache_index_table(void)
 		 * is 128 byte. Redirect kmalloc to use the 256 byte cache
 		 * instead.
 		 */
+/*
+ * IAMROOT, 2022.06.25:
+ * - 136 ~ 192까지는 8로 변경한다. 256byte씩 할당하겠다는 의미.
+ * - 만약 KMALLOC_MAX_SIZE가 128보다 작다면 기본값인 2를 index로 사용하며,
+ *   이는 129 ~ 256byte까지의 할당 요청은 256byte로 할당하겠다는것을 의미할것이다.
+ */
 		for (i = 128 + 8; i <= 192; i += 8)
 			size_index[size_index_elem(i)] = 8;
 	}
 }
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - @idx, @type에 해당하는 kmalloc_info의 정보로 kmalloc_cache를 생성한다.
+ */
 static void __init
 new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
 {
+/*
+ * IAMROOT, 2022.06.25:
+ * - reclaim와 memcg는 각자의 account flag를 추가한다.
+ */
 	if (type == KMALLOC_RECLAIM) {
 		flags |= SLAB_RECLAIM_ACCOUNT;
 	} else if (IS_ENABLED(CONFIG_MEMCG_KMEM) && (type == KMALLOC_CGROUP)) {
+/*
+ * IAMROOT, 2022.06.25:
+ * - memcg account가 disable이라면 그냥 normal로 사용한다.
+ */
 		if (cgroup_memory_nokmem) {
 			kmalloc_caches[type][idx] = kmalloc_caches[KMALLOC_NORMAL][idx];
 			return;
@@ -935,6 +1008,12 @@ new_kmalloc_cache(int idx, enum kmalloc_cache_type type, slab_flags_t flags)
  * may already have been created because they were needed to
  * enable allocations for slab creation.
  */
+/*
+ * IAMROOT, 2022.06.25:
+ * - KMALLOC_NORMAL ~ KMALLOC_RECLAIM까지 KMALLOC_SHIFT_LOW ~ KMALLOC_SHIFT_HIGH의
+ *   size로 kmalloc cache를 생성한다.
+ *   slab_state = UP이 된다.
+ */
 void __init create_kmalloc_caches(slab_flags_t flags)
 {
 	int i;
@@ -943,7 +1022,16 @@ void __init create_kmalloc_caches(slab_flags_t flags)
 	/*
 	 * Including KMALLOC_CGROUP if CONFIG_MEMCG_KMEM defined
 	 */
+/*
+ * IAMROOT, 2022.06.25:
+ * - config에 따라서 normal, memcg, reclaim type들을 순회한다.
+ */
 	for (type = KMALLOC_NORMAL; type <= KMALLOC_RECLAIM; type++) {
+
+/*
+ * IAMROOT, 2022.06.25:
+ * - KMALLOC_SHIFT_LOW(7) ~ KMALLOC_SHIFT_HIGH(13)
+ */
 		for (i = KMALLOC_SHIFT_LOW; i <= KMALLOC_SHIFT_HIGH; i++) {
 			if (!kmalloc_caches[type][i])
 				new_kmalloc_cache(i, type, flags);
@@ -953,6 +1041,10 @@ void __init create_kmalloc_caches(slab_flags_t flags)
 			 * These have to be created immediately after the
 			 * earlier power of two caches
 			 */
+/*
+ * IAMROOT, 2022.06.25:
+ * - 아래 조건에 따라 index 1, 2에 해당하는 96byte와 192byte kmalloc cache를 만든다.
+ */
 			if (KMALLOC_MIN_SIZE <= 32 && i == 6 &&
 					!kmalloc_caches[type][1])
 				new_kmalloc_cache(1, type, flags);
@@ -962,10 +1054,20 @@ void __init create_kmalloc_caches(slab_flags_t flags)
 		}
 	}
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - size별 kmalloc cache가 다 만들어져서 준비가 끝낫다고 판단.
+ */
 	/* Kmalloc array is now usable */
 	slab_state = UP;
 
 #ifdef CONFIG_ZONE_DMA
+
+/*
+ * IAMROOT, 2022.06.25:
+ * - 0 ~ KMALLOC_SHIFT_HIGH(13)
+ * - i에 해당하는 normal kemalloc_cache를 사용해서 dma kmalloc_caches를 생성한다.
+ */
 	for (i = 0; i <= KMALLOC_SHIFT_HIGH; i++) {
 		struct kmem_cache *s = kmalloc_caches[KMALLOC_NORMAL][i];
 
@@ -998,6 +1100,11 @@ gfp_t kmalloc_fix_flags(gfp_t flags)
  * directly to the page allocator. We use __GFP_COMP, because we will need to
  * know the allocation order to free the pages properly in kfree.
  */
+/*
+ * IAMROOT, 2022.06.25:
+ * - KMALLOC_MAX_CACHE_SIZE보다 큰 size에 대한 kmalloc 요청은 buddy에서
+ *   compound page로 할당받아온다.
+ */
 void *kmalloc_order(size_t size, gfp_t flags, unsigned int order)
 {
 	void *ret = NULL;
@@ -1021,6 +1128,11 @@ void *kmalloc_order(size_t size, gfp_t flags, unsigned int order)
 EXPORT_SYMBOL(kmalloc_order);
 
 #ifdef CONFIG_TRACING
+/*
+ * IAMROOT, 2022.06.25:
+ * - KMALLOC_MAX_CACHE_SIZE보다 큰 size에 대한 kmalloc 요청은 buddy에서
+ *   compound page로 할당받아온다.
+ */
 void *kmalloc_order_trace(size_t size, gfp_t flags, unsigned int order)
 {
 	void *ret = kmalloc_order(size, flags, order);

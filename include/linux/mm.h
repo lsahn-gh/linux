@@ -959,6 +959,10 @@ static inline int page_trans_huge_mapcount(struct page *page,
 }
 #endif
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - kernel linear virt @x에 해당하는 @page를 얻어온다.
+ */
 static inline struct page *virt_to_head_page(const void *x)
 {
 	struct page *page = virt_to_page(x);

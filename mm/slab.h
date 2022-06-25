@@ -310,6 +310,10 @@ static inline bool memcg_slab_pre_alloc_hook(struct kmem_cache *s,
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - **p(obj배열)을 순회하며 memcg charge를 수행한다. obj가 null이거나  경우 uncharge
+ */
 static inline void memcg_slab_post_alloc_hook(struct kmem_cache *s,
 					      struct obj_cgroup *objcg,
 					      gfp_t flags, size_t size,
@@ -345,6 +349,10 @@ static inline void memcg_slab_post_alloc_hook(struct kmem_cache *s,
 	obj_cgroup_put(objcg);
 }
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - objects만큼 memcg uncharge 한다.
+ */
 static inline void memcg_slab_free_hook(struct kmem_cache *s_orig,
 					void **p, int objects)
 {
@@ -525,6 +533,11 @@ static inline struct kmem_cache *slab_pre_alloc_hook(struct kmem_cache *s,
 	return s;
 }
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - @init이 true라면 memset한다.
+ *   memcg_slab_pre_alloc_hook를 실행한다.
+ */
 static inline void slab_post_alloc_hook(struct kmem_cache *s,
 					struct obj_cgroup *objcg, gfp_t flags,
 					size_t size, void **p, bool init)
@@ -632,6 +645,10 @@ static inline int cache_random_seq_create(struct kmem_cache *cachep,
 static inline void cache_random_seq_destroy(struct kmem_cache *cachep) { }
 #endif /* CONFIG_SLAB_FREELIST_RANDOM */
 
+/*
+ * IAMROOT, 2022.06.25:
+ * - memset 여부를 확인한다.
+ */
 static inline bool slab_want_init_on_alloc(gfp_t flags, struct kmem_cache *c)
 {
 	if (static_branch_maybe(CONFIG_INIT_ON_ALLOC_DEFAULT_ON,
