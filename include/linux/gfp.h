@@ -729,6 +729,12 @@ alloc_pages_bulk_array(gfp_t gfp, unsigned long nr_pages, struct page **page_arr
 	return __alloc_pages_bulk(gfp, numa_mem_id(), NULL, nr_pages, NULL, page_array);
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 싱글 페이지들을 요청한 @nr_pages 만큼 할당하고, 
+ * 할당받은 각각의 page 구조체를 출력 인자 @page_array에 대입하여 반환한다.
+ * 할당받은 페이지 수를 반환한다.
+ */
 static inline unsigned long
 alloc_pages_bulk_array_node(gfp_t gfp, int nid, unsigned long nr_pages, struct page **page_array)
 {

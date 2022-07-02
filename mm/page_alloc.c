@@ -7155,6 +7155,13 @@ static inline bool prepare_alloc_pages(gfp_t gfp_mask, unsigned int order,
  *
  * Returns the number of pages on the list or array.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * @nr_pages 만큼의 싱글 페이지들을 할당받아온다. 할당받은 페이지에 해당하는
+ * page 구조체들을 page_array 인자에 저장하고, 
+ * @page_list가 인자로 지정된 경우 @page_list에도 추가한다.
+ * 그런 후 할당 받은 페이지 수를 반환한다.
+ */
 unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 			nodemask_t *nodemask, int nr_pages,
 			struct list_head *page_list,
@@ -7243,6 +7250,11 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
 		goto failed;
 
 	/* Attempt the batch allocation */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 1번의 락을 사용하고, 위에서 찾은 zone의 pcp 버디 캐시에서 
+ * nr_pages 만큼 배치 할당을 해온다.
+ */
 	local_lock_irqsave(&pagesets.lock, flags);
 	pcp = this_cpu_ptr(zone->per_cpu_pageset);
 	pcp_list = &pcp->lists[order_to_pindex(ac.migratetype, 0)];

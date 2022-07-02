@@ -379,6 +379,12 @@ static inline void flush_tlb_range(struct vm_area_struct *vma,
 	__flush_tlb_range(vma, start, end, PAGE_SIZE, false, 0);
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @start ~ @end 영역까지의 모든 inner share core들의 TLB 캐시를 flush 한다.
+ * (내부적으로는 해당영역이 2M를 초과하는 경우에는 모든 TLB 캐시를 flush 하도록
+ *  하고, 그 이하인 경우는 해당 엔트리를 루프를 돌며 TLB 캐시를 flush 한다)
+ */
 static inline void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
 	unsigned long addr;
