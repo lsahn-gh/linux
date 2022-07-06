@@ -161,6 +161,14 @@ PERCPU_RET_OP(add, add, ldadd)
  * which builds inside a module would mean messing directly with the preempt
  * count. If you do this, peterz and tglx will hunt you down.
  */
+/*
+ * IAMROOT, 2022.06.28:
+ * -papago
+ *  선점형 커널에 대한 선점을 다시 활성화할 때 스케줄러에 대한 조건부 호출을
+ *  피하는 것이 좋지만 모듈 내부에서 빌드하는 방식으로 그렇게 하는 것은 선점 횟수를
+ *  직접적으로 엉망으로 만드는 것을 의미합니다. 이렇게 하면 peterz와 tglx가 당신을
+ *  사냥할 것입니다. 
+ */
 #define this_cpu_cmpxchg_double_8(ptr1, ptr2, o1, o2, n1, n2)		\
 ({									\
 	int __ret;							\

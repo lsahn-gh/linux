@@ -750,6 +750,9 @@ EXPORT_SYMBOL(kmalloc_caches);
  * IAMROOT, 2022.06.25:
  * - 192 이하까지 허용한다.
  * - 기본값 1, 2는 특수 케이스.
+ * - arm64 기본값으로 설정완료후 값
+ *   1 ~ 128 byte : 7
+ *   128byte 이후 : 8
  */
 static u8 size_index[24] __ro_after_init = {
 	3,	/* 8 */
@@ -907,6 +910,7 @@ const struct kmalloc_info_struct kmalloc_info[] __initconst = {
  *
  * - size_index를 초기화한다.
  */
+#include "kkr.h"
 void __init setup_kmalloc_cache_index_table(void)
 {
 	unsigned int i;

@@ -155,6 +155,109 @@
  * 			options set. This moves	slab handling out of
  * 			the fast path and disables lockless freelists.
  */
+/*
+ * IAMROOT, 2022.06.28:
+ * -papago
+ * 잠금 순서:
+ * 1. slab_mutex(글로벌 뮤텍스)
+ * 2. node->list_lock(Spinlock)
+ * 3. kmem_cache->cpu_slab->lock(로컬 잠금)
+ * 4. slab_lock(page)(일부 arch에서만 또는 디버깅용)
+ * 5. object_map_lock( 디버깅)
+ *
+ * slab_mutex
+ *
+ * slab_mutex의 역할은 모든 slab의 목록을 보호하고 주요 메타데이터 변경 사항을
+ * slab 캐시 구조에 동기화하는 것입니다.
+ * 또한 메모리 핫플러그 콜백을 동기화합니다.
+ *
+ * slab_lock slab_lock은 페이지 잠금을 둘러싼 래퍼이므로 약간의 스핀록입니다.
+ *
+ * slab_lock은 디버깅과 cmpxchg_double을 수행할 수 없는 아치에만 사용됩니다.
+ * 다음 사항만 보호합니다.
+ *	A. page->freelist	-> List of object free in a page
+ *	B. page->inuse		-> Number of objects in use
+ *	C. page->objects	-> Number of objects in page
+ *	D. page->frozen		-> frozen state
+ *
+ * Frozen slabs 
+ *
+ * 슬라브가 동결되면 목록 관리에서 제외됩니다. CPU별 부분 목록을 제외한 어떤
+ * 목록에도 없습니다. 슬랩을 고정한 프로세서는 페이지에서 목록 작업을 수행할 수
+ * 있는 프로세서입니다. 다른 프로세서는 개체를 여유 목록에 넣을 수 있지만 슬랩을
+ * 고정한 프로세서는 페이지의 여유 목록에서 개체를 검색할 수 있는 유일한
+ * 프로세서입니다.
+ *
+ * list_lock
+ *
+ * list_lock은 각 노드의 부분 및 전체 목록과 부분 슬랩 카운터를 보호합니다.
+ * 가져오면 새 슬라브를 목록에서 추가하거나 제거할 수 없으며 부분 슬라브의 수를
+ * 수정할 수 없습니다.
+ * (슬래브의 총 개수는 목록 잠금을 사용하지 않고 수정할 수 있는 원자 값입니다).
+ *
+ * list_lock은 중앙 집중식 잠금이므로 최대한 사용하지 않습니다.
+ * SLUB이 부분 슬래브를 처리할 필요가 없는 한 중앙 집중식 잠금 없이 작업을
+ * 계속할 수 있습니다. F.e
+ * 슬래브를 채우는 긴 일련의 객체를 할당하는 데에는 목록 잠금이 필요하지 않습니다.
+ *
+ * cpu_slab->lock local lock
+ *
+ * 이 잠금은 통계 카운터를 제외한 모든 kmem_cache_cpu 필드의 느린 경로 조작을
+ * 보호합니다. 이것은 로컬 cpu에 의해서만 조작되는 percpu 구조이므로 잠금은 irq에
+ * 의해 선점되거나 중단되는 것을 방지합니다. 빠른 경로 작업은 대신 잠금 없는
+ * 작업에 의존합니다.
+ * PREEMPT_RT에서 로컬 잠금은 실제로 irq를 비활성화하지 않으므로(따라서 잠금 없는
+ * 작업을 방지함) fastpath 작업도 잠금을 가져와야 하며 더 이상 잠금이 없습니다.
+ *
+ * lockless fastpaths
+ *
+ * 빠른 경로 할당(slab_alloc_node()) 및 해제(do_slab_free())는 percpu slab에서
+ * 충족될 때(cmpxchg_double을 사용할 수 있는 경우, 그렇지 않은 경우* slab_lock이
+ * 사용됨) 완전히 잠기지 않습니다.
+ * 또한 선점이나 마이그레이션 또는 irq를 비활성화하지 않습니다. 그들은 선점되거나
+ * 다른 CPU로 이동되는 것을 감지하기 위해 트랜잭션 ID(tid) 필드에 의존합니다.
+ *
+ * irq, preemption, migrtion considerations
+ *
+ * 인터럽트는 list_lock 또는 local_lock 작업의 일부로 비활성화되거나 slab_lock
+ * 작업 주변에서 비활성화되어 slab 할당자를 irq 컨텍스트에서 안전하게 사용할 수
+ * 있습니다.
+ *
+ * 또한 할당 느린 경로, 대량 할당 및 put_cpu_partial()에서 선점(또는 PREEMPT_RT의
+ * 마이그레이션)이 비활성화되어 로컬 CPU가 프로세스에서 변경되지 않습니다.
+ * kmem_cache_cpu 포인터는 로컬 잠금으로 보호되는 각 섹션에서 재검증할 필요가
+ * 없습니다.
+ *
+ * SLUB은 각 프로세서에 할당하기 위해 하나의 슬랩을 할당합니다.
+ * 할당은 CPU 슬래브라고 하는 이러한 슬래브에서만 발생합니다.
+ *
+ * 자유 요소가 있는 슬래브는 부분 목록에 보관되며 일반 작업 중에는 전체 슬래브에
+ * 대한 목록이 사용되지 않습니다. 전체 슬래브의 개체가 해제되면 해당 슬래브가 부분
+ * 목록에 다시 표시됩니다.
+ * 그렇지 않으면 모든 개체를 스캔할 수 없기 때문에 디버깅 목적으로 전체 슬래브를
+ * 추적합니다.
+ *
+ * 슬래브는 비워지면 해제됩니다. 분해 및 설정이 최소화되므로 빠른 해제 및 할당을
+ * 위해 CPU 캐시당 페이지 할당자에 의존합니다.
+ *
+ * page->frozen
+ *
+ * 슬래브가 고정되어 목록 처리에서 제외됩니다.
+ * 이것은 슬래브가 특정 프로세서에 대한 할당을 만족시키는 것과 같은 목적에
+ * 전념한다는 것을 의미합니다. 객체는 고정된 상태에서 슬래브에서 해제될 수 있지만
+ * slab_free는 일반적인 목록 작업을 건너뜁니다. 슬래브가 더 이상 필요하지 않을
+ * 때 슬래브를 슬래브 목록에 통합하는 것은 슬래브를 보유하는 프로세서에 달려
+ * 있습니다.
+ *
+ * 이 플래그의 한 가지 용도는 할당에 사용되는 슬래브를 표시하는 것입니다.
+ * 그런 다음 이러한 슬래브는 CPU 슬래브가 됩니다. CPU 슬래브에는 슬랩 잠금이
+ * 필요한 일반 여유 목록 외에 여유 개체에 대한 잠금 없는 액세스를 허용하는 추가 
+ * 여유 목록이 있을 수 있습니다.
+ *
+ * SLAB_DEBUG_FLAGS
+ * Slab은 디버그 옵션 세트로 인해 특별한 처리가 필요합니다. 이렇게 하면 슬랩
+ * 처리가 빠른 경로 밖으로 이동하고 잠금 없는 자유 목록이 비활성화됩니다.
+ */
 
 /*
  * We could simply use migrate_disable()/enable() but as long as it's a
@@ -410,6 +513,7 @@ static inline void *get_freepointer_safe(struct kmem_cache *s, void *object)
 /*
  * IAMROOT, 2022.06.18:
  * - @object의 FP에 next object (@fp)를 저장한다.
+ *   *object->fp = fp
  */
 static inline void set_freepointer(struct kmem_cache *s, void *object, void *fp)
 {
@@ -2463,7 +2567,7 @@ static inline void add_partial(struct kmem_cache_node *n,
 
 /*
  * IAMROOT, 2022.06.25:
- * - parital list에서 한개 뺀다.
+ * - partial list에서 한개 뺀다.
  */
 static inline void remove_partial(struct kmem_cache_node *n,
 					struct page *page)
@@ -2517,7 +2621,7 @@ static inline void *acquire_slab(struct kmem_cache *s,
 /*
  * IAMROOT, 2022.06.25:
  * - mode == true
- *   node parital list부터 page를 얻는 상태. 즉 cpu partial 추가해야되는 상태고
+ *   node partial list부터 page를 얻는 상태. 즉 cpu partial 추가해야되는 상태고
  *   이는 전부 cpu에서 사용중인거다.
  */
 	if (mode) {
@@ -2538,7 +2642,7 @@ static inline void *acquire_slab(struct kmem_cache *s,
 
 /*
  * IAMROOT, 2022.06.25:
- * - node parital list에서 막 꺼내온상태이므로 frozen(cpu on)은 false여야한다.
+ * - node partial list에서 막 꺼내온상태이므로 frozen(cpu on)은 false여야한다.
  */
 	VM_BUG_ON(new.frozen);
 
@@ -2578,7 +2682,7 @@ static inline bool pfmemalloc_match(struct page *page, gfp_t gfpflags);
  * IAMROOT, 2022.06.25:
  * @return 최초의 object.
  * @ret_pages 최초의 slab page
- * - @n에 node partial list가 존재하는 경우 cpu parital list로
+ * - @n에 node partial list가 존재하는 경우 cpu partial list로
  *   slabs_cpu_partial(s) / 2 개수만큼 옮기는걸 시도한다.
  */
 static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
@@ -2598,7 +2702,7 @@ static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
 	 */
 /*
  * IAMROOT, 2022.06.18:
- * - kmem_cache_node가 없거나 parital도 없으면 return null.
+ * - kmem_cache_node가 없거나 partial도 없으면 return null.
  */
 	if (!n || !n->nr_partial)
 		return NULL;
@@ -2631,7 +2735,7 @@ static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
 		if (!object) {
 /*
  * IAMROOT, 2022.06.25:
- * - node parital list부터 page를 얻음.
+ * - node partial list부터 page를 얻음.
  */
 			*ret_page = page;
 			stat(s, ALLOC_FROM_PARTIAL);
@@ -2639,7 +2743,7 @@ static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
 		} else {
 /*
  * IAMROOT, 2022.06.25:
- * - page를 cpu parital로 추가한다.
+ * - page를 cpu partial로 추가한다.
  */
 			put_cpu_partial(s, page, 0);
 			stat(s, CPU_PARTIAL_NODE);
@@ -2663,7 +2767,7 @@ static void *get_partial_node(struct kmem_cache *s, struct kmem_cache_node *n,
  */
 /*
  * IAMROOT, 2022.06.25:
- * - remote node parital list에서 slab page를 가져온다.
+ * - remote node partial list에서 slab page를 가져온다.
  */
 static void *get_any_partial(struct kmem_cache *s, gfp_t flags,
 			     struct page **ret_page)
@@ -3056,7 +3160,7 @@ static void __unfreeze_partials(struct kmem_cache *s, struct page *partial_page)
 /*
  * IAMROOT, 2022.06.25:
  * - node에 min_partial보다 많으면 buddy로 page를 discard_page로 연결한다.
- *   아니면 node parital list로 넣는다.
+ *   아니면 node partial list로 넣는다.
  */
 		if (unlikely(!new.inuse && n->nr_partial >= s->min_partial)) {
 			page->next = discard_page;
@@ -3124,11 +3228,11 @@ static void unfreeze_partials_cpu(struct kmem_cache *s,
  * IAMROOT, 2022.06.25:
  * - papago
  *   (__slab_free|get_partial_node에서) 방금 고정된 페이지를 가능한 경우
- *   parital 페이지 슬롯에 넣습니다.
+ *   partial 페이지 슬롯에 넣습니다.
  *
  *   슬롯을 찾지 못한 경우 모든 부분을 노드당 부분 목록으로 이동하기만 하면 됩니다.
  *
- * - cpu parital에 page를 넣는다. @drain 요청이 있다면 node로 보내는 기준으로
+ * - cpu partial에 page를 넣는다. @drain 요청이 있다면 node로 보내는 기준으로
  *   drain을 시도한다.
  */
 static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
@@ -3158,7 +3262,7 @@ static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
 /*
  * IAMROOT, 2022.06.25:
  * - papago
- *   partial 배열이 가득 찼습니다. 기존 집합을 노드별 parital list으로 이동합니다.
+ *   partial 배열이 가득 찼습니다. 기존 집합을 노드별 partial list으로 이동합니다.
  *   임계 영역 외부에서 실제 동결 해제를 연기합니다.
  */
 			page_to_unfreeze = oldpage;
@@ -3193,7 +3297,7 @@ static void put_cpu_partial(struct kmem_cache *s, struct page *page, int drain)
 
 /*
  * IAMROOT, 2022.06.25:
- * - page_to_unfreeze들을 node parital list나 buddy로 되돌려보낸다.
+ * - page_to_unfreeze들을 node partial list나 buddy로 되돌려보낸다.
  */
 	if (page_to_unfreeze) {
 		__unfreeze_partials(s, page_to_unfreeze);
@@ -3505,11 +3609,34 @@ static inline void *get_freelist(struct kmem_cache *s, struct page *page)
 /*
  * IAMROOT, 2022.06.25:
  * - c에 page가 없는 경우.
- *   1. cpu parital에서 가져온다.
+ *   1. cpu partial에서 가져온다.
  *   2. cpu partial에서 없다면 node partial list에서 얻어온다.
- *   3. node parital list에도 없다면 buddy에서 slab page를 할당후 재시도.
+ *   3. node partial list에도 없다면 buddy에서 slab page를 할당후 재시도.
  * - c에 page가 있는 경우
  *   c freelist에서 꺼내온다.
+ *
+ * ---
+ *
+ * ---------------------------------------------------------------------------
+ * buddy
+ * ---------------------------------------------------------------------------
+ * pcp
+ * ---------------------------------------------------------------------------
+ * s                      
+ * ---------------------------------------------------------------------------
+ * n      struct list_head partial(page linked list)
+ * ---------------------------------------------------------------------------
+ * c      
+ *		  struct page *partial
+ *		                |
+ *		                v
+ *                    page.freelist
+ *		  freelist<----------/
+ * ---------------------------------------------------------------------------
+ * page   struct list_head slab_list
+ *        slab_cache
+ *        freelist
+ * ---------------------------------------------------------------------------
  */
 static void *___slab_alloc(struct kmem_cache *s, gfp_t gfpflags, int node,
 			  unsigned long addr, struct kmem_cache_cpu *c)
@@ -3644,7 +3771,7 @@ new_objects:
 
 /*
  * IAMROOT, 2022.06.18:
- * - 요청 @node의 parital에서 slab page를 가져와본다.
+ * - 요청 @node의 partial에서 slab page를 가져와본다.
  *   n->paritial의 slab page가 없으면 freelist는 null.
  */
 	freelist = get_partial(s, gfpflags, node, &page);
@@ -4107,7 +4234,7 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
  * - !new.inuse  = 사용중인 object가 없는 상황. 전부 free object인 상황.
  *                 node freelist에 있다고 생각됨.
  *   !prior      = 해당 page->freelist가 없는상태.
- *   !was_frozen = cpu parital이나 cpu list에 없는 상황.
+ *   !was_frozen = cpu partial이나 cpu list에 없는 상황.
  */
 		if ((!new.inuse || !prior) && !was_frozen) {
 
@@ -4181,7 +4308,7 @@ static void __slab_free(struct kmem_cache *s, struct page *page,
 /*
  * IAMROOT, 2022.06.25:
  * - node partial list
- * - slab page 내의 모든 object가 free 상태이고, 이미 node parital에 많이 있다면
+ * - slab page 내의 모든 object가 free 상태이고, 이미 node partial에 많이 있다면
  *   slab page를 되돌려보낸다.
  */
 	if (unlikely(!new.inuse && n->nr_partial >= s->min_partial))
@@ -4855,7 +4982,22 @@ static struct kmem_cache *kmem_cache_node;
  * IAMROOT, 2022.06.25:
  * - slab page를 kmem_cache_node의 order로 할당받아온후,
  *   할당 받아온 page의 0번째(n) object를 kmem_cache_node->n[node]로 사용하고,
- *   parital list에 page를 넣는다. 1번째 object부터 freelist가 된다.
+ *   partial list에 page를 넣는다. 1번째 object부터 freelist가 된다.
+ *
+ * - new_slab으로 받아온 slab page가 o0 -> o1 -> o2 ->.. 구성이라고할때.
+ *
+ * -- page 구성
+ *  할당 : pcp (or buddy)
+ *  page->freelist = o1
+ *      ->inuse    = 1
+ *      ->frozen   = 0
+ *      ->objects  = object수
+ *      ->slab_cache = kmem_cache_node
+ *
+ *  -- kmem_cache_node 구성
+ *  kmem_cache_node->n[node] = o0
+ *                             o0->partial->tail = page->slab_list
+ *                             o0->nr_partial    = 1
  */
 static void early_kmem_cache_node_alloc(int node)
 {
@@ -4922,6 +5064,28 @@ void __kmem_cache_release(struct kmem_cache *s)
 	free_kmem_cache_nodes(s);
 }
 
+/*
+ * IAMROOT, 2022.06.27:
+ * - slab_state == DOWN : boot_kmem_cache_node초기화
+ *   kmem_cache_node == &boot_kmem_cache_node
+ *
+ *   -- new_slab으로 받아온 slab page가 o0 -> o1 -> o2 ->.. 구성이라고할때.
+ *   
+ *   --- page 구성
+ *     할당 : pcp (or buddy)
+ *     page->freelist = o1
+ *         ->inuse    = 1
+ *         ->frozen   = 0
+ *         ->objects  = kmem_cache_node object수
+ *         ->slab_cache = kmem_cache_node
+ *   
+ *   --- kmem_cache_node 구성
+ *     kmem_cache_node->n[0..n-1] = o0
+ *                                  o0->partial->tail = page->slab_list
+ *                                  o0->nr_partial    = 1
+ *
+ * - slab_state == PARTIAL : boot_kmem_cache 초기화
+ */
 static int init_kmem_cache_nodes(struct kmem_cache *s)
 {
 	int node;
@@ -4934,7 +5098,7 @@ static int init_kmem_cache_nodes(struct kmem_cache *s)
  * - kmem_cache_node를 못만든 상태(slab_state == DOWN) 이면 
  *   early_kmem_cache_node_alloc()를 수행하고, 아니면 kmem_cache_alloc_node를
  *   호출한다.
- * - kmem_cache_node->node[0..node] 까지 생성되고 각 parital list에 page가 등록된다.
+ * - kmem_cache_node->node[0..node] 까지 생성되고 각 partial list에 page가 등록된다.
  */
 		if (slab_state == DOWN) {
 			early_kmem_cache_node_alloc(node);
@@ -4965,7 +5129,7 @@ static void set_min_partial(struct kmem_cache *s, unsigned long min)
 
 /*
  * IAMROOT, 2022.06.25:
- * - cpu parital 기능을 사용한다면 2 ~ 30개의 slab page를 가지고 있게 된다.
+ * - cpu partial 기능을 사용한다면 2 ~ 30개의 slab page를 가지고 있게 된다.
  */
 static void set_cpu_partial(struct kmem_cache *s)
 {
