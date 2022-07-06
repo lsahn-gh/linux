@@ -4399,8 +4399,10 @@ redo:
 
 /*
  * IAMROOT, 2022.06.25:
- * - free 할 object가 c에서 관리되고 있는 경우.
- *   즉 관리되고 있는 page의 slab object가 할당해제요청이 온것.
+ * - free 할 object가 c에서 관리되고 있는 경우 fast-path를 사용하여 
+ *   object를 반환처리를 수행한다..
+ *   즉 cpu 슬랩에서 할당 관리되고 있는 page의 slab object가 할당해제요청이 온것.
+ *   -> 할당한 지 얼마 안된 시점에서 반납이 이루어진 case이다.
  */
 	if (likely(page == c->page)) {
 #ifndef CONFIG_PREEMPT_RT
@@ -4451,6 +4453,11 @@ redo:
 #endif
 		stat(s, FREE_FASTPATH);
 	} else
+/*
+ * IAMROOT, 2022.07.02: 
+ * cpu 슬랩이 처리하고 있는 page가 아닌 경우에는 slow-path 할당 해제 루틴을 
+ * 사용한다.
+ */
 		__slab_free(s, page, head, tail_obj, cnt, addr);
 
 }
@@ -5829,6 +5836,14 @@ size_t __ksize(const void *object)
 }
 EXPORT_SYMBOL(__ksize);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * object의 가상 주소 @x를 인자로 object의 반환(할당 해제)을 요청한다.
+ * -> 가상 주소 @x는 사용자 영역에 있는 가상 주소가 아니라 
+ *                   커널 lm 매핑을 한 커널 가상 주소 영역 중에 하나인 주소이므로
+ *                   이러한 lm 가상 주소는 virt_to_phys, virt_to_page와 같은 
+ *                   API의 사용이 가능하다.
+ */
 void kfree(const void *x)
 {
 	struct page *page;
@@ -5849,7 +5864,7 @@ void kfree(const void *x)
 		free_nonslab_page(page, object);
 		return;
 	}
-	slab_free(page->slab_cache, page, object, NULL, 1, _RET_IP_);
+	slab_free(page->slab_cache, page, object, NULL, 1, _RET_IP_)
 }
 EXPORT_SYMBOL(kfree);
 

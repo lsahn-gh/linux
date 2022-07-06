@@ -58,6 +58,12 @@ static const unsigned int ioremap_max_page_shift = PAGE_SHIFT;
 #endif	/* CONFIG_HAVE_ARCH_HUGE_VMAP */
 
 #ifdef CONFIG_HAVE_ARCH_HUGE_VMALLOC
+/*
+ * IAMROOT, 2022.07.02: 
+ * - vmap_allow_huge: 
+ *   2M 단위의 huge(pmd) 매핑을 허용할지 여부(default=true)
+ * - "nohugevmalloc" 커널 파라미터를 사용하면 huge 매핑을 사용하지 않게 한다.
+ */
 static bool __ro_after_init vmap_allow_huge = true;
 
 static int __init set_nohugevmalloc(char *str)
@@ -86,6 +92,12 @@ static DEFINE_PER_CPU(struct vfree_deferred, vfree_deferred);
 
 static void __vunmap(const void *, int);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 워크큐의 워커 스레드가 호출해주는 함수로 인터럽트 context에서 vfree
+ * 또는 vunmap API를 호출하면 처리를 워커 스레드에 이관하여 처리하도록 
+ * 한다.
+ */
 static void free_work(struct work_struct *w)
 {
 	struct vfree_deferred *p = container_of(w, struct vfree_deferred, wq);
@@ -282,6 +294,11 @@ static int vmap_p4d_range(pgd_t *pgd, unsigned long addr, unsigned long end,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 물리 주소 @phys_addr를 가상 주소 @addr에 @prot 속성으로 매핑하되, 
+ * 매핑 크기는 max_page_shift로 결정한다.
+ */
 static int vmap_range_noflush(unsigned long addr, unsigned long end,
 			phys_addr_t phys_addr, pgprot_t prot,
 			unsigned int max_page_shift)
@@ -576,9 +593,9 @@ static int vmap_small_pages_range_noflush(unsigned long addr, unsigned long end,
  */
 
 /*
- * IAMROOT, 2022.02.05:
- * - TODO
- *   page에 addr을 mapping한다.
+ * IAMROOT, 2022.07.02: 
+ * 요청한 @pages 구조체 배열로 @addr 주소에 @prot 속성으로 매핑한다.
+ * 매핑 단위는 page_shift 값을 사용한다.
  */
 int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
 		pgprot_t prot, struct page **pages, unsigned int page_shift)
@@ -618,6 +635,11 @@ int vmap_pages_range_noflush(unsigned long addr, unsigned long end,
  * RETURNS:
  * 0 on success, -errno on failure.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 요청한 @pages 구조체 배열로 @addr 주소에 @prot 속성으로 매핑한다.
+ * 매핑 단위는 page_shift 값을 사용하고, 매핑 후 flush 한다.
+ */
 static int vmap_pages_range(unsigned long addr, unsigned long end,
 		pgprot_t prot, struct page **pages, unsigned int page_shift)
 {
@@ -628,6 +650,11 @@ static int vmap_pages_range(unsigned long addr, unsigned long end,
 	return err;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 가상 주소 @x가 vmalloc 공간에 존재하는 주소 
+ * 또는 module 공간에 존재하는 여부를 판단
+ */
 int is_vmalloc_or_module_addr(const void *x)
 {
 	/*
@@ -647,6 +674,11 @@ int is_vmalloc_or_module_addr(const void *x)
  * Walk a vmap address to the struct page it maps. Huge vmap mappings will
  * return the tail page that corresponds to the base page address, which
  * matches small vmap mappings.
+ */
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc 공간에서 사용된 @vmalloc_addr 가상 주소로 매핑된
+ * 물리 페이지를 찾아 반환한다.
  */
 struct page *vmalloc_to_page(const void *vmalloc_addr)
 {
@@ -724,10 +756,19 @@ EXPORT_SYMBOL(vmalloc_to_pfn);
 static DEFINE_SPINLOCK(vmap_area_lock);
 static DEFINE_SPINLOCK(free_vmap_area_lock);
 /* Export for kexec only */
+
+/*
+ * IAMROOT, 2022.07.02: 
+ * 1) vmalloc 자료 구조에서 할당 공간을 관리하는 list와 rb tree
+ */
 LIST_HEAD(vmap_area_list);
 static struct rb_root vmap_area_root = RB_ROOT;
 static bool vmap_initialized __read_mostly;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 2) vmalloc 자료 구조에서 lazy free 요청을 관리하는 list와 rb tree
+ */
 static struct rb_root purge_vmap_area_root = RB_ROOT;
 static LIST_HEAD(purge_vmap_area_list);
 static DEFINE_SPINLOCK(purge_vmap_area_lock);
@@ -740,6 +781,10 @@ static DEFINE_SPINLOCK(purge_vmap_area_lock);
  */
 static struct kmem_cache *vmap_area_cachep;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 3) vmalloc 자료 구조에서 free 공간을 관리하는 list와 rb tree
+ */
 /*
  * This linked list is used in pair with free_vmap_area_root.
  * It gives O(1) access to prev/next to perform fast coalescing.
@@ -827,6 +872,11 @@ static struct vmap_area *find_vmap_area_exceed_addr(unsigned long addr)
 	return va;
 }
 
+/*
+ * iamroot, 2022.07.02: 
+ * vmalloc 자료구조에서 @addr에 해당하는 vmap_area를 찾는다.
+ * 못 잧은 경우 null을 반환한다.
+ */
 static struct vmap_area *__find_vmap_area(unsigned long addr)
 {
 	struct rb_node *n = vmap_area_root.rb_node;
@@ -854,6 +904,20 @@ static struct vmap_area *__find_vmap_area(unsigned long addr)
  * steps regarding inserting of conflicting overlap range
  * have to be declined and actually considered as a bug.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * - RB 트리를 @root 또는 @from부터 아래로 탐색하여 @va 영역을 추가할 link를 알아온다.
+ *   이 때 출력 인자 @parent에 노드를 기록한다.
+ *
+ * 예) @va의 시작 주소가 A보다 더 작은 경우
+ *     A 노드의 좌측 link를 반환한다.
+ *
+ *             @root
+ *            /     \
+ *           A      B
+ *          / \    / \
+ *       link
+ */
 static __always_inline struct rb_node **
 find_va_links(struct vmap_area *va,
 	struct rb_root *root, struct rb_node *from,
@@ -862,6 +926,11 @@ find_va_links(struct vmap_area *va,
 	struct vmap_area *tmp_va;
 	struct rb_node **link;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @root가 지정된 경우 link는 root 노드부터 시작하고, 
+ * @root가 지정되지 않는 경우 link는 @from 노드부터 시작한다.
+ */
 	if (root) {
 		link = &root->rb_node;
 		if (unlikely(!*link)) {
@@ -921,6 +990,11 @@ get_va_next_sibling(struct rb_node *parent, struct rb_node **link)
 	return (&parent->rb_right == link ? list->next : list);
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @va를 RB tree의 link 위치로 연결한다. 또한 @head 리스트에도 추가하되, 
+ * 리스트는 시작 주소 순으로 sorting되어 있으므로 해당 위치에 추가한다.
+ */
 static __always_inline void
 link_va(struct vmap_area *va, struct rb_root *root,
 	struct rb_node *parent, struct rb_node **link, struct list_head *head)
@@ -929,6 +1003,25 @@ link_va(struct vmap_area *va, struct rb_root *root,
 	 * VA is still not in the list, but we can
 	 * identify its future previous list_head node.
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * - @parent 노드가 지정된 경우 @link가 @parent 노드의 우측이 아닌 경우에는 
+ *   이전 노드를 대상(head)로 둔다.
+ *
+ * 예) @va의 시작 주소가 A보다 더 작은 경우
+ *     A 노드의 좌측 link를 반환한다.
+ *
+ *             @root
+ *            /     \
+ *           A      B
+ *          / \    / \
+ *       link
+ *    
+ *      list ->   head----A----root----B----
+ * 
+ *    추가후 ->   head----(va)----A----root----B----
+ *               
+ */
 	if (likely(parent)) {
 		head = &rb_entry(parent, struct vmap_area, rb_node)->list;
 		if (&parent->rb_right != link)
@@ -1034,6 +1127,10 @@ augment_tree_propagate_from(struct vmap_area *va)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * va를 vmalloc 자료구조(RB tree + list)에 추가한다.
+ */
 static void
 insert_vmap_area(struct vmap_area *va,
 	struct rb_root *root, struct list_head *head)
@@ -1195,6 +1292,10 @@ is_within_this_va(struct vmap_area *va, unsigned long size,
  * that will accomplish the request corresponding to passing
  * parameters.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * @size와 @align이 확보되는 vmalloc의 빈 공간을 아래부터 탐색하여 반환한다.
+ */
 static __always_inline struct vmap_area *
 find_vmap_lowest_match(unsigned long size,
 	unsigned long align, unsigned long vstart)
@@ -1297,6 +1398,38 @@ enum fit_type {
 	NE_FIT_TYPE = 4		/* no edge fit */
 };
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 찾은 빈 공간(va)에서 align이 적용되어 실제 할당하여 사용할 공간의 edge 
+ * 접촉 여부를 알아온다.
+ *
+ * - FL_FIT_TYPE: 찾은 va의 영역을 모두 다 사용하는 경우
+ * - LE_FIT_TYPE: 찾은 va 내에서 좌측 edge에 접해 할당할 수 있는 경우
+ * - RE_FIT_TYPE: 찾은 va 내에서 우측 edge에 접해 할당할 수 있는 경우
+ * - NE_FIT_TYPE: 찾은 va가 전체 공간의 양측 edge에 하나도 접해있지 않은 상태로
+ *                할당해야 하는 경우 
+ *
+ * 에) NE_FIT_TYPE 
+ *     align이 적용되어 nva_start_addr이 찾은 빈 공간의 va_start를 초과하였고,
+ *     size 만큼 사용하므로 우측 공간도 남아 있는 상태이다.
+ *                            <-----size------>
+ *         +--------------+---------------------------+---------------+
+ *         |      B       |   :        F      :       |       B       |
+ *         +--------------+---------------------------+---------------+
+ *                        ^   ^nva_start_addr         ^
+ *                      va_start                    va_end
+ *
+ * 에) LE_FIT_TYPE 
+ *     align이 적용되었어도 va_start == nva_start_addr 상태이고,
+ *     size를 적용하여 우측 공간이 남아 있는 상태이다.
+ *                        <-----size---------->
+ *         +--------------+---------------------------+---------------+
+ *         |      B       |            F      :       |       B       |
+ *         +--------------+---------------------------+---------------+
+ *                        ^                           ^
+ *                      va_start                    va_end
+ *                     nva_start_addr
+ */
 static __always_inline enum fit_type
 classify_va_fit_type(struct vmap_area *va,
 	unsigned long nva_start_addr, unsigned long size)
@@ -1338,6 +1471,10 @@ adjust_va_to_fit_type(struct vmap_area *va,
 		 * V      NVA      V
 		 * |---------------|
 		 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 전체 공간을 사용해야 하므로 남은 공간에서 제거한다.
+ */
 		unlink_va(va, &free_vmap_area_root);
 		kmem_cache_free(vmap_area_cachep, va);
 	} else if (type == LE_FIT_TYPE) {
@@ -1348,6 +1485,10 @@ adjust_va_to_fit_type(struct vmap_area *va,
 		 * V  NVA  V   R
 		 * |-------|-------|
 		 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 남은 우측(R) 공간으로 free(va) 공간의 시작 위치를 변경한다.
+ */
 		va->va_start += size;
 	} else if (type == RE_FIT_TYPE) {
 		/*
@@ -1357,6 +1498,10 @@ adjust_va_to_fit_type(struct vmap_area *va,
 		 *     L   V  NVA  V
 		 * |-------|-------|
 		 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 남은 좌측(L) 공간으로 free(va) 공간의 끝 위치를 변경한다.
+ */
 		va->va_end = nva_start_addr;
 	} else if (type == NE_FIT_TYPE) {
 		/*
@@ -1366,6 +1511,10 @@ adjust_va_to_fit_type(struct vmap_area *va,
 		 *   L V  NVA  V R
 		 * |---|-------|---|
 		 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 남은 좌측(L) 및 우측(R) 공간으로 free(va) 공간의 시작과 끝 위치를 변경한다.
+ */
 		lva = __this_cpu_xchg(ne_fit_preload_node, NULL);
 		if (unlikely(!lva)) {
 			/*
@@ -1412,6 +1561,11 @@ adjust_va_to_fit_type(struct vmap_area *va,
 		return -1;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 빈 공간의 사이즈 정보가 달라진 경우 상위 노드로 전파를 한다.
+ * 그리고, 좌 우측으로 갈라진 경우 좌측의 빈 공간을 자료구조에 추가한다.
+ */
 	if (type != FL_FIT_TYPE) {
 		augment_tree_propagate_from(va);
 
@@ -1427,6 +1581,12 @@ adjust_va_to_fit_type(struct vmap_area *va,
  * Returns a start address of the newly allocated area, if success.
  * Otherwise a vend is returned that indicates failure.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * @size 및 @align이 확보되는 @vstart ~ @vend 내(보통 vmalloc 공간)의 
+ * 빈 공간을 아래부터 탐색하고, @align에 맞춘 시작 주소를 반환한다.
+ * 만일 실패하면 @vend가 반환된다.
+ */
 static __always_inline unsigned long
 __alloc_vmap_area(unsigned long size, unsigned long align,
 	unsigned long vstart, unsigned long vend)
@@ -1436,6 +1596,10 @@ __alloc_vmap_area(unsigned long size, unsigned long align,
 	enum fit_type type;
 	int ret;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @size와 @align이 확보되는 vmalloc의 빈 공간을 아래부터 탐색하여 알아온다.
+ */
 	va = find_vmap_lowest_match(size, align, vstart);
 	if (unlikely(!va))
 		return vend;
@@ -1449,6 +1613,10 @@ __alloc_vmap_area(unsigned long size, unsigned long align,
 	if (nva_start_addr + size > vend)
 		return vend;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 찾은 free 공간 va의 edge 영역에 할당할 영역이 접하는 타입을 알아온다.
+ */
 	/* Classify what we have found. */
 	type = classify_va_fit_type(va, nva_start_addr, size);
 	if (WARN_ON_ONCE(type == NOTHING_FIT))
@@ -1513,6 +1681,11 @@ preload_this_cpu_lock(spinlock_t *lock, gfp_t gfp_mask, int node)
  * Allocate a region of KVA of the specified size and alignment, within the
  * vstart and vend.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * @vstart ~ @vend 영역내에서 빈 공간을 아래부터 탐색하여 찾은 후 @align에 
+ * 맞춘 주소로 vmap_area 정보를 할당하여 채운 후 반환한다.
+ */
 static struct vmap_area *alloc_vmap_area(unsigned long size,
 				unsigned long align,
 				unsigned long vstart, unsigned long vend,
@@ -1528,9 +1701,17 @@ static struct vmap_area *alloc_vmap_area(unsigned long size,
 	BUG_ON(offset_in_page(size));
 	BUG_ON(!is_power_of_2(align));
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc_init()이 완료되지 않은 시점에 이 함수를 요청하면 -EBUSY 에러를 반환.
+ */
 	if (unlikely(!vmap_initialized))
 		return ERR_PTR(-EBUSY);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc() 및 vmap() API는 sleepable로 운영된다. 따라서 reclaim을 허용한다.
+ */
 	might_sleep();
 	gfp_mask = gfp_mask & GFP_RECLAIM_MASK;
 
@@ -1545,6 +1726,10 @@ static struct vmap_area *alloc_vmap_area(unsigned long size,
 	kmemleak_scan_area(&va->rb_node, SIZE_MAX, gfp_mask);
 
 retry:
+/*
+ * IAMROOT, 2022.07.02: 
+ * align 및 size 정보로 빈 공간을 찾아 align에 정렬한 주소 addr을 알아온다.
+ */
 	preload_this_cpu_lock(&free_vmap_area_lock, gfp_mask, node);
 	addr = __alloc_vmap_area(size, align, vstart, vend);
 	spin_unlock(&free_vmap_area_lock);
@@ -1556,6 +1741,10 @@ retry:
 	if (unlikely(addr == vend))
 		goto overflow;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 알아온 시작주소 addr을 사용하여 va를 구성후 vmalloc(vmap) 자료 구조에 추가
+ */
 	va->va_start = addr;
 	va->va_end = addr + size;
 	va->vm = NULL;
@@ -1627,6 +1816,13 @@ EXPORT_SYMBOL_GPL(unregister_vmap_purge_notifier);
  * code, and it will be simple to change the scale factor if we find that it
  * becomes a problem on bigger systems.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * = log2(online cpu + 1) * 32M에 해당하는 페이지 수
+ *
+ * 예) 4 cpus
+ *     3 * 32M에 해당하는 page 수
+ */
 static unsigned long lazy_max_pages(void)
 {
 	unsigned int log;
@@ -1662,6 +1858,12 @@ void set_iounmap_nonlazy(void)
 /*
  * Purges all lazily-freed vmap areas.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * lazy free 상태의 vmap area들을 모두 vmalloc 자료 구조의 free 영역을 
+ * 관리하는 자료 구조(RB tree + list)로 옮기고 해당 영역에 대해 
+ * 모든 inner-share cpu들에 대해 TLB flush를 수행한다.
+ */
 static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 {
 	unsigned long resched_threshold;
@@ -1670,6 +1872,11 @@ static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 
 	lockdep_assert_held(&vmap_purge_lock);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * purge용 자료 구조 rb tree에는 RB_ROOT로 초기화하고,
+ * list의 내용은 local로 옮긴다.
+ */
 	spin_lock(&purge_vmap_area_lock);
 	purge_vmap_area_root = RB_ROOT;
 	list_replace_init(&purge_vmap_area_list, &local_pure_list);
@@ -1678,6 +1885,11 @@ static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 	if (unlikely(list_empty(&local_pure_list)))
 		return false;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * purge 리스트의 첫 엔트리 시작 주소 부터 마지막 엔트리 끝 주소까지
+ * tlb flush를 진행한다.
+ */
 	start = min(start,
 		list_first_entry(&local_pure_list,
 			struct vmap_area, list)->va_start);
@@ -1686,9 +1898,18 @@ static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 		list_last_entry(&local_pure_list,
 			struct vmap_area, list)->va_end);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * start ~ end 범위까지 모든 inner-share core들의 TLB 캐시를 flush 한다.
+ */
 	flush_tlb_kernel_range(start, end);
 	resched_threshold = lazy_max_pages() << 1;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 기존에 사용 중인 area들을 모두 local로 담아왔었는데, 이 번에는 이들을 모두
+ * free 영역의 자료 구조로 추가한다.
+ */
 	spin_lock(&free_vmap_area_lock);
 	list_for_each_entry_safe(va, n_va, &local_pure_list, list) {
 		unsigned long nr = (va->va_end - va->va_start) >> PAGE_SHIFT;
@@ -1734,6 +1955,12 @@ static void try_purge_vmap_area_lazy(void)
 /*
  * Kick off a purge of the outstanding lazy areas.
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * lazy free 상태의 vmap area들을 모두 vmalloc 자료 구조의 free 영역을 
+ * 관리하는 자료 구조(RB tree + list)로 옮기고 해당 영역에 대해 
+ * 모든 inner-share cpu들에 대해 TLB flush를 수행한다.
+ */
 static void purge_vmap_area_lazy(void)
 {
 	mutex_lock(&vmap_purge_lock);
@@ -1746,6 +1973,12 @@ static void purge_vmap_area_lazy(void)
  * Free a vmap area, caller ensuring that the area has been unmapped
  * and flush_cache_vunmap had been called for the correct range
  * previously.
+ */
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc 자료 구조에서 vmap_area 구조체를 unlink하고, 
+ * purge용 rb tree와 list에 추가한다.
+ * 단 일정 수 이상의 lazy된 페이지들인 경우 한꺼번에 TLB flush 처리한다.
  */
 static void free_vmap_area_noflush(struct vmap_area *va)
 {
@@ -1767,6 +2000,11 @@ static void free_vmap_area_noflush(struct vmap_area *va)
 	spin_unlock(&purge_vmap_area_lock);
 
 	/* After this point, we may free va at any time */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 적절한 용량을 초과하는 nr_lazy 수인 경우 해당 vmap area들을 free 자료 구조로
+ * 이동시키고, inner-share core들을 대상으로 lazy된 TLB flush를 수행한다.
+ */
 	if (unlikely(nr_lazy > lazy_max_pages()))
 		try_purge_vmap_area_lazy();
 }
@@ -1776,14 +2014,33 @@ static void free_vmap_area_noflush(struct vmap_area *va)
  */
 static void free_unmap_vmap_area(struct vmap_area *va)
 {
+/*
+ * IAMROOT, 2022.07.02: 
+ * ARM64의 경우 아래 API는 아무일도 하지 않는다.
+ */
 	flush_cache_vunmap(va->va_start, va->va_end);
+/*
+ * IAMROOT, 2022.07.02: 
+ * 해당 영역을 모두 페이지 테이블에서 언매핑한다.
+ */
 	vunmap_range_noflush(va->va_start, va->va_end);
 	if (debug_pagealloc_enabled_static())
 		flush_tlb_kernel_range(va->va_start, va->va_end);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc 자료 구조에서 vmap_area 구조체를 unlink하고, 
+ * purge용 rb tree와 list에 추가한다.
+ * 단 일정 수 이상의 lazy된 페이지들인 경우 한꺼번에 TLB flush 처리한다.
+ */
 	free_vmap_area_noflush(va);
 }
 
+/*
+ * iamroot, 2022.07.02: 
+ * vmalloc 자료구조에서 @addr에 해당하는 vmap_area를 찾는다.
+ * 못 잧은 경우 null을 반환한다.
+ */
 static struct vmap_area *find_vmap_area(unsigned long addr)
 {
 	struct vmap_area *va;
@@ -2308,7 +2565,17 @@ static void vmap_init_free_space(void)
 	 *  |           The KVA space           |
 	 *  |<--------------------------------->|
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 위의 그림은 4개의 va(busy)가 등록되어 있다.
+ * 이후 추가 2개의 va(free)가 free 공간 관리용 RB 트리와 list에 추가될 예정이다.
+ */
 	list_for_each_entry(busy, &vmap_area_list, list) {
+/*
+ * IAMROOT, 2022.07.02: 
+ * busy 공간 사이의 free 영역용 공간을 할당받아 초기화한 후,
+ * free 공간 관리용 RB 트리와 list에 추가한다.
+ */
 		if (busy->va_start - vmap_start > 0) {
 			free = kmem_cache_zalloc(vmap_area_cachep, GFP_NOWAIT);
 			if (!WARN_ON_ONCE(!free)) {
@@ -2324,6 +2591,10 @@ static void vmap_init_free_space(void)
 		vmap_start = busy->va_end;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 마지막 빈 공간에 대한 처리
+ */
 	if (vmap_end - vmap_start > 0) {
 		free = kmem_cache_zalloc(vmap_area_cachep, GFP_NOWAIT);
 		if (!WARN_ON_ONCE(!free)) {
@@ -2346,8 +2617,19 @@ void __init vmalloc_init(void)
 	/*
 	 * Create the cache for vmap_area objects.
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * - vmap_area 구조체를 위해 슬랩 캐시를 준비한다.
+ * - KMEM_CACHE() 매크로를 사용하는 경우 size와 align은 해당 구조체 크기만큼 
+ *   내부에서 자동 지정한다.
+ */
 	vmap_area_cachep = KMEM_CACHE(vmap_area, SLAB_PANIC);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 전역 vmap_block_queue 및 전역 vfree_deferred를 초기화한다.
+ *    vfree_deferred의 wq에는 free_work 함수를 호출할 수 있도록 준비한다.
+ */
 	for_each_possible_cpu(i) {
 		struct vmap_block_queue *vbq;
 		struct vfree_deferred *p;
@@ -2360,6 +2642,11 @@ void __init vmalloc_init(void)
 		INIT_WORK(&p->wq, free_work);
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * map_kernel_segment() -> vm_area_add_early()을 통해 등록한 영역을 
+ * 실제 vmalloc 자료 구조(RB tree + list)에 추가한다.
+ */
 	/* Import existing vmlist entries. */
 	for (tmp = vmlist; tmp; tmp = tmp->next) {
 		va = kmem_cache_zalloc(vmap_area_cachep, GFP_NOWAIT);
@@ -2375,10 +2662,19 @@ void __init vmalloc_init(void)
 	/*
 	 * Now we can initialize a free vmap space.
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * 빈 공간에 대한 자료 구조도 빈 공간용 vmallo 자료 구조(RB tree + list)에 
+ * 추가한다.
+ */
 	vmap_init_free_space();
 	vmap_initialized = true;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vm 구조체를 전달받은 인자 값으로 채워 초기화한다.
+ */
 static inline void setup_vmalloc_vm_locked(struct vm_struct *vm,
 	struct vmap_area *va, unsigned long flags, const void *caller)
 {
@@ -2389,6 +2685,10 @@ static inline void setup_vmalloc_vm_locked(struct vm_struct *vm,
 	va->vm = vm;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vm 구조체를 전달받은 인자 값으로 채워 초기화한다.
+ */
 static void setup_vmalloc_vm(struct vm_struct *vm, struct vmap_area *va,
 			      unsigned long flags, const void *caller)
 {
@@ -2408,6 +2708,11 @@ static void clear_vm_uninitialized_flag(struct vm_struct *vm)
 	vm->flags &= ~VM_UNINITIALIZED;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @start ~ @end까지 영역내에서 @size 및 @align에 해당하는 빈 공간을 찾아 
+ * vm_struct를 할당하고, 정보를 구성한 후 반환한다.
+ */
 static struct vm_struct *__get_vm_area_node(unsigned long size,
 		unsigned long align, unsigned long shift, unsigned long flags,
 		unsigned long start, unsigned long end, int node,
@@ -2430,9 +2735,18 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	if (unlikely(!area))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc 할당마다 보통 1페이지의 guard 페이지를 둔다.(매핑하지 않은 상태)
+ */
 	if (!(flags & VM_NO_GUARD))
 		size += PAGE_SIZE;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * @start ~ @end 영역내에서 빈 공간을 아래부터 탐색하여 찾은 후 @align에 
+ * 맞춘 주소로 vmap_area 정보를 할당해온다.
+ */
 	va = alloc_vmap_area(size, align, start, end, node, gfp_mask);
 	if (IS_ERR(va)) {
 		kfree(area);
@@ -2441,6 +2755,16 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 
 	kasan_unpoison_vmalloc((void *)va->va_start, requested_size);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * vm 구조체를 전달받은 인자 값으로 채워 초기화한다.
+ *
+ *      vmap_area(va)       /-->  vm_struct(area)
+ *      -------------      /      ---------------
+ *      va_start          /       addr
+ *      va_end           |        size
+ *      vm --------------+
+ */
 	setup_vmalloc_vm(area, va, flags, caller);
 
 	return area;
@@ -2491,6 +2815,11 @@ struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
  *
  * Return: the area descriptor on success or %NULL on failure.
  */
+/*
+ * iamroot, 2022.07.02: 
+ * vmalloc 자료구조에서 @addr에 해당하는 vmap_area를 찾은 후 연결된 vm_struct를 
+ * 반홚나다. 못 잧은 경우 null을 반환한다.
+ */
 struct vm_struct *find_vm_area(const void *addr)
 {
 	struct vmap_area *va;
@@ -2511,6 +2840,11 @@ struct vm_struct *find_vm_area(const void *addr)
  * on SMP machines, except for its size or flags.
  *
  * Return: the area descriptor on success or %NULL on failure.
+ */
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc 자료 구조에서 @addr 주소로 등록되어 있는 vmap_area를 찾은 후 
+ * 연결된 vm_struct의 매핑들을 해제한다.
  */
 struct vm_struct *remove_vm_area(const void *addr)
 {
@@ -2598,6 +2932,11 @@ static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 	set_area_direct_map(area, set_direct_map_default_noflush);
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 가상 주소 @addr을 언매핑한다. @deallocate_pages 요청이 1인 경우 
+ * 메모리도 회수한다. (vfree에서 요청한 경우 1, vunmap에서 요청한 경우 0)
+ */
 static void __vunmap(const void *addr, int deallocate_pages)
 {
 	struct vm_struct *area;
@@ -2609,6 +2948,11 @@ static void __vunmap(const void *addr, int deallocate_pages)
 			addr))
 		return;
 
+/*
+ * iamroot, 2022.07.02: 
+ * vmalloc 자료구조에서 @addr에 해당하는 vmap_area를 찾은 후 연결된 vm_struct를 
+ * 찾아온다.
+ */
 	area = find_vm_area(addr);
 	if (unlikely(!area)) {
 		WARN(1, KERN_ERR "Trying to vfree() nonexistent vm area (%p)\n",
@@ -2623,6 +2967,11 @@ static void __vunmap(const void *addr, int deallocate_pages)
 
 	vm_remove_mappings(area, deallocate_pages);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 언매핑 후 @deallocate_pages(vfreei 요청)==1 이면 모든 관련 페이지들을
+ * 할당 해제한다.
+ */
 	if (deallocate_pages) {
 		unsigned int page_order = vm_area_page_order(area);
 		int i;
@@ -2650,6 +2999,13 @@ static inline void __vfree_deferred(const void *addr)
 	 * implementation is lockless, so it works even if we are adding to
 	 * another cpu's list. schedule_work() should be fine with this too.
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * vfree 해야할 주소 @addr을 per-cpu 리스트인 vfee_deferred 리스트에 추가한 후
+ * 워크큐를 스케쥴-인하여 워커스레드가 free_work() 함수를 호출하여 
+ * vunmap 처리를 수행하도록 한다.
+ */
+
 	struct vfree_deferred *p = raw_cpu_ptr(&vfree_deferred);
 
 	if (llist_add((struct llist_node *)addr, &p->list))
@@ -2674,6 +3030,12 @@ void vfree_atomic(const void *addr)
 	__vfree_deferred(addr);
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * - vmalloc으로 할당한 메모리를 할당 해제하고, 언매핑한다.
+ *   (인터럽트 핸들러에서 호출된 경우 워커스레드를 사용하여 
+ *    deferred 처리를 수행한다.)
+ */
 static void __vfree(const void *addr)
 {
 	if (unlikely(in_interrupt()))
@@ -2698,6 +3060,10 @@ static void __vfree(const void *addr)
  * Must not be called in NMI context (strictly speaking, it could be
  * if we have CONFIG_ARCH_HAVE_NMI_SAFE_CMPXCHG, but making the calling
  * conventions for vfree() arch-dependent would be a really bad idea).
+ */
+/*
+ * IAMROOT, 2022.07.02: 
+ * vmalloc으로 할당한 메모리를 할당 해제하고, 언매핑한다.
  */
 void vfree(const void *addr)
 {
@@ -2838,6 +3204,12 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 	 * to fails, fallback to a single page allocator that is
 	 * more permissive.
 	 */
+/*
+ * IAMROOT, 2022.07.02: 
+ * order=0이고, node가 지정된 경우 최대 100개 이내로 bulk 방식으로 
+ * 싱글 페이지들을 할당해온다.
+ */
+
 	if (!order && nid != NUMA_NO_NODE) {
 		while (nr_allocated < nr_pages) {
 			unsigned int nr, nr_pages_request;
@@ -2872,6 +3244,11 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 
 	/* High-order pages or fallback path if "bulk" fails. */
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 싱글 페이지들을 buik 방식으로 할당하지 못하엿거나, huge(pmd) 단위로
+ * 할당해야 하는 경우 이 루틴을 사용한다.
+ */
 	while (nr_allocated < nr_pages) {
 		if (nid == NUMA_NO_NODE)
 			page = alloc_pages(gfp, order);
@@ -2895,6 +3272,10 @@ vm_area_alloc_pages(gfp_t gfp, int nid,
 	return nr_allocated;
 }
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * area 정보(vm_struct)로 single 페이지들을 할당하고, 매핑한다.
+ */
 static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 				 pgprot_t prot, unsigned int page_shift,
 				 int node)
@@ -2906,11 +3287,21 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 	unsigned int nr_small_pages = size >> PAGE_SHIFT;
 	unsigned int page_order;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * area 정보의 **page에 필요한 페이지 수만큼 page 구조체들을 할당할 사이즈를 
+ * 정한다.
+ */
 	array_size = (unsigned long)nr_small_pages * sizeof(struct page *);
 	gfp_mask |= __GFP_NOWARN;
 	if (!(gfp_mask & (GFP_DMA | GFP_DMA32)))
 		gfp_mask |= __GFP_HIGHMEM;
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * page 배열이 1 페이지 사이즈를 초과하는 경우 vmalloc을 통해서 할당받고,
+ * 그렇지 않은 경우 kmalloc으로 할당해온다.
+ */
 	/* Please note that the recursion is strictly bounded. */
 	if (array_size > PAGE_SIZE) {
 		area->pages = __vmalloc_node(array_size, 1, nested_gfp, node,
@@ -2927,9 +3318,21 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		return NULL;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * huge 매핑이 허용된 경우 해당 order를 산출하여 vm에 지정한다.
+ * huge 매핑이 아닌 경우 order 0를 vm에 지정한다.
+ * 예) huge허용: page_shift=20, PAGE_SHIFT=12
+ *     -> order=8 (4K 페이지가 2^8=256인 즉, 2MB)
+ */
 	set_vm_area_page_order(area, page_shift - PAGE_SHIFT);
 	page_order = vm_area_page_order(area);
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 싱글 페이지 또는 huge page들을 할당받고, 
+ * 각 page 구조체들을 area->pages에 알아온다.
+ */
 	area->nr_pages = vm_area_alloc_pages(gfp_mask, node,
 		page_order, nr_small_pages, area->pages);
 
@@ -2946,6 +3349,10 @@ static void *__vmalloc_area_node(struct vm_struct *area, gfp_t gfp_mask,
 		goto fail;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 정상적으로 할당받아온 경우 매핑을 수행한다.
+ */
 	if (vmap_pages_range(addr, addr + size, prot, area->pages,
 			page_shift) < 0) {
 		warn_alloc(gfp_mask, NULL,
@@ -2979,6 +3386,11 @@ fail:
  *
  * Return: the address of the area or %NULL on failure
  */
+/*
+ * IAMROOT, 2022.07.02: 
+ * @start ~ @end 가상 공간 범위내에서 @align 적용된 @size 만큼의 
+ * 빈 공간을 탐색하여 싱글 물리 페이지들을 할당하고, @prot 속성으로 매핑한다.
+ */
 void *__vmalloc_node_range(unsigned long size, unsigned long align,
 			unsigned long start, unsigned long end, gfp_t gfp_mask,
 			pgprot_t prot, unsigned long vm_flags, int node,
@@ -3000,6 +3412,12 @@ void *__vmalloc_node_range(unsigned long size, unsigned long align,
 		return NULL;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 시스템은 huge 매핑을 지원하지만 사용자 요청에 huge 매핑을 사용하지 않도록
+ * 요청하지 않은 경우이다. 이러한 경우 size와 align 값은 huge(pmd=2M) 매핑 
+ * 단위로 정렬하여 사용한다.
+ */
 	if (vmap_allow_huge && !(vm_flags & VM_NO_HUGE_VMAP)) {
 		unsigned long size_per_node;
 
@@ -3023,6 +3441,11 @@ void *__vmalloc_node_range(unsigned long size, unsigned long align,
 	}
 
 again:
+/*
+ * IAMROOT, 2022.07.02: 
+ * start ~ end까지 영역내에서 real_size 및 align에 해당하는 빈 공간을 찾아 
+ * vm_struct를 할당하고, page 구조체 배열 들의 정보를 구성하여 알아온다.
+ */
 	area = __get_vm_area_node(real_size, align, shift, VM_ALLOC |
 				  VM_UNINITIALIZED | vm_flags, start, end, node,
 				  gfp_mask, caller);
@@ -3033,6 +3456,11 @@ again:
 		goto fail;
 	}
 
+/*
+ * IAMROOT, 2022.07.02: 
+ *  area(vm_struct) 정보에 있는 pages 구조체 배열을 사용하여 싱글 페이지(또는
+ *  huge 페이지)들을 할당받은 후 가상 주소 krea->addr 부터 매핑한다.
+ */
 	addr = __vmalloc_area_node(area, gfp_mask, prot, shift, node);
 	if (!addr)
 		goto fail;
@@ -3112,6 +3540,28 @@ EXPORT_SYMBOL(__vmalloc);
  * use __vmalloc() instead.
  *
  * Return: pointer to the allocated memory or %NULL on error
+ */
+/*
+ * IAMROOT, 2022.07.02: 
+ * - vmalloc 공간에 연속된 메모리를 할당한다.
+ *    (내부적으로 요청한 @size 만큼의 single 페이지들을 할당받아 
+ *     vmalloc 공간의 하단 공간 중 빈 공간을 찾아 vmap()을 통해 매핑한다.)
+ * - vmalloc 공간의 상위 부분은 per-cpu의 chunk들이 추가될 때 사용된다.
+ *   그리고 vmalloc 및 vmap API를 통해 아래 공간의 빈 공간 부터 검색되어 
+ *   사용된다.
+ *
+ *    vmalloc 공간
+ *    +---------------------------+
+ *    |         per-cpu           |
+ *    |            :              |
+ *    |            v              |
+ *    |                           |
+ *    |                           |
+ *    |                           |
+ *    |            ^              |
+ *    |            :              |
+ *    |         vmalloc()         |
+ *    +---------------------------+
  */
 void *vmalloc(unsigned long size)
 {
@@ -3972,6 +4422,15 @@ static const struct seq_operations vmalloc_op = {
 	.show = s_show,
 };
 
+/*
+ * IAMROOT, 2022.07.02: 
+ * 
+ * $ echo 1 > /proc/sys/kernel/kptr_restrict (root 권한 필요)
+ * $ cat /proc/vmallocinfo
+ *
+ * 0xffff800000000000-0xffff800000002000    8192 bpf_jit_binary_alloc+0xa8/0x124 pages=1 vmalloc N0=1
+ * 0xffff800000002000-0xffff800000004000    8192 bpf_jit_binary_alloc+0xa8/0x124 pages=1 vmalloc N0=1
+ */
 static int __init proc_vmalloc_init(void)
 {
 	if (IS_ENABLED(CONFIG_NUMA))
