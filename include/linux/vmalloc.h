@@ -181,6 +181,13 @@ extern int remap_vmalloc_range(struct vm_area_struct *vma, void *addr,
  * relied upon the compiler to optimize calls out if ARCH_PAGE_TABLE_SYNC_MASK
  * is 0.
  */
+/*
+ * IAMROOT, 2022.07.08:
+ * - papago
+ *   arch_sync_kernel_mappings()에 대한 기본 구현은 없습니다.
+ *   ARCH_PAGE_TABLE_SYNC_MASK가 0인 경우 호출을 최적화하기 위해
+ *   컴파일러에 의존합니다.
+ */
 void arch_sync_kernel_mappings(unsigned long start, unsigned long end);
 
 /*

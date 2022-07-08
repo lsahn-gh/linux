@@ -7254,6 +7254,9 @@ unsigned long __alloc_pages_bulk(gfp_t gfp, int preferred_nid,
  * IAMROOT, 2022.07.02: 
  * 1번의 락을 사용하고, 위에서 찾은 zone의 pcp 버디 캐시에서 
  * nr_pages 만큼 배치 할당을 해온다.
+ * - pcp에서 할당을 못받아 왓을 경우 slowpath로 single page만 받아오고 끝낸다
+ *   vm_area_alloc_pages()에서 불러와졌을 경우 나머지 page들은
+ *   vm_area_alloc_pages()에서 slowpath로 할당받을것이다.
  */
 	local_lock_irqsave(&pagesets.lock, flags);
 	pcp = this_cpu_ptr(zone->per_cpu_pageset);
@@ -7296,6 +7299,10 @@ out:
 failed_irq:
 	local_unlock_irqrestore(&pagesets.lock, flags);
 
+/*
+ * IAMROOT, 2022.07.08:
+ * - 실패했을경우 single page만 slowpath로 할당한다.
+ */
 failed:
 	page = __alloc_pages(gfp, 0, preferred_nid, nodemask);
 	if (page) {

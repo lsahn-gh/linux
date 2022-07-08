@@ -322,6 +322,11 @@ static int vmap_range_noflush(unsigned long addr, unsigned long end,
 			break;
 	} while (pgd++, phys_addr += (next - addr), addr = next, addr != end);
 
+/*
+ * IAMROOT, 2022.07.08:
+ * - arch_sync_kernel_mappings()은 기본 구현이 없다. ARCH_PAGE_TABLE_SYNC_MASK
+ *   가 0이면 compiler에 의해서 삭제되고 arm64는 0이므로 삭제.
+ */
 	if (mask & ARCH_PAGE_TABLE_SYNC_MASK)
 		arch_sync_kernel_mappings(start, end);
 
@@ -990,6 +995,34 @@ get_va_next_sibling(struct rb_node *parent, struct rb_node **link)
 	return (&parent->rb_right == link ? list->next : list);
 }
 
+#include "kkr.h"
+static void kkr_show_list(struct list_head *head)
+{
+	struct vmap_area *va;
+	struct vmap_area *next;
+
+	PR_KKR(1, 0, "head : %px\n", head);
+	list_for_each_entry_safe(va, next, head, list) {
+		PR_KKR(1, 0, "\tva : %px(%lx, %lx)\n", va,  va->va_start, va->va_end);
+	}
+}
+
+static void kkr_show_rbtree(struct rb_root *root)
+{
+	struct vmap_area *va;
+	struct vmap_area *next;
+
+	PR_KKR(1, 0, "root : %px\n", root);
+	rbtree_postorder_for_each_entry_safe(va, next, root, rb_node)
+	{
+		struct rb_node *rb = &va->rb_node;
+		PR_KKR(1, 0, "\tva : %px(%lx,%lx) p : %px l : %px r: %px\n",
+			   va, va->va_start, va->va_end, (void *)rb->__rb_parent_color,
+			   rb_entry(rb->rb_left, struct vmap_area, rb_node),
+			   rb_entry(rb->rb_right, struct vmap_area, rb_node));
+	}
+
+}
 /*
  * IAMROOT, 2022.07.02: 
  * @va를 RB tree의 link 위치로 연결한다. 또한 @head 리스트에도 추가하되, 
@@ -1021,6 +1054,44 @@ link_va(struct vmap_area *va, struct rb_root *root,
  * 
  *    추가후 ->   head----(va)----A----root----B----
  *               
+ * - va가 parent의 left에 있는 경우
+ *   parent보다 작으므로 list의 tail쪽에 위치해야 되므로 head를 head->prev로
+ *   고친다.
+ * - va가 parent의 right에 있는 경우
+ *   parent보다 크므로 list next에 위치해야 되므로 그냥 하면된다.
+ *
+ * ex) 다음과 같은 구조에서 0이 들어올경우
+ * 1) 0 입력전
+ *         tree             list
+ *             2          1----->2----->3------>1..
+ *           /  \         ^head         ^head->prev
+ *          1     3
+ *        /
+ *      link(0이 들어올 위치)
+ *
+ * 2) head 변경
+ *
+ * 1----->2----->3------>1..
+ *               ^head
+ * 3) 0입력
+ *
+ * 1----->2----->3------>(0)----->1..
+ *               ^head
+ *
+ * ex) 다음과 같은 구조에서 2이 들어올경우
+ * 1) 2 입력전
+ *         tree             list
+ *             3          1----->3----->4------>1..
+ *           /  \         ^head         
+ *          1     4
+ *           \
+ *         link(2이 들어올 위치)
+ *
+ * 2) 2입력
+ *
+ * 1----->(2)------>3----->4------>
+ * ^head             
+ * 
  */
 	if (likely(parent)) {
 		head = &rb_entry(parent, struct vmap_area, rb_node)->list;
@@ -1030,6 +1101,11 @@ link_va(struct vmap_area *va, struct rb_root *root,
 
 	/* Insert to the rb-tree */
 	rb_link_node(&va->rb_node, parent, link);
+/*
+ * IAMROOT, 2022.07.07:
+ * - root가 free_vmap_area_root면 free_vma_area 방식으로, 아니면 일반 방식으로
+ *   inssert한다.
+ */
 	if (root == &free_vmap_area_root) {
 		/*
 		 * Some explanation here. Just perform simple insertion
@@ -1042,6 +1118,22 @@ link_va(struct vmap_area *va, struct rb_root *root,
 		 * to let __augment_tree_propagate_from() puts everything to
 		 * the correct order later on.
 		 */
+/*
+ * IAMROOT, 2022.07.07:
+ * - papgo
+ *   여기에 약간의 설명이 있습니다. 트리에 단순 삽입만 수행하면 됩니다.
+ *   rb_insert_augmented()를 호출하기 전에 va->subtree_max_size를 현재 크기로
+ *   설정하지 않습니다. 
+ *   노드가 트리에 있을 때 맨 아래에서 상위 레벨로 트리를 채우기 때문입니다.
+ *
+ *   따라서 삽입 후 subtree_max_size를 0으로 설정하여
+ *   __augment_tree_propagate_from()이 나중에 모든 것을 올바른 순서로
+ *   배치하도록 합니다.
+ *
+ * - insert를 하고나면 subtree_max_size가 계산되서 넣어지는데,
+ *   후에 augment_tree_propagate_from() 함수를 통해서 subtree_max_size를 재계산
+ *   하기 때문에 0으로 초기화 해준다.
+ */
 		rb_insert_augmented(&va->rb_node,
 			root, &free_vmap_area_rb_augment_cb);
 		va->subtree_max_size = 0;
@@ -1112,6 +1204,21 @@ augment_tree_propagate_check(void)
  * the node 8 to 6, then its subtree_max_size is set to 6 and parent
  * node becomes 4--6.
  */
+/*
+ * IAMROOT, 2022.07.07:
+ * - papago
+ *   이 함수는 VA 포인트에서 시작하여 하위 레벨에서 상위 레벨로
+ *   subtree_max_size를 채웁니다. va_start/va_end를 변경하여 VA 크기를 수정할
+ *   때 전파를 수행해야 합니다. 또는 트리에 VA를 새로 삽입하는 경우.
+ *
+ *   이는 __augment_tree_propagate_from()을 호출해야 함을 의미합니다.
+ *   - VA가 트리(자유 경로)에 삽입된 후;
+ *   - VA가 축소된 후(할당 경로);
+ *   - VA가 증가한 후(병합 경로).
+ *
+ *   상위 부모 노드와 해당 subtree_max_size가 루트 노드까지 항상 다시
+ *   계산된다는 의미는 아닙니다.
+ */
 static __always_inline void
 augment_tree_propagate_from(struct vmap_area *va)
 {
@@ -1120,6 +1227,16 @@ augment_tree_propagate_from(struct vmap_area *va)
 	 * the calculated maximum available size of checked node
 	 * is equal to its current one.
 	 */
+/*
+ * IAMROOT, 2022.07.07:
+ * - papgo
+ *   확인된 노드의 계산된 최대 사용 가능한 크기가 현재 노드와 같을 때까지
+ *   트리를 아래쪽에서 루트 방향으로 채웁니다.
+ *
+ * - RB_DECLARE_CALLBACKS_MAX -> RB_DECLARE_CALLBACKS를 통해서
+ *   _propagate, _copy, _rotate 함수가 생긴다.
+ * - recompute 는 va_size()함수를 통해서 수행한다.
+ */
 	free_vmap_area_rb_augment_cb_propagate(&va->rb_node, NULL);
 
 #if DEBUG_AUGMENT_PROPAGATE_CHECK
@@ -1143,6 +1260,10 @@ insert_vmap_area(struct vmap_area *va,
 		link_va(va, root, parent, link, head);
 }
 
+/*
+ * IAMROOT, 2022.07.08:
+ * - insert + propagate
+ */
 static void
 insert_vmap_area_augment(struct vmap_area *va,
 	struct rb_node *from, struct rb_root *root,
@@ -1456,6 +1577,10 @@ classify_va_fit_type(struct vmap_area *va,
 	return type;
 }
 
+/*
+ * IAMROOT, 2022.07.08:
+ * - @type에 따라 free_vmap_area를 수정한다.
+ */
 static __always_inline int
 adjust_va_to_fit_type(struct vmap_area *va,
 	unsigned long nva_start_addr, unsigned long size,
@@ -1514,6 +1639,7 @@ adjust_va_to_fit_type(struct vmap_area *va,
 /*
  * IAMROOT, 2022.07.02: 
  * 남은 좌측(L) 및 우측(R) 공간으로 free(va) 공간의 시작과 끝 위치를 변경한다.
+ * - preload되있던 va를 사용한다. 없으면 slap에서 할당받는다.
  */
 		lva = __this_cpu_xchg(ne_fit_preload_node, NULL);
 		if (unlikely(!lva)) {
@@ -1542,6 +1668,28 @@ adjust_va_to_fit_type(struct vmap_area *va,
 			 * triggered to repeat one more time. See more details
 			 * in alloc_vmap_area() function.
 			 */
+/*
+ * IAMROOT, 2022.07.08:
+ * - papgo
+ *   percpu 할당자의 경우 사전 할당을 수행하지 않고 그대로 둡니다. 그 이유는
+ *   NE_FIT_TYPE 분할로 끝나지 않을 가능성이 높기 때문입니다. percpu 할당의
+ *   경우 오프셋과 크기가 고정 정렬 요청에 맞춰 정렬됩니다. 즉, RE_FIT_TYPE 및
+ *   FL_FIT_TYPE이 주요 피팅 케이스입니다.
+ *
+ *   그러나 몇 가지 예외가 있습니다. 예를 들어 분할해야 하는 하나의 큰 여유
+ *   공간이 있을 때 첫 번째 할당(조기 부팅)입니다.
+ *
+ *   또한 이 현재 CPU가 사전 로드되지 않은 경우 일반 vmap 할당의 경우 이
+ *   경로에 도달할 수 있습니다. 
+ *   alloc_vmap_area()의 주석을 참조하십시오. 이유. 그렇다면 GFP_NOWAIT를
+ *   사용하여 분할 목적으로 추가 개체를 가져옵니다. 그것은 드물고 대부분의
+ *   시간이 발생하지 않습니다.
+ *
+ *   할당이 실패하면 어떻게 됩니까? 기본적으로 오버플로 경로가 트리거되어
+ *   지연 해제된 영역을 제거하여 일부 메모리를 해제한 다음 재시도 경로가
+ *   트리거되어 한 번 더 반복됩니다. alloc_vmap_area() 함수에서 자세한 내용을
+ *   참조하십시오.
+ */
 			lva = kmem_cache_alloc(vmap_area_cachep, GFP_NOWAIT);
 			if (!lva)
 				return -1;
@@ -2712,6 +2860,7 @@ static void clear_vm_uninitialized_flag(struct vm_struct *vm)
  * IAMROOT, 2022.07.02: 
  * @start ~ @end까지 영역내에서 @size 및 @align에 해당하는 빈 공간을 찾아 
  * vm_struct를 할당하고, 정보를 구성한 후 반환한다.
+ * - vm + vma 할당
  */
 static struct vm_struct *__get_vm_area_node(unsigned long size,
 		unsigned long align, unsigned long shift, unsigned long flags,
@@ -2969,7 +3118,7 @@ static void __vunmap(const void *addr, int deallocate_pages)
 
 /*
  * IAMROOT, 2022.07.02: 
- * 언매핑 후 @deallocate_pages(vfreei 요청)==1 이면 모든 관련 페이지들을
+ * 언매핑 후 @deallocate_pages(vfree 요청)==1 이면 모든 관련 페이지들을
  * 할당 해제한다.
  */
 	if (deallocate_pages) {
@@ -3063,7 +3212,24 @@ static void __vfree(const void *addr)
  */
 /*
  * IAMROOT, 2022.07.02: 
- * vmalloc으로 할당한 메모리를 할당 해제하고, 언매핑한다.
+ * - papago
+ * vfree - Release memory allocated by vmalloc()
+ * @addr:  Memory base address
+ *
+ * vmalloc() API 제품군 중 하나에서 얻은 @addr에서 시작하는 가상 연속 메모리
+ * 영역을 해제합니다. 이렇게 하면 일반적으로 가상 할당의 기본이 되는 물리적
+ * 메모리도 해제되지만 해당 메모리는 참조 카운트되므로 마지막 사용자가 사라질
+ * 때까지 해제되지 않습니다.
+ *
+ * If @addr is NULL, no operation is performed.
+ *
+ * Context:
+ * 인터럽트 컨텍스트에서 *not* 호출된 경우 절전 모드일 수 있습니다.
+ * NMI 컨텍스트에서 호출하면 안 됩니다(엄밀히 말하면
+ * CONFIG_ARCH_HAVE_NMI_SAFE_CMPXCHG가 있는 경우일 수 있지만 vfree()에 대한
+ * 호출 규칙을 arch 종속으로 만드는 것은 정말 나쁜 생각입니다).
+ *
+ * - vmalloc으로 할당한 메모리를 할당 해제하고, 언매핑한다.
  */
 void vfree(const void *addr)
 {
@@ -3190,6 +3356,13 @@ void *vmap_pfn(unsigned long *pfns, unsigned int count, pgprot_t prot)
 EXPORT_SYMBOL_GPL(vmap_pfn);
 #endif /* CONFIG_VMAP_PFN */
 
+/*
+ * IAMROOT, 2022.07.08:
+ * 1. @order 0이고 @nid가 지정된경우.
+ *   bulk로 받아온다.
+ * 2. 그외 or bulk로 할당실패
+ *   slowpath로 받아온다.
+ */
 static inline unsigned int
 vm_area_alloc_pages(gfp_t gfp, int nid,
 		unsigned int order, unsigned int nr_pages, struct page **pages)
