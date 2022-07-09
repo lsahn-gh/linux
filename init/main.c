@@ -1341,6 +1341,14 @@ asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 	 * timer interrupt). Full topology setup happens at smp_init()
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * -papago
+ *  인터럽트(예: 타이머 인터럽트)를 시작하기 전에 스케줄러를 설정하십시오.
+ *  전체 토폴로지 설정은 smp_init() 시간에 발생하지만 그 동안에는 여전히 작동하는
+ *  스케줄러가 있습니다.
+ */
 	sched_init();
 
 	if (WARN(!irqs_disabled(),

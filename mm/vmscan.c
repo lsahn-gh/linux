@@ -1842,7 +1842,7 @@ retry:
 			if (!PageSwapCache(page)) {
 /*
  * IAMROOT, 2022.05.04:
- * - swap요청이 없다. kepp.
+ * - swap요청이 없다. keep.
  */
 				if (!(sc->gfp_mask & __GFP_IO))
 					goto keep_locked;
@@ -2012,7 +2012,7 @@ retry:
 				SetPageReclaim(page);
 
 				goto activate_locked;
-			}
+		}
 
 			if (references == PAGEREF_RECLAIM_CLEAN)
 				goto keep_locked;
@@ -2225,6 +2225,11 @@ keep:
 	return nr_reclaimed;
 }
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - 즉시 reclaim이 가능한 page들을 @page_list에서 찾아서 reclaim을 시도한다.
+ *   reclaim못한 page들은 @page_list에 남아있다.
+ */
 unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 					    struct list_head *page_list)
 {
@@ -2238,6 +2243,16 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 	LIST_HEAD(clean_pages);
 	unsigned int noreclaim_flag;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - !PageHuge : huge page가 아님
+ *   page_is_file_lru : clean anon page or file lru
+ *   !PageDirty : clean.
+ *   !__PageMovable : non-lru-movable이 아님.
+ *   !PageUnevictable : evictable
+ * - clean anon page or non dirty file cache 인 경우.
+ * - 특별한걸 안한 page라 바로 buddy로 넣을수있는 상태인지 확인.
+ */
 	list_for_each_entry_safe(page, next, page_list, lru) {
 		if (!PageHuge(page) && page_is_file_lru(page) &&
 		    !PageDirty(page) && !__PageMovable(page) &&
@@ -2254,10 +2269,19 @@ unsigned int reclaim_clean_pages_from_list(struct zone *zone,
 	 * change in the future.
 	 */
 	noreclaim_flag = memalloc_noreclaim_save();
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - clean_pages에 잇는 page들을 reclaim 한다.
+ */
 	nr_reclaimed = shrink_page_list(&clean_pages, zone->zone_pgdat, &sc,
 					&stat, true);
 	memalloc_noreclaim_restore(noreclaim_flag);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - relcaim에 실패하고 남은 page들은 page_list에 옮긴다.
+ */
 	list_splice(&clean_pages, page_list);
 	mod_node_page_state(zone->zone_pgdat, NR_ISOLATED_FILE,
 			    -(long)nr_reclaimed);

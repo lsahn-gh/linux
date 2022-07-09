@@ -32,6 +32,12 @@ extern int __init cma_declare_contiguous_nid(phys_addr_t base,
 			phys_addr_t alignment, unsigned int order_per_bit,
 			bool fixed, const char *name, struct cma **res_cma,
 			int nid);
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - cmdline or kernel config에 의한 cma 정보를 memblock reserved 영역을 할당하고
+ *   @res_cma(struct cma)에 등록한다.
+ */
 static inline int __init cma_declare_contiguous(phys_addr_t base,
 			phys_addr_t size, phys_addr_t limit,
 			phys_addr_t alignment, unsigned int order_per_bit,

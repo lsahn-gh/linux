@@ -92,6 +92,10 @@ static void cma_clear_bitmap(struct cma *cma, unsigned long pfn,
 	spin_unlock_irqrestore(&cma->lock, flags);
 }
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - @cma 영역의 bitmap을 초기화하고 cma page들을 reserved를 풀고 cma buddy로 옮긴다.
+ */
 static void __init cma_activate_area(struct cma *cma)
 {
 	unsigned long base_pfn = cma->base_pfn, pfn;
@@ -107,6 +111,11 @@ static void __init cma_activate_area(struct cma *cma)
 	 * same zone.
 	 */
 	WARN_ON_ONCE(!pfn_valid(base_pfn));
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - cma는 전부 같은 zone에 있어야된다.
+ */
 	zone = page_zone(pfn_to_page(base_pfn));
 	for (pfn = base_pfn + 1; pfn < base_pfn + cma->count; pfn++) {
 		WARN_ON_ONCE(!pfn_valid(pfn));
@@ -139,6 +148,10 @@ out_error:
 	return;
 }
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - dt, cmline, kernel config등으로 미리 초기화된 cma_areas을 설정한다.
+ */
 static int __init cma_init_reserved_areas(void)
 {
 	int i;
@@ -162,6 +175,12 @@ core_initcall(cma_init_reserved_areas);
  *
  * This function creates custom contiguous area from already reserved memory.
  */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - size, align, reserved 영역 범위 검사등을 수행하고 cma 정보를 하나 얻고
+ *   초기화한다.
+ */
 int __init cma_init_reserved_mem(phys_addr_t base, phys_addr_t size,
 				 unsigned int order_per_bit,
 				 const char *name,
@@ -176,6 +195,10 @@ int __init cma_init_reserved_mem(phys_addr_t base, phys_addr_t size,
 		return -ENOSPC;
 	}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - size가 없거나 이미 reserved 영역과 겹치는지 검사
+ */
 	if (!size || !memblock_is_region_reserved(base, size))
 		return -EINVAL;
 
@@ -230,6 +253,12 @@ int __init cma_init_reserved_mem(phys_addr_t base, phys_addr_t size,
  *
  * If @fixed is true, reserve contiguous area at exactly @base.  If false,
  * reserve in range from @base to @limit.
+ */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - cmdline or kernel config에 의한 cma 정보를 memblock reserved 영역을 할당하고
+ *   @res_cma(struct cma)에 등록한다.
  */
 int __init cma_declare_contiguous_nid(phys_addr_t base,
 			phys_addr_t size, phys_addr_t limit,
@@ -315,6 +344,12 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 
 	/* Reserve memory */
 	if (fixed) {
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - start가 0이 아니면 해당 주소를 시작으로 할당한다.
+ * - 겹쳣거나 reserve 할당 실패면 error.
+ */
 		if (memblock_is_region_reserved(base, size) ||
 		    memblock_reserve(base, size) < 0) {
 			ret = -EBUSY;
@@ -323,6 +358,10 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 	} else {
 		phys_addr_t addr = 0;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - start가 0이였으면 memblock의 lowmem 영역에서의 할당 정책을 따른다.
+ */
 		/*
 		 * All pages in the reserved area must come from the same zone.
 		 * If the requested region crosses the low/high memory boundary,
@@ -343,6 +382,15 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 		 * Avoid using first 4GB to not interfere with constrained zones
 		 * like DMA/DMA32.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   메모리가 충분하면 상향식 할당을 먼저 시도하십시오. 
+ *   새로운 cma 영역을 노드의 시작 부분에 가깝게 배치하고 compaction이 페이지를 cma
+ *   영역 밖으로 이동시키는 것이지 안으로 이동하지 않도록 보장합니다.
+ *   DMA/DMA32와 같은 제한된 영역을 방해하지 않으려면 처음 4GB를 사용하지 마십시오.
+ * - DMA가 충분하면 4GB 밖에 cma영역을 생성한다.
+ */
 #ifdef CONFIG_PHYS_ADDR_T_64BIT
 		if (!memblock_bottom_up() && memblock_end >= SZ_4G + size) {
 			memblock_set_bottom_up(true);
@@ -453,7 +501,18 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 	if (bitmap_count > bitmap_maxno)
 		goto out;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - config 할당을 시도한다. 실패하는 경우 align단위로 점프하면서 재시도한다.
+ */
 	for (;;) {
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - cma는 bitmap으로 관리하기때문에 cma끼리 관리는 불가능하다. frag 되버리고
+ *   후에 큰 범위 요청이 오면 못한다.
+ * - 여기서 spinlock을 통해 bitmap을 관리하므로 cpu 경합을 피한다.
+ */
 		spin_lock_irq(&cma->lock);
 		bitmap_no = bitmap_find_next_zero_area_off(cma->bitmap,
 				bitmap_maxno, start, bitmap_count, mask,
@@ -474,11 +533,19 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_CMA,
 				     GFP_KERNEL | (no_warn ? __GFP_NOWARN : 0));
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - 성공하면 break.
+ */
 		if (ret == 0) {
 			page = pfn_to_page(pfn);
 			break;
 		}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - 실패한경우는 지금 정보를 clear하고 mask + 1(align)단위로 start를 바꾼다.
+ */
 		cma_clear_bitmap(cma, pfn, count);
 		if (ret != -EBUSY)
 			break;
@@ -533,6 +600,10 @@ out:
  * This function releases memory allocated by cma_alloc().
  * It returns false when provided pages do not belong to contiguous area and
  * true otherwise.
+ */
+/*
+ * IAMROOT, 2022.07.09:
+ * - buddy로 돌려보내고 cma bitmap clear한다.
  */
 bool cma_release(struct cma *cma, const struct page *pages,
 		 unsigned long count)

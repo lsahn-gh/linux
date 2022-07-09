@@ -15,6 +15,11 @@ struct reserved_mem {
 	const struct reserved_mem_ops	*ops;
 	phys_addr_t			base;
 	phys_addr_t			size;
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - cma : struct cma
+ */
 	void				*priv;
 };
 

@@ -209,6 +209,10 @@ struct cma_device {
 	refcount_t refcount;
 	struct list_head	id_list;
 	enum ib_gid_type	*default_gid_type;
+/*
+ * IAMROOT, 2022.07.09:
+ * - roce(RDMA용 프로토콜) 관련 정보.
+ */
 	u8			*default_roce_tos;
 };
 
@@ -5105,6 +5109,10 @@ static struct pernet_operations cma_pernet_operations = {
 	.size = sizeof(struct cma_pernet),
 };
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - cma 관련 자료구조를 생성한다.
+ */
 static int __init cma_init(void)
 {
 	int ret;
@@ -5115,6 +5123,13 @@ static int __init cma_init(void)
 	 * must never be nested under lock so it can find these without having
 	 * to test with bonding.
 	 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   본딩이 활성화된 경우에만 발생하는 드문 잠금 순서 종속성이
+ *   cma_netdev_callback()에 있습니다. lockdep에 rtnl이 잠금 상태에서 중첩되어서는
+ *   안 된다는 것을 가르쳐 본딩으로 테스트하지 않고도 찾을 수 있도록 합니다.
+ */
 	if (IS_ENABLED(CONFIG_LOCKDEP)) {
 		rtnl_lock();
 		mutex_lock(&lock);
@@ -5122,6 +5137,10 @@ static int __init cma_init(void)
 		rtnl_unlock();
 	}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - workqueue, net susys, InfiniBand SA module client를 생성한다.
+ */
 	cma_wq = alloc_ordered_workqueue("rdma_cm", WQ_MEM_RECLAIM);
 	if (!cma_wq)
 		return -ENOMEM;

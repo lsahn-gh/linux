@@ -17,6 +17,11 @@
  * Upon receiving a device removal event, users must destroy the associated
  * RDMA identifier and release all resources allocated with the device.
  */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - InfiniBand를 동작하기 위한 remote DMA.
+ */
 enum rdma_cm_event_type {
 	RDMA_CM_EVENT_ADDR_RESOLVED,
 	RDMA_CM_EVENT_ADDR_ERROR,

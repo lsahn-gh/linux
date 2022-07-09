@@ -1431,6 +1431,7 @@ int next_demotion_node(int node)
  */
 /*
  * IAMROOT, 2022.04.02:
+ * @ reason trace, debug 용
  * - 1. get_new_page를 통해서 new_page를 얻어온다.
  *   2. @page를 newpage로 속성들을 복사한다. @page따라서 contents까지
  *   복사한다.
@@ -1729,7 +1730,7 @@ static inline int try_split_thp(struct page *page, struct page **page2,
  */
 /*
  * IAMROOT, 2022.04.02:
- * @reason enum migrate_reason
+ * @reason enum migrate_reason. trace, debug 용
  */
 int migrate_pages(struct list_head *from, new_page_t get_new_page,
 		free_page_t put_new_page, unsigned long private,

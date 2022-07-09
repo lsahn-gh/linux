@@ -2017,7 +2017,7 @@ static void free_pcppages_bulk(struct zone *zone, int count,
  * IAMROOT, 2022.05.14:
  * - buddy로 free.
  * - @zone에 isolate pageblock이 존재하거나, @page가 isolate일 경우
- *   대표 migratetype으로 변경한다.
+ *   해당 page를 대표 migratetype으로 변경후 buddy로 보낸다.
  */
 static void free_one_page(struct zone *zone,
 				struct page *page, unsigned long pfn,
@@ -2837,6 +2837,11 @@ void __init page_alloc_init_late(void)
 
 #ifdef CONFIG_CMA
 /* Free whole pageblock and set its migration type to MIGRATE_CMA. */
+/*
+ * IAMROOT, 2022.07.09:
+ * - migrate cma buddy로 보내기 위해 reserved clear후 migratetype cma로 pageblock
+ *   migratetype을 설정한다.
+ */
 void __init init_cma_reserved_pageblock(struct page *page)
 {
 	unsigned i = pageblock_nr_pages;
@@ -2849,6 +2854,10 @@ void __init init_cma_reserved_pageblock(struct page *page)
 
 	set_pageblock_migratetype(page, MIGRATE_CMA);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - ref up을 하고 MIGRATE_CMA buddy로 돌려보낸다.
+ */
 	if (pageblock_order >= MAX_ORDER) {
 		i = pageblock_nr_pages;
 		p = page;
@@ -2863,6 +2872,11 @@ void __init init_cma_reserved_pageblock(struct page *page)
 	}
 
 	adjust_managed_page_count(page, pageblock_nr_pages);
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - 해당 존에 cma가 이제 생기는것이므로 카운팅 추가.
+ */
 	page_zone(page)->cma_pages += pageblock_nr_pages;
 }
 #endif
@@ -4612,6 +4626,11 @@ void split_page(struct page *page, unsigned int order)
 }
 EXPORT_SYMBOL_GPL(split_page);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - @order 단위로 freelist에서 제거한다.
+ * - alloc_contig_pages()로 들어왔으면 @page의 pageblock mt는 isolate일 것이다.
+ */
 int __isolate_free_page(struct page *page, unsigned int order)
 {
 	unsigned long watermark;
@@ -4623,6 +4642,11 @@ int __isolate_free_page(struct page *page, unsigned int order)
 	zone = page_zone(page);
 	mt = get_pageblock_migratetype(page);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - pageblock mt가 isolate가 아니라면 CMA에 할당가능한지 검사.
+ *
+ */
 	if (!is_migrate_isolate(mt)) {
 		/*
 		 * Obey watermarks as if the page was being allocated. We can
@@ -4630,6 +4654,13 @@ int __isolate_free_page(struct page *page, unsigned int order)
 		 * watermark, because we already know our high-order page
 		 * exists.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   페이지가 할당되는 것처럼 워터마크를 준수합니다. 상위 페이지가 존재한다는
+ *   것을 이미 알고 있기 때문에 상위 워터마크 검사를 제기된 0차 워터마크로
+ *   에뮬레이트할 수 있습니다.
+ */
 		watermark = zone->_watermark[WMARK_MIN] + (1UL << order);
 		if (!zone_watermark_ok(zone, 0, watermark, 0, ALLOC_CMA))
 			return 0;
@@ -4645,6 +4676,11 @@ int __isolate_free_page(struct page *page, unsigned int order)
 	 * Set the pageblock if the isolated page is at least half of a
 	 * pageblock
 	 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - order가 pageblock_order보다 클경우 pageblock단위로
+ *   UNMOVABLE, RECLAIM인 경우 MOVABLE로 변경할지 확인하고 변경한다.
+ */
 	if (order >= pageblock_order - 1) {
 		struct page *endpage = page + (1 << order) - 1;
 		for (; page < endpage; page += pageblock_nr_pages) {
@@ -5198,6 +5234,7 @@ bool __zone_watermark_ok(struct zone *z, unsigned int order, unsigned long mark,
 
 /*
  * IAMROOT, 2022.03.05:
+ * @return 할당가능하면 true.
  * - 가장 기본 형태의 free page 확인 함수.
  *   러프한 값을 가지고 @order에 대한 free page를 확인한다.
  */
@@ -10856,6 +10893,11 @@ static int __init cmdline_parse_movablecore(char *p)
 early_param("kernelcore", cmdline_parse_kernelcore);
 early_param("movablecore", cmdline_parse_movablecore);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - @page : buddy system으로 관리하게 될 page.
+ *   @page들을 counting한다.
+ */
 void adjust_managed_page_count(struct page *page, long count)
 {
 	atomic_long_add(count, &page_zone(page)->managed_pages);
@@ -11657,6 +11699,22 @@ void *__init alloc_large_system_hash(const char *tablename,
  * cannot get removed (e.g., via memory unplug) concurrently.
  *
  */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papgo
+ *   이 함수는 pageblock에 움직일 수 없는 페이지가 포함되어 있는지 확인합니다.
+ *
+ *   isolate 또는 lru_lock이 없는 PageLRU 검사가 경합하여 MIGRATE_MOVABLE 블록에
+ *   이동할 수 없는 페이지가 포함될 수 있습니다. 또한 lock_page가 없는
+ *   __PageMovable 검사는 경쟁 조건에서 일부 이동 가능한 비 lru 페이지를
+ *   놓칠 수 있습니다. 따라서 이 함수가 정확해야 한다고 기대할 수는 없습니다.
+ *
+ *   참조를 보유하지 않고 페이지를 반환합니다. 호출자가 해당 페이지를
+ *   역참조(예: 덤프)하려는 경우 해당 페이지가 동시에 제거될 수
+ *   없도록(예: 메모리 분리를 통해) 확인해야 합니다.
+ *
+ * - page block내에서 이동불가인 page들이 있는지 확인한다. 있다면 return page
+ */
 struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 				 int migratetype, int flags)
 {
@@ -11670,6 +11728,12 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * isolate CMA pageblocks even when they are not movable in fact
 		 * so consider them movable here.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - unmovable이 요청 범위에 있는지 확인하는 api에서, @page의 pageblock이 cma인데
+ *   다른 migrate type으로 변경을 요청한다면 unmovable로 취급해서 해당
+ *   page를 return한다. 즉 변경 불가의 의미
+ */
 		if (is_migrate_cma(migratetype))
 			return NULL;
 
@@ -11685,6 +11749,10 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * allocations inside ZONE_MOVABLE, for example when
 		 * specifying "movablecore".
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - reserved는 변경불가. unmovable 취급.
+ */
 		if (PageReserved(page))
 			return page;
 
@@ -11693,6 +11761,10 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * pages then it should be reasonably safe to assume the rest
 		 * is movable.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - movable zone은 변경가능. skip
+ */
 		if (zone_idx(zone) == ZONE_MOVABLE)
 			continue;
 
@@ -11702,6 +11774,11 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * We need not scan over tail pages because we don't
 		 * handle each tail page individually in migration.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - huge page인데 migratge support안하면 return page.
+ *   lru도 아니고 non-lru도 아니면 movable 불가이므로 return page.
+ */
 		if (PageHuge(page) || PageTransCompound(page)) {
 			struct page *head = compound_head(page);
 			unsigned int skip_pages;
@@ -11724,6 +11801,10 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * This check already skips compound tails of THP
 		 * because their page->_refcount is zero at all time.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - free가 되버린 page. continue.
+ */
 		if (!page_ref_count(page)) {
 			if (PageBuddy(page))
 				iter += (1 << buddy_order(page)) - 1;
@@ -11734,6 +11815,11 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * The HWPoisoned page may be not in buddy system, and
 		 * page_count() is not 0.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - buddy에 없는 offline page이면서 HWPoison 이거나 PageOfflinㅇ이면
+ *   움직일수있다고 판단.
+ */
 		if ((flags & MEMORY_OFFLINE) && PageHWPoison(page))
 			continue;
 
@@ -11750,6 +11836,10 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		if ((flags & MEMORY_OFFLINE) && PageOffline(page))
 			continue;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - non-lru movable이거나 lru면 이동가능.
+ */
 		if (__PageMovable(page) || PageLRU(page))
 			continue;
 
@@ -11758,6 +11848,10 @@ struct page *has_unmovable_pages(struct zone *zone, struct page *page,
 		 * it.  But now, memory offline itself doesn't call
 		 * shrink_node_slabs() and it still to be fixed.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - 그외에는 이동불가 취급.
+ */
 		return page;
 	}
 	return NULL;
@@ -11798,6 +11892,11 @@ static inline void alloc_contig_dump_pages(struct list_head *page_list)
 #endif
 
 /* [start, end) must belong to a single zone. */
+/*
+ * IAMROOT, 2022.07.09:
+ * - @start ~ @end까지 migrate를 수행한다. signal을 받거나 error가 나지 않는한은
+ *   될때까지 수행한다.
+ */
 static int __alloc_contig_migrate_range(struct compact_control *cc,
 					unsigned long start, unsigned long end)
 {
@@ -11819,6 +11918,10 @@ static int __alloc_contig_migrate_range(struct compact_control *cc,
 			break;
 		}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - cc->migratepages가 비어있다면 채운다.
+ */
 		if (list_empty(&cc->migratepages)) {
 			cc->nr_migratepages = 0;
 			ret = isolate_migratepages_range(cc, pfn, end);
@@ -11831,10 +11934,19 @@ static int __alloc_contig_migrate_range(struct compact_control *cc,
 			break;
 		}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - cc->migratepages에 있는 page들 중 clean page들을 reclaim한다.
+ *   못한 page들은 남아있다.
+ */
 		nr_reclaimed = reclaim_clean_pages_from_list(cc->zone,
 							&cc->migratepages);
 		cc->nr_migratepages -= nr_reclaimed;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - cc->migratepages에 남아있는것들은 migratge한다.
+ */
 		ret = migrate_pages(&cc->migratepages, alloc_migration_target,
 			NULL, (unsigned long)&mtc, cc->mode, MR_CONTIG_RANGE, NULL);
 
@@ -11847,6 +11959,11 @@ static int __alloc_contig_migrate_range(struct compact_control *cc,
 	}
 
 	lru_cache_enable();
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - 실패했다면 원복후 dump debug 출력.
+ */
 	if (ret < 0) {
 		if (ret == -EBUSY)
 			alloc_contig_dump_pages(&cc->migratepages);
@@ -11876,6 +11993,20 @@ static int __alloc_contig_migrate_range(struct compact_control *cc,
  * Return: zero on success or negative error code.  On success all
  * pages which PFN is in [start, end) are allocated for the caller and
  * need to be freed with free_contig_range().
+ */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   PFN 범위는 페이지 블록 또는 MAX_ORDER_NR_PAGES 정렬될 필요가 없습니다.
+ *   PFN 범위는 단일 영역에 속해야 합니다.
+ *   
+ *   이 루틴이 수행하는 첫 번째 작업은 범위의 모든 페이지 블록을
+ *   MIGRATE_ISOLATE하려고 시도하는 것입니다. 일단 격리되면 페이지 블록은
+ *   다른 사람이 수정해서는 안 됩니다.
+ *
+ * Return: 성공 또는 음수 오류 코드의 경우 0입니다. 성공하면 PFN이 [시작, 끝]에
+ * 있는 모든 페이지가 호출자에게 할당되고 free_contig_range()로 해제되어야 합니다.
  */
 int alloc_contig_range(unsigned long start, unsigned long end,
 		       unsigned migratetype, gfp_t gfp_mask)
@@ -11919,12 +12050,42 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 	 * aligned range but not in the unaligned, original range are
 	 * put back to page allocator so that buddy can use them.
 	 */
-
+/*
+ * IAMROOT, 2022.07.09:
+ * -papago
+ *  여기에서는 범위 내의 모든 페이지 블록을 MIGRITE_ISOLATE로 표시합니다.
+ *  페이지 블록과 최대 순서 페이지는 크기가 다를 수 있으며 페이지 할당자의
+ *  작동 방식 때문에 페이지 할당자가 다른 페이지 블록의 buddy를 병합하거나
+ *  MIGRITE_ISOLATE를 다른 마이그레이션 유형으로 변경하지 않도록 두 페이지 중
+ *  가장 큰 페이지에 범위를 맞춥니다.
+ *
+ *  페이지 블록이 MIGRATE_ISOLATE로 표시되면 정렬되지 않은 범위(즉, 관심 있는
+ *  페이지)에서 페이지를 마이그레이션합니다. 이렇게 하면 범위 내의 모든 페이지가
+ *  다시 페이지 할당자로 MIGRIGHT_ISOLATE됩니다.
+ *
+ *  이 작업이 완료되면 페이지 할당기에서 범위 내의 페이지를 가져와 
+ *  버디 시스템에서 제거합니다. 이런 방식으로 페이지 할당자는 이러한 항목을
+ *  사용하는 것을 고려하지 않습니다.
+ *
+ *  이렇게 하면 페이지 블록을 다시 MIGRATE_CMA/MIGRATE_MOVIBLE로 표시하여
+ *  정렬된 범위에 있지만 정렬되지 않은 원래 범위에 있지 않은 사용 가능한
+ *  페이지가 다시 페이지 할당기에 표시되도록 하여 버디가 사용할 수 있도록 합니다.
+ */
+/*
+ * IAMROOT, 2022.07.09:
+ * - isolate 표식.
+ */
 	ret = start_isolate_page_range(pfn_max_align_down(start),
 				       pfn_max_align_up(end), migratetype, 0);
 	if (ret)
 		return ret;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - pcplist에 있는 page들은 사용중으로 취급하기 때문에 일단 buddy로 돌려보낸다.
+ * - 연속된 memory할당을 해야되기때문에 잘려져서 할당되있는 pcp memory들
+ *   방해가 될수있기 때문이다.
+ */
 	drain_all_pages(cc.zone);
 
 	/*
@@ -11937,7 +12098,26 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 	 * allocated.  So, if we fall through be sure to clear ret so that
 	 * -EBUSY is not accidentally used or returned to caller.
 	 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   -EBUSY의 경우, 어느 페이지에서 문제가 발생하는지 알고 싶습니다.
+ *   test_pages_isolated()에는 사용 중인 페이지를 보고할 추적점이 있습니다.
+ *
+ *   test_pages_isolated로 호출하기 전에 사용 중인 페이지를 사용할 수 있으며
+ *   범위가 실제로 할당될 수 있습니다. 따라서, 만약 우리가 실패한다면, -EBUSY가
+ *   실수로 사용되거나 호출자에게 반환되지 않도록 반드시 ret를 클리어해야
+ *   합니다.
+ *
+ * - isolate 표시만 해놨던 page들을 실제 isolate시킨다. 그리고 reclaim이 즉시
+ *   가능한것들은 수행하고, 아니면 migrate한다.
+ */
 	ret = __alloc_contig_migrate_range(&cc, start, end);
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - !busy이면 error 처리.
+ */
 	if (ret && ret != -EBUSY)
 		goto done;
 	ret = 0;
@@ -11959,8 +12139,31 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 	 * isolated thus they won't get removed from buddy.
 	 */
 
+/*
+ * IAMROOT, 2022.07.09:
+ * -papago
+ *  [start, end)의 페이지는 MIGRATE_ISOLATE로 표시된 MAX_ORDER_NR_PAGES
+ *  aligned 블록 내에 있습니다. 또한 [start, end)의 모든 페이지는 페이지 할당자에서
+ *  free입니다.
+ *  우리가 할 일은 [시작, 끝)에서 모든 페이지를 할당하는 것입니다(즉,
+ *  페이지 할당자에서 제거).
+ *
+ *  유일한 문제는 관심 범위의 시작과 끝에 있는 페이지가 페이지 할당자가 보유하는
+ *  페이지와 정렬되지 않을 수 있다는 것입니다. 그들은 highorder 페이지의 일부가
+ *  될 수 있습니다. 이 때문에 더 큰 범위를 예약하고 이 작업이 완료되면 관심이 없는
+ *  페이지를 해제합니다.
+ *
+ *  페이지가 격리되어 buddy로부터 제거되지 않기 때문에 여기에서
+ *  zone->lock을 유지할 필요가 없습니다.
+ */
 	order = 0;
 	outer_start = start;
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - migrate 끝난 범위를 이제 cma로 쓰기 위해 할당을 시작한다.
+ * - start page가 buddy가 아니라면 order 단위로증가하면서 start를 조정해본다.
+ */
 	while (!PageBuddy(pfn_to_page(outer_start))) {
 		if (++order >= MAX_ORDER) {
 			outer_start = start;
@@ -11969,6 +12172,10 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 		outer_start &= ~0UL << order;
 	}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - start 지점이 옮겼다면, 해당 지점이 상위 buddy라면 하위 buddy로 변경한다.
+ */
 	if (outer_start != start) {
 		order = buddy_order(pfn_to_page(outer_start));
 
@@ -11978,17 +12185,33 @@ int alloc_contig_range(unsigned long start, unsigned long end,
 		 * in this case to report failed page properly
 		 * on tracepoint in test_pages_isolated()
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   outer_start 페이지는 small order buddy 페이지일 수 있으며 시작 페이지는
+ *   포함되지 않습니다. 이 경우 outer_start를 조정하여 test_pages_isolated()의
+ *   추적점에서 실패한 페이지를 제대로 보고합니다.
+ */
 		if (outer_start + (1UL << order) <= start)
 			outer_start = start;
 	}
 
 	/* Make sure the range is really isolated. */
+/*
+ * IAMROOT, 2022.07.09:
+ * - migrate해온 page들이 전부 buddy에 있는지 한번 test.
+ */
 	if (test_pages_isolated(outer_start, end, 0)) {
 		ret = -EBUSY;
 		goto done;
 	}
 
 	/* Grab isolated pages from freelists. */
+/*
+ * IAMROOT, 2022.07.09:
+ * - buddy에 isolate pageorder type으로 들어가있던 page들을 isolate하여
+ *   single page로 가져온다.
+ */
 	outer_end = isolate_freepages_range(&cc, outer_start, end);
 	if (!outer_end) {
 		ret = -EBUSY;
@@ -12104,6 +12327,10 @@ struct page *alloc_contig_pages(unsigned long nr_pages, gfp_t gfp_mask,
 }
 #endif /* CONFIG_CONTIG_ALLOC */
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - 이미 contig alloc을 했던(migrate통일, merge등) page이므로 free만 해준다.
+ */
 void free_contig_range(unsigned long pfn, unsigned long nr_pages)
 {
 	unsigned long count = 0;

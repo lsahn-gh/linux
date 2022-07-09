@@ -57,6 +57,10 @@
 #define CMA_SIZE_MBYTES 0
 #endif
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - dma 할당 api가 사용할 기본 cma
+ */
 struct cma *dma_contiguous_default_area;
 
 /*
@@ -75,6 +79,13 @@ static phys_addr_t  size_cmdline __initdata = -1;
 static phys_addr_t base_cmdline __initdata;
 static phys_addr_t limit_cmdline __initdata;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - admin-guide/kernel-parameters.txt 참고
+ *   cma=nn[MG]@[start[MG][-end[MG]]]
+ *       ^size
+ * - size는 무조건 있어야 된다.
+ */
 static int __init early_cma(char *p)
 {
 	if (!p) {
@@ -170,7 +181,11 @@ void __init dma_pernuma_cma_reserve(void)
  */
 /*
  * IAMROOT, 2021.12.18:
- * - TODO
+ * - cmdline에 cma정보가 있다면 해당정보로, 아니면 kernel default or config정보로
+ *   cma size를 정한후 초기화한다.
+ *   1. cmdline or kernel config로 default cma 정보를 초기화.
+ *   2. dt에 default cma가 있을시. 1번에서 초기화했다면 안하고,
+ *   아니면 dt default cma로 수행.
  */
 void __init dma_contiguous_reserve(phys_addr_t limit)
 {
@@ -187,12 +202,20 @@ void __init dma_contiguous_reserve(phys_addr_t limit)
  *   지정이 안되면 CONFIG에 따라서 selected_size를 지정한다.
  */
 	if (size_cmdline != -1) {
+/*
+ * IAMROOT, 2022.07.09:
+ * - cmdline
+ */
 		selected_size = size_cmdline;
 		selected_base = base_cmdline;
 		selected_limit = min_not_zero(limit_cmdline, limit);
 		if (base_cmdline + size_cmdline == limit_cmdline)
 			fixed = true;
 	} else {
+/*
+ * IAMROOT, 2022.07.09:
+ * - kernel config
+ */
 #ifdef CONFIG_CMA_SIZE_SEL_MBYTES
 		selected_size = size_bytes;
 #elif defined(CONFIG_CMA_SIZE_SEL_PERCENTAGE)
@@ -238,8 +261,9 @@ dma_contiguous_early_fixup(phys_addr_t base, unsigned long size)
  * reserve in range from @base to @limit.
  */
 /*
- * IAMROOT, 2021.10.23:
- * - cma memory allocator. TODO
+ * IAMROOT, 2022.07.09:
+ * - cmdline or kernel config에 의한 cma 정보를 memblock reserved 영역을 할당하고
+ *   @res_cma(struct cma)에 등록한다.
  */
 int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
 				       phys_addr_t limit, struct cma **res_cma,
@@ -397,6 +421,10 @@ void dma_free_contiguous(struct device *dev, struct page *page, size_t size)
 #undef pr_fmt
 #define pr_fmt(fmt) fmt
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - rmem->priv에는 cma로 사용할때에 struct cma가 저장되있다.
+ */
 static int rmem_cma_device_init(struct reserved_mem *rmem, struct device *dev)
 {
 	dev->cma_area = rmem->priv;
@@ -414,8 +442,53 @@ static const struct reserved_mem_ops rmem_cma_ops = {
 	.device_release = rmem_cma_device_release,
 };
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - ex) boot/dts/amlogic/meson-a1.dtsi
+ *   reserved-memory {
+ *	#address-cells = <2>;
+ *	#size-cells = <2>;
+ *	ranges; 
+ *
+ *	linux,cma {
+ *		compatible = "shared-dma-pool";
+ *		reusable;
+ *		size = <0x0 0x800000>;
+ *		alignment = <0x0 0x400000>;
+ *		linux,cma-default;
+ *	};
+ *  };
+ *
+ * - booting 시 순서
+ * loader -> SPL -> TPL -> UBOOT -> kernel
+ * uboot : DTB, config에서 아주 기본적인 정보를 읽어서 초기화
+ *
+ * - size = <0x0 0x800000>;
+ *   size 정보만 제공했고, 시작 주소는 안정해서 아무데서나 만들어도 된다는뜻.
+ *
+ * - ex)
+ *
+ * reserved-memory {
+ *	#address-cells = <1>;
+ *	#size-cells = <1>;
+ *	ranges;
+ *
+ *	default-pool {
+ *		compatible = "shared-dma-pool";
+ *		size = <0x6000000>;
+ *		alloc-ranges = <0x40000000 0x10000000>;
+ *		reusable;
+ *		linux,cma-default;
+ *	};
+ * };
+ * - alloc-ranges(x,y) : x ~ y 사이에  size만큼 할당하라는 뜻.
+ */
 static int __init rmem_cma_setup(struct reserved_mem *rmem)
 {
+/*
+ * IAMROOT, 2022.07.09:
+ * - 4K * 1024 = 4M 단위 align
+ */
 	phys_addr_t align = PAGE_SIZE << max(MAX_ORDER - 1, pageblock_order);
 	phys_addr_t mask = align - 1;
 	unsigned long node = rmem->fdt_node;
@@ -423,12 +496,54 @@ static int __init rmem_cma_setup(struct reserved_mem *rmem)
 	struct cma *cma;
 	int err;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - dt가 default cma인데 cmdline에 의해 이미 default cma 정보가 있을 경우
+ *   cmdline꺼를 우선으로 생각해서 dt를 안쓴다.
+ */
 	if (size_cmdline != -1 && default_cma) {
 		pr_info("Reserved memory: bypass %s node, using cmdline CMA params instead\n",
 			rmem->name);
 		return -EBUSY;
 	}
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - documentation
+ *   no-map (optional) - empty property
+ *	- Indicates the operating system must not create a virtual mapping
+ *	of the region as part of its standard mapping of system memory,
+ *	nor permit speculative access to it under any circumstances other
+ *	than under the control of the device driver using the region.
+ *   reusable (optional) - empty property
+ *      - The operating system can use the memory in this region with the
+ *      limitation that the device driver(s) owning the region need to be
+ *      able to reclaim it back. Typically that means that the operating
+ *      system can use that region to store volatile or cached data that
+ *      can be otherwise regenerated or migrated elsewhere.
+ * - papago
+ *   no-map (optional) - empty property
+ *   - 운영 체제가 시스템 메모리의 표준 매핑의 일부로 영역의 가상 매핑을
+ *   생성해서는 안 되며 영역을 사용하는 장치 드라이버의 제어 하에 있지 않은
+ *   상황에서 추측적인 액세스를 허용하지 않아야 함을 나타냅니다.
+ *
+ *   reusable (optional) - empty property
+ *   - 운영 체제는 영역을 소유한 장치 드라이버가 다시 회수할 수 있어야 하는
+ *   제한이 있는 이 영역의 메모리를 사용할 수 있습니다. 일반적으로 이는 운영
+ *   체제가 해당 영역을 사용하여 다른 곳에서 reclaim되거나 migrate될 수 있는
+ *   휘발성 또는 캐시된 데이터를 저장할 수 있음을 의미합니다.
+ *
+ * - reserved memory에서의 no-map의 이유
+ *   1. device가 직접 mapping을 하기때문이다. SRAM등 속도가 빠른 memory를 사용할때
+ *   cpu에 있는 l1, l2 cache를 사용하지 않기 위함이다.
+ *   2. device 전용 memory로 cpu개입 없이 사용하기 위함.
+ *
+ * -----------------------
+ *
+ * - 무조건 cma는 reusable, !no-map
+ *   reclaim, migrate가 가능해야 된다. 즉 system이 movable page로 사용하겠다는것.
+ *   (cpu 개입)
+ */
 	if (!of_get_flat_dt_prop(node, "reusable", NULL) ||
 	    of_get_flat_dt_prop(node, "no-map", NULL))
 		return -EINVAL;
@@ -446,6 +561,10 @@ static int __init rmem_cma_setup(struct reserved_mem *rmem)
 	/* Architecture specific contiguous memory fixup. */
 	dma_contiguous_early_fixup(rmem->base, rmem->size);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - prop가 default_cma라면 default로 넣는다.
+ */
 	if (default_cma)
 		dma_contiguous_default_area = cma;
 

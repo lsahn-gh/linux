@@ -89,6 +89,10 @@ static unsigned long release_freepages(struct list_head *freelist)
 	return high_pfn;
 }
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - page들의 order를 다 풀어서 single page로 만들어서 @list에 다시 넣는다.
+ */
 static void split_map_pages(struct list_head *list)
 {
 	unsigned int i, order, nr_pages;
@@ -757,6 +761,26 @@ static bool compact_unlock_should_abort(spinlock_t *lock,
  * returning 0 on any invalid PFNs or non-free pages inside of the pageblock
  * (even though it may still end up isolating some pages).
  */
+/*
+ * IAMROOT, 2022.07.09:
+ * @strict true 면 무조건 1 page씩 하며 처음부터 끝가지 다 하겠다는 의미.
+ *         false 면 요청한 stride 만큼 page을 점프하면서 하고, migrate page보다
+ *         free page가 많아지면 종료한다.
+ * @stride @strict가 true면 의미없다. 1로 고정.
+ *         @strict가 false인 경우 요청값(1 ~ COMPACT_CLUSTER_MAX)으로 되며
+ *         @stride 단위로 page을 skip한다.
+ *
+ * - stride를 1보다 큰값으로 단위로 검색을 하기도하는데, 한번 실패하게되면
+ *   연속으로 실패가능성이 크므로, 1, 2, 4.. 단위로 점프하면서 isolate가 되는 page를
+ *   찾기 위함도있다. 한번찾아지면 다시 단위가 1로 작아질것이다. stride를 쓰는
+ *   함수면 어짜피 migrate page보다만 free를 얻어오면되서 적당히 빨리 하기위함도
+ *   있는거같다. (isolate_freepages() 참고)
+ * - cma contig에서 할당받을때는 무조건 성공을 해야되기때문에 strice이 true가되서
+ *   stride가 무조건 1로 고정으로되어 skip없이 모든 영역을 검사한다.
+ *
+ * - pageblock내에서 stride page 단위로 freelist에서 page를 제거한다. 제거된
+ *   page는 @freelist로 넣어진다.
+ */
 static unsigned long isolate_freepages_block(struct compact_control *cc,
 				unsigned long *start_pfn,
 				unsigned long end_pfn,
@@ -800,6 +824,11 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 		 * The check is racy, but we can consider only valid values
 		 * and the only danger is skipping too much.
 		 */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - page가 compound page거나 buddy에 없으면 isolate fail.
+ */
 		if (PageCompound(page)) {
 			const unsigned int order = compound_order(page);
 
@@ -820,6 +849,10 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 		 * so it is correct to skip the suitable migration target
 		 * recheck as well.
 		 */
+/*
+ * IAMROOT, 2022.07.09:
+ * - zone lock을 하고 buddy에 있는지 계속있는지 한번더 검사한다.
+ */
 		if (!locked) {
 			locked = compact_lock_irqsave(&cc->zone->lock,
 								&flags, cc);
@@ -830,6 +863,10 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 		}
 
 		/* Found a free page, will break it into order-0 pages */
+/*
+ * IAMROOT, 2022.07.09:
+ * - buddy freelist에서 page를 제거한다.
+ */
 		order = buddy_order(page);
 		isolated = __isolate_free_page(page, order);
 		if (!isolated)
@@ -838,8 +875,17 @@ static unsigned long isolate_freepages_block(struct compact_control *cc,
 
 		total_isolated += isolated;
 		cc->nr_freepages += isolated;
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - buddy에서 제거한 page를 local freelist에 넣어놓는다.
+ */
 		list_add_tail(&page->lru, freelist);
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - @strict이 false면 free page를 migratge 했던 page이상이면 중단.
+ */
 		if (!strict && cc->nr_migratepages <= cc->nr_freepages) {
 			blockpfn += isolated;
 			break;
@@ -901,6 +947,17 @@ isolate_fail:
  * (which may be greater then end_pfn if end fell in a middle of
  * a free page).
  */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - papago
+ *   non-free 페이지, 유효하지 않은 PFN 또는 [start_pfn, end_pfn) 범위 내의
+ *   영역 경계는 오류로 간주되어 함수가 해당 작업을 실행 취소하고 0을 반환하게
+ *   합니다.
+ *
+ *   그렇지 않으면 함수는 isolate 페이지의 마지막 PFN을 반환합니다(종료가
+ *   빈 페이지의 중간에 있는 경우 end_pfn보다 클 수 있음).
+ */
 unsigned long
 isolate_freepages_range(struct compact_control *cc,
 			unsigned long start_pfn, unsigned long end_pfn)
@@ -956,9 +1013,18 @@ isolate_freepages_range(struct compact_control *cc,
 	}
 
 	/* __isolate_free_page() does not map the pages */
+
+/*
+ * IAMROOT, 2022.07.09:
+ * - single page로 나눈다.
+ */
 	split_map_pages(&freelist);
 
 	if (pfn < end_pfn) {
+/*
+ * IAMROOT, 2022.07.09:
+ * - 실패. buddy로 원복.
+ */
 		/* Loop terminated early, cleanup. */
 		release_freepages(&freelist);
 		return 0;
@@ -1644,6 +1710,10 @@ fatal_pending:
  * Returns -EAGAIN when contented, -EINTR in case of a signal pending, -ENOMEM
  * in case we could not allocate a page, or 0.
  */
+/*
+ * IAMROOT, 2022.07.09:
+ * - @cc->migratepages에 요청범위의 page를 옮긴다.
+ */
 int
 isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
 							unsigned long end_pfn)
@@ -1668,6 +1738,10 @@ isolate_migratepages_range(struct compact_control *cc, unsigned long start_pfn,
 					block_end_pfn, cc->zone))
 			continue;
 
+/*
+ * IAMROOT, 2022.07.09:
+ * - ISOLATE_UNEVICTABLE : mlocked으로 잠긴 page조차 isolate시키라는 강제 명령.
+ */
 		ret = isolate_migratepages_block(cc, pfn, block_end_pfn,
 						 ISOLATE_UNEVICTABLE);
 
@@ -2210,6 +2284,12 @@ static void isolate_freepages(struct compact_control *cc)
 			continue;
 
 		/* Found a block suitable for isolating free pages from. */
+/*
+ * IAMROOT, 2022.07.09:
+ * - stride를 1보다 큰값으로 단위로 검색을 하기도하는데, 한번 실패하게되면
+ *   연속으로 실패가능성이 크므로, 1, 2, 4.. 단위로 점프하면서 isolate가 되는 page를
+ *   찾기 위함도있다. 한번찾아지면 다시 단위가 1로 작아질것이다.
+ */
 		nr_isolated = isolate_freepages_block(cc, &isolate_start_pfn,
 					block_end_pfn, freelist, stride, false);
 
