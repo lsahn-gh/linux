@@ -18,7 +18,9 @@
 /*
  * IAMROOT, 2022.07.09:
  * - @page가 소속된 page block단위로 @migratetype으로 이동이 가능한지 확인한다.
- *   이동이 가능하다면 isolate한다.
+ *   이동이 가능하다면
+ *   1. pageblock mt를 isolate로 전환
+ *   2. pageblock에서 buddy에 있는것들은 page order isolate freelist로 옮긴다.
  */
 static int set_migratetype_isolate(struct page *page, int migratetype, int isol_flags)
 {
@@ -44,7 +46,10 @@ static int set_migratetype_isolate(struct page *page, int migratetype, int isol_
 	 */
 /*
  * IAMROOT, 2022.07.09:
- * - page block내에 움직일수없는 page가 있는지 확인한다. 없다면 isolate한다.
+ * - page block내에 움직일수없는 page가 있는지 확인한다.
+ *   이동이 가능한 page들이라면
+ *   1. pageblock mt를 isolate로 전환
+ *   2. pageblock에서 buddy에 있는것들은 page order isolate freelist로 옮긴다.
  */
 	unmovable = has_unmovable_pages(zone, page, migratetype, isol_flags);
 	if (!unmovable) {
@@ -230,7 +235,8 @@ __first_valid_page(unsigned long pfn, unsigned long nr_pages)
  *   Return: 성공 시 0이고 범위의 어느 부분도 분리할 수 없는 경우 -EBUSY입니다.
  *
  * - pageblock단위로 요청범위만큼 @migratetype으로 이동이 가능한지 확인하고
- *   isolate시킨다.
+ *   1. pageblock단위로 mt를 isolate로 전환
+ *   2. page중 buddy에 있는것들은 page order isolate freelist로 옮긴다.
  */
 int start_isolate_page_range(unsigned long start_pfn, unsigned long end_pfn,
 			     unsigned migratetype, int flags)

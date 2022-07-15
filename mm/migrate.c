@@ -1438,10 +1438,15 @@ int next_demotion_node(int node)
  *   3. @page를 unmap한다. @page에따라서 newpage에 mapping을 한다.
  * ---
  * - thp + normal page에 대해서 수행한다.
+ *   
  * - compact_zone을 통해서 불려졌을 경우
  *   get_new_page = compaction_alloc
  *   put_new_page = compaction_free
  *   private = struct compact_control *cc
+ *
+ * - cma(__alloc_contig_migrate_range)을 통해서 불러졌을 경우
+ *   get_new_page = alloc_migration_target,
+ *   put_new_page = NULL
  */
 static int unmap_and_move(new_page_t get_new_page,
 				   free_page_t put_new_page,

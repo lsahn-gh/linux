@@ -3224,7 +3224,7 @@ static inline struct page *__rmqueue_cma_fallback(struct zone *zone,
  * @return buddy내에서 page(@start_pfn ~ @end_pfn)에서 @zone의
  *
  * - @start_pfn ~ @end_pfn page를 확인하여
- *   @orer @migratetyp free_list에 옮긴다. buddy에 없다면 free list에
+ *   @orer @migratetype free_list에 옮긴다. buddy에 없다면 free list에
  *   옮길 필요가 없으니 @num_movable에 기록해두고, buddy에 있는것들은
  *   옮긴다.
  */
@@ -3277,6 +3277,7 @@ static int move_freepages(struct zone *zone,
 /*
  * IAMROOT, 2022.03.12:
  * - @page의 pfn범위구한후 한 block단위로 fix한후 move_freepages를 수행한다.
+ * - buddy에 page가 있다면 @page의 order @migratetype freelist로 옮긴다.
  */
 int move_freepages_block(struct zone *zone, struct page *page,
 				int migratetype, int *num_movable)
@@ -4516,6 +4517,11 @@ void free_unref_page(struct page *page, unsigned int order)
 	 * areas back if necessary. Otherwise, we may have to free
 	 * excessively into the page allocator
 	 */
+/*
+ * IAMROOT, 2022.07.15:
+ * - 사실상 직전 free_unref_page_prepare에서 pageblock mt로 page mt를
+ *   통일 시켰기때문에 pageblock mt를 가져온거나 다름없다.
+ */
 	migratetype = get_pcppage_migratetype(page);
 /*
  * IAMROOT, 2022.05.14:
@@ -12073,7 +12079,12 @@ int alloc_contig_range(unsigned long start, unsigned long end,
  */
 /*
  * IAMROOT, 2022.07.09:
- * - isolate 표식.
+ * - pageblock단위로 mt를 isolate로 전환
+ * - page중 buddy에 있는것들은 page order isolate freelist로 옮긴다.
+ *
+ * ---
+ * lru, movable pages => mt = isolate
+ * buddy pages        => mt = isolate, freelist = page order isolate.
  */
 	ret = start_isolate_page_range(pfn_max_align_down(start),
 				       pfn_max_align_up(end), migratetype, 0);
@@ -12111,6 +12122,12 @@ int alloc_contig_range(unsigned long start, unsigned long end,
  *
  * - isolate 표시만 해놨던 page들을 실제 isolate시킨다. 그리고 reclaim이 즉시
  *   가능한것들은 수행하고, 아니면 migrate한다.
+ * - reclaim, migrate된 page들은 buddy(order isolate freelist)로 되돌아가
+ *   있을것이다.
+ *
+ * ---
+ *  mt isolate된 lru, movable pages
+ *   ===(reclaim, migrate) ==> mt isolate, freelist = page order isolate
  */
 	ret = __alloc_contig_migrate_range(&cc, start, end);
 

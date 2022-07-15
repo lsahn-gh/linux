@@ -995,34 +995,6 @@ get_va_next_sibling(struct rb_node *parent, struct rb_node **link)
 	return (&parent->rb_right == link ? list->next : list);
 }
 
-#include "kkr.h"
-static void kkr_show_list(struct list_head *head)
-{
-	struct vmap_area *va;
-	struct vmap_area *next;
-
-	PR_KKR(1, 0, "head : %px\n", head);
-	list_for_each_entry_safe(va, next, head, list) {
-		PR_KKR(1, 0, "\tva : %px(%lx, %lx)\n", va,  va->va_start, va->va_end);
-	}
-}
-
-static void kkr_show_rbtree(struct rb_root *root)
-{
-	struct vmap_area *va;
-	struct vmap_area *next;
-
-	PR_KKR(1, 0, "root : %px\n", root);
-	rbtree_postorder_for_each_entry_safe(va, next, root, rb_node)
-	{
-		struct rb_node *rb = &va->rb_node;
-		PR_KKR(1, 0, "\tva : %px(%lx,%lx) p : %px l : %px r: %px\n",
-			   va, va->va_start, va->va_end, (void *)rb->__rb_parent_color,
-			   rb_entry(rb->rb_left, struct vmap_area, rb_node),
-			   rb_entry(rb->rb_right, struct vmap_area, rb_node));
-	}
-
-}
 /*
  * IAMROOT, 2022.07.02: 
  * @va를 RB tree의 link 위치로 연결한다. 또한 @head 리스트에도 추가하되, 
