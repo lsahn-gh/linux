@@ -2413,6 +2413,12 @@ bool __init_memblock memblock_is_memory(phys_addr_t addr)
 	return memblock_search(&memblock.memory, addr) != -1;
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - memblock을 @addr로 search한다. mapping된 정상적인 memblcok이 존재했을때
+ *   nomap flag가 없다면 return true.
+ * - 즉 이미 mapping된 memblock인지 확인한다.
+ */
 bool __init_memblock memblock_is_map_memory(phys_addr_t addr)
 {
 	int i = memblock_search(&memblock.memory, addr);

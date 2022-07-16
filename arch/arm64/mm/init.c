@@ -339,6 +339,10 @@ int pfn_valid(unsigned long pfn)
 }
 EXPORT_SYMBOL(pfn_valid);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @pfn이 lm mapping되있는지 확인한다.
+ */
 int pfn_is_map_memory(unsigned long pfn)
 {
 	phys_addr_t addr = PFN_PHYS(pfn);

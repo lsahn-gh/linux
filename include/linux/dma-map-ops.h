@@ -75,6 +75,10 @@ struct dma_map_ops {
 #ifdef CONFIG_DMA_OPS
 #include <asm/dma-mapping.h>
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dev에서 dma_ops를 지원했으면 그걸 가져오고 아니면 arch것을 가져온다.
+ */
 static inline const struct dma_map_ops *get_dma_ops(struct device *dev)
 {
 	if (dev->dma_ops)

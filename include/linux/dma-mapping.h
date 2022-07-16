@@ -412,6 +412,10 @@ static inline void dma_sync_sgtable_for_device(struct device *dev,
 #define dma_get_sgtable(d, t, v, h, s) dma_get_sgtable_attrs(d, t, v, h, s, 0)
 #define dma_mmap_coherent(d, v, c, h, s) dma_mmap_attrs(d, v, c, h, s, 0)
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - driver에서 사용하는 dma 할당자.
+ */
 static inline void *dma_alloc_coherent(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, gfp_t gfp)
 {
@@ -553,6 +557,10 @@ static inline void *dmam_alloc_coherent(struct device *dev, size_t size,
 			(gfp & __GFP_NOWARN) ? DMA_ATTR_NO_WARN : 0);
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - wc dma
+ */
 static inline void *dma_alloc_wc(struct device *dev, size_t size,
 				 dma_addr_t *dma_addr, gfp_t gfp)
 {

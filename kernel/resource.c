@@ -502,6 +502,14 @@ int __weak page_is_ram(unsigned long pfn)
 }
 EXPORT_SYMBOL_GPL(page_is_ram);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - iomem에서 영역이 겹치는지 확인한다.
+ * - 여기에서 등록하는건 물리주소, return은 가상주소.
+ * @return REGION_DISJOINT   겹친게 없거나 other만 겹쳤다면.
+ *         REGION_INTERSECTS 같은 flags, desc과 겹쳤고, 그외 겹친 other가 없다면.
+ *         REGION_MIXED      같은 flags, desc와 겹쳣고, 그 외 other와도 겹쳤다면.
+ */
 static int __region_intersects(resource_size_t start, size_t size,
 			unsigned long flags, unsigned long desc)
 {
@@ -512,6 +520,12 @@ static int __region_intersects(resource_size_t start, size_t size,
 	res.start = start;
 	res.end = start + size - 1;
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - is_type : resoure와 요청범위의 flag와 desc가 일치하는지 확인한다.
+ *   일치한 상태에서(is_type = true) 범위가 겹치면 type++,
+ *   일치하지 않은 상태에서 겹치면 other++
+ */
 	for (p = iomem_resource.child; p ; p = p->sibling) {
 		bool is_type = (((p->flags & flags) == flags) &&
 				((desc == IORES_DESC_NONE) ||
@@ -521,12 +535,27 @@ static int __region_intersects(resource_size_t start, size_t size,
 			is_type ? type++ : other++;
 	}
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - type == 0, other == 0 or type ==0, other > 0
+ *   겹친게 없거나 다른 장치와 겹쳤으면 return.
+ */
 	if (type == 0)
 		return REGION_DISJOINT;
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - type > 0,  other == 0
+ *   같은 type과 겹쳤으면 return.
+ */
 	if (other == 0)
 		return REGION_INTERSECTS;
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - tpye > 0, other > 0
+ *   같은 type 범위와, 같은 other 둘다 겹친게 있으면 return.
+ */
 	return REGION_MIXED;
 }
 

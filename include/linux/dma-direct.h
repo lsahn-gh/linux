@@ -24,6 +24,11 @@ struct bus_dma_region {
 	u64		offset;
 };
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @paddr이 @dev의 dma_range_map중에 범위에 있는 주소인지 확인해서 offset을 계산후
+ *   return 한다.
+ */
 static inline dma_addr_t translate_phys_to_dma(struct device *dev,
 		phys_addr_t paddr)
 {
@@ -55,6 +60,12 @@ static inline phys_addr_t translate_dma_to_phys(struct device *dev,
 #define phys_to_dma_unencrypted		phys_to_dma
 #endif
 #else
+
+/*
+ * IAMROOT, 2022.07.16:
+ * - dma_range_map이 있는 경우 @paddr이 map에 있는지 확인후 offset을 고려해서 return하고
+ *   아니면 즉시 paddr을 return한다.
+ */
 static inline dma_addr_t phys_to_dma_unencrypted(struct device *dev,
 		phys_addr_t paddr)
 {
@@ -68,6 +79,11 @@ static inline dma_addr_t phys_to_dma_unencrypted(struct device *dev,
  * bit in the DMA address, and dma_to_phys will clear it.
  * phys_to_dma_unencrypted is for use on special unencrypted memory like swiotlb
  * buffers.
+ */
+/*
+ * IAMROOT, 2022.07.16:
+ * - dma_range_map이 있는 경우 @paddr이 map에 있는지 확인후 offset을 고려해서 return하고
+ *   아니면 즉시 paddr을 return한다.
  */
 static inline dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
 {

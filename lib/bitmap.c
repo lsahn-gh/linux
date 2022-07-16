@@ -1246,6 +1246,10 @@ enum {
 	REG_OP_RELEASE,		/* clear all bits in region */
 };
 
+/*
+ * IAMROOT, 2022.07.16:
+ * @reg_op에 따라 찾은 bitmap을 검색/할당/해제 한다.
+ */
 static int __reg_op(unsigned long *bitmap, unsigned int pos, int order, int reg_op)
 {
 	int nbits_reg;		/* number of bits in region */
@@ -1311,6 +1315,10 @@ done:
  *
  * Return the bit offset in bitmap of the allocated region,
  * or -errno on failure.
+ */
+/*
+ * IAMROOT, 2022.07.16:
+ * 요청 @bits로 free공간을 찾은후 alloc한다.
  */
 int bitmap_find_free_region(unsigned long *bitmap, unsigned int bits, int order)
 {

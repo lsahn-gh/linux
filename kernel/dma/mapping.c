@@ -108,12 +108,27 @@ void *dmam_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 }
 EXPORT_SYMBOL(dmam_alloc_attrs);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - direct 연결이 가능한지 확인한다.
+ *   1. ops가 없으면 1:1 mampping의 의미 이므로 가능.
+ *   2. bus dma limit >= dev dma max 이면 true.
+ */
 static bool dma_go_direct(struct device *dev, dma_addr_t mask,
 		const struct dma_map_ops *ops)
 {
+/*
+ * IAMROOT, 2022.07.16:
+ * - 1:1 이므로 ops가 불필요.
+ */
 	if (likely(!ops))
 		return true;
 #ifdef CONFIG_DMA_OPS_BYPASS
+/*
+ * IAMROOT, 2022.07.16:
+ * - bus가 지원하는 폭이 dev의 max dma보다 크거나 같으면 true.
+ *   즉 bus 범위 >= dev 범위
+ */
 	if (dev->dma_ops_bypass)
 		return min_not_zero(mask, dev->bus_dma_limit) >=
 			    dma_direct_get_required_mask(dev);
@@ -126,6 +141,13 @@ static bool dma_go_direct(struct device *dev, dma_addr_t mask,
  * Check if the devices uses a direct mapping for streaming DMA operations.
  * This allows IOMMU drivers to set a bypass mode if the DMA mask is large
  * enough.
+ */
+/*
+ * IAMROOT, 2022.07.16:
+ * - direct mapping
+ *   물리주소와 io주소가 동일하게 된다.
+ * - IOMMU없이 system memory를 그대로(1:1) 사용한다.
+ *   IOMMU사용시 bypass mode를 지원한다면 사용한다.
  */
 static inline bool dma_alloc_direct(struct device *dev,
 		const struct dma_map_ops *ops)
@@ -489,6 +511,11 @@ u64 dma_get_required_mask(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(dma_get_required_mask);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * @attrs dma_alloc_wc에서 불러올경우 DMA_ATTR_WRITE_COMBINE이 추가된다.
+ *        gfp에 __GFP_NO_WARN이 있었을경우 DMA_ATTR_NO_WARN이 추가 됬었다.
+ */
 void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 		gfp_t flag, unsigned long attrs)
 {
@@ -497,12 +524,20 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 
 	WARN_ON_ONCE(!dev->coherent_dma_mask);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dev 전용 coherent가 있으면 해당 영역에서 bitmap을 통해서 할당해온다.
+ */
 	if (dma_alloc_from_dev_coherent(dev, size, dma_handle, &cpu_addr))
 		return cpu_addr;
 
 	/* let the implementation decide on the zone to allocate from: */
 	flag &= ~(__GFP_DMA | __GFP_DMA32 | __GFP_HIGHMEM);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - direct alloc인지 ops alloc인지 판단해 alloc한다.
+ */
 	if (dma_alloc_direct(dev, ops))
 		cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
 	else if (ops->alloc)

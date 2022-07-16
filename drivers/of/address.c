@@ -1049,6 +1049,11 @@ EXPORT_SYMBOL(of_io_request_and_map);
  * It returns -ENODEV if "dma-ranges" property was not found for this
  * device in the DT.
  */
+/*
+ * IAMROOT, 2022.07.16:
+ * dma-ranges = <0xc0000000 0x00000000 0x3f000000>;
+ *               ^dma       ^phy       ^size
+ */
 int of_dma_get_range(struct device_node *np, const struct bus_dma_region **map)
 {
 	struct device_node *node = of_node_get(np);

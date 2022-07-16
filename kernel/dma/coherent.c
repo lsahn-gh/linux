@@ -20,6 +20,10 @@ struct dma_coherent_mem {
 	bool		use_dev_dma_pfn_offset;
 };
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dt에서 지정한 reserved memory.
+ */
 static inline struct dma_coherent_mem *dev_get_coherent_memory(struct device *dev)
 {
 	if (dev && dev->dma_mem)
@@ -27,6 +31,10 @@ static inline struct dma_coherent_mem *dev_get_coherent_memory(struct device *de
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @mem의 debice_base를 가져온다.
+ */
 static inline dma_addr_t dma_get_device_base(struct device *dev,
 					     struct dma_coherent_mem * mem)
 {
@@ -35,6 +43,12 @@ static inline dma_addr_t dma_get_device_base(struct device *dev,
 	return mem->device_base;
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @device_addr, @size로 vmalloc공간에 write combine 방식으로 mapping을 한다.
+ *   dma 구조체 정보를 return한다.
+ * - device driver 전용 dma memory를 구성한다.
+ */
 static struct dma_coherent_mem *dma_init_coherent_memory(phys_addr_t phys_addr,
 		dma_addr_t device_addr, size_t size, bool use_dma_pfn_offset)
 {
@@ -46,10 +60,18 @@ static struct dma_coherent_mem *dma_init_coherent_memory(phys_addr_t phys_addr,
 	if (!size)
 		return ERR_PTR(-EINVAL);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - va를 가져온다. 
+ */
 	mem_base = memremap(phys_addr, size, MEMREMAP_WC);
 	if (!mem_base)
 		return ERR_PTR(-EINVAL);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dma 자료구조를 slab에서 가져오고 초기화한다.
+ */
 	dma_mem = kzalloc(sizeof(struct dma_coherent_mem), GFP_KERNEL);
 	if (!dma_mem)
 		goto out_unmap_membase;
@@ -85,6 +107,10 @@ static void dma_release_coherent_memory(struct dma_coherent_mem *mem)
 	kfree(mem);
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * @dev에 @mem을 등록한다.
+ */
 static int dma_assign_coherent_memory(struct device *dev,
 				      struct dma_coherent_mem *mem)
 {
@@ -115,6 +141,10 @@ static int dma_assign_coherent_memory(struct device *dev,
  * As a simplification for the platforms, only *one* such region of memory may
  * be declared per device.
  */
+/*
+ * IAMROOT, 2022.07.16:
+ * - custom 방식의 dma declear.
+ */
 int dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
 				dma_addr_t device_addr, size_t size)
 {
@@ -131,6 +161,10 @@ int dma_declare_coherent_memory(struct device *dev, phys_addr_t phys_addr,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - bitmap에서 size를 할당할수있는 영역을 얻어오고 얻어온 va를 return한다.
+ */
 static void *__dma_alloc_from_coherent(struct device *dev,
 				       struct dma_coherent_mem *mem,
 				       ssize_t size, dma_addr_t *dma_handle)
@@ -176,6 +210,10 @@ err:
  *
  * Returns 0 if dma_alloc_coherent should continue with allocating from
  * generic memory areas, or !0 if dma_alloc_coherent should return @ret.
+ */
+/*
+ * IAMROOT, 2022.07.16:
+ * - bitmap을 통해서 요청 공간만큼 memory를 할당해온다.
  */
 int dma_alloc_from_dev_coherent(struct device *dev, ssize_t size,
 		dma_addr_t *dma_handle, void **ret)
@@ -301,6 +339,10 @@ int dma_mmap_from_global_coherent(struct vm_area_struct *vma, void *vaddr,
 					vaddr, size, ret);
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - global dma.
+ */
 int dma_init_global_coherent(phys_addr_t phys_addr, size_t size)
 {
 	struct dma_coherent_mem *mem;
@@ -326,6 +368,10 @@ int dma_init_global_coherent(phys_addr_t phys_addr, size_t size)
 static struct reserved_mem *dma_reserved_default_memory __initdata;
 #endif
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - device tree에서 등록된 dma.
+ */
 static int rmem_dma_device_init(struct reserved_mem *rmem, struct device *dev)
 {
 	if (!rmem->priv) {
@@ -353,6 +399,38 @@ static const struct reserved_mem_ops rmem_dma_ops = {
 	.device_release	= rmem_dma_device_release,
 };
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - cma로 사용하는 case
+ * reserved-memory {
+ *	#address-cells = <2>;
+ *	#size-cells = <2>;
+ *	ranges;
+ *	linux,cma {
+ *		compatible = "shared-dma-pool"; 
+ *		reusable;
+ *		size = <0x0 0x800000>;
+ *		alignment = <0x0 0x400000>;
+ *		linux,cma-default;
+ *	};
+ * };
+ *
+ * - dma로만 사용하는 case.
+ *   reserved_memory: reserved-memory {
+ *	#address-cells = <2>;
+ *	#size-cells = <2>;
+ *	ranges;
+ *
+ *	mcu_r5fss0_core0_dma_memory_region: r5f-dma-memory@a0000000 {
+ *		compatible = "shared-dma-pool";
+ *		reg = <0x00 0xa0000000 0x00 0x100000>;
+ *		no-map;
+ *	};
+ * };
+ *
+ * - 각 device driver들은 of_reserved_mem_device_init()을 통해서 어떤 reserved memory를 사용할지
+ *   결정한다.
+ */
 static int __init rmem_dma_setup(struct reserved_mem *rmem)
 {
 	unsigned long node = rmem->fdt_node;

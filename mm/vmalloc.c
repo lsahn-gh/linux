@@ -333,6 +333,10 @@ static int vmap_range_noflush(unsigned long addr, unsigned long end,
 	return err;
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - mapping.
+ */
 int ioremap_page_range(unsigned long addr, unsigned long end,
 		phys_addr_t phys_addr, pgprot_t prot)
 {
@@ -2918,6 +2922,10 @@ struct vm_struct *get_vm_area(unsigned long size, unsigned long flags)
 				  __builtin_return_address(0));
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - vmalloc 공간에 요청 영역을 mapping한다.
+ */
 struct vm_struct *get_vm_area_caller(unsigned long size, unsigned long flags,
 				const void *caller)
 {

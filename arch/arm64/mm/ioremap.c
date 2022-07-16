@@ -17,6 +17,11 @@
 #include <asm/fixmap.h>
 #include <asm/tlbflush.h>
 
+/*
+ * IAMROOT, 2022.07.16:
+ * @return mapping된 va.
+ * @phys_addr, @size로 vmalloc에 mapping후 mapping된 va를 return한다.
+ */
 static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 				      pgprot_t prot, void *caller)
 {
@@ -46,9 +51,18 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 	if (WARN_ON(pfn_is_map_memory(__phys_to_pfn(phys_addr))))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - vmalloc공간에 size를 VM_IOREMAP으로 area를 얻어온다.
+ */
 	area = get_vm_area_caller(size, VM_IOREMAP, caller);
 	if (!area)
 		return NULL;
+
+/*
+ * IAMROOT, 2022.07.16:
+ * - 얻어온 area에 mapping을 한다.
+ */
 	addr = (unsigned long)area->addr;
 	area->phys_addr = phys_addr;
 
@@ -61,6 +75,10 @@ static void __iomem *__ioremap_caller(phys_addr_t phys_addr, size_t size,
 	return (void __iomem *)(offset + addr);
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @prot로 vmalloc에 mapping한다.
+ */
 void __iomem *__ioremap(phys_addr_t phys_addr, size_t size, pgprot_t prot)
 {
 	return __ioremap_caller(phys_addr, size, prot,
@@ -81,6 +99,12 @@ void iounmap(volatile void __iomem *io_addr)
 }
 EXPORT_SYMBOL(iounmap);
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @phys_addr이 이미 lm mapping이 되있다면 return va.
+ *   아니면 normal prot로 vmalloc에 mapping해서 가져온다.
+ * - normal memory 속성이 즉 cache
+ */
 void __iomem *ioremap_cache(phys_addr_t phys_addr, size_t size)
 {
 	/* For normal memory we already have a cacheable mapping. */

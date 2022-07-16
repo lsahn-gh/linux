@@ -327,6 +327,32 @@ static DEFINE_MUTEX(of_rmem_assigned_device_mutex);
  *
  * Returns error code or zero on success.
  */
+
+/*
+ * IAMROOT, 2022.07.16:
+ *
+ * reserved-memory {
+ *	#address-cells = <2>;
+ *	#size-cells = <2>;
+ *	ranges;
+ *
+ *	bman_fbpr: bman-fbpr {
+ *		compatible = "shared-dma-pool";
+ *		size = <0 0x1000000>;
+ *		alignment = <0 0x1000000>;
+ *		no-map;
+ *	};
+ * };
+ *
+ * bman: bman@1890000 {
+ *	compatible = "fsl,bman";
+ *	reg = <0x0 0x1890000 0x0 0x10000>;
+ *	interrupts = <GIC_SPI 45 IRQ_TYPE_LEVEL_HIGH>;
+ *	memory-region = <&bman_fbpr>;
+ *	                   ^..idx = 0
+ * };
+ *
+ */
 int of_reserved_mem_device_init_by_idx(struct device *dev,
 				       struct device_node *np, int idx)
 {

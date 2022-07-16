@@ -32,6 +32,10 @@ static __always_inline int fls64(__u64 x)
  * long형이 64bit일 경우 __builtin_clzl(__fls)로만으로 처리가 가능하므로,
  * 해당 함수 처리조건인 0검사, __가 없는 fls는 0번 bit가 1인것을 고려한 + 1처리를
  * 해준다.
+ * ex) x == 0. return 0
+ *     x =  1, return 1
+ *     x =  2, return 2
+ *     x =  3, return 2
  */
 static __always_inline int fls64(__u64 x)
 {

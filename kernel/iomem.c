@@ -13,6 +13,11 @@ __weak void __iomem *ioremap_cache(resource_size_t offset, unsigned long size)
 #endif
 
 #ifndef arch_memremap_wb
+
+/*
+ * IAMROOT, 2022.07.16:
+ * - normal memory prot로 vmalloc에 mapping후 va를 받아온다.
+ */
 static void *arch_memremap_wb(resource_size_t offset, unsigned long size)
 {
 	return (__force void *)ioremap_cache(offset, size);
@@ -27,6 +32,11 @@ static bool arch_memremap_can_ram_remap(resource_size_t offset, size_t size,
 }
 #endif
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - @offset을 lm va로 return.
+ * - @offset 이 highmem이 아닌지 확인한다. highmem은 lm이 안된다.
+ */
 static void *try_ram_remap(resource_size_t offset, size_t size,
 			   unsigned long flags)
 {
@@ -68,6 +78,17 @@ static void *try_ram_remap(resource_size_t offset, size_t size,
  * be coalesced together (e.g. in the CPU's write buffers), but is otherwise
  * uncached. Attempts to map System RAM with this mapping type will fail.
  */
+/*
+ * IAMROOT, 2022.07.16:
+ * - @flags에 따라 vmalloc mapping을 하여 va를 가져온다.
+ *   이미 mapping된경우 lm va를 가져온다.
+ *
+ * wb            wt                  wc
+ * PROT_NORMAL | PROT_DEVICE_nGnRE | PROT_NORMAL_NC
+ * - 옵션만으로 봤을때 속도는 wb > wt > wc.
+ *   하지만 arm64에서는 wt를 지원안하므로 cache를 사용안하는 prot를 사용하여 실제
+ *   성능이 wb > wc > wt으로 될것이다.
+ */
 void *memremap(resource_size_t offset, size_t size, unsigned long flags)
 {
 	int is_ram = region_intersects(offset, size,
@@ -84,6 +105,14 @@ void *memremap(resource_size_t offset, size_t size, unsigned long flags)
 	}
 
 	/* Try all mapping types requested until one returns non-NULL */
+/*
+ * IAMROOT, 2022.07.16:
+ * - write back 요청 : 일반 DRAM으로 cache를 사용하는 memory로 mapping하겠다는것.
+ *   1. 이미 mapping된 상태 (REGION_INTERSECTS)
+ *   address만 가져오면 된다.
+ *   2. 할당을 해야되는 상태
+ *   normal memory prot로 vmalloc에 mapping한다.
+ */
 	if (flags & MEMREMAP_WB) {
 		/*
 		 * MEMREMAP_WB is special in that it can be satisfied
@@ -103,6 +132,16 @@ void *memremap(resource_size_t offset, size_t size, unsigned long flags)
 	 * address mapping.  Enforce that this mapping is not aliasing
 	 * System RAM.
 	 */
+/*
+ * IAMROOT, 2022.07.16:
+ * - papago
+ *   매핑이 아직 없고 다른 요청 플래그가 있으면 새 가상 주소 매핑을 설정하려고
+ *   합니다. 이 매핑이 시스템 RAM을 별칭으로 지정하지 않도록 합니다.
+ * - flags가 only writeback + a 인 상태에서 위에서 할당실패했으면 return.
+ *   할당이 실패한 상황.
+ * - flags가 only writeback이 아니면서 is_ram이 REGION_INTERSECTS면 return.
+ *   요청이 잘못된 상황
+ */
 	if (!addr && is_ram == REGION_INTERSECTS && flags != MEMREMAP_WB) {
 		WARN_ONCE(1, "memremap attempted on ram %pa size: %#lx\n",
 				&offset, (unsigned long) size);

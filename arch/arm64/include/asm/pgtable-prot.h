@@ -62,6 +62,19 @@ extern bool arm64_use_ng_mappings;
 #define PROT_DEFAULT		(_PROT_DEFAULT | PTE_MAYBE_NG)
 #define PROT_SECT_DEFAULT	(_PROT_SECT_DEFAULT | PMD_MAYBE_NG)
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - PROT_DEVICE_nGnRE  : ioremap.(write through)
+ *   PROT_NORMAL_NC     : ioremap_wc.(write combine)
+ *   PROT_DEVICE_nGnRnE : ioremap_np.(가장 높은 strong order)
+ * ---
+ * G : gather
+ * R : reorder
+ * E : early ack
+ *
+ * - memory 속도
+ *   wb > wt > wc > nc
+ */
 #define PROT_DEVICE_nGnRnE	(PROT_DEFAULT | PTE_PXN | PTE_UXN | PTE_WRITE | PTE_ATTRINDX(MT_DEVICE_nGnRnE))
 #define PROT_DEVICE_nGnRE	(PROT_DEFAULT | PTE_PXN | PTE_UXN | PTE_WRITE | PTE_ATTRINDX(MT_DEVICE_nGnRE))
 #define PROT_NORMAL_NC		(PROT_DEFAULT | PTE_PXN | PTE_UXN | PTE_WRITE | PTE_ATTRINDX(MT_NORMAL_NC))

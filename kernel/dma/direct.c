@@ -26,6 +26,11 @@
  */
 unsigned int zone_dma_bits __ro_after_init = 24;
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dma_range_map이 있는 경우 @paddr이 map에 있는지 확인후 offset을 고려해서
+ *   return하고 아니면 즉시 paddr을 return한다.
+ */
 static inline dma_addr_t phys_to_dma_direct(struct device *dev,
 		phys_addr_t phys)
 {
@@ -40,6 +45,14 @@ static inline struct page *dma_direct_to_page(struct device *dev,
 	return pfn_to_page(PHYS_PFN(dma_to_phys(dev, dma_addr)));
 }
 
+/*
+ * IAMROOT, 2022.07.16:
+ * - dma max를 구해 mask값을 적당히 2의 배수로 올림해서 가져온다.
+ * - ex) max_dma = 0x6000_0000
+ *   fls(max_dma) = 31
+ *   (1 << (31 - 1)) * 2 = 0x8000_0000
+ *   0x8000_0000 - 1 = 0x7fff_ffff
+ */
 u64 dma_direct_get_required_mask(struct device *dev)
 {
 	phys_addr_t phys = (phys_addr_t)(max_pfn - 1) << PAGE_SHIFT;
