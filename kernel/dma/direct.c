@@ -101,6 +101,10 @@ static void __dma_direct_free_pages(struct device *dev, struct page *page,
 	dma_free_contiguous(dev, page, size);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - cma등을 통해서 dma page를 할당해온다.
+ */
 static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
 		gfp_t gfp)
 {
@@ -112,6 +116,11 @@ static struct page *__dma_direct_alloc_pages(struct device *dev, size_t size,
 
 	gfp |= dma_direct_optimal_gfp_mask(dev, dev->coherent_dma_mask,
 					   &phys_limit);
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - swiotlb를 사용하는 장치라면 해당 방법으로 alloc.
+ */
 	if (IS_ENABLED(CONFIG_DMA_RESTRICTED_POOL) &&
 	    is_swiotlb_for_alloc(dev)) {
 		page = swiotlb_alloc(dev, size);
@@ -150,6 +159,10 @@ again:
 	return page;
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - PASS
+ */
 static void *dma_direct_alloc_from_pool(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, gfp_t gfp)
 {
@@ -177,6 +190,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	if (attrs & DMA_ATTR_NO_WARN)
 		gfp |= __GFP_NOWARN;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - kernel mapping을 하지 않은 경우.
+ */
 	if ((attrs & DMA_ATTR_NO_KERNEL_MAPPING) &&
 	    !force_dma_unencrypted(dev) && !is_swiotlb_for_alloc(dev)) {
 		page = __dma_direct_alloc_pages(dev, size, gfp & ~__GFP_ZERO);
@@ -190,6 +207,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 		return page;
 	}
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - arch. arm32, sparc등등
+ */
 	if (!IS_ENABLED(CONFIG_ARCH_HAS_DMA_SET_UNCACHED) &&
 	    !IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
 	    !IS_ENABLED(CONFIG_DMA_GLOBAL_POOL) &&
@@ -197,6 +218,11 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	    !is_swiotlb_for_alloc(dev))
 		return arch_dma_alloc(dev, size, dma_handle, gfp, attrs);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - global pool이 있는 kernel config일때, dev가 dma coherent device가 아니라면
+ *   (전용 dma가 아니라면) global pool에서 메모리를 할당한다.
+ */
 	if (IS_ENABLED(CONFIG_DMA_GLOBAL_POOL) &&
 	    !dev_is_dma_coherent(dev))
 		return dma_alloc_from_global_coherent(dev, size, dma_handle);
@@ -208,6 +234,11 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	 * set up another device coherent pool by shared-dma-pool and use
 	 * dma_alloc_from_dev_coherent instead.
 	 */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - kernel config에서 dma coherent pool을 지원하고 blocking이 가능한 경우(reclaim)
+ */
 	if (IS_ENABLED(CONFIG_DMA_COHERENT_POOL) &&
 	    !gfpflags_allow_blocking(gfp) &&
 	    (force_dma_unencrypted(dev) ||
@@ -221,6 +252,10 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 	if (!page)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - remap이 가능한경우, highmem인 경우(32bit system). remap을 한다.
+ */
 	if ((IS_ENABLED(CONFIG_DMA_DIRECT_REMAP) &&
 	     !dev_is_dma_coherent(dev)) ||
 	    (IS_ENABLED(CONFIG_DMA_REMAP) && PageHighMem(page))) {
@@ -332,12 +367,22 @@ void dma_direct_free(struct device *dev, size_t size,
 	__dma_direct_free_pages(dev, dma_direct_to_page(dev, dma_addr), size);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - 일반적으로 cma에서 dma를 할당해온다.
+ *   legacy에서는 pool에서 할당해올수있다.
+ */
 struct page *dma_direct_alloc_pages(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, enum dma_data_direction dir, gfp_t gfp)
 {
 	struct page *page;
 	void *ret;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - PASS
+ * - CONFIG_DMA_COHERENT_POOL은 x86에서만 사용했던걸로 보인다.
+ */
 	if (IS_ENABLED(CONFIG_DMA_COHERENT_POOL) &&
 	    force_dma_unencrypted(dev) && !gfpflags_allow_blocking(gfp) &&
 	    !is_swiotlb_for_alloc(dev))
@@ -346,6 +391,11 @@ struct page *dma_direct_alloc_pages(struct device *dev, size_t size,
 	page = __dma_direct_alloc_pages(dev, size, gfp);
 	if (!page)
 		return NULL;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - highmem에서 가져왔다면 안된다. 그걸 검사하는 루틴.
+ */
 	if (PageHighMem(page)) {
 		/*
 		 * Depending on the cma= arguments and per-arch setup

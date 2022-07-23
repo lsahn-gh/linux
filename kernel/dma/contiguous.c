@@ -320,6 +320,10 @@ bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 	return cma_release(dev_get_cma_area(dev), pages, count);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - @cma의 bitmap관리를 통해 @page를 가져온다.
+ */
 static struct page *cma_alloc_aligned(struct cma *cma, size_t size, gfp_t gfp)
 {
 	unsigned int align = min(get_order(size), CONFIG_CMA_ALIGNMENT);
@@ -342,6 +346,11 @@ static struct page *cma_alloc_aligned(struct cma *cma, size_t size, gfp_t gfp)
  * there is no need to waste CMA pages for that kind; it also helps reduce
  * fragmentations.
  */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - dev에 cma가 지정되있다면 지정된 cma에서, 아니면 default cma에서 할당해온다.
+ */
 struct page *dma_alloc_contiguous(struct device *dev, size_t size, gfp_t gfp)
 {
 #ifdef CONFIG_DMA_PERNUMA_CMA
@@ -351,6 +360,11 @@ struct page *dma_alloc_contiguous(struct device *dev, size_t size, gfp_t gfp)
 	/* CMA can be used only in the context which permits sleeping */
 	if (!gfpflags_allow_blocking(gfp))
 		return NULL;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - dev init에서 dtb등을 통해 cma_area이 설정됬을것.
+ */
 	if (dev->cma_area)
 		return cma_alloc_aligned(dev->cma_area, size, gfp);
 	if (size <= PAGE_SIZE)
@@ -368,6 +382,11 @@ struct page *dma_alloc_contiguous(struct device *dev, size_t size, gfp_t gfp)
 		}
 	}
 #endif
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - default cma가 가 설정되있으면 default에서 가져온다.
+ */
 	if (!dma_contiguous_default_area)
 		return NULL;
 

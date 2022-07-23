@@ -537,6 +537,7 @@ void *dma_alloc_attrs(struct device *dev, size_t size, dma_addr_t *dma_handle,
 /*
  * IAMROOT, 2022.07.16:
  * - direct alloc인지 ops alloc인지 판단해 alloc한다.
+ *   (1:1를 사용하는 direct 방식인지, iommu를 사용하는 방식인지 판단)
  */
 	if (dma_alloc_direct(dev, ops))
 		cpu_addr = dma_direct_alloc(dev, size, dma_handle, flag, attrs);
@@ -577,6 +578,12 @@ void dma_free_attrs(struct device *dev, size_t size, void *cpu_addr,
 }
 EXPORT_SYMBOL(dma_free_attrs);
 
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - 일반적으로 cma에서 dma를 할당해오고 memset한다.
+ *   legacy에서는 global pool, swiotlb등에서 할당해올수도있다.
+ */
 static struct page *__dma_alloc_pages(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, enum dma_data_direction dir, gfp_t gfp)
 {
@@ -595,6 +602,11 @@ static struct page *__dma_alloc_pages(struct device *dev, size_t size,
 	return ops->alloc_pages(dev, size, dma_handle, dir, gfp);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - 일반적으로 cma에서 dma를 할당해오고 memset한다.
+ *   legacy에서는 global pool, swiotlb등에서 할당해올수도있다.
+ */
 struct page *dma_alloc_pages(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, enum dma_data_direction dir, gfp_t gfp)
 {

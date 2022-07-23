@@ -213,6 +213,11 @@ static inline void fs_reclaim_release(gfp_t gfp_mask) { }
  * that might allocate, but often don't. Compiles to nothing without
  * CONFIG_LOCKDEP. Includes a conditional might_sleep() if @gfp allows blocking.
  */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - preemption point. 잠깐 쉰다.
+ */
 static inline void might_alloc(gfp_t gfp_mask)
 {
 	fs_reclaim_acquire(gfp_mask);

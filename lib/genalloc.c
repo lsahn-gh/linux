@@ -150,6 +150,11 @@ bitmap_clear_ll(unsigned long *map, unsigned long start, unsigned long nr)
  * Create a new special memory pool that can be used to manage special purpose
  * memory not managed by the regular kmalloc/kfree interface.
  */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - struct gen_pool 구조체를 할당하고 초기화한다.
+ */
 struct gen_pool *gen_pool_create(int min_alloc_order, int nid)
 {
 	struct gen_pool *pool;
@@ -618,6 +623,14 @@ EXPORT_SYMBOL_GPL(gen_pool_size);
  * Call @algo for each memory allocation in the pool.
  * If @algo is NULL use gen_pool_first_fit as default
  * memory allocation function.
+ */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - pool을 사용할 algo를 set한다.
+ *   __dma_atomic_pool_init()에서 불러왔을 경우
+ *   algo = gen_pool_first_fit_order_align
+ *   data = NULL
  */
 void gen_pool_set_algo(struct gen_pool *pool, genpool_algo_t algo, void *data)
 {

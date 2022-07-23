@@ -62,6 +62,18 @@ struct dma_page {		/* cacheable header for 'allocation' bytes */
 static DEFINE_MUTEX(pools_lock);
 static DEFINE_MUTEX(pools_reg_lock);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - @dev에 등록되있는 dma_pools를 iterate하며 정보를 출력한다.
+ * - ex)
+ *  # cat /sys/devices/platform/soc/fe007000.dma/pools
+ *  poolinfo - 0.1
+ *  fe007000.dma        0     128    32       1
+ *
+ *  해석
+ *  name              | blocks | 할당가능 개수 | size | pages |
+ *  fe007000.dma      | 0      | 128           | 32   | 1     |
+ */
 static ssize_t pools_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	unsigned temp;
@@ -102,6 +114,10 @@ static ssize_t pools_show(struct device *dev, struct device_attribute *attr, cha
 	return PAGE_SIZE - size;
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - dev_attr_pools
+ */
 static DEVICE_ATTR_RO(pools);
 
 /**
@@ -127,6 +143,14 @@ static DEVICE_ATTR_RO(pools);
  * Return: a dma allocation pool with the requested characteristics, or
  * %NULL if one can't be created.
  */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - strcut dma_pool을 slab에서 할당받고 @size, @align, @boundary에 따라 값을
+ *   초기화한다.
+ * - @dev의 최초 dma_pool일 경우 sysfs에 생성한다.
+ *
+ */
 struct dma_pool *dma_pool_create(const char *name, struct device *dev,
 				 size_t size, size_t align, size_t boundary)
 {
@@ -143,15 +167,26 @@ struct dma_pool *dma_pool_create(const char *name, struct device *dev,
 		return NULL;
 	else if (size < 4)
 		size = 4;
-
+/*
+ * IAMROOT, 2022.07.23:
+ * - @size를 @align으로 align시키고, 최소 PAGE_SIZE값 이상으로 할당한다.
+ */
 	size = ALIGN(size, align);
 	allocation = max_t(size_t, size, PAGE_SIZE);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - boundary가 없으면 Allocation과 동일하게 쓴다.
+ */
 	if (!boundary)
 		boundary = allocation;
 	else if ((boundary < size) || (boundary & (boundary - 1)))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - struct dma_pool을 slab에서 할당해온다.
+ */
 	retval = kmalloc_node(sizeof(*retval), GFP_KERNEL, dev_to_node(dev));
 	if (!retval)
 		return retval;
@@ -178,8 +213,18 @@ struct dma_pool *dma_pool_create(const char *name, struct device *dev,
 	 */
 	mutex_lock(&pools_reg_lock);
 	mutex_lock(&pools_lock);
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - dma_pools이 비어있을경우 sysfs를 생성한다.
+ */
 	if (list_empty(&dev->dma_pools))
 		empty = true;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - 만들어진 dma pools을 dev>dma_pools에 추가한다.
+ */
 	list_add(&retval->pools, &dev->dma_pools);
 	mutex_unlock(&pools_lock);
 	if (empty) {
@@ -200,6 +245,17 @@ struct dma_pool *dma_pool_create(const char *name, struct device *dev,
 }
 EXPORT_SYMBOL(dma_pool_create);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - offset으로 next object를 가리킨다.
+ *
+ * <---------------------4096----------------------------->
+ * <----1024----><----1024----><----1024----><----1024---->
+ * |1024|        |2048|        |3072|        |0|          |
+ * ^             ^             ^             ^
+ * 0             vaddr+1024    vaddr+2048     vaddr+3072
+ * (vaddr)
+ */
 static void pool_initialise_page(struct dma_pool *pool, struct dma_page *page)
 {
 	unsigned int offset = 0;
@@ -216,6 +272,11 @@ static void pool_initialise_page(struct dma_pool *pool, struct dma_page *page)
 	} while (offset < pool->allocation);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - struct dma_page 자료구조를 slab에서 할당후 dma_alloc_coherent에서 메모리를
+ *   얻어와 page->vaddr에 넣는다.
+ */
 static struct dma_page *pool_alloc_page(struct dma_pool *pool, gfp_t mem_flags)
 {
 	struct dma_page *page;
@@ -311,6 +372,10 @@ EXPORT_SYMBOL(dma_pool_destroy);
  * and reports its dma address through the handle.
  * If such a memory block can't be allocated, %NULL is returned.
  */
+/*
+ * IAMROOT, 2022.07.23:
+ * - pool에서 dma object를 하나 가져온다.
+ */
 void *dma_pool_alloc(struct dma_pool *pool, gfp_t mem_flags,
 		     dma_addr_t *handle)
 {
@@ -321,6 +386,11 @@ void *dma_pool_alloc(struct dma_pool *pool, gfp_t mem_flags,
 
 	might_alloc(mem_flags);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - pool에 있는 page에서 free object가 있는 page를 가져온다. 만약 없다면
+ *   pool_alloc_page를 통해 charge한다.
+ */
 	spin_lock_irqsave(&pool->lock, flags);
 	list_for_each_entry(page, &pool->page_list, page_list) {
 		if (page->offset < pool->allocation)
@@ -339,8 +409,23 @@ void *dma_pool_alloc(struct dma_pool *pool, gfp_t mem_flags,
 	list_add(&page->page_list, &pool->page_list);
  ready:
 	page->in_use++;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - 현재 object의 위치를 가져온다.
+ */
 	offset = page->offset;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - next object 위치를 page->offset에 갱신한다.
+ */
 	page->offset = *(int *)(page->vaddr + offset);
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - 현재 object 위치 + vaddr로 해서 실제 object의 va를 retval로 가져온다.
+ */
 	retval = offset + page->vaddr;
 	*handle = offset + page->dma;
 #ifdef	DMAPOOL_DEBUG
@@ -379,10 +464,22 @@ void *dma_pool_alloc(struct dma_pool *pool, gfp_t mem_flags,
 }
 EXPORT_SYMBOL(dma_pool_alloc);
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - @dma가 소속된 dma_page를 찾는다.
+ */
 static struct dma_page *pool_find_page(struct dma_pool *pool, dma_addr_t dma)
 {
 	struct dma_page *page;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * ex) 
+ * <--- allocation-->  <--- allocation-->
+ * |    dma_page1   |  |    dma_page2   | 
+ * ^page->dma          ^page->dma  ^dma
+ *                      dma_page2가 선택된다.
+ */
 	list_for_each_entry(page, &pool->page_list, page_list) {
 		if (dma < page->dma)
 			continue;
@@ -455,6 +552,18 @@ void dma_pool_free(struct dma_pool *pool, void *vaddr, dma_addr_t dma)
 #endif
 
 	page->in_use--;
+
+/*
+ * IAMROOT, 2022.07.23:
+ * ex)
+ * 1. before
+ * | o1-inuse        | o2-inuse        | o3-free        |
+ *                                     ^page->offset
+ * 2. after o2 free                          
+ * | o1-inuse        | o2-inuse        | o3-free        |
+ * |                 | o3 offset|      |                |
+ *                   ^page->offset(o2offset으로 갱신)
+ */
 	*(int *)vaddr = page->offset;
 	page->offset = offset;
 	/*

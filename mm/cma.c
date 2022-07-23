@@ -471,6 +471,11 @@ static inline void cma_debug_show_areas(struct cma *cma) { }
  * This function allocates part of contiguous memory on specific
  * contiguous memory area.
  */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - @cma의 bitmap관리를 통해 @page를 가져온다.
+ */
 struct page *cma_alloc(struct cma *cma, unsigned long count,
 		       unsigned int align, bool no_warn)
 {

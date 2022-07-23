@@ -28,6 +28,7 @@
  * IAMROOT, 2021.11.13:
  * - buddy system에서 사용하는 메모리 승수
  *   2^0 ~ 2^10까지 관리한다는것.
+ * - MAX_ORDER_NR_PAGES = 1024
  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
 #define MAX_ORDER 11

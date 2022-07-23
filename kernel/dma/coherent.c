@@ -310,6 +310,10 @@ int dma_mmap_from_dev_coherent(struct device *dev, struct vm_area_struct *vma,
 #ifdef CONFIG_DMA_GLOBAL_POOL
 static struct dma_coherent_mem *dma_coherent_default_memory __ro_after_init;
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - dma_coherent_default_memory에서 할당해온다.
+ */
 void *dma_alloc_from_global_coherent(struct device *dev, ssize_t size,
 				     dma_addr_t *dma_handle)
 {

@@ -21,6 +21,11 @@ static struct gen_pool *atomic_pool_kernel __ro_after_init;
 static unsigned long pool_size_kernel;
 
 /* Size can be defined by the coherent_pool command line */
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - cmdline coherent_pool을 통해서 설정가능.
+ */
 static size_t atomic_pool_size;
 
 /* Dynamic background expansion when the atomic pool is near capacity */
@@ -76,6 +81,10 @@ static bool cma_in_zone(gfp_t gfp)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - PASS
+ */
 static int atomic_pool_expand(struct gen_pool *pool, size_t pool_size,
 			      gfp_t gfp)
 {
@@ -159,6 +168,10 @@ static void atomic_pool_work_fn(struct work_struct *work)
 	atomic_pool_resize(atomic_pool_kernel, GFP_KERNEL);
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - slab에서 pool을 할당해오고 초기화한다.
+ */
 static __init struct gen_pool *__dma_atomic_pool_init(size_t pool_size,
 						      gfp_t gfp)
 {
@@ -179,6 +192,14 @@ static __init struct gen_pool *__dma_atomic_pool_init(size_t pool_size,
 		return NULL;
 	}
 
+
+/*
+ * IAMROOT, 2022.07.23:
+ * - ex)
+ *  DMA: preallocated 1024 KiB GFP_KERNEL pool for atomic allocations
+ *  DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+ *  DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations 
+ */
 	pr_info("DMA: preallocated %zu KiB %pGg pool for atomic allocations\n",
 		gen_pool_size(pool) >> 10, &gfp);
 	return pool;
@@ -192,6 +213,16 @@ static int __init dma_atomic_pool_init(void)
 	 * If coherent_pool was not used on the command line, default the pool
 	 * sizes to 128KB per 1GB of memory, min 128KB, max MAX_ORDER-1.
 	 */
+/*
+ * IAMROOT, 2022.07.23:
+ * - cmdline coherent_pool설정이 없었다면 totalram_pages를 기준으로 만든다.
+ * - totalram_pages / 8192. 범위는 128k ~ 4MB. RAM 1GB당 128k. 8GB max 1024k
+ * - ex) totalram 4GB, page size = 4k
+ *   totalram_pages  = 1MB
+ *   pages = 1MB / 8192 = 128
+ *   pages = MIN(pages, MAX_ORDER_NR_PAGES ) = pages = 128
+ *   atomic_pool_size = MAX( 128 * 4k = 512k, SZ_128K) = 512k
+ */
 	if (!atomic_pool_size) {
 		unsigned long pages = totalram_pages() / (SZ_1G / SZ_128K);
 		pages = min_t(unsigned long, pages, MAX_ORDER_NR_PAGES);
@@ -221,6 +252,18 @@ static int __init dma_atomic_pool_init(void)
 }
 postcore_initcall(dma_atomic_pool_init);
 
+/*
+ * IAMROOT, 2022.07.23:
+ *   prev                     next
+ * - atomic_pool_kernel      atomic_pool_dma32가 존재하면 dma32. 아니면 dma
+ *   atomic_pool_dma32       atomic_pool_dma
+ *   atomic_pool_dma         NULL
+ *
+ * 1. atomic_pool_dma32가 존재하는 경우
+ * atomic_pool_kernel -> atomic_pool_dma32 -> atomic_pool_dma -> NULL
+ * 2. atomic_pool_dma32가 없는 경우
+ * atomic_pool_kernel -> atomic_pool_dma -> NULL
+ */
 static inline struct gen_pool *dma_guess_pool(struct gen_pool *prev, gfp_t gfp)
 {
 	if (prev == NULL) {
@@ -230,6 +273,7 @@ static inline struct gen_pool *dma_guess_pool(struct gen_pool *prev, gfp_t gfp)
 			return atomic_pool_dma;
 		return atomic_pool_kernel;
 	}
+
 	if (prev == atomic_pool_kernel)
 		return atomic_pool_dma32 ? atomic_pool_dma32 : atomic_pool_dma;
 	if (prev == atomic_pool_dma32)
@@ -262,6 +306,10 @@ static struct page *__dma_alloc_from_pool(struct device *dev, size_t size,
 	return pfn_to_page(__phys_to_pfn(phys));
 }
 
+/*
+ * IAMROOT, 2022.07.23:
+ * - PASS
+ */
 struct page *dma_alloc_from_pool(struct device *dev, size_t size,
 		void **cpu_addr, gfp_t gfp,
 		bool (*phys_addr_ok)(struct device *, phys_addr_t, size_t))
