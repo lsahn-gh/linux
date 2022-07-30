@@ -1,0 +1,8 @@
+obj-m += hello.o
+KERNEL := /home/kkr/main/iamroot/5.15/
+CROSS := aarch64-linux-gnu-
+
+all:
+	$(MAKE) ARCH=arm64 CROSS_COMPILE=$(CROSS) -C $(KERNEL) M=$(shell pwd)  modules
+clean:
+	$(MAKE) -C $(KERNEL) M=$(shell pwd) clean
