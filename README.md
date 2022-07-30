@@ -272,3 +272,7 @@
 - 2022.07.16, Zoom 온라인(5명 참석)
 - dma_alloc_coherent() 진행중
 
+### 61주차
+- 2022.07.23, Zoom 온라인(5명 참석)
+- dma memory allocator 완료
+
