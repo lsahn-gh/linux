@@ -374,7 +374,15 @@ static struct reserved_mem *dma_reserved_default_memory __initdata;
 
 /*
  * IAMROOT, 2022.07.16:
- * - device tree에서 등록된 dma.
+ * - device tree의 reserved-memory에서 "shared-dma-pool"로 등록한 dma 메모리는
+ *   해당 메모리를 사용하려는 사용자 디바이스 드라이버에서 
+ *   of_reserved_mem_device_init() 함수를 호출하면 아래의 함수가 호출된다.
+ *   dma 메모리 영역은 no-map; 속성이 지정되더 있어야 하며, 아래 함수를 통해
+ *   이들은 초기화 과정에서 write-combine 매핑된다.
+ *
+ * - "shared-dma-pool"은 cma 메모리로도 사용되는데, cma 메모리 역시
+ *   of_reserved_mem_device_init() 함수를 호출하면 rmem_cma_device_init() 함수가 
+ *   호출된다.
  */
 static int rmem_dma_device_init(struct reserved_mem *rmem, struct device *dev)
 {

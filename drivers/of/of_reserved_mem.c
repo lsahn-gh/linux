@@ -383,6 +383,11 @@ int of_reserved_mem_device_init_by_idx(struct device *dev,
 	if (!rd)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.08.01: 
+ * (*device_init) -> rmem_dma_device_init	: rmem_dma_setup
+ * (*device_init) -> rmem_cma_device_init	: rmem_cma_setup
+ */
 	ret = rmem->ops->device_init(rmem, dev);
 	if (ret == 0) {
 		rd->dev = dev;
