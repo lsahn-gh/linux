@@ -137,6 +137,11 @@ void clk_hw_unregister_fixed_rate(struct clk_hw *hw)
 EXPORT_SYMBOL_GPL(clk_hw_unregister_fixed_rate);
 
 #ifdef CONFIG_OF
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - 아래와 같은 속성값들을 읽어 of_clk_providers에 등록해준다.
+ */
 static struct clk_hw *_of_fixed_clk_setup(struct device_node *node)
 {
 	struct clk_hw *hw;

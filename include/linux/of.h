@@ -115,6 +115,10 @@ struct device_node {
 #if defined(CONFIG_OF_KOBJ)
 	struct	kobject kobj;
 #endif
+/*
+ * IAMROOT, 2022.08.06:
+ * - OF_POPULATED 와 같은 bit flag가 set된다.
+ */
 	unsigned long _flags;
 	void	*data;
 #if defined(CONFIG_SPARC)
@@ -1350,6 +1354,10 @@ static inline int of_property_read_s32(const struct device_node *np,
 #define for_each_matching_node(dn, matches) \
 	for (dn = of_find_matching_node(NULL, matches); dn; \
 	     dn = of_find_matching_node(dn, matches))
+/*
+ * IAMROOT, 2022.08.06:
+ * - matches되는 모든 device_node를 순회한다.
+ */
 #define for_each_matching_node_and_match(dn, matches, match) \
 	for (dn = of_find_matching_node_and_match(NULL, matches, match); \
 	     dn; dn = of_find_matching_node_and_match(dn, matches, match))

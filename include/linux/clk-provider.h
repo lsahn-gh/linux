@@ -1241,6 +1241,12 @@ struct clk_hw_onecell_data {
 	struct clk_hw *hws[];
 };
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - static const struct of_device_id __of_table##name
+ *   ex) CLK_OF_DECLARE(fixed_clk, "fixed-clock", of_fixed_clk_setup);
+ *   -> __of_table_fixed_clk의 구조체로 __clk_of_table section에 정의된다
+ */
 #define CLK_OF_DECLARE(name, compat, fn) OF_DECLARE_1(clk, name, compat, fn)
 
 /*

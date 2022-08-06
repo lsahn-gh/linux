@@ -243,6 +243,10 @@ struct property *of_find_property(const struct device_node *np,
 }
 EXPORT_SYMBOL(of_find_property);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - tree 순회.
+ */
 struct device_node *__of_find_all_nodes(struct device_node *prev)
 {
 	struct device_node *np;
@@ -502,6 +506,11 @@ EXPORT_SYMBOL(of_get_cpu_state_node);
  * 10. type
  * 11. name
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - compatible을 주석에 내용에 따라 찾는다.
+ */
 static int __of_device_is_compatible(const struct device_node *device,
 				     const char *compat, const char *type, const char *name)
 {
@@ -607,6 +616,11 @@ EXPORT_SYMBOL(of_machine_is_compatible);
  *  Return: True if the status property is absent or set to "okay" or "ok",
  *  false otherwise
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - dts에서 status=ok or okay인 것을 찾는다. dts에서의 on/off 기능.
+ */
 static bool __of_device_is_available(const struct device_node *device)
 {
 	const char *status;
@@ -634,6 +648,10 @@ static bool __of_device_is_available(const struct device_node *device)
  *
  *  Return: True if the status property is absent or set to "okay" or "ok",
  *  false otherwise
+ */
+/*
+ * IAMROOT, 2022.08.06:
+ * - dts에서 status=ok or okay인 것을 찾는다. dts에서의 on/off 기능.
  */
 bool of_device_is_available(const struct device_node *device)
 {
@@ -1101,6 +1119,10 @@ out:
 }
 EXPORT_SYMBOL(of_find_node_with_property);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - "compatible" 에 best한 of_device_id를 찾는다.
+ */
 static
 const struct of_device_id *__of_match_node(const struct of_device_id *matches,
 					   const struct device_node *node)
@@ -1155,6 +1177,11 @@ EXPORT_SYMBOL(of_match_node);
  *
  * Return: A node pointer with refcount incremented, use
  * of_node_put() on it when done.
+ */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - @from부터 모든 of_device_node를 순회한다.
  */
 struct device_node *of_find_matching_node_and_match(struct device_node *from,
 					const struct of_device_id *matches,
@@ -1500,6 +1527,20 @@ EXPORT_SYMBOL(of_parse_phandle);
  * To get a device_node of the ``node2`` node you may call this:
  * of_parse_phandle_with_args(node3, "list", "#list-cells", 1, &args);
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - 주석예제를 참고하면 phandle1은 인자2개, phandle2는 인자1개가 필요한 상황이고
+ *  node3 {
+ *	list = <&phandle1 1 2 &phandle2 3>;
+ *  };
+ *  에서 phandle1에 인자2개를 1,2, phandle2에 인자1개를 3으로 설정해주는게 보인다.
+ *
+ *  @index가 0이면 phandle1, @index가1이면 phandle2가 선택될것이고, 
+ *  phandle1은 out_args에서 args_count = 2, args[] = {1, 2},
+ *  phandle2은 out_args에서 args_count = 1, args[] = {3}
+ *  로 될것이다.
+ */
 int of_parse_phandle_with_args(const struct device_node *np, const char *list_name,
 				const char *cells_name, int index,
 				struct of_phandle_args *out_args)
@@ -1757,6 +1798,11 @@ EXPORT_SYMBOL(of_parse_phandle_with_fixed_args);
  * phandle and 1 or more arguments. The number of arguments are
  * determined by the #gpio-cells property in the node pointed to by the
  * phandle.
+ */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - papgo
  */
 int of_count_phandle_with_args(const struct device_node *np, const char *list_name,
 				const char *cells_name)

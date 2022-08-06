@@ -442,6 +442,10 @@ static void clk_core_fill_parent_index(struct clk_core *core, u8 index)
 		entry->core = parent;
 }
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - parent가 없으면 NULL. 
+ */
 static struct clk_core *clk_core_get_parent_by_index(struct clk_core *core,
 							 u8 index)
 {
@@ -1664,6 +1668,15 @@ unsigned long clk_get_rate(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_get_rate);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @core의 parent중에서 @parent가 있는지 확인한다.
+ *   1. core->parent[i].core와 parent가 같거나.
+ *   core->parent[i].core가 없는 것들 중에서.
+ *   1. hw가 같거나.
+ *   2. clk_core_get(core, i)와 core가 같거나
+ *   3. core->parents의 이름과 parent의 이름이 같은경우.
+ */
 static int clk_fetch_parent_index(struct clk_core *core,
 				  struct clk_core *parent)
 {
@@ -2446,6 +2459,10 @@ static struct clk_core *__clk_init_parent(struct clk_core *core)
 {
 	u8 index = 0;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - num_parents가 0이면 안구해온다.
+ */
 	if (core->num_parents > 1 && core->ops->get_parent)
 		index = core->ops->get_parent(core->hw);
 
@@ -2502,6 +2519,11 @@ bool clk_has_parent(struct clk *clk, struct clk *parent)
 }
 EXPORT_SYMBOL_GPL(clk_has_parent);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @core의 parent를 @parent로 지정한다.
+ *   즉 mux clk의 입력소스로 @parent를 선택한다.
+ */
 static int clk_core_set_parent_nolock(struct clk_core *core,
 				      struct clk_core *parent)
 {
@@ -2528,6 +2550,10 @@ static int clk_core_set_parent_nolock(struct clk_core *core,
 	if (clk_core_rate_is_protected(core))
 		return -EBUSY;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - core에 parent가 fetch되있는지 확인한다.
+ */
 	/* try finding the new parent index */
 	if (parent) {
 		p_index = clk_fetch_parent_index(core, parent);
@@ -2589,6 +2615,21 @@ EXPORT_SYMBOL_GPL(clk_hw_set_parent);
  * __clk_recalc_rates.
  *
  * Returns 0 on success, -EERROR otherwise.
+ */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - papgo
+ *   부모를 새 입력 소스로 사용하려면 다시 부모로 지정합니다. clk가 준비 상태에
+ *   있으면 이 호출 기간 동안 clk가 활성화됩니다. 특정 clk에 허용되지 않는 경우
+ *   (예: 소비자가 이를 처리할 수 없고 하드웨어에서 부모 재지정이 결함이 있는 경우 등)
+ *   CLK_SET_PARENT_GATE 플래그를 사용하여 clk가 준비되지 않은 경우에만 부모
+ *   재지정을 허용합니다.
+ *
+ *   clk의 부모를 성공적으로 변경한 후 clk_set_parent는 clk 토폴로지, sysfs
+ *   토폴로지를 업데이트하고 __clk_recalc_rates를 통해 속도 재계산을 전파합니다.
+ *
+ *   성공하면 0을 반환하고 그렇지 않으면 -EERROR를 반환합니다
  */
 int clk_set_parent(struct clk *clk, struct clk *parent)
 {
@@ -2687,6 +2728,10 @@ int clk_set_phase(struct clk *clk, int degrees)
 }
 EXPORT_SYMBOL_GPL(clk_set_phase);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - get_phase ops가 있다면 함수를 수행해 위상을 알아온다.
+ */
 static int clk_core_get_phase(struct clk_core *core)
 {
 	int ret;
@@ -2725,6 +2770,10 @@ int clk_get_phase(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_get_phase);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - 50%를 default로 설정한다.
+ */
 static void clk_core_reset_duty_cycle_nolock(struct clk_core *core)
 {
 	/* Assume a default value of 50% */
@@ -2734,11 +2783,21 @@ static void clk_core_reset_duty_cycle_nolock(struct clk_core *core)
 
 static int clk_core_update_duty_cycle_parent_nolock(struct clk_core *core);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - parent가 있고 parent것을 사용하라고하면 parent로 타고 올라가고, 아니면
+ *   자기것을 사용한다.
+ * - 아무대도 없을 경우 default로 50%를 사용한다.
+ */
 static int clk_core_update_duty_cycle_nolock(struct clk_core *core)
 {
 	struct clk_duty *duty = &core->duty;
 	int ret = 0;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - ops가 없으면 parent에서 
+ */
 	if (!core->ops->get_duty_cycle)
 		return clk_core_update_duty_cycle_parent_nolock(core);
 
@@ -2759,6 +2818,12 @@ reset:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - parent가 존재하고 flag가 parent꺼를 사용하라고 되있으면 parent사용한다.
+ *   아니라면 default로 50%를 사용한다.
+ * - 재귀함수로 되있다.
+ */
 static int clk_core_update_duty_cycle_parent_nolock(struct clk_core *core)
 {
 	int ret = 0;
@@ -3368,6 +3433,11 @@ static inline void clk_debug_unregister(struct clk_core *core)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - clk_orphan_list를 순회하며 orphans이 였던 것들중에 parent가 생긴것이
+ *   있는 확인하여 작업을 해준다.
+ */
 static void clk_core_reparent_orphans_nolock(void)
 {
 	struct clk_core *orphan;
@@ -3479,6 +3549,13 @@ static int __clk_core_init(struct clk_core *core)
 			goto out;
 	}
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - num_parents를 사용하여 parent가 있는지 판단해본다.
+ *   clk_hw_register_fixed_rate_with_accuracy()를 통해서 이 루틴 까지 왔을때
+ *   clk_hw_register_fixed_rate_with_accuracy()에서 parent 관련 인자들이
+ *   NULL값이였으면 num_parents가 0이 되어 parent를 안구한다.
+ */
 	parent = core->parent = __clk_init_parent(core);
 
 	/*
@@ -3491,6 +3568,11 @@ static int __clk_core_init(struct clk_core *core)
 	 * clocks and re-parent any that are children of the clock currently
 	 * being clk_init'd.
 	 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - parent가 없는데, num_parents가 0이라는것은 root라는 것이고 num_parents가
+ *   존재하면 일단 orphan상태로 한다.
+ */
 	if (parent) {
 		hlist_add_head(&core->child_node, &parent->children);
 		core->orphan = parent->orphan;
@@ -3509,6 +3591,10 @@ static int __clk_core_init(struct clk_core *core)
 	 * parent (or is orphaned) then accuracy is set to zero (perfect
 	 * clock).
 	 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - ex) clk_fixed_rate_recalc_accuracy,
+ */
 	if (core->ops->recalc_accuracy)
 		core->accuracy = core->ops->recalc_accuracy(core->hw,
 					clk_core_get_accuracy_no_lock(parent));
@@ -3595,6 +3681,10 @@ unlock:
  * @core: clk to add consumer to
  * @clk: consumer to link to a clk
  */
+/*
+ * IAMROOT, 2022.08.06:
+ * - core(provider)에 clk(consumer) 등록.
+ */
 static void clk_core_link_consumer(struct clk_core *core, struct clk *clk)
 {
 	clk_prepare_lock();
@@ -3619,6 +3709,10 @@ static void clk_core_unlink_consumer(struct clk *clk)
  * @con_id: connection ID string on device
  *
  * Returns: clk consumer left unlinked from the consumer list
+ */
+/*
+ * IAMROOT, 2022.08.06:
+ * - struct clk 할당 및 초기화.
  */
 static struct clk *alloc_clk(struct clk_core *core, const char *dev_id,
 			     const char *con_id)
@@ -3662,12 +3756,21 @@ static void free_clk(struct clk *clk)
  * consumers. It connects a consumer to the clk_core and clk_hw structures
  * used by the framework and clk provider respectively.
  */
+/*
+ * IAMROOT, 2022.08.06:
+ * - @hw가 error 라면 error return.
+ * - clk core에 clk을 할당하여 추가한다.
+ */
 struct clk *clk_hw_create_clk(struct device *dev, struct clk_hw *hw,
 			      const char *dev_id, const char *con_id)
 {
 	struct clk *clk;
 	struct clk_core *core;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @hw가 error라면 error 변환 return.
+ */
 	/* This is to allow this function to be chained to others */
 	if (IS_ERR_OR_NULL(hw))
 		return ERR_CAST(hw);
@@ -3683,7 +3786,16 @@ struct clk *clk_hw_create_clk(struct device *dev, struct clk_hw *hw,
 		return ERR_PTR(-ENOENT);
 	}
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - clk core ref up
+ */
 	kref_get(&core->ref);
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - core(provider)에 clk(consumer)를 등록한다.
+ */
 	clk_core_link_consumer(core, clk);
 
 	return clk;
@@ -3801,6 +3913,10 @@ static void clk_core_free_parent_map(struct clk_core *core)
 	kfree(core->parents);
 }
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @hw로 받은 data로 core와 clk를 생성한다.
+ */
 static struct clk *
 __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
 {
@@ -3862,12 +3978,23 @@ __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
 		goto fail_create_clk;
 	}
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - 자기자신으로 등록한다.
+ *    +-- hw --+
+ *    v        v
+ *   core <--- clk
+ */
 	clk_core_link_consumer(hw->core, hw->clk);
 
 	ret = __clk_core_init(core);
 	if (!ret)
 		return hw->clk;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - 실패시 unlink후 free.
+ */
 	clk_prepare_lock();
 	clk_core_unlink_consumer(hw->clk);
 	clk_prepare_unlock();
@@ -4449,6 +4576,11 @@ int devm_clk_notifier_register(struct device *dev, struct clk *clk,
 EXPORT_SYMBOL_GPL(devm_clk_notifier_register);
 
 #ifdef CONFIG_OF
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - orphans에 대해서 reparent를 수행한다.
+ */
 static void clk_core_reparent_orphans(void)
 {
 	clk_prepare_lock();
@@ -4475,6 +4607,12 @@ struct of_clk_provider {
 	void *data;
 };
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - CLK_OF_DECLARE(..) 을 통해서 정의된 of_table들은
+ *   __clk_of_table section에 struct of_device_id 형태로 compile time에 넣어진다.
+ *   __clk_of_table은 해당 시작주소를 가리킨다.
+ */
 extern struct of_device_id __clk_of_table;
 static const struct of_device_id __clk_of_table_sentinel
 	__used __section("__clk_of_table_end");
@@ -4573,6 +4711,10 @@ EXPORT_SYMBOL_GPL(of_clk_add_provider);
  * @np: Device node pointer associated with clock provider
  * @get: callback for decoding clk_hw
  * @data: context pointer for @get callback.
+ */
+/*
+ * IAMROOT, 2022.08.06:
+ * - of_clk_providers에 clk provider로 등록한다.
  */
 int of_clk_add_hw_provider(struct device_node *np,
 			   struct clk_hw *(*get)(struct of_phandle_args *clkspec,
@@ -4763,6 +4905,26 @@ EXPORT_SYMBOL(devm_of_clk_del_provider);
  * if @name is NULL or -EINVAL if @name is non-NULL and it can't be found in
  * the "clock-names" property of @np.
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - ex)  imx8-ss-audio.dtsi 참고
+ *   dsp라는 np를 예제로 가져온다;
+ *   dsp: dsp@596e8000 {
+ *	compatible = "fsl,imx8qxp-dsp";
+ *	reg = <0x596e8000 0x88000>;
+ *	clocks = <&dsp_lpcg IMX_LPCG_CLK_5>,
+ *	<&dsp_ram_lpcg IMX_LPCG_CLK_4>,
+ *	<&dsp_lpcg IMX_LPCG_CLK_7>;
+ *	clock-names = "ipg", "ocram", "core";
+ *   };
+ *   clocks : 0번 index dsp_lpcg으로 사용하고 IMX_LPCG_CLK_5라는 속성을 사용한단것.
+ *            1번 index dsp_ram_lpcg, 2번 index는 dsp_lpcg가 된다.
+ *   clock-names : cloks의 index에 대응하는 각각의 이름
+ *
+ * - @name이나 @index로 clkspec을 찾는다. 만약 해당 np에서 못찾았고, parent np에
+ *   clock-ranges;가 있다면 부모에서 @name, @index로 찾아본다.(for arm lagacy)
+ */
 static int of_parse_clkspec(const struct device_node *np, int index,
 			    const char *name, struct of_phandle_args *out_args)
 {
@@ -4776,12 +4938,30 @@ static int of_parse_clkspec(const struct device_node *np, int index,
 		 * will be an error code and of_parse_phandle_with_args() will
 		 * return -EINVAL.
 		 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - name이 주어지면 name으로 index를 구해온다.
+ *   cloks = <&dsp_lpcg ..>, <&dsp_ram_lpcg ..>, <&dsp_lpcg ..>
+ *   clock-names = "ipg", "ocram", "core";
+ *   라고 했을대 "ocram"로 인자가오면 <&dsp_ram_lpcg ..>을 찾아주는 개념.
+ * - <&dsp_ram_lpcg IMX_LPCG_CLK_4>가 검색했다고 됬을대 out_args에 cnt는 1,
+ *   arg[] = {IMX_LPCG_CLK_4} 가 얻어진다.
+ */
 		if (name)
 			index = of_property_match_string(np, "clock-names", name);
 		ret = of_parse_phandle_with_args(np, "clocks", "#clock-cells",
 						 index, out_args);
+/*
+ * IAMROOT, 2022.08.06:
+ * - 찾아지면 종료.
+ */
 		if (!ret)
 			break;
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - 못찾았는데 name이 주어지고, name에 해당하는 index까지 찾아진 경우 종료(error)
+ */
 		if (name && index >= 0)
 			break;
 
@@ -4790,6 +4970,11 @@ static int of_parse_clkspec(const struct device_node *np, int index,
 		 * has a "clock-ranges" property, then we can try one of its
 		 * clocks.
 		 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - 부모가 존재하고 부모가 clock-ranges를 찾는다. 없으면 break.(error)
+ *   부모에 clock-ranges;가 있으면 부모까지 확장해서 name이나 index로 해보라는의미.
+ */
 		np = np->parent;
 		if (np && !of_get_property(np, "clock-ranges", NULL))
 			break;
@@ -4805,6 +4990,10 @@ __of_clk_get_hw_from_provider(struct of_clk_provider *provider,
 {
 	struct clk *clk;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - ex) of_clk_hw_simple_get
+ */
 	if (provider->get_hw)
 		return provider->get_hw(clkspec, provider->data);
 
@@ -4814,6 +5003,11 @@ __of_clk_get_hw_from_provider(struct of_clk_provider *provider,
 	return __clk_get_hw(clk);
 }
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - of_clk_providers에서 @clkspec이 존재하는 찾아본다
+ * - 못찾으면 -EPROBE_DEFER
+ */
 static struct clk_hw *
 of_clk_get_hw_from_clkspec(struct of_phandle_args *clkspec)
 {
@@ -4844,6 +5038,13 @@ of_clk_get_hw_from_clkspec(struct of_phandle_args *clkspec)
  * providers, an input is a clock specifier data structure as returned
  * from the of_parse_phandle_with_args() function call.
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - papago
+ *   이 함수는 등록된 클럭 제공자 목록에서 구조체 clk를 조회하며, 입력은
+ *   of_parse_phandle_with_args() 함수 호출에서 반환된 클럭 지정자 데이터 구조입니다.
+ */
 struct clk *of_clk_get_from_provider(struct of_phandle_args *clkspec)
 {
 	struct clk_hw *hw = of_clk_get_hw_from_clkspec(clkspec);
@@ -4852,6 +5053,11 @@ struct clk *of_clk_get_from_provider(struct of_phandle_args *clkspec)
 }
 EXPORT_SYMBOL_GPL(of_clk_get_from_provider);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @np에서 @index, @name에 해당하는 clock을 찾은후 of_clk_providers에서 일치하는게
+ *   있는지 확인한다.
+ */
 struct clk_hw *of_clk_get_hw(struct device_node *np, int index,
 			     const char *con_id)
 {
@@ -4859,20 +5065,40 @@ struct clk_hw *of_clk_get_hw(struct device_node *np, int index,
 	struct clk_hw *hw;
 	struct of_phandle_args clkspec;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @index or @name에 해당하는 clock을 phandle argu를 가져온다.
+ */
 	ret = of_parse_clkspec(np, index, con_id, &clkspec);
 	if (ret)
 		return ERR_PTR(ret);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - of_clk_provider에서 일치하는 걸 찾는다. 못찾았다면 -EPROBE_DEFER
+ */
 	hw = of_clk_get_hw_from_clkspec(&clkspec);
 	of_node_put(clkspec.np);
 
 	return hw;
 }
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - @con_id or @index에 해당하는 clk을 찾고 struct clk를 초기화하여
+ *   clk core에 consumer로 등록한다.
+ */
 static struct clk *__of_clk_get(struct device_node *np,
 				int index, const char *dev_id,
 				const char *con_id)
 {
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - @index or @con_idx에 해당하는 phandle에 대응하는 clk_hw를 찾고 of_clk_provider
+ *   에서 검색을 한다.
+ * - of_clk_provider에 없으면 -EPROBE_DEFER.
+ */
 	struct clk_hw *hw = of_clk_get_hw(np, index, con_id);
 
 	return clk_hw_create_clk(NULL, hw, dev_id, con_id);
@@ -5012,11 +5238,27 @@ struct clock_provider {
  * checks that the provider for this parent clock was initialized, in
  * this case the parent clock will be ready.
  */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * -papgo
+ *  이 함수는 부모 clock를 찾습니다. 있는 경우 이 상위 clock의 공급자가
+ *  초기화되었는지 확인합니다. 이 경우 상위 clock가 준비됩니다. 
+ *
+ * - @np의 index 0부터 parent clock을 순회하며 clk을 가져온다.
+ *
+ * - 만약 -EPROBE_DEFER가 났다면 상위 부모를 못찾았다(부모가 아직 준비가 안됬다)
+ *   는 의미가 되고 return 0.
+ */
 static int parent_ready(struct device_node *np)
 {
 	int i = 0;
 
 	while (true) {
+/*
+ * IAMROOT, 2022.08.06:
+ * - 
+ */
 		struct clk *clk = of_clk_get(np, i);
 
 		/* this parent is ready we can check the next one */
@@ -5038,6 +5280,14 @@ static int parent_ready(struct device_node *np)
 		 * parent, no need to wait for them, then we can
 		 * consider their absence as being ready
 		 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - papago
+ *   여기서 우리는 장치 트리가 올바르게 작성되었다고 가정합니다. 따라서 오류는
+ *   더 이상 부모가 없음을 의미합니다. 아직 종료하지 않았으므로 이전 부모가
+ *   준비되었습니다. clock 부모가 없으면 기다릴 필요가 없다면 그들의 부재는 준비된
+ *   것으로 간주할 수 있습니다.*
+ */
 		return 1;
 	}
 }
@@ -5094,6 +5344,16 @@ void __init of_clk_init(const struct of_device_id *matches)
 	bool force = false;
 	LIST_HEAD(clk_provider_list);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - matches == NULL일 경우 kernel image(CLK_OF_DECLARE(..))에 있는 구조체
+ *   시작주소를 가져온다.
+ *   ex) CLK_OF_DECLARE(fixed_clk, "fixed-clock", of_fixed_clk_setup);
+ *   device tree에서 compatible = "fixed-clock"인 것들을 of_device_id로 가져온다.
+ *
+ * - kernel image에서 1, 2, 3, 4, 5 라는 of_device_id가 있고, dts에서 3, 4, 6라는
+ *   device_node가 있다고 했을때, 매치되는 3, 4를 찾는 과정.
+ */
 	if (!matches)
 		matches = &__clk_of_table;
 
@@ -5101,11 +5361,19 @@ void __init of_clk_init(const struct of_device_id *matches)
 	for_each_matching_node_and_match(np, matches, &match) {
 		struct clock_provider *parent;
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - status ok가 아닌것들을 skip한다.
+ */
 		if (!of_device_is_available(np))
 			continue;
 
 		parent = kzalloc(sizeof(*parent), GFP_KERNEL);
 		if (!parent) {
+/*
+ * IAMROOT, 2022.08.06:
+ * - 할당 실패했을 경우 여지껏 만든것을 모두 해제하고 return.
+ */
 			list_for_each_entry_safe(clk_provider, next,
 						 &clk_provider_list, node) {
 				list_del(&clk_provider->node);
@@ -5121,6 +5389,10 @@ void __init of_clk_init(const struct of_device_id *matches)
 		list_add_tail(&parent->node, &clk_provider_list);
 	}
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - parent_ready가 되는 것들은 먼저 처리하고, 그 다음 루틴에서 나머지를 처리한다.
+ */
 	while (!list_empty(&clk_provider_list)) {
 		is_init_done = false;
 		list_for_each_entry_safe(clk_provider, next,
@@ -5131,6 +5403,11 @@ void __init of_clk_init(const struct of_device_id *matches)
 				of_node_set_flag(clk_provider->np,
 						 OF_POPULATED);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - of_fixed_clk_setup 참고. of_clk_providers에 등록된다.
+ * - of_clk_add_hw_provider이나 of_clk_add_provider를 통해서 등록될것이다.
+ */
 				clk_provider->clk_init_cb(clk_provider->np);
 				of_clk_set_defaults(clk_provider->np, true);
 
@@ -5147,6 +5424,10 @@ void __init of_clk_init(const struct of_device_id *matches)
 		 * initialize all the remaining ones unconditionally
 		 * in case the clock parent was not mandatory
 		 */
+/*
+ * IAMROOT, 2022.08.06:
+ * - 한번에 안되면 한번더 돈다. 한번더 돌때는 parent_ready를 안따른다.
+ */
 		if (!is_init_done)
 			force = true;
 	}

@@ -40,6 +40,10 @@ static inline unsigned int kref_read(const struct kref *kref)
  * kref_get - increment refcount for object.
  * @kref: object.
  */
+/*
+ * IAMROOT, 2022.08.06:
+ * - kref up
+ */
 static inline void kref_get(struct kref *kref)
 {
 	refcount_inc(&kref->refcount);

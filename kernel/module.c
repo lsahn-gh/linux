@@ -1066,6 +1066,10 @@ void __module_get(struct module *module)
 }
 EXPORT_SYMBOL(__module_get);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - module ref up
+ */
 bool try_module_get(struct module *module)
 {
 	bool ret = true;

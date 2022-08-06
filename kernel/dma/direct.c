@@ -249,7 +249,7 @@ void *dma_direct_alloc(struct device *dev, size_t size,
 
 /*
  * IAMROOT, 2022.07.23:
- * 4) atomice 요청 시 dma coherent pool에서 할당한다.
+ * 4) atomic 요청 시 dma coherent pool에서 할당한다.
  */
 	if (IS_ENABLED(CONFIG_DMA_COHERENT_POOL) &&
 	    !gfpflags_allow_blocking(gfp) &&

@@ -51,6 +51,10 @@ unsigned long profile_pc(struct pt_regs *regs)
 }
 EXPORT_SYMBOL(profile_pc);
 
+/*
+ * IAMROOT, 2022.08.06:
+ * - 진행시작.
+ */
 void __init time_init(void)
 {
 	u32 arch_timer_rate;

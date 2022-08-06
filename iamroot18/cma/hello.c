@@ -34,35 +34,16 @@ static int iamroot_probe(struct platform_device *pdev)
 {
 	int err;
 
-	printk(KERN_INFO "%s %d %px\n", __func__, __LINE__, pdev->dev.dma_mem);
+	err = of_reserved_mem_device_init_by_idx(&pdev->dev, pdev->dev.of_node, 0);
 
-#if 0
-	struct device_node *mem_node;
-	struct reserved_mem *rmem;
-	mem_node = of_parse_phandle(pdev->dev.of_node, "memory-region", 0);
-	if (!mem_node) {
-		dev_err(&pdev->dev, "No memory-region found for index %d\n", 0);
-		return -ENODEV;
-	}
-
-	rmem = of_reserved_mem_lookup(mem_node);
-	if (!rmem) {
-		dev_err(&pdev->dev, "of_reserved_mem_lookup() returned NULL\n");
-		return -ENODEV;
-	}
-
-	pdev->dev.dma_mem = rmem->priv;
-
-	printk(KERN_INFO "%s %d %px %x %x %s\n", __func__, __LINE__, pdev->dev.dma_mem,
-			rmem->base, (uint32_t)rmem->size, rmem->name);
-#endif
-
-	err = of_reserved_mem_device_init_by_name(&pdev->dev, pdev->dev.of_node, "iamroot_buffer2");
 	if (err < 0) {
 		dev_err(&pdev->dev, "failed to get nominal EMC table: %d\n", err);
 		return err;
 	}
+
+	printk(KERN_INFO "%s %d %px\n", __func__, __LINE__, pdev->dev.dma_mem);
 	g_dma = dma_alloc_coherent(&pdev->dev, ALLOC_SIZE, &g_dma_addr, GFP_KERNEL);
+	printk(KERN_INFO "%s %d %px %llx\n", __func__, __LINE__, g_dma, g_dma_addr);
 	return 0;
 }
 
