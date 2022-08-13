@@ -23,6 +23,11 @@
  * @offset: offset from the master IP module base address
  * @index: index of the master IP module
  */
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - @ptr ioremap으로 mapping한 register ptr.
+ */
 struct clk_omap_reg {
 	void __iomem *ptr;
 	u16 offset;

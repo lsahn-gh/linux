@@ -67,6 +67,10 @@ int clk_mux_val_to_index(struct clk_hw *hw, u32 *table, unsigned int flags,
 }
 EXPORT_SYMBOL_GPL(clk_mux_val_to_index);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @index에 해당하는 table에서 val을 가져와 flag에 따라 가공해서 return한다.
+ */
 unsigned int clk_mux_index_to_val(u32 *table, unsigned int flags, u8 index)
 {
 	unsigned int val = index;
@@ -96,6 +100,11 @@ static u8 clk_mux_get_parent(struct clk_hw *hw)
 	return clk_mux_val_to_index(hw, mux->table, mux->flags, val);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - table에서 index에서 해당하는 parent를 선택하고, 거기에 저장된 val값을
+ *   flag에 따라 수정수 가져온다.
+ */
 static int clk_mux_set_parent(struct clk_hw *hw, u8 index)
 {
 	struct clk_mux *mux = to_clk_mux(hw);
@@ -146,6 +155,10 @@ const struct clk_ops clk_mux_ro_ops = {
 };
 EXPORT_SYMBOL_GPL(clk_mux_ro_ops);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk_hw_register_fixed_rate류 와 비슷한 방식을 사용해서 등록한다.
+ */
 struct clk_hw *__clk_hw_register_mux(struct device *dev, struct device_node *np,
 		const char *name, u8 num_parents,
 		const char * const *parent_names,
@@ -241,6 +254,10 @@ struct clk_hw *__devm_clk_hw_register_mux(struct device *dev, struct device_node
 }
 EXPORT_SYMBOL_GPL(__devm_clk_hw_register_mux);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 등록.
+ */
 struct clk *clk_register_mux_table(struct device *dev, const char *name,
 		const char * const *parent_names, u8 num_parents,
 		unsigned long flags, void __iomem *reg, u8 shift, u32 mask,

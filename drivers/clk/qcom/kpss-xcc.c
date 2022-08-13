@@ -29,6 +29,17 @@ static const struct of_device_id kpss_xcc_match_table[] = {
 };
 MODULE_DEVICE_TABLE(of, kpss_xcc_match_table);
 
+
+/*
+ * IAMROOT, 2022.08.13:
+ * ex)
+ * acc0: clock-controller@2088000 {
+ *	compatible = "qcom,kpss-acc-v1";
+ *	reg = <0x02088000 0x1000>, <0x02008000 0x1000>;
+ * }; 
+ *
+ * - table 등록.
+ */
 static int kpss_xcc_driver_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *id;

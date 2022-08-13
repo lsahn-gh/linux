@@ -239,6 +239,10 @@ CLK_OF_DECLARE(ti_composite_clock, "ti,composite-clock",
  * Adds a component clock to the list of available components, so that
  * it can be registered by a composite clock.
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk를 생성해 parent clk정보를 찾아서 등록하고, @type으로 설정한다.
+ */
 int __init ti_clk_add_component(struct device_node *node, struct clk_hw *hw,
 				int type)
 {
@@ -257,6 +261,10 @@ int __init ti_clk_add_component(struct device_node *node, struct clk_hw *hw,
 	if (!parent_names)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - dt에서 parent_names를 num_parents만큼 가져온다.
+ */
 	of_clk_parent_fill(node, parent_names, num_parents);
 
 	clk = kzalloc(sizeof(*clk), GFP_KERNEL);

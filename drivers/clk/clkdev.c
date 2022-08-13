@@ -33,6 +33,10 @@ static DEFINE_MUTEX(clocks_mutex);
  * Then we take the most specific entry - with the following
  * order of precedence: dev+con > dev only > con only.
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - dev+con > dev only > con only 순으로 찾아본다.
+ */
 static struct clk_lookup *clk_find(const char *dev_id, const char *con_id)
 {
 	struct clk_lookup *p, *cl = NULL;
@@ -47,17 +51,31 @@ static struct clk_lookup *clk_find(const char *dev_id, const char *con_id)
 
 	list_for_each_entry(p, &clocks, node) {
 		match = 0;
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - dev_id 일치하면 2 point
+ */
 		if (p->dev_id) {
 			if (!dev_id || strcmp(p->dev_id, dev_id))
 				continue;
 			match += 2;
 		}
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - con_id 일치하면 1 point
+ */
 		if (p->con_id) {
 			if (!con_id || strcmp(p->con_id, con_id))
 				continue;
 			match += 1;
 		}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 주어진 인자와 일치하게 point가 얻어지면 바로 break. 아니면 best로 갱신한다.
+ */
 		if (match > best_found) {
 			cl = p;
 			if (match != best_possible)
@@ -69,11 +87,21 @@ static struct clk_lookup *clk_find(const char *dev_id, const char *con_id)
 	return cl;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - dt를 사용하지 않은 lagacy에서는 custom방식으로 등록을 이미 시켜놨다.
+ *   clokcs(drivers/clk/clkdev.c) 전역변수에서 바로 찾는다.
+ */
 struct clk_hw *clk_find_hw(const char *dev_id, const char *con_id)
 {
 	struct clk_lookup *cl;
 	struct clk_hw *hw = ERR_PTR(-ENOENT);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clocks(drivers/clk/clkdev.c) 전역리스트에서 dev_id, con_id로 검색해본다.
+ *   dev_id + con_id > dev_id > con_id로 우선순위되서 찾는다.
+ */
 	mutex_lock(&clocks_mutex);
 	cl = clk_find(dev_id, con_id);
 	if (cl)
@@ -83,6 +111,11 @@ struct clk_hw *clk_find_hw(const char *dev_id, const char *con_id)
 	return hw;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @dev_id, @con_id에 따라서 hw을 찾아오고 clk자료 구조를 생성해
+ *   clk에 dev를 등록하고 core와 clk를 연결한다.
+ */
 static struct clk *__clk_get_sys(struct device *dev, const char *dev_id,
 				 const char *con_id)
 {
@@ -91,23 +124,45 @@ static struct clk *__clk_get_sys(struct device *dev, const char *dev_id,
 	return clk_hw_create_clk(dev, hw, dev_id, con_id);
 }
 
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - @dev_id, @con_id에 따라서 hw을 찾아오고 clk자료 구조를 생성해
+ *   core와 clk를 연결한다.
+ */
 struct clk *clk_get_sys(const char *dev_id, const char *con_id)
 {
 	return __clk_get_sys(NULL, dev_id, con_id);
 }
 EXPORT_SYMBOL(clk_get_sys);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * @dev consumer측의 device
+ * @con_id @dev와 연결될것. 
+ * - dt나 system 방식으로 dev_id, con_id로 검색해 hw를 찾아서 등록한다.
+ */
 struct clk *clk_get(struct device *dev, const char *con_id)
 {
 	const char *dev_id = dev ? dev_name(dev) : NULL;
 	struct clk_hw *hw;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - dt에서 왔으면(dev->of_node가 있다는것.) of_clk_get_hw로 들어간다.
+ *   dts에서 phandle을 찾고, 해당 정보로 연결된 clk core에 clk(consumer)
+ *   를 만들어서 등록한다.
+ */
 	if (dev && dev->of_node) {
 		hw = of_clk_get_hw(dev->of_node, 0, con_id);
 		if (!IS_ERR(hw) || PTR_ERR(hw) == -EPROBE_DEFER)
 			return clk_hw_create_clk(dev, hw, dev_id, con_id);
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - dt가 아니였거나 error 였을경우 실행.
+ */
 	return __clk_get_sys(dev, dev_id, con_id);
 }
 EXPORT_SYMBOL(clk_get);

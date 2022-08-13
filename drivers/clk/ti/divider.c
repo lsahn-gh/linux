@@ -76,6 +76,12 @@ static unsigned int _get_div(struct clk_omap_divider *divider, unsigned int val)
 	return val + 1;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @div가 table에 있어야 해당 val을 가져온다.
+ * - ex) ti,dividers = <8>, <16>;
+ *   div == 8이면 return 0. div == 16이면 return 1
+ */
 static unsigned int _get_table_val(const struct clk_div_table *table,
 				   unsigned int div)
 {
@@ -87,14 +93,32 @@ static unsigned int _get_table_val(const struct clk_div_table *table,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 4가지 방식으로 div를 구해온다.
+ * ex) parent 16MHz, 요구 1Mhz 일때 div. 16인 상황.
+ * 1) CLK_DIVIDER_ONE_BASED.   : return 16
+ * 2) CLK_DIVIDER_POWER_OF_TWO : return 4
+ * 3) divider->table           : table에 <8>, <16>을 썻다고 가정. return 1
+ * 4) div - 1                  : return 15
+ */
 static unsigned int _get_val(struct clk_omap_divider *divider, u8 div)
 {
 	if (divider->flags & CLK_DIVIDER_ONE_BASED)
 		return div;
 	if (divider->flags & CLK_DIVIDER_POWER_OF_TWO)
 		return __ffs(div);
+/*
+ * IAMROOT, 2022.08.13:
+ * ex) 1/1, 1/3, 1/57.. 와 같이 불규칙한 하드웨어면 table에 해당 divide를 정의해서
+ * 사용하는 방식으로 쓴다.
+ */
 	if (divider->table)
 		return  _get_table_val(divider->table, div);
+/*
+ * IAMROOT, 2022.08.13:
+ * - -1만 한다.
+ */
 	return div - 1;
 }
 
@@ -261,6 +285,12 @@ static int ti_clk_divider_set_rate(struct clk_hw *hw, unsigned long rate,
 
 	value = _get_val(divider, div);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - read register.
+ *   set register value.
+ *   write register
+ */
 	val = ti_clk_ll_ops->clk_readl(&divider->reg);
 	val &= ~(divider->mask << divider->shift);
 	val |= value << divider->shift;
@@ -392,6 +422,17 @@ int ti_clk_parse_divider_data(int *div_table, int num_dividers, int max_div,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - ex)
+ *   abe_24m_fclk: abe_24m_fclk@11c {
+ *	#clock-cells = <0>;
+ *	compatible = "ti,divider-clock";
+ *	clocks = <&dpll_abe_m2x2_ck>;
+ *	reg = <0x011c>;
+ *	ti,dividers = <8>, <16>;
+ *   };
+ */
 static int __init ti_clk_get_div_table(struct device_node *node,
 				       struct clk_omap_divider *div)
 {
@@ -550,6 +591,10 @@ cleanup:
 }
 CLK_OF_DECLARE(divider_clk, "ti,divider-clock", of_ti_divider_clk_setup);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - CLK_COMPONENT_TYPE_DIVIDER로 add한다.
+ */
 static void __init of_ti_composite_divider_clk_setup(struct device_node *node)
 {
 	struct clk_omap_divider *div;

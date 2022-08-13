@@ -49,6 +49,15 @@ const struct clk_ops clk_fixed_rate_ops = {
 };
 EXPORT_SYMBOL_GPL(clk_fixed_rate_ops);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed rate를 등록한다.
+ *   parent관련 3개의 인자중 하나를 다음과 같은 함수로 통해서 정해서 사용한다.
+ *   clk_hw_register_fixed_rate : parent_name
+ *   clk_hw_register_fixed_rate_parent_hw : parent_hw
+ *   clk_hw_register_fixed_rate_parent_data : parent_data
+ *
+ */
 struct clk_hw *__clk_hw_register_fixed_rate(struct device *dev,
 		struct device_node *np, const char *name,
 		const char *parent_name, const struct clk_hw *parent_hw,
@@ -72,6 +81,13 @@ struct clk_hw *__clk_hw_register_fixed_rate(struct device *dev,
 	init.parent_names = parent_name ? &parent_name : NULL;
 	init.parent_hws = parent_hw ? &parent_hw : NULL;
 	init.parent_data = parent_data;
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed factor끼리도 parent관계가 될수있다.
+ *   ex) gemini clock 
+ *           xtal(30MHz) -> tvc(27MHz)
+ */
 	if (parent_name || parent_hw || parent_data)
 		init.num_parents = 1;
 	else
@@ -85,6 +101,11 @@ struct clk_hw *__clk_hw_register_fixed_rate(struct device *dev,
 
 	/* register the clock */
 	hw = &fixed->hw;
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - device tree로 왔으면 of_clk_hw_register. 아니면 clk_hw_register.
+ */
 	if (dev || !np)
 		ret = clk_hw_register(dev, hw);
 	else if (np)
@@ -157,6 +178,10 @@ static struct clk_hw *_of_fixed_clk_setup(struct device_node *node)
 
 	of_property_read_string(node, "clock-output-names", &clk_name);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - name, fixed_rate, fixed_accuracy
+ */
 	hw = clk_hw_register_fixed_rate_with_accuracy(NULL, clk_name, NULL,
 						    0, rate, accuracy);
 	if (IS_ERR(hw))
@@ -174,6 +199,10 @@ static struct clk_hw *_of_fixed_clk_setup(struct device_node *node)
 /**
  * of_fixed_clk_setup() - Setup function for simple fixed rate clock
  * @node:	device node for the clock
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed rate등록. 
  */
 void __init of_fixed_clk_setup(struct device_node *node)
 {

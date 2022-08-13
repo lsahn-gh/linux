@@ -25,6 +25,17 @@
  *	status = "okay";
  *	..
  *   }
+ *
+ * ----
+ * - assigned-clocks
+ *   ex) assigned-clocks = <&clkcon 0>, <&pll 2>;
+ *   clkcon 0번, pll2번에 대해 clock 변경 요청
+ * - assigned-clock-parents
+ *   ex) assigned-clock-parents = <&pll 2>;
+ *                                 ^clkcon 0의 parent는 pll 2라고 정해버리는것.
+ * - assigned-clock-rates
+ *   ex) assigned-clock-rates = <0>, <460800>
+ *          clkocn 0는 안한다는것^      ^pll 2는 460800으로 쓰겟다는것.
  */
 static int __set_clk_parents(struct device_node *node, bool clk_supplier)
 {
@@ -176,6 +187,9 @@ static int __set_clk_rates(struct device_node *node, bool clk_supplier)
  *   'assigned-clock-parents' 속성에 나열된 clok의 clock 공급자일 수도 있는 경우
  *   @clk_supplier 인수는 true로 설정되어야 합니다. @clk_supplier가 false이면 함수는
  *   @node가 시계 공급자이기도 하다고 결정하자마자 0을 반환하며 종료됩니다.
+ *
+ * - dts의 assigned-clocks관련 정보를 참조해 parent와 rate를 미리 설정 해야되는지를
+ *   확인해 설정한다.
  */
 int of_clk_set_defaults(struct device_node *node, bool clk_supplier)
 {

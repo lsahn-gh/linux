@@ -66,6 +66,10 @@ struct clk_core {
 	u8			new_parent_index;
 	unsigned long		rate;
 	unsigned long		req_rate;
+/*
+ * IAMROOT, 2022.08.13:
+ * - pre로 clock을 계산해볼때 결과값을 저장하는 멤버.
+ */
 	unsigned long		new_rate;
 	struct clk_core		*new_parent;
 	struct clk_core		*new_child;
@@ -106,6 +110,10 @@ struct clk {
 };
 
 /***           runtime pm          ***/
+/*
+ * IAMROOT, 2022.08.13:
+ * - 절전 상태에 있으면 normal 상태로 전환.
+ */
 static int clk_pm_runtime_get(struct clk_core *core)
 {
 	int ret;
@@ -156,6 +164,10 @@ static void clk_prepare_unlock(void)
 	mutex_unlock(&prepare_lock);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 전역 lock enable
+ */
 static unsigned long clk_enable_lock(void)
 	__acquires(enable_lock)
 {
@@ -198,6 +210,10 @@ static void clk_enable_unlock(unsigned long flags)
 	spin_unlock_irqrestore(&enable_lock, flags);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 누군가 protected해논지 확인.
+ */
 static bool clk_core_rate_is_protected(struct clk_core *core)
 {
 	return core->protect_count;
@@ -474,6 +490,10 @@ unsigned int __clk_get_enable_count(struct clk *clk)
 	return !clk ? 0 : clk->core->enable_count;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @core의 rate를 가져온다.
+ */
 static unsigned long clk_core_get_rate_nolock(struct clk_core *core)
 {
 	if (!core)
@@ -487,6 +507,10 @@ static unsigned long clk_core_get_rate_nolock(struct clk_core *core)
 	 * known yet. Best to return 0 as the rate of this clk until we can
 	 * properly recalc the rate based on the parent's rate.
 	 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - @core parent가 있지만 아지만 parent가 설정이 안된 경우 0으로 그냥 return한다는것.
+ */
 	return 0;
 }
 
@@ -537,6 +561,12 @@ bool __clk_is_enabled(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(__clk_is_enabled);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - closest일 경우 절대값으로 차이가 적은 것을,(요구 rate보다 높아도 무관)
+ *   아니면 best < now <= rate(요구 rate보다 높으면 안됨)
+ *   결국 요구 rate보다 높아도되는지 안되는지에대한 차이.
+ */
 static bool mux_is_better_rate(unsigned long rate, unsigned long now,
 			   unsigned long best, unsigned long flags)
 {
@@ -546,6 +576,10 @@ static bool mux_is_better_rate(unsigned long rate, unsigned long now,
 	return now <= rate && now > best;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent를 순회해 best rate를 구해온다.
+ */
 int clk_mux_determine_rate_flags(struct clk_hw *hw,
 				 struct clk_rate_request *req,
 				 unsigned long flags)
@@ -556,8 +590,20 @@ int clk_mux_determine_rate_flags(struct clk_hw *hw,
 	struct clk_rate_request parent_req = *req;
 
 	/* if NO_REPARENT flag set, pass through to current parent */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 현재 clk에 parent(입력소스) 변경 불가인 경우.
+ *   parent rate 변경이 가능 -> parent rate 변경 시도.
+ *	parent 가 있음          -> parent rate 가져옴.
+ *	parent 가 없음          -> 자신의 rate 가져옴.
+ *	즉 parent rate변경이 불가능한 거면 parent나 자신것을 그대로 쓴다는 의미.
+ */
 	if (core->flags & CLK_SET_RATE_NO_REPARENT) {
 		parent = core->parent;
+/*
+ * IAMROOT, 2022.08.13:
+ * - 자신의 clk source 변경은 없고, 최적의 parent의 rate를 선택하게 한다.
+ */
 		if (core->flags & CLK_SET_RATE_PARENT) {
 			ret = __clk_determine_rate(parent ? parent->hw : NULL,
 						   &parent_req);
@@ -565,6 +611,10 @@ int clk_mux_determine_rate_flags(struct clk_hw *hw,
 				return ret;
 
 			best = parent_req.rate;
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent를 못바꾸면 parent clk을 가져오고, parent가 없으면 그냥 자기것을 가져온다.
+ */
 		} else if (parent) {
 			best = clk_core_get_rate_nolock(parent);
 		} else {
@@ -581,6 +631,11 @@ int clk_mux_determine_rate_flags(struct clk_hw *hw,
 		if (!parent)
 			continue;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 부모한테 영향을 줘야되는 경우. parent clk에서 재귀탐색을 하고,
+ *   아니면 parent의 rate를 바로 가져온다.
+ */
 		if (core->flags & CLK_SET_RATE_PARENT) {
 			parent_req = *req;
 			ret = __clk_determine_rate(parent->hw, &parent_req);
@@ -617,6 +672,11 @@ struct clk *__clk_lookup(const char *name)
 	return !core ? NULL : core->hw->clk;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clks_node(사용자들)에서 사용하는 값들과 clamp하며
+ * - 가장큰 min과 가장 작은 max를 구한다.(교집합)
+ */
 static void clk_core_get_boundaries(struct clk_core *core,
 				    unsigned long *min_rate,
 				    unsigned long *max_rate)
@@ -653,6 +713,10 @@ EXPORT_SYMBOL_GPL(clk_hw_set_rate_range);
  * complex clock that may combine a mux with other operations.
  *
  * Returns: 0 on success, -EERROR value on error
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - @req에 최적인 rate를 구해온다.
  */
 int __clk_mux_determine_rate(struct clk_hw *hw,
 			     struct clk_rate_request *req)
@@ -865,6 +929,11 @@ void clk_unprepare(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_unprepare);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 재귀적으로 parent까지 올라가며 prepare안되있으면 prepare 시킨다.
+ *   실제 하드웨어적으로 clock을 on해주는 함수.
+ */
 static int clk_core_prepare(struct clk_core *core)
 {
 	int ret = 0;
@@ -914,6 +983,10 @@ runtime_put:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk prepare. (clk on)
+ */
 static int clk_core_prepare_lock(struct clk_core *core)
 {
 	int ret;
@@ -1003,6 +1076,11 @@ void clk_disable(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_disable);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - gate clk enable. enable count가 안되있으면 parent까지 타고 올라가며
+ *   enable 및 enable count증가 시킨다.
+ */
 static int clk_core_enable(struct clk_core *core)
 {
 	int ret = 0;
@@ -1017,6 +1095,10 @@ static int clk_core_enable(struct clk_core *core)
 		return -ESHUTDOWN;
 
 	if (core->enable_count == 0) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent까지 올라가 enable안되있다면 시킨다.
+ */
 		ret = clk_core_enable(core->parent);
 
 		if (ret)
@@ -1039,6 +1121,10 @@ static int clk_core_enable(struct clk_core *core)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - gate clk enable.
+ */
 static int clk_core_enable_lock(struct clk_core *core)
 {
 	unsigned long flags;
@@ -1189,6 +1275,10 @@ bool clk_is_enabled_when_prepared(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_is_enabled_when_prepared);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk on 및 gate on
+ */
 static int clk_core_prepare_enable(struct clk_core *core)
 {
 	int ret;
@@ -1323,6 +1413,10 @@ static int __init clk_disable_unused(void)
 }
 late_initcall_sync(clk_disable_unused);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - determin or round
+ */
 static int clk_core_determine_round_nolock(struct clk_core *core,
 					   struct clk_rate_request *req)
 {
@@ -1339,6 +1433,11 @@ static int clk_core_determine_round_nolock(struct clk_core *core,
 	 * - if the calling consumer is the only one which has exclusivity
 	 *   over the provider
 	 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - protected면 core, > determine_rate > round_rate를 우선순위로 설정한다.
+ *   ex) __clk_mux_determine_rate,
+ */
 	if (clk_core_rate_is_protected(core)) {
 		req->rate = core->rate;
 	} else if (core->ops->determine_rate) {
@@ -1357,6 +1456,10 @@ static int clk_core_determine_round_nolock(struct clk_core *core,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @parent의 hw, rate를 그대로 가져온다.
+ */
 static void clk_core_init_rate_req(struct clk_core * const core,
 				   struct clk_rate_request *req)
 {
@@ -1375,11 +1478,19 @@ static void clk_core_init_rate_req(struct clk_core * const core,
 	}
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - ops 함수 제공 확인.
+ */
 static bool clk_core_can_round(struct clk_core * const core)
 {
 	return core->ops->determine_rate || core->ops->round_rate;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @req에 맞는 rate를 구해온다. 
+ */
 static int clk_core_round_rate_nolock(struct clk_core *core,
 				      struct clk_rate_request *req)
 {
@@ -1392,6 +1503,12 @@ static int clk_core_round_rate_nolock(struct clk_core *core,
 
 	clk_core_init_rate_req(core, req);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @core에서 detertmin이나 round를 할수없는경우, parent 변경 가능한 경우
+ *   parent에서 round를 시도한다.
+ *   그것도 안되면 자기것을 그냥 가져온다.
+ */
 	if (clk_core_can_round(core))
 		return clk_core_determine_round_nolock(core, req);
 	else if (core->flags & CLK_SET_RATE_PARENT)
@@ -1408,8 +1525,16 @@ static int clk_core_round_rate_nolock(struct clk_core *core,
  *
  * Useful for clk_ops such as .set_rate and .determine_rate.
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 
+ */
 int __clk_determine_rate(struct clk_hw *hw, struct clk_rate_request *req)
 {
+/*
+ * IAMROOT, 2022.08.13:
+ * - 재귀호출로 사용할수도있다. 최상위까지 왓을 경우에 대한 탈출조건.
+ */
 	if (!hw) {
 		req->rate = 0;
 		return 0;
@@ -1459,6 +1584,11 @@ EXPORT_SYMBOL_GPL(clk_hw_round_rate);
  * use which is then returned.  If clk doesn't support round_rate operation
  * then the parent rate is returned.
  */
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - @rate에 근접한 실제 사용가능할수있는 clk rate를 구해온다.
+ */
 long clk_round_rate(struct clk *clk, unsigned long rate)
 {
 	struct clk_rate_request req;
@@ -1472,9 +1602,17 @@ long clk_round_rate(struct clk *clk, unsigned long rate)
 	if (clk->exclusive_count)
 		clk_core_rate_unprotect(clk->core);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk을 사용하는 모든 사용자들의 범위 이내로 min, max를 clamp 시킨다.
+ */
 	clk_core_get_boundaries(clk->core, &req.min_rate, &req.max_rate);
 	req.rate = rate;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - rate를 설정할수있는지 확인한다.
+ */
 	ret = clk_core_round_rate_nolock(clk->core, &req);
 
 	if (clk->exclusive_count)
@@ -1502,6 +1640,11 @@ EXPORT_SYMBOL_GPL(clk_round_rate);
  * internal clock code only.  Returns NOTIFY_DONE from the last driver
  * called if all went well, or NOTIFY_STOP or NOTIFY_BAD immediately if
  * a driver returns that.
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - notifier에 등록된 clk이 가리키는 core에만 notify한다.
+ * 참고) dw8250_clk_notifier_cb, gcc_ipq4019_cpu_clk_notifier_fn
  */
 static int __clk_notify(struct clk_core *core, unsigned long msg,
 		unsigned long old_rate, unsigned long new_rate)
@@ -1587,6 +1730,10 @@ long clk_get_accuracy(struct clk *clk)
 }
 EXPORT_SYMBOL_GPL(clk_get_accuracy);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent로 일단 rate로 해놓고, ops가 등록되있으면 ops로 rate를 재산출한다.
+ */
 static unsigned long clk_recalc(struct clk_core *core,
 				unsigned long parent_rate)
 {
@@ -1751,6 +1898,12 @@ static void clk_core_update_orphan_status(struct clk_core *core, bool is_orphan)
 		clk_core_update_orphan_status(child, is_orphan);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @new_parent가 있으면 core를 new_parent orphan상태로 일치시키고 new_parent의
+ *   child로 변경한다.
+ * - @new_parent가 없으면 parent가 없어진 것이므로 orphan으로 변경한다.
+ */
 static void clk_reparent(struct clk_core *core, struct clk_core *new_parent)
 {
 	bool was_orphan = core->orphan;
@@ -1758,6 +1911,10 @@ static void clk_reparent(struct clk_core *core, struct clk_core *new_parent)
 	hlist_del(&core->child_node);
 
 	if (new_parent) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - 둘중하나가 orphan 상태가 다르면 core의 orphan상태를 new_parent의 상태로 업데이트
+ */
 		bool becomes_orphan = new_parent->orphan;
 
 		/* avoid duplicate POST_RATE_CHANGE notifications */
@@ -1777,6 +1934,11 @@ static void clk_reparent(struct clk_core *core, struct clk_core *new_parent)
 	core->parent = new_parent;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * @return old_parent
+ * - @core의 parent를 @parent로 변경한다.
+ */
 static struct clk_core *__clk_set_parent_before(struct clk_core *core,
 					   struct clk_core *parent)
 {
@@ -1803,6 +1965,10 @@ static struct clk_core *__clk_set_parent_before(struct clk_core *core,
 	 * See also: Comment for clk_set_parent() below.
 	 */
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - CLK_OPS_PARENT_ENABLE이 있는경우 old_parent와 parent를 prepare/enable 한다.
+ */
 	/* enable old_parent & parent if CLK_OPS_PARENT_ENABLE is set */
 	if (core->flags & CLK_OPS_PARENT_ENABLE) {
 		clk_core_prepare_enable(old_parent);
@@ -1810,6 +1976,10 @@ static struct clk_core *__clk_set_parent_before(struct clk_core *core,
 	}
 
 	/* migrate prepare count if > 0 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 현재 core가 prepare 되있는 상태라면 parent를 prepare/enable하고 core도 enable한다.
+ */
 	if (core->prepare_count) {
 		clk_core_prepare_enable(parent);
 		clk_core_enable_lock(core);
@@ -1823,6 +1993,10 @@ static struct clk_core *__clk_set_parent_before(struct clk_core *core,
 	return old_parent;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 필요없어진 clk을 diable/unprepare
+ */
 static void __clk_set_parent_after(struct clk_core *core,
 				   struct clk_core *parent,
 				   struct clk_core *old_parent)
@@ -1919,6 +2093,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 결정된 new_rate, new_parent, p_index을 subtree 재귀로 넣어준다.
+ */
 static void clk_calc_subtree(struct clk_core *core, unsigned long new_rate,
 			     struct clk_core *new_parent, u8 p_index)
 {
@@ -1929,9 +2107,17 @@ static void clk_calc_subtree(struct clk_core *core, unsigned long new_rate,
 	core->new_parent_index = p_index;
 	/* include clk in new parent's PRE_RATE_CHANGE notifications */
 	core->new_child = NULL;
+/*
+ * IAMROOT, 2022.08.13:
+ * - 현재 parent랑 같이 않으면 child도 이동을 해야되므로 new_child로 set해놓는다.
+ */
 	if (new_parent && new_parent != core->parent)
 		new_parent->new_child = core;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - chlid 가 parent가 되어 재귀로 new를 설정하러 간다.
+ */
 	hlist_for_each_entry(child, &core->children, child_node) {
 		child->new_rate = clk_recalc(child, new_rate);
 		clk_calc_subtree(child, child->new_rate, NULL, 0);
@@ -1941,6 +2127,11 @@ static void clk_calc_subtree(struct clk_core *core, unsigned long new_rate,
 /*
  * calculate the new rates returning the topmost clock that has to be
  * changed.
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - tree를 재귀로 돌며 @rate를 설정할수있는 new_rate, new_parent, new_child를
+ *   찾아서 얻어온다.
  */
 static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 					   unsigned long rate)
@@ -1966,6 +2157,10 @@ static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 	clk_core_get_boundaries(core, &min_rate, &max_rate);
 
 	/* find the closest rate and parent clk/rate */
+/*
+ * IAMROOT, 2022.08.13:
+ * - round로 구해올수있으면 round기능으로 rate를 구해온다.
+ */
 	if (clk_core_can_round(core)) {
 		struct clk_rate_request req;
 
@@ -1986,10 +2181,18 @@ static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 		if (new_rate < min_rate || new_rate > max_rate)
 			return NULL;
 	} else if (!parent || !(core->flags & CLK_SET_RATE_PARENT)) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 없거나 parent가 있어도 parent로 올라갈수없으면 자기것으로 설정후 return.
+ */
 		/* pass-through clock without adjustable parent */
 		core->new_rate = core->rate;
 		return NULL;
 	} else {
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 있고 CLK_SET_RATE_PARENT가 가능한 상태. 재귀로 parent에서 시도해본다.
+ */
 		/* pass-through clock with adjustable parent */
 		top = clk_calc_new_rates(parent, rate);
 		new_rate = parent->new_rate;
@@ -1997,6 +2200,10 @@ static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 	}
 
 	/* some clocks must be gated to change parent */
+/*
+ * IAMROOT, 2022.08.13:
+ * - gate가 열려 있는 상태. 사용중이 상태이기때문에 바꾸지 못한다.
+ */
 	if (parent != old_parent &&
 	    (core->flags & CLK_SET_PARENT_GATE) && core->prepare_count) {
 		pr_debug("%s: %s not gated but wants to reparent\n",
@@ -2005,6 +2212,10 @@ static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 	}
 
 	/* try finding the new parent index */
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 여러개인경우 @parent의 index를 구해온다.
+ */
 	if (parent && core->num_parents > 1) {
 		p_index = clk_fetch_parent_index(core, parent);
 		if (p_index < 0) {
@@ -2014,6 +2225,10 @@ static struct clk_core *clk_calc_new_rates(struct clk_core *core,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent rate랑 best랑 일치하지 않으면 best로 변경을 시도한다.(재귀)
+ */
 	if ((core->flags & CLK_SET_RATE_PARENT) && parent &&
 	    best_parent_rate != parent->rate)
 		top = clk_calc_new_rates(parent, best_parent_rate);
@@ -2029,6 +2244,11 @@ out:
  * so that in case of an error we can walk down the whole tree again and
  * abort the change.
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * @event PRE_RATE_CHANGE등.
+ * - 재귀로 @event를 전달한다.
+ */
 static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
 						  unsigned long event)
 {
@@ -2039,11 +2259,19 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
 		return NULL;
 
 	if (core->notifier_count) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk notifier들한테 전달한다.
+ */
 		ret = __clk_notify(core, event, core->rate, core->new_rate);
 		if (ret & NOTIFY_STOP_MASK)
 			fail_clk = core;
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - child한태도 event를 전달한다.
+ */
 	hlist_for_each_entry(child, &core->children, child_node) {
 		/* Skip children who will be reparented to another clock */
 		if (child->new_parent && child->new_parent != core)
@@ -2054,6 +2282,10 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
 	}
 
 	/* handle the new child who might not be in core->children yet */
+/*
+ * IAMROOT, 2022.08.13:
+ * - new child한테도 보낸다.
+ */
 	if (core->new_child) {
 		tmp_clk = clk_propagate_rate_change(core->new_child, event);
 		if (tmp_clk)
@@ -2067,6 +2299,11 @@ static struct clk_core *clk_propagate_rate_change(struct clk_core *core,
  * walk down a subtree and set the new rates notifying the rate
  * change on the way
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 실제 parent 변경 및 하드웨어적인 clk on, rate 설정.
+ *   재귀로 child를 순회하며 조작한다.
+ */
 static void clk_change_rate(struct clk_core *core)
 {
 	struct clk_core *child;
@@ -2079,6 +2316,10 @@ static void clk_change_rate(struct clk_core *core)
 
 	old_rate = core->rate;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - new_parent가 있으면 new_parent를 사용. 아니면 parent를 사용.
+ */
 	if (core->new_parent) {
 		parent = core->new_parent;
 		best_parent_rate = core->new_parent->rate;
@@ -2095,10 +2336,22 @@ static void clk_change_rate(struct clk_core *core)
 		clk_core_enable_lock(core);
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - mux clk에 대한 조작.
+ */
 	if (core->new_parent && core->new_parent != core->parent) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - @core의 parent을 실제적으로 변경한다.
+ */
 		old_parent = __clk_set_parent_before(core, core->new_parent);
 		trace_clk_set_parent(core, core->new_parent);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 현재 clk의 parent(입력소스) 및 rate를 변경한다.
+ */
 		if (core->ops->set_rate_and_parent) {
 			skip_set_rate = true;
 			core->ops->set_rate_and_parent(core->hw, core->new_rate,
@@ -2117,11 +2370,19 @@ static void clk_change_rate(struct clk_core *core)
 
 	trace_clk_set_rate(core, core->new_rate);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - rate clock 조작.
+ */
 	if (!skip_set_rate && core->ops->set_rate)
 		core->ops->set_rate(core->hw, core->new_rate, best_parent_rate);
 
 	trace_clk_set_rate_complete(core, core->new_rate);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 최종 rate를 산출한다.
+ */
 	core->rate = clk_recalc(core, best_parent_rate);
 
 	if (core->flags & CLK_SET_RATE_UNGATE) {
@@ -2132,6 +2393,11 @@ static void clk_change_rate(struct clk_core *core)
 	if (core->flags & CLK_OPS_PARENT_ENABLE)
 		clk_core_disable_unprepare(parent);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 실제 적용.
+ * - 모든 clk설정에 문제가 없으면 적용한다.
+ */
 	if (core->notifier_count && old_rate != core->rate)
 		__clk_notify(core, POST_RATE_CHANGE, old_rate, core->rate);
 
@@ -2142,6 +2408,10 @@ static void clk_change_rate(struct clk_core *core)
 	 * Use safe iteration, as change_rate can actually swap parents
 	 * for certain clock types.
 	 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 재귀로 child를 순회하며 변경한다.
+ */
 	hlist_for_each_entry_safe(child, tmp, &core->children, child_node) {
 		/* Skip children who will be reparented to another clock */
 		if (child->new_parent && child->new_parent != core)
@@ -2195,6 +2465,10 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 
 	rate = clk_core_req_round_rate_nolock(core, req_rate);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @core의 현재 rate가 rate랑 일치하면 return.
+ */
 	/* bail early if nothing to do */
 	if (rate == clk_core_get_rate_nolock(core))
 		return 0;
@@ -2204,6 +2478,10 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 		return -EBUSY;
 
 	/* calculate new rates and get the topmost changed clock */
+/*
+ * IAMROOT, 2022.08.13:
+ * - @req_rate를 set할수있는 new 값들을 구해온다.
+ */
 	top = clk_calc_new_rates(core, req_rate);
 	if (!top)
 		return -EINVAL;
@@ -2212,6 +2490,10 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 	if (ret)
 		return ret;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 이전에 구한 new값으로 변경 가능한지 물어본다.(실제 설정은 안한다.) 안되면 롤백.
+ */
 	/* notify that we are about to change rates */
 	fail_clk = clk_propagate_rate_change(top, PRE_RATE_CHANGE);
 	if (fail_clk) {
@@ -2222,6 +2504,10 @@ static int clk_core_set_rate_nolock(struct clk_core *core,
 		goto err;
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 잘 바뀌면. 실제 change
+ */
 	/* change the rates */
 	clk_change_rate(top);
 
@@ -3473,6 +3759,13 @@ static void clk_core_reparent_orphans_nolock(void)
  * Initializes the lists in struct clk_core, queries the hardware for the
  * parent and rate and sets them both.
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 1. ops 검사.
+ *   2. parent가 없는 @core면 root.
+ *      parent가 있는데 parent가 아직 등록안됬으면 orphan.
+ *      parent가 있는데 parent가 있으면 parent에 등록.
+ */
 static int __clk_core_init(struct clk_core *core)
 {
 	int ret;
@@ -3483,12 +3776,24 @@ static int __clk_core_init(struct clk_core *core)
 	if (!core)
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - lock.
+ */
 	clk_prepare_lock();
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 절전모드였을 경우 다시 power on
+ */
 	ret = clk_pm_runtime_get(core);
 	if (ret)
 		goto unlock;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - core를 찾는다.
+ */
 	/* check to see if a clock with this name is already registered */
 	if (clk_core_lookup(core->name)) {
 		pr_debug("%s: clk %s already initialized\n",
@@ -3497,7 +3802,18 @@ static int __clk_core_init(struct clk_core *core)
 		goto out;
 	}
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - ops를 전체적으로 잘 설정되있는지 검사한다.
+ */
 	/* check that clk_ops are sane.  See Documentation/driver-api/clk.rst */
+/*
+ * IAMROOT, 2022.08.13:
+ * - set_rate가 지정되면 round_rate, determine_rate 둘중하나와
+ *   recalc_rate가 존재해야된다.
+ *   설정을 못하는 clk이 왔을때 대처방안을 마련해줘야되는 개념.
+ * ex) clk_factor_round_rate, clk_factor_set_rate, clk_factor_recalc_rate,
+ */
 	if (core->ops->set_rate &&
 	    !((core->ops->round_rate || core->ops->determine_rate) &&
 	      core->ops->recalc_rate)) {
@@ -3577,9 +3893,17 @@ static int __clk_core_init(struct clk_core *core)
 		hlist_add_head(&core->child_node, &parent->children);
 		core->orphan = parent->orphan;
 	} else if (!core->num_parents) {
+/*
+ * IAMROOT, 2022.08.13:
+ * - 최상위 fixed factor면 root로 등록한다.
+ */
 		hlist_add_head(&core->child_node, &clk_root_list);
 		core->orphan = false;
 	} else {
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 있는데 . 못찾은경우.(아직 parent가 등록안되있음.). orphan.
+ */
 		hlist_add_head(&core->child_node, &clk_orphan_list);
 		core->orphan = true;
 	}
@@ -3836,6 +4160,11 @@ static int clk_cpy_name(const char **dst_p, const char *src, bool must_exist)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent_xxx 인자에 따라 core의 parent를 설정한다.
+ *   각각의 parent index는 -1로 설정해놓는다. 아직 연결이 안되있다는 의미.
+ */
 static int clk_core_populate_parent_map(struct clk_core *core,
 					const struct clk_init_data *init)
 {
@@ -3846,9 +4175,17 @@ static int clk_core_populate_parent_map(struct clk_core *core,
 	int i, ret = 0;
 	struct clk_parent_map *parents, *parent;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 없으면 빠져나간다.
+ */
 	if (!num_parents)
 		return 0;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent가 있을 경우.
+ */
 	/*
 	 * Avoid unnecessary string look-ups of clk_core's possible parents by
 	 * having a cache of names/clk_hw pointers to clk_core pointers.
@@ -3861,6 +4198,18 @@ static int clk_core_populate_parent_map(struct clk_core *core,
 	/* Copy everything over because it might be __initdata */
 	for (i = 0, parent = parents; i < num_parents; i++, parent++) {
 		parent->index = -1;
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - 상위 함수에 따라 parent_name, parent_data, parent_hw 3가지중 한가지가
+ *   무조건 있을 것이다.
+ * - parent_name
+ *   name만 copy한다.
+ * - parent_data
+ *   hw, index, name(fw_name으로 copy)을 설정한다.
+ * - parent_hw
+ *   hw만 설정한다.
+ */
 		if (parent_names) {
 			/* throw a WARN if any entries are NULL */
 			WARN(!parent_names[i],
@@ -3915,7 +4264,8 @@ static void clk_core_free_parent_map(struct clk_core *core)
 
 /*
  * IAMROOT, 2022.08.06:
- * - @hw로 받은 data로 core와 clk를 생성한다.
+ * - @hw로 받은 data로 core와 clk를 생성하고,
+ *   root list or orphan list, 부모의 child 에 등록한다.
  */
 static struct clk *
 __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
@@ -3962,6 +4312,10 @@ __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
 	core->max_rate = ULONG_MAX;
 	hw->core = core;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - core의 parent map 할당 및 초기화.
+ */
 	ret = clk_core_populate_parent_map(core, init);
 	if (ret)
 		goto fail_parents;
@@ -3972,6 +4326,11 @@ __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
 	 * Don't call clk_hw_create_clk() here because that would pin the
 	 * provider module to itself and prevent it from ever being removed.
 	 */
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk 자료구조 설정.
+ */
 	hw->clk = alloc_clk(core, NULL, NULL);
 	if (IS_ERR(hw->clk)) {
 		ret = PTR_ERR(hw->clk);
@@ -3987,6 +4346,10 @@ __clk_register(struct device *dev, struct device_node *np, struct clk_hw *hw)
  */
 	clk_core_link_consumer(hw->core, hw->clk);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - core를 등록한다.
+ */
 	ret = __clk_core_init(core);
 	if (!ret)
 		return hw->clk;
@@ -4081,6 +4444,12 @@ EXPORT_SYMBOL_GPL(clk_hw_register);
  * device_node is. It returns an integer equal to zero indicating success or
  * less than zero indicating failure. Drivers must test for an error code after
  * calling of_clk_hw_register().
+ */
+
+/*
+ * IAMROOT, 2022.08.06:
+ * - @hw로 받은 data로 core와 clk를 생성하고,
+ *   root list or orphan list, 부모의 child 에 등록한다.
  */
 int of_clk_hw_register(struct device_node *node, struct clk_hw *hw)
 {
@@ -4459,6 +4828,10 @@ void __clk_put(struct clk *clk)
  * allocation failure; otherwise, passes along the return value of
  * srcu_notifier_chain_register().
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - @clk에 해당하는 @nb를 clk_notifier_list에 등록한다.
+ */
 int clk_notifier_register(struct clk *clk, struct notifier_block *nb)
 {
 	struct clk_notifier *cn;
@@ -4470,10 +4843,19 @@ int clk_notifier_register(struct clk *clk, struct notifier_block *nb)
 	clk_prepare_lock();
 
 	/* search the list of notifiers for this clk */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 이미 있는지 찾는다.
+ */
 	list_for_each_entry(cn, &clk_notifier_list, node)
 		if (cn->clk == clk)
 			goto found;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 없다면 메모리를 할당하고 초기화한후 clk_notifier_list에 넣고 notifier_count를
+ *   증가시킨다.
+ */
 	/* if clk wasn't in the notifier list, allocate new clk_notifier */
 	cn = kzalloc(sizeof(*cn), GFP_KERNEL);
 	if (!cn)
@@ -5055,8 +5437,8 @@ EXPORT_SYMBOL_GPL(of_clk_get_from_provider);
 
 /*
  * IAMROOT, 2022.08.06:
- * - @np에서 @index, @name에 해당하는 clock을 찾은후 of_clk_providers에서 일치하는게
- *   있는지 확인한다.
+ * - @np에서 @index, @con_id에 해당하는 clock을 찾은후
+ *   of_clk_providers에서 일치하는게 있는지 확인한다.
  */
 struct clk_hw *of_clk_get_hw(struct device_node *np, int index,
 			     const char *con_id)
@@ -5067,7 +5449,7 @@ struct clk_hw *of_clk_get_hw(struct device_node *np, int index,
 
 /*
  * IAMROOT, 2022.08.06:
- * - @index or @name에 해당하는 clock을 phandle argu를 가져온다.
+ * - @index or @con_id에 해당하는 clock을 phandle argu를 가져온다.
  */
 	ret = of_parse_clkspec(np, index, con_id, &clkspec);
 	if (ret)
@@ -5134,6 +5516,12 @@ EXPORT_SYMBOL(of_clk_get_by_name);
  *
  * Returns: The number of clocks that are possible parents of this node
  */
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - clocks의 입력소스가 몇개잇ㅎ는지 알아온다.
+ *   ex) clocks = <&a>, <&b> => 2개.
+ */
 unsigned int of_clk_get_parent_count(const struct device_node *np)
 {
 	int count;
@@ -5146,6 +5534,10 @@ unsigned int of_clk_get_parent_count(const struct device_node *np)
 }
 EXPORT_SYMBOL_GPL(of_clk_get_parent_count);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @index에 해당하는 clk의 parent name을 가져온다.
+ */
 const char *of_clk_get_parent_name(const struct device_node *np, int index)
 {
 	struct of_phandle_args clkspec;
@@ -5157,17 +5549,41 @@ const char *of_clk_get_parent_name(const struct device_node *np, int index)
 	int count;
 	struct clk *clk;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - index에 해당하는 phandle을 가져온다.
+ *   ex) clocks = <&a ..> <&b ..>
+ *   index == 0이면 <&a ..>에 대한 phandle 가져온다.
+ */
 	rc = of_parse_phandle_with_args(np, "clocks", "#clock-cells", index,
 					&clkspec);
 	if (rc)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - clocks = <&a 2> <&b 3>
+ *   index = 0 요청 이라고 했을때
+ *   &a 2가 선택되고 여기서 args[0]는 2가 되어
+ *   index = 2가 된다.
+ */
 	index = clkspec.args_count ? clkspec.args[0] : 0;
 	count = 0;
 
 	/* if there is an indices property, use it to transfer the index
 	 * specified into an array offset for the clock-output-names property.
 	 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent np에서 clock-indices로 index를 변경해야되는지 확인한다.
+ *
+ * - clock-indices = <3> <5>
+ *   index 번호를 바꾼다는것.
+ *   ex) clocks = <&a ..> <&b ..>
+ *       clock-indices = <3> <5>
+ *       a가 index = 0 -> 3, b가 index 1 -> 5로 바뀌게되는것이고 이 후 바뀐
+ *       index로 접근해야된다.
+ */
 	of_property_for_each_u32(clkspec.np, "clock-indices", prop, vp, pv) {
 		if (index == pv) {
 			index = count;
@@ -5179,6 +5595,12 @@ const char *of_clk_get_parent_name(const struct device_node *np, int index)
 	if (prop && !vp)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - parent np에서 정해진 이름이 있는지 확인한다.
+ *   
+ * - index로 안하고 문자열로 찾고싶을때 사용.
+ */
 	if (of_property_read_string_index(clkspec.np, "clock-output-names",
 					  index,
 					  &clk_name) < 0) {
@@ -5188,6 +5610,11 @@ const char *of_clk_get_parent_name(const struct device_node *np, int index)
 		 * registered, we return the node name as the name of
 		 * the clock as long as #clock-cells = 0.
 		 */
+/*
+ * IAMROOT, 2022.08.13:
+ * - 실패했거나 clock-output-names가 없는경우엔 clkspec로 등록된 provider에서
+ *   찾아서 clk_name을 설정한다.
+ */
 		clk = of_clk_get_from_provider(&clkspec);
 		if (IS_ERR(clk)) {
 			if (clkspec.args_count == 0)
@@ -5214,6 +5641,10 @@ EXPORT_SYMBOL_GPL(of_clk_get_parent_name);
  * @size: size of the @parents array
  *
  * Return: number of parents for the clock node.
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - @np의 @size(parent 개수)만큼 순회해서 parents에 parent name을 채운다.
  */
 int of_clk_parent_fill(struct device_node *np, const char **parents,
 		       unsigned int size)
@@ -5405,8 +5836,27 @@ void __init of_clk_init(const struct of_device_id *matches)
 
 /*
  * IAMROOT, 2022.08.06:
- * - of_fixed_clk_setup 참고. of_clk_providers에 등록된다.
+ * - of_fixed_clk_setup(fixed rate등록). 참고.
+ *   of_fixed_factor_clk_setup(fixed factor등록),
+ *   of_clk_providers에 등록된다.
  * - of_clk_add_hw_provider이나 of_clk_add_provider를 통해서 등록될것이다.
+ *
+ * ex)
+ *  읽힌 순서 |    3    2    1
+ *  tree 순서 |    A -> B -> C
+ *
+ * step 1) C가 orphan으로 들어간다.
+ *    root   |
+ *    orphan | C
+ *
+ * step 2) B가 orphan으로 들어가고, C는 B의 child로 들어간다.
+ *    root   |
+ *    orphan | B
+ *
+ * step 3) A가 root로 들어가고, orphan list 검색을 통해 B가 A의 child로 들어가
+ *             완성된다.
+ *    root   | A
+ *    orphan | 
  */
 				clk_provider->clk_init_cb(clk_provider->np);
 				of_clk_set_defaults(clk_provider->np, true);

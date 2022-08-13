@@ -2306,6 +2306,37 @@ static const struct cprman_plat_data cprman_bcm2711_plat_data = {
 	.soc = SOC_BCM2711,
 };
 
+/*
+ * IAMROOT, 2022.08.13:
+ * clocks {
+ *	clk_osc: clk-osc {
+ *		compatible = "fixed-clock";
+ *		#clock-cells = <0>;
+ *		clock-output-names = "osc";
+ *		clock-frequency = <19200000>;
+ *	};
+ * };
+ *
+ * clocks: cprman@7e101000 {
+ *	compatible = "brcm,bcm2835-cprman";
+ *	#clock-cells = <1>;
+ *	reg = <0x7e101000 0x2000>;
+ *	clocks = <&clk_osc>,
+ *		<&dsi0 0>, <&dsi0 1>, <&dsi0 2>,
+ *		<&dsi1 0>, <&dsi1 1>, <&dsi1 2>;
+ * };
+ *
+ * uart0: serial@7e201000 {
+ *	compatible = "arm,pl011", "arm,primecell";
+ *	reg = <0x7e201000 0x200>;
+ *	clocks = <&clocks BCM2835_CLOCK_UART>, #BCM2835_CLOCK_UART 19
+ *		<&clocks BCM2835_CLOCK_VPU>;   #BCM2835_CLOCK_VPU 20
+ *	clock-names = "uartclk", "apb_pclk";
+ * };
+ * 
+ * BCM2835_CLOCK_UART 19 : cprman의 19번째 clock이라는 뜻. "uartclk"이름을 가진다.
+ * BCM2835_CLOCK_VPU 20 : cprman의 20번째 clock이라는 뜻. "apb_pclk"이름을 가진다.
+ */
 static const struct of_device_id bcm2835_clk_of_match[] = {
 	{ .compatible = "brcm,bcm2835-cprman", .data = &cprman_bcm2835_plat_data },
 	{ .compatible = "brcm,bcm2711-cprman", .data = &cprman_bcm2711_plat_data },

@@ -63,6 +63,11 @@ static u8 ti_clk_mux_get_parent(struct clk_hw *hw)
 	return val;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - table방식이면 table[index]에서 실제 index값을 가져오고
+ *   아니면 index를 flag에 따라 가져온다.
+ */
 static int ti_clk_mux_set_parent(struct clk_hw *hw, u8 index)
 {
 	struct clk_omap_mux *mux = to_clk_omap_mux(hw);
@@ -118,6 +123,12 @@ static void clk_mux_restore_context(struct clk_hw *hw)
 	ti_clk_mux_set_parent(hw, mux->saved_parent);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - set_rate가 없는 이유.
+ *   mux이기 때문에 parent에서 선택해서 바꿔야된다. 즉 mux는 get_parent, set_parent
+ *   가 기본이 된다.
+ */
 const struct clk_ops ti_clk_mux_ops = {
 	.get_parent = ti_clk_mux_get_parent,
 	.set_parent = ti_clk_mux_set_parent,
@@ -254,6 +265,19 @@ struct clk_hw *ti_clk_build_component_mux(struct ti_clk_mux *setup)
 	return &mux->hw;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - ti가 가장 뼈대가 되는 mux driver를 만듬.
+ * - ex) arm/boot/dts/am33xx-clocks.dtsi
+ *   sys_clkin_ck: sys_clkin_ck@40 {
+ *	#clock-cells = <0>;
+ *	compatible = "ti,mux-clock";
+ *	clocks = <&virt_19200000_ck>, <&virt_24000000_ck>,
+ *		<&virt_25000000_ck>, <&virt_26000000_ck>;
+ *	ti,bit-shift = <22>;
+ *	reg = <0x0040>;
+ *  };
+ */
 static void __init of_ti_composite_mux_clk_setup(struct device_node *node)
 {
 	struct clk_omap_mux *mux;
@@ -270,11 +294,19 @@ static void __init of_ti_composite_mux_clk_setup(struct device_node *node)
 	if (!of_property_read_u32(node, "ti,bit-shift", &val))
 		mux->shift = val;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - index가 0부터 시작인지, 1부터 시작인지에 대한 여부.
+ */
 	if (of_property_read_bool(node, "ti,index-starts-at-one"))
 		mux->flags |= CLK_MUX_INDEX_ONE;
 
 	num_parents = of_clk_get_parent_count(node);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - mux는 2개이상이여야 한다.
+ */
 	if (num_parents < 2) {
 		pr_err("%pOFn must have parents\n", node);
 		goto cleanup;
@@ -283,6 +315,10 @@ static void __init of_ti_composite_mux_clk_setup(struct device_node *node)
 	mux->mask = num_parents - 1;
 	mux->mask = (1 << fls(mux->mask)) - 1;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - mux로 사용하겠다는 의미.
+ */
 	if (!ti_clk_add_component(node, &mux->hw, CLK_COMPONENT_TYPE_MUX))
 		return;
 

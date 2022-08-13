@@ -18,6 +18,20 @@
  */
 #define CLK_SET_RATE_GATE	BIT(0) /* must be gated across rate change */
 #define CLK_SET_PARENT_GATE	BIT(1) /* must be gated across re-parent */
+/*
+ * IAMROOT, 2022.08.13:
+ * - child, parent의 조합중에 가장 근접한 rate를 선택
+ * 
+ * ex)
+ * parent          divider          divider         device
+ *        |      | 1 2 4 8 |      | 1 2 4 8 |      |           |
+ * 16MHz  | ---- |   ^     | ---- |       ^ | ---- | 1MHz 필요 |
+ *        |      |         |      |         |      |           |
+ *                             CLK_SET_RATE_PARENT                           
+ * 
+ * device가 1MHz가 필요한 경우, 자기만의 divider만으로 해결이 안될경우
+ * parent divider까지 영향을 줘야되는 경우 CLK_SET_RATE_PARENT를 설정한다.
+ */
 #define CLK_SET_RATE_PARENT	BIT(2) /* propagate rate change up one level */
 #define CLK_IGNORE_UNUSED	BIT(3) /* do not gate even if unused */
 				/* unused */
@@ -403,6 +417,10 @@ struct clk *clk_register_fixed_rate(struct device *dev, const char *name,
  * @fixed_rate: non-adjustable clock rate
  * @fixed_accuracy: non-adjustable clock accuracy
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed rate를 등록한다. parent_name으로 판단하는 경우.
+ */
 #define clk_hw_register_fixed_rate_with_accuracy(dev, name, parent_name,      \
 						 flags, fixed_rate,	      \
 						 fixed_accuracy)	      \
@@ -419,6 +437,10 @@ struct clk *clk_register_fixed_rate(struct device *dev, const char *name,
  * @fixed_rate: non-adjustable clock rate
  * @fixed_accuracy: non-adjustable clock accuracy
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed rate를 등록한다. parent_hw으로 판단하는 경우.
+ */
 #define clk_hw_register_fixed_rate_with_accuracy_parent_hw(dev, name,	      \
 		parent_hw, flags, fixed_rate, fixed_accuracy)		      \
 	__clk_hw_register_fixed_rate((dev), NULL, (name), NULL, (parent_hw)   \
@@ -433,6 +455,10 @@ struct clk *clk_register_fixed_rate(struct device *dev, const char *name,
  * @flags: framework-specific flags
  * @fixed_rate: non-adjustable clock rate
  * @fixed_accuracy: non-adjustable clock accuracy
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed rate를 등록한다. parent_data으로 판단하는 경우.
  */
 #define clk_hw_register_fixed_rate_with_accuracy_parent_data(dev, name,	      \
 		parent_data, flags, fixed_rate, fixed_accuracy)		      \
@@ -606,6 +632,13 @@ struct clk_divider {
 #define clk_div_mask(width)	((1 << (width)) - 1)
 #define to_clk_divider(_hw) container_of(_hw, struct clk_divider, hw)
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - CLK_DIVIDER_ONE_BASED
+ *   1/1, 1/2, 1/3, 1/4 ...의 방식
+ * - CLK_DIVIDER_POWER_OF_TWO
+ *   1/1, 1/2, 1/4, 1/8 ..의 방식
+ */
 #define CLK_DIVIDER_ONE_BASED		BIT(0)
 #define CLK_DIVIDER_POWER_OF_TWO	BIT(1)
 #define CLK_DIVIDER_ALLOW_ZERO		BIT(2)
@@ -874,6 +907,12 @@ struct clk_mux {
 
 #define to_clk_mux(_hw) container_of(_hw, struct clk_mux, hw)
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - CLK_MUX_INDEX_ONE : 1부터 시작
+ *   CLK_MUX_INDEX_BIT : 0b01, 0b10, 0b100.. 로 사용
+ *   CLK_MUX_ROUND_CLOSEST : rate를 고를때 절대값의 차이가 적은것을 선택하라는것.
+ */
 #define CLK_MUX_INDEX_ONE		BIT(0)
 #define CLK_MUX_INDEX_BIT		BIT(1)
 #define CLK_MUX_HIWORD_MASK		BIT(2)
@@ -908,6 +947,11 @@ struct clk *clk_register_mux_table(struct device *dev, const char *name,
 	clk_register_mux_table((dev), (name), (parent_names), (num_parents),  \
 			       (flags), (reg), (shift), BIT((width)) - 1,     \
 			       (clk_mux_flags), NULL, (lock))
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - clk_hw_register_fixed_rate류 와 비슷한 방식을 사용해서 등록한다.
+ */
 #define clk_hw_register_mux_table(dev, name, parent_names, num_parents,	      \
 				  flags, reg, shift, mask, clk_mux_flags,     \
 				  table, lock)				      \

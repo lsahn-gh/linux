@@ -36,6 +36,20 @@ struct of_phandle_args;
  *     completed.  Callbacks must always return NOTIFY_DONE or NOTIFY_OK.
  *
  */
+/*
+ * IAMROOT, 2022.08.13:
+ * - papago
+ *   PRE_RATE_CHANGE - 클럭 비율이 변경되기 직전에 호출되어 비율 변경이 계속 진행됨을
+ *   나타냅니다. 운전자는 요금 변경의 영향을 받는 모든 작업을 즉시 종료해야 합니다.
+ *   콜백은 NOTIFY_DONE, NOTIFY_OK, NOTIFY_STOP 또는 NOTIFY_BAD를 반환할 수 있습니다.
+ *
+ *   ABORT_RATE_CHANGE: PRE_RATE_CHANGE 이후 어떤 이유로 비율 변경이 실패하면 호출됩니다.
+ *   이 경우 clk에 등록된 모든 알림자는 ABORT_RATE_CHANGE로 호출됩니다. 콜백은 항상
+ *   NOTIFY_DONE 또는 NOTIFY_OK를 반환해야 합니다.
+ *
+ *   POST_RATE_CHANGE - 클럭 비율 변경이 성공적으로 완료된 후 호출됩니다. 콜백은 항상
+ *   NOTIFY_DONE 또는 NOTIFY_OK를 반환해야 합니다.
+ */
 #define PRE_RATE_CHANGE			BIT(0)
 #define POST_RATE_CHANGE		BIT(1)
 #define ABORT_RATE_CHANGE		BIT(2)

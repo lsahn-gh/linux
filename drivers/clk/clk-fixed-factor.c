@@ -57,6 +57,13 @@ static int clk_factor_set_rate(struct clk_hw *hw, unsigned long rate,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - __clk_core_init()참고.
+ * - set_rate가 지정되면 round_rate, determine_rate 둘중하나와
+ *   recalc_rate가 존재해야된다.
+ *   설정을 못하는 clk이 왔을때 대처방안을 마련해줘야되는 개념.
+ */
 const struct clk_ops clk_fixed_factor_ops = {
 	.round_rate = clk_factor_round_rate,
 	.set_rate = clk_factor_set_rate,
@@ -76,6 +83,11 @@ static void devm_clk_hw_register_fixed_factor_release(struct device *dev, void *
 	clk_hw_unregister(&fix->hw);
 }
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - @devm driver에서 exit시 자동해제를 위할때 true설정.
+ * - fixed factor를 등록한다. mult, div등을 설정하고 등록한다.
+ */
 static struct clk_hw *
 __clk_hw_register_fixed_factor(struct device *dev, struct device_node *np,
 		const char *name, const char *parent_name, int index,
@@ -83,15 +95,28 @@ __clk_hw_register_fixed_factor(struct device *dev, struct device_node *np,
 		bool devm)
 {
 	struct clk_fixed_factor *fix;
+/*
+ * IAMROOT, 2022.08.13:
+ * - hw의 init을 잠깐 전달해준다.
+ */
 	struct clk_init_data init = { };
 	struct clk_parent_data pdata = { .index = index };
 	struct clk_hw *hw;
 	int ret;
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - 자동해제요청(@devm)이 있으면 @dev가 무조건 필요하다.
+ */
 	/* You can't use devm without a dev */
 	if (devm && !dev)
 		return ERR_PTR(-EINVAL);
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - driver 요청이라고 하면 자동해제가능한 alloc을 쓴다.
+ *   자동해제할때 devm_clk_hw_register_fixed_factor_release를 파괴자로 사용하나다.
+ */
 	if (devm)
 		fix = devres_alloc(devm_clk_hw_register_fixed_factor_release,
 				sizeof(*fix), GFP_KERNEL);
@@ -112,6 +137,11 @@ __clk_hw_register_fixed_factor(struct device *dev, struct device_node *np,
 		init.parent_names = &parent_name;
 	else
 		init.parent_data = &pdata;
+
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed factor는 무조건 clk을 공급받을 한개의 부모가 존재한다.
+ */
 	init.num_parents = 1;
 
 	hw = &fix->hw;
@@ -193,6 +223,10 @@ static const struct of_device_id set_rate_parent_matches[] = {
 	{ /* Sentinel */ },
 };
 
+/*
+ * IAMROOT, 2022.08.13:
+ * - dts에서 div, mult, clk_name, CLK_SET_RATE_PARENT여부등을 확인후.
+ */
 static struct clk_hw *_of_fixed_factor_clk_setup(struct device_node *node)
 {
 	struct clk_hw *hw;
@@ -241,6 +275,10 @@ static struct clk_hw *_of_fixed_factor_clk_setup(struct device_node *node)
 /**
  * of_fixed_factor_clk_setup() - Setup function for simple fixed factor clock
  * @node:	device node for the clock
+ */
+/*
+ * IAMROOT, 2022.08.13:
+ * - fixed factor clk을 setup 한다.
  */
 void __init of_fixed_factor_clk_setup(struct device_node *node)
 {
