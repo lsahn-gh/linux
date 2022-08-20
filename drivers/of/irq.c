@@ -384,6 +384,10 @@ EXPORT_SYMBOL_GPL(of_irq_to_resource);
  * -EPROBE_DEFER if the IRQ domain is not yet created, or error code in case
  * of any other failure.
  */
+/*
+ * IAMROOT, 2022.08.20:
+ * - @index에 해당하는 irq번호를 가져온다.
+ */
 int of_irq_get(struct device_node *dev, int index)
 {
 	int rc;

@@ -41,6 +41,10 @@ struct kona_bcm_timers {
 
 static struct kona_bcm_timers timers;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - dts나 bootloader에서 읽어온 arch timer hz. dts가 우선된다.
+ */
 static u32 arch_timer_rate;
 
 /*

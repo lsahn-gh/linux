@@ -66,6 +66,15 @@ struct arch_timer {
 static u32 arch_timer_rate __ro_after_init;
 static int arch_timer_ppi[ARCH_TIMER_MAX_TIMER_PPI] __ro_after_init;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - dts에는 다음과 같이 있다.
+ *	interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>, // Physical Secure
+ *		     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>, // Physical Non-Secure
+ *		     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>, // Virtual
+ *		     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>; // Hypervisor
+ *
+ */
 static const char *arch_timer_ppi_names[ARCH_TIMER_MAX_TIMER_PPI] = {
 	[ARCH_TIMER_PHYS_SECURE_PPI]	= "sec-phys",
 	[ARCH_TIMER_PHYS_NONSECURE_PPI]	= "phys",
@@ -76,9 +85,25 @@ static const char *arch_timer_ppi_names[ARCH_TIMER_MAX_TIMER_PPI] = {
 
 static struct clock_event_device __percpu *arch_timer_evt;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - kernel에서 사용할 timer.
+ */
 static enum arch_timer_ppi_nr arch_timer_uses_ppi __ro_after_init = ARCH_TIMER_VIRT_PPI;
+
+/*
+ * IAMROOT, 2022.08.20:
+ * - clock을 끄는 기능의 지원여부. 절전등에서 사용한다.
+ *   core가 정지.
+ */
 static bool arch_timer_c3stop __ro_after_init;
 static bool arch_timer_mem_use_virtual __ro_after_init;
+
+/*
+ * IAMROOT, 2022.08.20:
+ * - dts prop : arm,no-tick-in-suspend
+ *   절전시 interrupt on/off 여부.
+ */
 static bool arch_counter_suspend_stop __ro_after_init;
 #ifdef CONFIG_GENERIC_GETTIMEOFDAY
 static enum vdso_clock_mode vdso_default = VDSO_CLOCKMODE_ARCHTIMER;
@@ -166,6 +191,10 @@ static notrace u64 arch_counter_get_cntpct_stable(void)
 	return __arch_counter_get_cntpct_stable();
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - read cntpct
+ */
 static notrace u64 arch_counter_get_cntpct(void)
 {
 	return __arch_counter_get_cntpct();
@@ -176,6 +205,10 @@ static notrace u64 arch_counter_get_cntvct_stable(void)
 	return __arch_counter_get_cntvct_stable();
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - read cntvct
+ */
 static notrace u64 arch_counter_get_cntvct(void)
 {
 	return __arch_counter_get_cntvct();
@@ -200,6 +233,10 @@ static u64 arch_counter_read_cc(const struct cyclecounter *cc)
 	return arch_timer_read_counter();
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - !arch_counter_suspend_stop => flags CLOCK_SOURCE_SUSPEND_NONSTOP 추가
+ */
 static struct clocksource clocksource_counter = {
 	.name	= "arch_sys_counter",
 	.id	= CSID_ARM_ARCH_COUNTER,
@@ -391,6 +428,12 @@ static u32 notrace sun50i_a64_read_cntv_tval_el0(void)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - Out of Line Counter.
+ *   하드웨어 이상으로 counter값이 순간적으로 튀는등 이상하게 변동되는경우가 있는데,
+ *   그것에 대한 방어코드.
+ */
 #ifdef CONFIG_ARM_ARCH_TIMER_OOL_WORKAROUND
 DEFINE_PER_CPU(const struct arch_timer_erratum_workaround *, timer_unstable_counter_workaround);
 EXPORT_SYMBOL_GPL(timer_unstable_counter_workaround);
@@ -592,6 +635,11 @@ void arch_timer_enable_workaround(const struct arch_timer_erratum_workaround *wa
 	}
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - ool일 발생할수있는 arch일 경우 거기에 대한 방어처리를 한다.
+ *   ool_workarounds 참고.
+ */
 static void arch_timer_check_ool_workaround(enum arch_timer_erratum_match_type type,
 					    void *arg)
 {
@@ -879,6 +927,12 @@ static void arch_counter_set_user_access(void)
 	arch_timer_set_cntkctl(cntkctl);
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - kernel이 현재 쓰는 timer가 ARCH_TIMER_PHYS_SECURE_PPI인데
+ *   ARCH_TIMER_PHYS_NONSECURE_PPI가 설정되잇으면 true.
+ * - system이 secure상태인데 none-secure도 있으면 none-secure도 설정하기 위함.
+ */
 static bool arch_timer_has_nonsecure_ppi(void)
 {
 	return (arch_timer_uses_ppi == ARCH_TIMER_PHYS_SECURE_PPI &&
@@ -921,6 +975,10 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - timer 유효성검사.
+ */
 static int validate_timer_rate(void)
 {
 	if (!arch_timer_rate)
@@ -937,6 +995,12 @@ static int validate_timer_rate(void)
  * rate was probed first, and don't verify that others match. If the first node
  * probed has a clock-frequency property, this overrides the HW register.
  */
+/*
+ * IAMROOT, 2022.08.20:
+ * - 이미 설정되있으면 return.
+ *   clock-frequency prop에 없으면 @rate를, 존재한다면 dts를 우선해서 사용한다.
+ * - 즉 dts에 있으면 dts, 아니면 bootloader에서 읽은걸 asrch_timer_rate로 사용한다.
+ */
 static void __init arch_timer_of_configure_rate(u32 rate, struct device_node *np)
 {
 	/* Who has more than one independent system counter? */
@@ -951,6 +1015,15 @@ static void __init arch_timer_of_configure_rate(u32 rate, struct device_node *np
 		pr_warn("frequency not available\n");
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - pc ubuntu(guest os)
+ *   arch_timer: cp15 timer(s) running at 62.50MHz (virt).
+ * - rpi4
+ *   arch_timer: cp15 timer(s) running at 54.00MHz (phys).
+ * - rpi4(guest os)
+ *   arch_timer: cp15 timer(s) running at 54.00MHz (virt).
+ */
 static void __init arch_timer_banner(unsigned type)
 {
 	pr_info("%s%s%s timer(s) running at %lu.%02luMHz (%s%s%s).\n",
@@ -1004,11 +1077,25 @@ struct arch_timer_kvm_info *arch_timer_get_kvm_info(void)
 	return &arch_timer_kvm_info;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * @type arch_timers_present
+ */
 static void __init arch_counter_register(unsigned type)
 {
 	u64 start_count;
 
 	/* Register the CP15 based counter if we have one */
+/*
+ * IAMROOT, 2022.08.20:
+ * - wa(workaround) 는 고려안함.
+ *
+ * 1. type 에 CP15 존재
+ *  - arm64, !hyp                     = arch_counter_get_cntvct
+ *  - ppi = virt_ppi                  = arch_counter_get_cntvct
+ *  - 그외(arm64가 아니거나 hyp mode) = arch_counter_get_cntpct
+ * 2. type 에 CP15 없음(MEM이라는뜻). = arch_counter_get_cntvct_mem
+ */
 	if (type & ARCH_TIMER_TYPE_CP15) {
 		u64 (*rd)(void);
 
@@ -1033,6 +1120,11 @@ static void __init arch_counter_register(unsigned type)
 
 	if (!arch_counter_suspend_stop)
 		clocksource_counter.flags |= CLOCK_SOURCE_SUSPEND_NONSTOP;
+
+/*
+ * IAMROOT, 2022.08.20:
+ * - 
+ */
 	start_count = arch_timer_read_counter();
 	clocksource_register_hz(&clocksource_counter, arch_timer_rate);
 	cyclecounter.mult = clocksource_counter.mult;
@@ -1087,6 +1179,10 @@ static struct notifier_block arch_timer_cpu_pm_notifier = {
 	.notifier_call = arch_timer_cpu_pm_notify,
 };
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - notifier 등록
+ */
 static int __init arch_timer_cpu_pm_init(void)
 {
 	return cpu_pm_register_notifier(&arch_timer_cpu_pm_notifier);
@@ -1108,6 +1204,11 @@ static void __init arch_timer_cpu_pm_deinit(void)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - arch_timer_evt를 생성한다.
+ * - kernel timer의 percpu irq를 등록한다.
+ */
 static int __init arch_timer_register(void)
 {
 	int err;
@@ -1120,6 +1221,16 @@ static int __init arch_timer_register(void)
 	}
 
 	ppi = arch_timer_ppi[arch_timer_uses_ppi];
+
+/*
+ * IAMROOT, 2022.08.20:
+ * - cpu마다 있는 irq에 대해 irq를 등록한다.
+ * -
+ *  ARCH_TIMER_VIRT_PPI : guest os용
+ *  ARCH_TIMER_PHYS_NONSECURE_PPI : EL1에서 동작하는 linux kernel 용.
+ *  ARCH_TIMER_PHYS_SECURE_PPI    :
+ *  ARCH_TIMER_HYP_PPI : EL2에서 동작하는 linux kernel 용.
+ */
 	switch (arch_timer_uses_ppi) {
 	case ARCH_TIMER_VIRT_PPI:
 		err = request_percpu_irq(ppi, arch_timer_handler_virt,
@@ -1127,6 +1238,15 @@ static int __init arch_timer_register(void)
 		break;
 	case ARCH_TIMER_PHYS_SECURE_PPI:
 	case ARCH_TIMER_PHYS_NONSECURE_PPI:
+/*
+ * IAMROOT, 2022.08.20:
+ * - kernel이 none-secure
+ *   arch_timer_evt등록.
+ * - kernel이 ARCH_TIMER_PHYS_SECURE_PPI 이면서 ARCH_TIMER_PHYS_NONSECURE_PPI가 없는상태.
+ *   arch_timer_evt등록.
+ * - kernel이 ARCH_TIMER_PHYS_SECURE_PPI 이면서 ARCH_TIMER_PHYS_NONSECURE_PPI가 있는 상태.
+ *   arch_timer_evt, arch_timer_handler_phys등록.
+ */
 		err = request_percpu_irq(ppi, arch_timer_handler_phys,
 					 "arch_timer", arch_timer_evt);
 		if (!err && arch_timer_has_nonsecure_ppi()) {
@@ -1156,6 +1276,10 @@ static int __init arch_timer_register(void)
 		goto out_unreg_notify;
 
 	/* Register and immediately configure the timer on the boot CPU */
+/*
+ * IAMROOT, 2022.08.20:
+ * - CPUHP_AP_ARM_ARCH_TIMER_STARTING로 on / off일때 각각의 callback 함수를 등록.
+ */
 	err = cpuhp_setup_state(CPUHP_AP_ARM_ARCH_TIMER_STARTING,
 				"clockevents/arm/arch_timer:starting",
 				arch_timer_starting_cpu, arch_timer_dying_cpu);
@@ -1217,12 +1341,20 @@ static const struct of_device_id arch_timer_mem_of_match[] __initconst = {
 	{},
 };
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - CP15가 설정되있다면 MEM을, MEM이 설정되있다면 CP15를 확인하여 probing.
+ */
 static bool __init arch_timer_needs_of_probing(void)
 {
 	struct device_node *dn;
 	bool needs_probing = false;
 	unsigned int mask = ARCH_TIMER_TYPE_CP15 | ARCH_TIMER_TYPE_MEM;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - CP15, MEM둘중 하나만 초기화 하기 위한것.
+ */
 	/* We have two timers, and both device-tree nodes are probed. */
 	if ((arch_timers_present & mask) == mask)
 		return false;
@@ -1231,6 +1363,16 @@ static bool __init arch_timer_needs_of_probing(void)
 	 * Only one type of timer is probed,
 	 * check if we have another type of timer node in device-tree.
 	 */
+/*
+ * IAMROOT, 2022.08.20:
+ * - ARCH_TIMER_TYPE_CP15 지원.
+ *   arm,armv7-timer-mem
+ *
+ * - ARCH_TIMER_TYPE_MEM 지원.
+ *   arm,armv7-timer, arm,armv7-timer
+ *
+ * 나머지 한개에 대해서 probing을 요구.
+ */
 	if (arch_timers_present & ARCH_TIMER_TYPE_CP15)
 		dn = of_find_matching_node(NULL, arch_timer_mem_of_match);
 	else
@@ -1269,6 +1411,13 @@ static int __init arch_timer_common_init(void)
  *
  * Return: a suitable PPI type for the current system.
  */
+/*
+ * IAMROOT, 2022.08.20:
+ * 1. hyp mode : ARCH_TIMER_HYP_PPI
+ * 2. hyp mode disable. 이고 ARCH_TIMER_VIRT_PPI존재. : ARCH_TIMER_VIRT_PPI
+ * 3. arm64 : ARCH_TIMER_PHYS_NONSECURE_PPI
+ * 4. 그외 ARCH_TIMER_PHYS_SECURE_PPI
+ */
 static enum arch_timer_ppi_nr __init arch_timer_select_ppi(void)
 {
 	if (is_kernel_in_hyp_mode())
@@ -1283,6 +1432,12 @@ static enum arch_timer_ppi_nr __init arch_timer_select_ppi(void)
 	return ARCH_TIMER_PHYS_SECURE_PPI;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - ARCH_TIMER_VIRT_PPI에 해당하는 irq를 arch_timer_kvm_info.virtual_irq에 넣는다.
+ *   현재 kernel이 hyp mode면 ARCH_TIMER_PHYS_NONSECURE_PPI에 해당하는 irq를
+ *   arch_timer_kvm_info.physical_irq에 넣는다.
+ */
 static void __init arch_timer_populate_kvm_info(void)
 {
 	arch_timer_kvm_info.virtual_irq = arch_timer_ppi[ARCH_TIMER_VIRT_PPI];
@@ -1290,12 +1445,20 @@ static void __init arch_timer_populate_kvm_info(void)
 		arch_timer_kvm_info.physical_irq = arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI];
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - ARCH_TIMER_TYPE_CP15 방식의 초기화 방법.
+ */
 static int __init arch_timer_of_init(struct device_node *np)
 {
 	int i, irq, ret;
 	u32 rate;
 	bool has_names;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - ARCH_TIMER_TYPE_CP15의 방식으로의 설정이 중복되서 호출됬는지 확인한다.
+ */
 	if (arch_timers_present & ARCH_TIMER_TYPE_CP15) {
 		pr_warn("multiple nodes in dt, skipping\n");
 		return 0;
@@ -1305,6 +1468,22 @@ static int __init arch_timer_of_init(struct device_node *np)
 
 	has_names = of_property_read_bool(np, "interrupt-names");
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - interrupt-names에 name이 있다면 name을 기준으로, 아니면 순서대로 irq 번호를 찾는다.
+ *   여기 찾는건 virq(virutal irq).
+ *
+ * - ex) interrupt-names 사용처 예제. dts/apple/t8103.dtsi
+ *   timer {
+ *	compatible = "arm,armv8-timer";
+ *	interrupt-parent = <&aic>;
+ *	interrupt-names = "phys", "virt", "hyp-phys", "hyp-virt";
+ *	interrupts = <AIC_FIQ AIC_TMR_GUEST_PHYS IRQ_TYPE_LEVEL_HIGH>,
+ *	<AIC_FIQ AIC_TMR_GUEST_VIRT IRQ_TYPE_LEVEL_HIGH>,
+ *	<AIC_FIQ AIC_TMR_HV_PHYS IRQ_TYPE_LEVEL_HIGH>,
+ *	<AIC_FIQ AIC_TMR_HV_VIRT IRQ_TYPE_LEVEL_HIGH>;
+ *   };
+ */
 	for (i = ARCH_TIMER_PHYS_SECURE_PPI; i < ARCH_TIMER_MAX_TIMER_PPI; i++) {
 		if (has_names)
 			irq = of_irq_get_byname(np, arch_timer_ppi_names[i]);
@@ -1316,9 +1495,18 @@ static int __init arch_timer_of_init(struct device_node *np)
 
 	arch_timer_populate_kvm_info();
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - arch timer hz를 cntfrq에서 읽어온다. 그 이후에 dts에 timer clock값이 존재하면, dts우선,
+ *   아니면 cntfrq에서 읽어온(bootloader가 세팅해준)값을 사용한다.
+ */
 	rate = arch_timer_get_cntfrq();
 	arch_timer_of_configure_rate(rate, np);
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - always-on이 존재하면 arch_timer_c3stop을 disable.
+ */
 	arch_timer_c3stop = !of_property_read_bool(np, "always-on");
 
 	/* Check for globally applicable workarounds */
@@ -1328,6 +1516,10 @@ static int __init arch_timer_of_init(struct device_node *np)
 	 * If we cannot rely on firmware initializing the timer registers then
 	 * we should use the physical timers instead.
 	 */
+/*
+ * IAMROOT, 2022.08.20:
+ * - 현재 kernel이 사용할 timer의 종류를 구한다.
+ */
 	if (IS_ENABLED(CONFIG_ARM) &&
 	    of_property_read_bool(np, "arm,cpu-registers-not-fw-configured"))
 		arch_timer_uses_ppi = ARCH_TIMER_PHYS_SECURE_PPI;
@@ -1340,6 +1532,10 @@ static int __init arch_timer_of_init(struct device_node *np)
 	}
 
 	/* On some systems, the counter stops ticking when in suspend. */
+/*
+ * IAMROOT, 2022.08.20:
+ * - 절전시 interrupt on/off여부를 dts에서 prop를 통해 읽어온다.
+ */
 	arch_counter_suspend_stop = of_property_read_bool(np,
 							 "arm,no-tick-in-suspend");
 
@@ -1347,9 +1543,18 @@ static int __init arch_timer_of_init(struct device_node *np)
 	if (ret)
 		return ret;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - CP15가 위에서 설정되었고, MEM이 아직 설정안된상태에서 MEM이 dts에 있으면 return true로
+ *   probe해야되는 상태. MEM probe에서 arch_timer_common_init을 호출할것이다.
+ */
 	if (arch_timer_needs_of_probing())
 		return 0;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - MEM을 probe할 필요없거나 둘다 초기화됬으면 arch_timer_common_init()을 호출한다.
+ */
 	return arch_timer_common_init();
 }
 TIMER_OF_DECLARE(armv7_arch_timer, "arm,armv7-timer", arch_timer_of_init);
@@ -1464,6 +1669,41 @@ arch_timer_mem_frame_register(struct arch_timer_mem_frame *frame)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - memory mapped 방식의 timer.
+ *   ioremap으로 vmap으로 mapping하며 해당 memory를 register로 사용하는 방법.
+ *
+ * ex) dts에서 사용한 예. cp15방식의 timer와 동시에 사용하는것이 보인다.
+ *     (qcom/ipq6018.dtsi)
+ *
+ * timer {
+ *	compatible = "arm,armv8-timer";
+ *	interrupts = <GIC_PPI 2 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+ *		     <GIC_PPI 3 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+ *		     <GIC_PPI 4 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+ *		     <GIC_PPI 1 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
+ * };
+ *
+ * timer@b120000 {
+ *	#address-cells = <2>;
+ *	#size-cells = <2>;
+ *	ranges;
+ *	compatible = "arm,armv7-timer-mem";
+ *	reg = <0x0 0x0b120000 0x0 0x1000>; 
+ *	clock-frequency = <19200000>;
+ *
+ *	frame@b120000 {
+ *		frame-number = <0>;
+ *		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>,
+ *			     <GIC_SPI 7 IRQ_TYPE_LEVEL_HIGH>;
+ *		reg = <0x0 0x0b121000 0x0 0x1000>,
+ *		      <0x0 0x0b122000 0x0 0x1000>;
+ *      };
+ *      ....
+ * }
+ *
+ */
 static int __init arch_timer_mem_of_init(struct device_node *np)
 {
 	struct arch_timer_mem *timer_mem;

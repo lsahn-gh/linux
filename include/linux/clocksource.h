@@ -241,6 +241,10 @@ static inline int __clocksource_register(struct clocksource *cs)
 	return __clocksource_register_scale(cs, 1, 0);
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - 
+ */
 static inline int clocksource_register_hz(struct clocksource *cs, u32 hz)
 {
 	return __clocksource_register_scale(cs, 1, hz);
@@ -261,6 +265,10 @@ static inline void __clocksource_update_freq_khz(struct clocksource *cs, u32 khz
 	__clocksource_update_freq_scale(cs, 1000, khz);
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - arm은 없음.
+ */
 #ifdef CONFIG_ARCH_CLOCKSOURCE_INIT
 extern void clocksource_arch_init(struct clocksource *cs);
 #else
@@ -279,6 +287,10 @@ extern int clocksource_mmio_init(void __iomem *, const char *,
 
 extern int clocksource_i8253_init(void);
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - __timer_of_table에 등록된다.
+ */
 #define TIMER_OF_DECLARE(name, compat, fn) \
 	OF_DECLARE_1_RET(timer, name, compat, fn)
 

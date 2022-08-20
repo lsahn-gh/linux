@@ -43,16 +43,49 @@
  * reduce the conversion accuracy by choosing smaller mult and shift
  * factors.
  */
+/*
+ * IAMROOT, 2022.08.20:
+ * ex) from = 19200000, to = 10^9, maxsec = 600
+ * - sftacc 계산
+ *   600 * 19200000 = 0x2_AEA5_4000 => shift32 => 0x2
+ *   두번 loop를 돌면 sftacc = 30가 된다.
+ */
 void
 clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 {
 	u64 tmp;
+/*
+ * IAMROOT, 2022.08.20:
+ * - 정확도는 최대 32bit.
+ */
 	u32 sft, sftacc= 32;
 
 	/*
 	 * Calculate the shift factor which is limiting the conversion
 	 * range:
 	 */
+/*
+ * IAMROOT, 2022.08.20:
+ * 63..      55                                                      0
+ * | unusable |            counter                                   |
+ *
+ * |          |            empty            | sec(최대600) | freq    |
+ *
+ * 여기선 정확도용으로 사용할 bit를 계산한다.
+ *
+ * | 정확도용                 |               sec(최대600) | freq     |
+ *                            ^
+ *                            이 부분일거같은 bit를 찾는것.
+ *
+ * | 정확도용                 |               sec(최대600) | freq     |
+ * <----------- sftacc ------> <------- maxsec * from ---------------->
+ *                                       ^  
+ * ex) from = 19200000, to = 10^9, maxsec = 600, sftacc = 30
+ *
+ * | 정확도용                 |               sec(최대600) | freq     |
+ * <----------- sftacc ------> <------- maxsec * from ---------------->
+ *              30 bits       ^  34bit
+ */
 	tmp = ((u64)maxsec * from) >> 32;
 	while (tmp) {
 		tmp >>=1;
@@ -63,6 +96,24 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 	 * Find the conversion shift/mult pair which has the best
 	 * accuracy and fits the maxsec conversion range:
 	 */
+/*
+ * IAMROOT, 2022.08.20:
+ * - from * mult >> shift = to의 개념에서 mult, shift값을 구한다.
+ *   tmp = (to << sft + from / 2) / from
+ *
+ * - sftacc 내에서 처리될수있는 mult, shift값을 계산한다.
+ * - from / 2는 나머지를 고려해서, do_div(mult, from)를 할때 정확성을 조금 올리는것. 
+ * - from으로 위애서 sftacc(정확도)를 구하고, sftacc내의 범위에서 to값의 최종 정확도를 shift
+ *   한값이 들어오는지 계산하여 mult, sft값을 구한다.
+ *
+ * ex) from = 19200000, to = 10^9, maxsec = 600, sftacc = 30
+ * sft = 24이면
+ * tmp = 1000000000 << 24 = 16777216000000000
+ * tmp += 9600000
+ * tmp = do_div(16777216000000000,  19200000) = 873813333 = 0x3415_5555
+ * tmp >> sftasce = 0x3415_5555 >> 30 == 0
+ * mult = 0x3415_5555, shift = 24가 된다.
+ */
 	for (sft = 32; sft > 0; sft--) {
 		tmp = (u64) to << sft;
 		tmp += from / 2;
@@ -1046,7 +1097,24 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
 		 * clocksource with mask >= 40-bit and f >= 4GHz. That maps to
 		 * ~ 0.06ppm granularity for NTP.
 		 */
+
+/*
+ * IAMROOT, 2022.08.20:
+ * - papago
+ *   둘러싸기 전에 실행할 수 있는 최대 시간(초)을 계산합니다. 마스크가 32비트보다 큰 클록
+ *   소스의 경우 좋은 변환 정밀도를 갖기 위해 최대 절전 시간을 제한해야 합니다. 10분은 여전히
+ *   적당한 양입니다. 그 결과 마스크 >= 40비트 및 f >= 4GHz인 클록 소스에 대해 시프트 값이 24가
+ *   됩니다. 이는 NTP의 경우 ~ 0.06ppm 단위로 매핑됩니다.
+ */
 		sec = cs->mask;
+/*
+ * IAMROOT, 2022.08.20:
+ * - sec = sec / freq / scale
+ * ex) cs->mask = CLOCKSOURCE_MASK(56), freq = 19200000, scale = 1
+ * sec = 0xff_ffff_ffff_ffff / 19200000 = 3752999689 => clamp => 600
+ *
+ * clamp로 10분을 한계로 두고 정확도를 높이는 개념.
+ */
 		do_div(sec, freq);
 		do_div(sec, scale);
 		if (!sec)
@@ -1054,6 +1122,12 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
 		else if (sec > 600 && cs->mask > UINT_MAX)
 			sec = 600;
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - sec * scale시간을 한계로 freq -> NSEC_PER_SEC / scale이 되기 위한 mult, shift를 계산한다.
+ * ex) clocksource_counter에서 mask = CLOCKSOURCE_MASK(56)
+ * ex) cs->mask = CLOCKSOURCE_MASK(56), freq = 19200000, scale = 1, sec = 600
+ */
 		clocks_calc_mult_shift(&cs->mult, &cs->shift, freq,
 				       NSEC_PER_SEC / scale, sec * scale);
 	}
@@ -1115,6 +1189,10 @@ EXPORT_SYMBOL_GPL(__clocksource_update_freq_scale);
  * This *SHOULD NOT* be called directly! Please use the
  * clocksource_register_hz() or clocksource_register_khz helper functions.
  */
+/*
+ * IAMROOT, 2022.08.20:
+ * - scale * freq = 실제 freq
+ */
 int __clocksource_register_scale(struct clocksource *cs, u32 scale, u32 freq)
 {
 	unsigned long flags;
@@ -1123,6 +1201,11 @@ int __clocksource_register_scale(struct clocksource *cs, u32 scale, u32 freq)
 
 	if (WARN_ON_ONCE((unsigned int)cs->id >= CSID_MAX))
 		cs->id = CSID_GENERIC;
+
+/*
+ * IAMROOT, 2022.08.20:
+ * ex) VDSO_CLOCKMODE_NONE, VDSO_CLOCKMODE_ARCHTIMER_NOCOMPAT
+ */
 	if (cs->vdso_clock_mode < 0 ||
 	    cs->vdso_clock_mode >= VDSO_CLOCKMODE_MAX) {
 		pr_warn("clocksource %s registered with invalid VDSO mode %d. Disabling VDSO support.\n",

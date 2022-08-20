@@ -149,6 +149,18 @@ u32 arch_timer_reg_read_cp15(int access, enum arch_timer_reg reg)
 	BUG();
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - CNTFRQ_EL0, Counter-timer Frequency register를 읽는다.
+ *   (arch timer에 사용한 주파수.)
+ * - Bits [63:32]
+ *   Reserved, RES0.
+ *
+ * - Bits [31:0]
+ *   Clock frequency. Indicates the system counter clock frequency, in Hz.
+ *   The reset behavior of this field is:
+ *   On a Warm reset, this field resets to an architecturally UNKNOWN value. 
+ */
 static inline u32 arch_timer_get_cntfrq(void)
 {
 	return read_sysreg(cntfrq_el0);
@@ -175,6 +187,10 @@ static __always_inline u64 __arch_counter_get_cntpct_stable(void)
 	return cnt;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - read cntpct_el0
+ */
 static __always_inline u64 __arch_counter_get_cntpct(void)
 {
 	u64 cnt;
@@ -195,6 +211,13 @@ static __always_inline u64 __arch_counter_get_cntvct_stable(void)
 	return cnt;
 }
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - CNTVCT_EL0, Counter-timer Virtual Count register
+ *   Holds the 64-bit virtual count value. The virtual count value is equal to the physical count
+ *   value minus the virtual offset visible in CNTVOFF_EL2.
+ * - read cntvct_el0
+ */
 static __always_inline u64 __arch_counter_get_cntvct(void)
 {
 	u64 cnt;

@@ -27,6 +27,12 @@ enum arch_timer_reg {
 	ARCH_TIMER_REG_TVAL,
 };
 
+/*
+ * IAMROOT, 2022.08.20:
+ * - PPI : private peri irq. cpu당 개별 irq 지원.
+ * - ARCH_TIMER_PHYS_SECURE_PPI
+ *   arm의 경우 arm,cpu-registers-not-fw-configured prop가 있으면 사용한다.
+ */
 enum arch_timer_ppi_nr {
 	ARCH_TIMER_PHYS_SECURE_PPI,
 	ARCH_TIMER_PHYS_NONSECURE_PPI,
