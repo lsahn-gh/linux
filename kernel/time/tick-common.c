@@ -25,6 +25,10 @@
 /*
  * Tick devices
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - sche tick. 
+ */
 DEFINE_PER_CPU(struct tick_device, tick_cpu_device);
 /*
  * Tick next event: keeps track of the tick time. It's updated by the
@@ -337,6 +341,10 @@ bool tick_check_replacement(struct clock_event_device *curdev,
 /*
  * Check, if the new registered device should be used. Called with
  * clockevents_lock held and interrupts disabled.
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - TODO
  */
 void tick_check_new_device(struct clock_event_device *newdev)
 {

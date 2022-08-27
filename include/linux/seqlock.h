@@ -692,6 +692,13 @@ typedef struct {
  * picking which data copy to read. The full counter must then be checked
  * with read_seqcount_latch_retry().
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - papgo
+ *   시퀀스 카운터 원시 값. 읽을 데이터 복사본을 선택하기 위한 인덱스로
+ *   가장 낮은 비트를 사용합니다. 그런 다음 전체 카운터를
+ *   read_seqcount_latch_retry()로 확인해야 합니다 
+ */
 static inline unsigned raw_read_seqcount_latch(const seqcount_latch_t *s)
 {
 	/*
@@ -794,6 +801,82 @@ read_seqcount_latch_retry(const seqcount_latch_t *s, unsigned start)
  *
  *	When data is a dynamic data structure; one should use regular RCU
  *	patterns to manage the lifetimes of the objects within.
+ */
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - papgo
+ *   aw_write_seqcount_latch() - 래치 판독기를 짝수/홀수 사본 @s로 리디렉션:
+ *   seqcount_latch_t에 대한 포인터 래치 기술은 원자가 아닌 수정 중에
+ *   쿼리를 허용하는 다중 버전 동시성 제어 방법입니다. 쿼리가 수정을
+ *   중단하지 않도록 보장할 수 있다면 -- 예를 들어 동시성은 CPU 간에
+ *   엄격하게 이루어지므로 필요하지 않을 가능성이 큽니다.
+ *
+ *   기존의 RCU/잠금 없는 데이터 구조가 원자적 수정에 의존하여 쿼리가 이전
+ *   또는 새 상태를 관찰하도록 보장하는 경우 래치가 비원자 업데이트에 대해
+ *   동일한 것을 허용합니다. 절충안은 스토리지 비용을 두 배로 늘립니다.
+ *   전체 데이터 구조의 두 복사본을 유지해야 합니다.
+ *
+ *   아주 간단히 말해서:
+ *   먼저 한 사본을 수정한 다음 다른 사본을 수정합니다. 이것은 우리에게
+ *   답을 줄 준비가 된 안정적인 상태의 사본이 항상 하나 있음을 보장합니다.
+ *
+ *   기본 형식은 다음과 같은 데이터 구조입니다.
+ *	struct latch_struct {
+ *		seqcount_latch_t	seq;
+ *		struct data_struct	data[2];
+ *	};
+ *
+ *   외부 직렬화를 전제로 하는 수정 사항은 다음과 같습니다::
+ *
+ *	void latch_modify(struct latch_struct *latch, ...)
+ *	{
+ *		smp_wmb();	// Ensure that the last data[1] update is visible
+ *		latch->seq.sequence++;
+ *		smp_wmb();	// Ensure that the seqcount update is visible
+ *
+ *		modify(latch->data[0], ...);
+ *
+ *		smp_wmb();	// Ensure that the data[0] update is visible
+ *		latch->seq.sequence++;
+ *		smp_wmb();	// Ensure that the seqcount update is visible
+ *
+ *		modify(latch->data[1], ...);
+ *	}
+ *
+ * The query will have a form like::
+ *
+ *	struct entry *latch_query(struct latch_struct *latch, ...)
+ *	{
+ *		struct entry *entry;
+ *		unsigned seq, idx;
+ *
+ *		do {
+ *			seq = raw_read_seqcount_latch(&latch->seq);
+ *
+ *			idx = seq & 0x01;
+ *			entry = data_query(latch->data[idx], ...);
+ *
+ *		// This includes needed smp_rmb()
+ *		} while (read_seqcount_latch_retry(&latch->seq, seq));
+ *
+ *		return entry;
+ *	}
+ *
+ *  따라서 수정하는 동안 쿼리는 먼저 data[1]로 리디렉션됩니다. 그런 다음
+ *  데이터[0]을 수정합니다. 완료되면 쿼리를 다시 data[0]으로 리디렉션하고
+ *  data[1]을 수정할 수 있습니다.
+ *
+ *  노트:
+ *  원자적 수정에 대한 비요구 사항은 데이터가 동적 데이터 구조인 경우
+ *  새 항목의 게시를 포함하지 않는다.
+ *
+ *  반복은 data[0]에서 시작하고 전체 수정 시퀀스를 놓칠 만큼 충분히
+ *  오래 일시 중단될 수 있습니다. 다시 시작하면 새 항목이 관찰될 수
+ *  있습니다.
+ *
+ *  노트 2: 데이터가 동적 데이터 구조인 경우 내부 개체의 수명을 관리하려면
+ *  일반 RCU 패턴을 사용해야 합니다.
  */
 static inline void raw_write_seqcount_latch(seqcount_latch_t *s)
 {

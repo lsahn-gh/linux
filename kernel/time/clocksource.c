@@ -49,6 +49,8 @@
  * - sftacc 계산
  *   600 * 19200000 = 0x2_AEA5_4000 => shift32 => 0x2
  *   두번 loop를 돌면 sftacc = 30가 된다.
+ *
+ * - 이진화 정수화.
  */
 void
 clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
@@ -56,7 +58,7 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
 	u64 tmp;
 /*
  * IAMROOT, 2022.08.20:
- * - 정확도는 최대 32bit.
+ * - 이진화 정확도는 최대 32bit.
  */
 	u32 sft, sftacc= 32;
 
@@ -113,9 +115,26 @@ clocks_calc_mult_shift(u32 *mult, u32 *shift, u32 from, u32 to, u32 maxsec)
  * tmp = do_div(16777216000000000,  19200000) = 873813333 = 0x3415_5555
  * tmp >> sftasce = 0x3415_5555 >> 30 == 0
  * mult = 0x3415_5555, shift = 24가 된다.
+ *
+ * - ex) 0.1을 이진화 정수화.
+ *
+ *   0            | (0.1에 대한 값)
+ *
+ *   0.1 * 2 = 0.2 -> 0
+ *   0.2 * 2 = 0.4 -> 0
+ *   0.4 * 2 = 0.8 -> 0
+ *   0.8 * 2 = 1.6 -> 1
+ *    .------- 0.6
+ *   0.6 * 2 = 1.2 -> 1
+ *   0.2 * 2 = 0.4 -> 0
  */
 	for (sft = 32; sft > 0; sft--) {
 		tmp = (u64) to << sft;
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - round up
+ */
 		tmp += from / 2;
 		do_div(tmp, from);
 		if ((tmp >> sftacc) == 0)
@@ -869,6 +888,10 @@ void clocksource_touch_watchdog(void)
  * @cs:         Pointer to clocksource
  *
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - mult의 0.11배값을 return.
+ */
 static u32 clocksource_max_adjustment(struct clocksource *cs)
 {
 	u64 ret;
@@ -895,6 +918,20 @@ static u32 clocksource_max_adjustment(struct clocksource *cs)
  * delayed timers or bad hardware, which might result in time intervals that
  * are larger than what the math used can handle without overflows.
  */
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - papago
+ *   이 함수에는 50%의 safety margin가 포함됩니다. 즉, 하드웨어 카운터가 기술적으로
+ *   처리할 수 있는 나노초 수의 절반을 반환합니다. 이는 지연된 타이머 또는 잘못된
+ *   하드웨어로 인해 발생하는 문제를 잠재적으로 감지할 수 있도록 하기 위해 수행되며,
+ *   이로 인해 사용된 수학이 오버플로 없이 처리할 수 있는 것보다 더 큰 시간 간격이
+ *   발생할 수 있습니다.
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - overlfow가 발생할수있는 제한을 구한다.
+ */
 u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cyc)
 {
 	u64 max_nsecs, max_cycles;
@@ -903,6 +940,10 @@ u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cy
 	 * Calculate the maximum number of cycles that we can pass to the
 	 * cyc2ns() function without overflowing a 64-bit result.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - max_cycles = UNLLONG_MAX / (mult + maxadj)
+ */
 	max_cycles = ULLONG_MAX;
 	do_div(max_cycles, mult+maxadj);
 
@@ -912,7 +953,24 @@ u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cy
 	 * Note: Here we subtract the maxadj to make sure we don't sleep for
 	 * too long if there's a large negative adjustment.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - papago
+ *   클럭 소스를 연기할 수 있는 실제 최대 사이클 수는 max_cycles와
+ *   마스크의 최소값에 의해 결정됩니다.
+ *   note:
+ *   여기서 우리는 큰 음수 조정이 있는 경우 너무 오랫동안 잠을 자지
+ *   않도록 maxadj를 뺍니다. 
+ *
+ * - mask값(ex. arm arch timer CLOCKSOURCE_MASK(56)과 min 비교를 한다.
+ *   즉 mask값보다 높은 값을 사용하지 않겟다는것.
+ */
 	max_cycles = min(max_cycles, mask);
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - max_cyc값에 해당하는 max_nsecs값을 구한다
+ */
 	max_nsecs = clocksource_cyc2ns(max_cycles, mult - maxadj, shift);
 
 	/* return the max_cycles value as well if requested */
@@ -929,6 +987,10 @@ u64 clocks_calc_max_nsecs(u32 mult, u32 shift, u32 maxadj, u64 mask, u64 *max_cy
  * clocksource_update_max_deferment - Updates the clocksource max_idle_ns & max_cycles
  * @cs:         Pointer to clocksource to be updated
  *
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - overflow당하지 않을 cycle값과 ns값을 구한다.
  */
 static inline void clocksource_update_max_deferment(struct clocksource *cs)
 {
@@ -1079,6 +1141,11 @@ static void clocksource_enqueue(struct clocksource *cs)
  * __clocksource_update_freq_hz() or __clocksource_update_freq_khz() helper
  * functions.
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - @cs에 대한 mult, shift값을 구하고 margin, adj, max_idle_ns,
+ *   max_cycles 값을 구한다.
+ */
 void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq)
 {
 	u64 sec;
@@ -1142,6 +1209,22 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
 	 * to be specified by the caller for testing purposes, but warn
 	 * to discourage production use of this capability.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - papgo
+ *   불확실성 마진이 지정되지 않은 경우 계산합니다. scale과 freq가 모두 0이 아닌 경우 클록 주기를
+ *   계산하지만 2*WATCHDOG_MAX_SKEW에서 아래로 제한됩니다. 그러나 scale 또는 freq 중 하나가 0이면
+ *   매우 보수적이며 불확실성 마진에 대해 수십 밀리초 WATCHDOG_THRESHOLD 값을 사용합니다. 테스트
+ *   목적으로 호출자가 지정하는 어리석게 작은 불확실성 마진을 허용하지만 이 기능의 프로덕션
+ *   사용을 권장하지 않도록 경고합니다.
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - cs->uncertainty_margin이 0인 경우
+ *   scale, freq둘다 0이 아니면 계산. 그렇지 않은경우 고정값 사용.
+ * - 1초에대한 margin값을 정의 하는것.
+ *   ex) margin이 0.1이라고 하면 0.9 ~ 1.1 사이값이 오면 1초라고 생각한다는것.
+ */
 	if (scale && freq && !cs->uncertainty_margin) {
 		cs->uncertainty_margin = NSEC_PER_SEC / (scale * freq);
 		if (cs->uncertainty_margin < 2 * WATCHDOG_MAX_SKEW)
@@ -1156,6 +1239,11 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
 	 * when adjusted.
 	 */
 	cs->maxadj = clocksource_max_adjustment(cs);
+/*
+ * IAMROOT, 2022.08.27:
+ * - adj값을 계산하고 계산된 mult에 적용해봐서 overflow, underflow가 안될때까지
+ *   재조정한다.
+ */
 	while (freq && ((cs->mult + cs->maxadj < cs->mult)
 		|| (cs->mult - cs->maxadj > cs->mult))) {
 		cs->mult >>= 1;
@@ -1171,8 +1259,23 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
 		"timekeeping: Clocksource %s might overflow on 11%% adjustment\n",
 		cs->name);
 
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - overflow당하지 않은 제한값(cs->max_idle_ns)을 구한다.
+ */
 	clocksource_update_max_deferment(cs);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - ex) x64 ubuntu
+ *   clocksource: tsc: mask: 0xffffffffffffffff
+ *   max_cycles: 0x6d581b92771, max_idle_ns: 881590605997 ns
+ * - 위 예제로 봤을때 600초를 제한으로 했지만, 881초까지 여유를 두는것이
+ *   확인된다.
+ *   881초도 50%줄인 숫자(max_idle_ns)이고, 실제로는 max_cycles에 있는
+ *   881 * 2초 만큼 버티게된다.
+ */
 	pr_info("%s: mask: 0x%llx max_cycles: 0x%llx, max_idle_ns: %lld ns\n",
 		cs->name, cs->mask, cs->max_cycles, cs->max_idle_ns);
 }

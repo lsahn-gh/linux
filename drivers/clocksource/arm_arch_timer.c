@@ -112,6 +112,11 @@ static enum vdso_clock_mode vdso_default = VDSO_CLOCKMODE_NONE;
 #endif /* CONFIG_GENERIC_GETTIMEOFDAY */
 
 static cpumask_t evtstrm_available = CPU_MASK_NONE;
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - config, early
+ */
 static bool evtstrm_enable __ro_after_init = IS_ENABLED(CONFIG_ARM_ARCH_TIMER_EVTSTREAM);
 
 static int __init early_evtstrm_cfg(char *buf)
@@ -180,6 +185,11 @@ u32 arch_timer_reg_read(int access, enum arch_timer_reg reg,
 			break;
 		}
 	} else {
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - CP15
+ */
 		val = arch_timer_reg_read_cp15(access, reg);
 	}
 
@@ -680,6 +690,10 @@ static void arch_timer_check_ool_workaround(enum arch_timer_erratum_match_type t
 		local ? "local" : "global", wa->desc);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - read cntvct_el0
+ */
 static bool arch_timer_this_cpu_has_cntvct_wa(void)
 {
 	return has_erratum_handler(read_cntvct_el0);
@@ -739,6 +753,10 @@ static irqreturn_t arch_timer_handler_virt_mem(int irq, void *dev_id)
 	return timer_handler(ARCH_TIMER_MEM_VIRT_ACCESS, evt);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @access timer regiser 직접제어. disable.
+ */
 static __always_inline int timer_shutdown(const int access,
 					  struct clock_event_device *clk)
 {
@@ -751,11 +769,19 @@ static __always_inline int timer_shutdown(const int access,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - virt timer regiser 직접제어. disable.
+ */
 static int arch_timer_shutdown_virt(struct clock_event_device *clk)
 {
 	return timer_shutdown(ARCH_TIMER_VIRT_ACCESS, clk);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - phy timer regiser 직접제어. disable.
+ */
 static int arch_timer_shutdown_phys(struct clock_event_device *clk)
 {
 	return timer_shutdown(ARCH_TIMER_PHYS_ACCESS, clk);
@@ -810,6 +836,10 @@ static int arch_timer_set_next_event_phys_mem(unsigned long evt,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @clk를 @type에 따라 초기화한다.
+ */
 static void __arch_timer_setup(unsigned type,
 			       struct clock_event_device *clk)
 {
@@ -826,6 +856,11 @@ static void __arch_timer_setup(unsigned type,
 		clk->rating = 450;
 		clk->cpumask = cpumask_of(smp_processor_id());
 		clk->irq = arch_timer_ppi[arch_timer_uses_ppi];
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - guest os일경우, virt 그외에 phy로 callback 함수를 등록한다.
+ */
 		switch (arch_timer_uses_ppi) {
 		case ARCH_TIMER_VIRT_PPI:
 			clk->set_state_shutdown = arch_timer_shutdown_virt;
@@ -862,11 +897,28 @@ static void __arch_timer_setup(unsigned type,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - timer stop
+ */
 	clk->set_state_shutdown(clk);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - 15tick , 31bit로 clockevents의 최소 최대값을 설정한다.
+ *   (programming이 가능한 최소, 최대 틱)
+ */
 	clockevents_config_and_register(clk, arch_timer_rate, 0xf, 0x7fffffff);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - divider를 EVNTI위치에 set. evt enable도 set한다.
+ * - ex) 19.2MHZ에서, eventi가 13일때(0b1101) 1초에 발생하는 event 횟수.
+ *   19200000 / 0x1000 = 4580
+ *   pulse가 raising edge에서만 동작한다고 했을때 4580 / 2 = 2343.
+ *   1초에 1171번 발생한다.
+ */
 static void arch_timer_evtstrm_enable(int divider)
 {
 	u32 cntkctl = arch_timer_get_cntkctl();
@@ -880,6 +932,10 @@ static void arch_timer_evtstrm_enable(int divider)
 	cpumask_set_cpu(smp_processor_id(), &evtstrm_available);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - evt stream을 설정하고 enable한다.(wfe를 위한것.)
+ */
 static void arch_timer_configure_evtstream(void)
 {
 	int evt_stream_div, lsb;
@@ -888,20 +944,44 @@ static void arch_timer_configure_evtstream(void)
 	 * As the event stream can at most be generated at half the frequency
 	 * of the counter, use half the frequency when computing the divider.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - evt_stream_div = arch_timer_rate / 2000
+ *   arch_timer_rate = 19.2M이라고 했을대
+ *   evt_stream_div = 19200000 / 2000 = 9600
+ */
 	evt_stream_div = arch_timer_rate / ARCH_TIMER_EVT_STREAM_FREQ / 2;
 
 	/*
 	 * Find the closest power of two to the divisor. If the adjacent bit
 	 * of lsb (last set bit, starts from 0) is set, then we use (lsb + 1).
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - evt_stream_div & BIT(lsb - 1)
+ *   반올림 여부 판단.
+ *
+ * ex) evt_stream_div = 9600 = 0b10_0101_1000_0000
+ *                                ^반올림 체크
+ * fls(9600) = 14.
+ * lsb = 13 (반올림 안됨)
+ */
 	lsb = fls(evt_stream_div) - 1;
 	if (lsb > 0 && (evt_stream_div & BIT(lsb - 1)))
 		lsb++;
 
 	/* enable event stream */
+/*
+ * IAMROOT, 2022.08.27:
+ * - 최대 15bit까지만 가능.(ARCH_TIMER_EVT_TRIGGER_SHIFT 참고)
+ */
 	arch_timer_evtstrm_enable(max(0, min(lsb, 15)));
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - ARCH_TIMER_USR_VCT_ACCESS_EN set이 가능한지 여부를 판단해 set한다.
+ */
 static void arch_counter_set_user_access(void)
 {
 	u32 cntkctl = arch_timer_get_cntkctl();
@@ -939,6 +1019,10 @@ static bool arch_timer_has_nonsecure_ppi(void)
 		arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI]);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - irq의 trigger flags를 얻어온다.
+ */
 static u32 check_ppi_trigger(int irq)
 {
 	u32 flags = irq_get_trigger_type(irq);
@@ -952,6 +1036,14 @@ static u32 check_ppi_trigger(int irq)
 	return flags;
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - arch_timer_register에서 CPUHP_AP_ARM_ARCH_TIMER_STARTING에서
+ *   call되는 함수.
+ *
+ * - ARCH_TIMER_TYPE_CP15 설정.
+ *   irq 설정.
+ */
 static int arch_timer_starting_cpu(unsigned int cpu)
 {
 	struct clock_event_device *clk = this_cpu_ptr(arch_timer_evt);
@@ -959,9 +1051,19 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 
 	__arch_timer_setup(ARCH_TIMER_TYPE_CP15, clk);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - arch_timer_uses_ppi에 대한 flags를 가져와서 percpu_irq를 등록한다.
+ */
 	flags = check_ppi_trigger(arch_timer_ppi[arch_timer_uses_ppi]);
 	enable_percpu_irq(arch_timer_ppi[arch_timer_uses_ppi], flags);
 
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - nonsecure_ppi가 있는경우 nonsecure_pp가 flags를 가져와서
+ *   percpu_irq를 등록한다.
+ */
 	if (arch_timer_has_nonsecure_ppi()) {
 		flags = check_ppi_trigger(arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI]);
 		enable_percpu_irq(arch_timer_ppi[ARCH_TIMER_PHYS_NONSECURE_PPI],
@@ -969,6 +1071,10 @@ static int arch_timer_starting_cpu(unsigned int cpu)
 	}
 
 	arch_counter_set_user_access();
+/*
+ * IAMROOT, 2022.08.27:
+ * - default config enable.
+ */
 	if (evtstrm_enable)
 		arch_timer_configure_evtstream();
 
@@ -1080,6 +1186,10 @@ struct arch_timer_kvm_info *arch_timer_get_kvm_info(void)
 /*
  * IAMROOT, 2022.08.20:
  * @type arch_timers_present
+ * 1. clocksource
+ * 2. clockevents 
+ * 3. timercounter
+ * 4. sched clock
  */
 static void __init arch_counter_register(unsigned type)
 {
@@ -1123,7 +1233,8 @@ static void __init arch_counter_register(unsigned type)
 
 /*
  * IAMROOT, 2022.08.20:
- * - 
+ * - clocksource_counter에서 구한 mult, shift값으로 cyclecounter에 사용하고,
+ *   만들어진 cyclecounter를 arch_timer_kvm_info의 timecounter로 사용한다.
  */
 	start_count = arch_timer_read_counter();
 	clocksource_register_hz(&clocksource_counter, arch_timer_rate);
@@ -1133,6 +1244,10 @@ static void __init arch_counter_register(unsigned type)
 			 &cyclecounter, start_count);
 
 	/* 56 bits minimum, so we assume worst case rollover */
+/*
+ * IAMROOT, 2022.08.27:
+ * - arch timer를 sched의 tick으로 사용하겠다는것.
+ */
 	sched_clock_register(arch_timer_read_counter, 56, arch_timer_rate);
 }
 
@@ -1386,6 +1501,10 @@ static bool __init arch_timer_needs_of_probing(void)
 	return needs_probing;
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - timer common init.
+ */
 static int __init arch_timer_common_init(void)
 {
 	arch_timer_banner(arch_timers_present);
@@ -1722,6 +1841,10 @@ static int __init arch_timer_mem_of_init(struct device_node *np)
 	timer_mem->cntctlbase = res.start;
 	timer_mem->size = resource_size(&res);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - dts에서 정의된 frame_number를 가져와 각각의 number로 mem time을 설정한다.
+ */
 	for_each_available_child_of_node(np, frame_node) {
 		u32 n;
 		struct arch_timer_mem_frame *frame;
@@ -1749,9 +1872,20 @@ static int __init arch_timer_mem_of_init(struct device_node *np)
 			of_node_put(frame_node);
 			goto out;
 		}
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - register address 및 size설정
+ */
 		frame->cntbase = res.start;
 		frame->size = resource_size(&res);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - virt irq, phys irq 설정. pcpu가 아닌 mem time이기 때문에 SPI를
+ *   (shared peri interrupt)
+ *   사용하는게 보인다.
+ */
 		frame->virt_irq = irq_of_parse_and_map(frame_node,
 						       ARCH_TIMER_VIRT_SPI);
 		frame->phys_irq = irq_of_parse_and_map(frame_node,

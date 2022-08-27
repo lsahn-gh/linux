@@ -41,6 +41,10 @@ static inline enum clock_event_state clockevent_get_state(struct clock_event_dev
 	return dev->state_use_accessors;
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @state로 설정한다.
+ */
 static inline void clockevent_set_state(struct clock_event_device *dev,
 					enum clock_event_state state)
 {

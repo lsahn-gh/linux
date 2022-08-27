@@ -166,6 +166,10 @@ static inline u32 arch_timer_get_cntfrq(void)
 	return read_sysreg(cntfrq_el0);
 }
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - read cntkctl_el1
+ */
 static inline u32 arch_timer_get_cntkctl(void)
 {
 	return read_sysreg(cntkctl_el1);

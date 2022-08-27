@@ -93,7 +93,16 @@ struct module;
  * information you need you should consider to cache line align that
  * structure.
  */
+
 struct clocksource {
+/*
+ * IAMROOT, 2022.08.27:
+ * - __clocksource_update_freq_scale()에서
+ *   mask, mult, shift, max_idle_ns, maxadj, uncertainty_margin, max_cycles
+ *   이 초기화 된다.
+ * - clocks_calc_max_nsecs()를 사용하여 ns값을 계산한다.
+ *   ex) clocks_calc_max_nsecs(mult, shift, maxadj, mask, max_cycles)
+ */
 	u64			(*read)(struct clocksource *cs);
 	u64			mask;
 	u32			mult;
@@ -105,6 +114,11 @@ struct clocksource {
 	struct arch_clocksource_data archdata;
 #endif
 	u64			max_cycles;
+/*
+ * IAMROOT, 2022.08.27:
+ * - struct clocksource정의시, rate, name, id, read, mask, flags등이 미리
+ *   정의된다.(arm_arch_timer.c clocksource_counter 참고)
+ */
 	const char		*name;
 	struct list_head	list;
 	int			rating;
@@ -201,6 +215,11 @@ static inline u32 clocksource_hz2mult(u32 hz, u32 shift_constant)
  *
  * XXX - This could use some mult_lxl_ll() asm optimization
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - (from * mult) >> shift = to
+ * - cycles값을 nanosecond로 치환한다.
+ */
 static inline s64 clocksource_cyc2ns(u64 cycles, u32 mult, u32 shift)
 {
 	return ((u64) cycles * mult) >> shift;
@@ -243,7 +262,8 @@ static inline int __clocksource_register(struct clocksource *cs)
 
 /*
  * IAMROOT, 2022.08.20:
- * - 
+ * - from * factor >> shift = to
+ *   to 값을 @hz로 사용해 factor를 구하고 @cs를 초기화한다.
  */
 static inline int clocksource_register_hz(struct clocksource *cs, u32 hz)
 {

@@ -29,20 +29,47 @@ struct ce_unbind {
 	int res;
 };
 
+/*
+ * IAMROOT, 2022.08.27:
+ * @return 최솟값이 1000ns이상인 latch -> ns 변환값.
+ * - @evt의 mult, shift값을 사용해 latch의 ns를 구해온다.
+ * - ex) mult = 0xdd2_f1aa, shift = 32
+ *   1. latch = 0xf = > 숫자가 작기때문에 1000
+ *   2. latch = 0x7fffffff
+ *	clc = 0x7fffffff = 0x7fffffff_0000_0000
+ *	rnd = mult - 1 = 0xdd2_f1a9
+ *	clc += rnd ==> clc = 0x7fffffff_0dd2_f1a9
+ *	clc = clc / 0xdd2_f1a9
+ *	    = 39768215854 (ns)
+ *	    = 39 (sec)
+ */
 static u64 cev_delta2ns(unsigned long latch, struct clock_event_device *evt,
 			bool ismax)
 {
+/*
+ * IAMROOT, 2022.08.27:
+ * - clc = (정확도가 고려된 cycle)
+ *   mult = (정확도가 고려된 1 ns당 cycle 개수)
+ */
 	u64 clc = (u64) latch << evt->shift;
 	u64 rnd;
 
 	if (WARN_ON(!evt->mult))
 		evt->mult = 1;
+/*
+ * IAMROOT, 2022.08.27:
+ * - 반올 손상 보정.
+ */
 	rnd = (u64) evt->mult - 1;
 
 	/*
 	 * Upper bound sanity check. If the backwards conversion is
 	 * not equal latch, we know that the above shift overflowed.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - overflow check. 
+ */
 	if ((clc >> evt->shift) != (u64)latch)
 		clc = ~0ULL;
 
@@ -65,6 +92,26 @@ static u64 cev_delta2ns(unsigned long latch, struct clock_event_device *evt,
 	 *
 	 * Also omit the add if it would overflow the u64 boundary.
 	 */
+/*
+ * IAMROOT, 2022.08.27:
+ * - papago
+ *   스케일링된 수학 기이함:
+ *   mult <= (1 << shift)의 경우 정수 반올림 손실을 방지하기 위해 mult - 1을
+ *   안전하게 추가할 수 있습니다. 따라서 nsec에서 장치 틱으로의 역변환은
+ *   정확할 것입니다.
+ *
+ *   mult > (1 << shift), 즉 장치 주파수가 > 1GHz인 경우 주의해야 합니다.
+ *   mult - 1을 추가하면 장치 틱으로 다시 변환될 때 최대
+ *   (mult - 1) >> shift만큼 래치보다 클 수 있는 값이 생성됩니다. min_delta
+ *   계산의 경우 최소 장치 틱 제한 이상을 유지하기 위해 여전히 이를 적용하려고
+ *   합니다. 상한선의 경우 장치의 상한선보다 큰 래치 값으로 끝나므로 장치
+ *   상한선 아래에 머물기 위해 추가를 생략합니다.
+ *
+ *   또한 u64 경계를 넘을 경우 추가를 생략합니다.
+ *
+ * - 반올림을 계산한다. 이 계산으로 인한 상한값 overflow가 발생안하게 하기위한
+ *   예외처리.
+ */
 	if ((~0ULL - clc > rnd) &&
 	    (!ismax || evt->mult <= (1ULL << evt->shift)))
 		clc += rnd;
@@ -340,6 +387,10 @@ int clockevents_program_event(struct clock_event_device *dev, ktime_t expires,
  * Called after a notify add to make devices available which were
  * released from the notifier call.
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - TODO
+ */
 static void clockevents_notify_released(void)
 {
 	struct clock_event_device *dev;
@@ -440,6 +491,10 @@ EXPORT_SYMBOL_GPL(clockevents_unbind_device);
  * clockevents_register_device - register a clock event device
  * @dev:	device to register
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - cpumask 검사, state 변경. clock event 등록
+ */
 void clockevents_register_device(struct clock_event_device *dev)
 {
 	unsigned long flags;
@@ -447,6 +502,10 @@ void clockevents_register_device(struct clock_event_device *dev)
 	/* Initialize state to DETACHED */
 	clockevent_set_state(dev, CLOCK_EVT_STATE_DETACHED);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - cpumask가 지정이 안되있으면 현재 cpu만. all cpu면 possible로 지정한다.
+ */
 	if (!dev->cpumask) {
 		WARN_ON(num_possible_cpus() > 1);
 		dev->cpumask = cpumask_of(smp_processor_id());
@@ -468,6 +527,10 @@ void clockevents_register_device(struct clock_event_device *dev)
 }
 EXPORT_SYMBOL_GPL(clockevents_register_device);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @dev가 @freq로 지원하는 min / max nsec를 구한다.
+ */
 static void clockevents_config(struct clock_event_device *dev, u32 freq)
 {
 	u64 sec;
@@ -487,7 +550,16 @@ static void clockevents_config(struct clock_event_device *dev, u32 freq)
 	else if (sec > 600 && dev->max_delta_ticks > UINT_MAX)
 		sec = 600;
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @dev의 mult, shift값을 계산해온다.
+ */
 	clockevents_calc_mult_shift(dev, freq, sec);
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - min, max tick을 가지고 nsec를 구한다.
+ */
 	dev->min_delta_ns = cev_delta2ns(dev->min_delta_ticks, dev, false);
 	dev->max_delta_ns = cev_delta2ns(dev->max_delta_ticks, dev, true);
 }
@@ -500,6 +572,11 @@ static void clockevents_config(struct clock_event_device *dev, u32 freq)
  * @max_delta:	The maximum clock ticks to program in oneshot mode
  *
  * min/max_delta can be 0 for devices which do not support oneshot mode.
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - clockevents의 @freq, 최대최소 nsec를 설정하고 시슷템에 clock event를
+ *   등록한다.
  */
 void clockevents_config_and_register(struct clock_event_device *dev,
 				     u32 freq, unsigned long min_delta,

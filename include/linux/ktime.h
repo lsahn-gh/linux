@@ -219,6 +219,10 @@ static inline __must_check bool ktime_to_timespec64_cond(const ktime_t kt,
 
 #include <vdso/ktime.h>
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - ktime은 ns로 사용하니 즉시 return. 부호 여부.
+ */
 static inline ktime_t ns_to_ktime(u64 ns)
 {
 	return ns;

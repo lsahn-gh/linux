@@ -189,6 +189,10 @@ extern void clockevents_config_and_register(struct clock_event_device *dev,
 
 extern int clockevents_update_freq(struct clock_event_device *ce, u32 freq);
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - mult, shift를 계산하여 알아온다.
+ */
 static inline void
 clockevents_calc_mult_shift(struct clock_event_device *ce, u32 freq, u32 maxsec)
 {

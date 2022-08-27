@@ -56,6 +56,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/timer.h>
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - jiffies_64 정의.
+ */
 __visible u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
 
 EXPORT_SYMBOL(jiffies_64);

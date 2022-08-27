@@ -56,14 +56,36 @@ enum arch_timer_spi_nr {
 #define ARCH_TIMER_MEM_MAX_FRAMES	8
 
 #define ARCH_TIMER_USR_PCT_ACCESS_EN	(1 << 0) /* physical counter */
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - el0(usere)에서 virtual counter로 직접 access가능하게 한다.
+ */
 #define ARCH_TIMER_USR_VCT_ACCESS_EN	(1 << 1) /* virtual counter */
 #define ARCH_TIMER_VIRT_EVT_EN		(1 << 2)
+
+/*
+ * IAMROOT, 2022.08.27:
+ * EVNTI, bits [7:4]
+ * Selects which bit of the counter register CNTVCT_EL0 is the trigger for the
+ * event stream generated from that counter, when that stream is enabled.
+ * If FEAT_ECV is implemented, and CNTKCTL_EL1.EVNTIS is 1, this field selects a
+ * trigger bit in the range 8 to 23 of the counter register CNTVCT_EL0.
+ * Otherwise, this field selects a trigger bit in the range 0 to 15 of
+ * the counter register.  The reset behavior of this field is:
+ * On a Warm reset, this field resets to an architecturally UNKNOWN value.
+ */
 #define ARCH_TIMER_EVT_TRIGGER_SHIFT	(4)
 #define ARCH_TIMER_EVT_TRIGGER_MASK	(0xF << ARCH_TIMER_EVT_TRIGGER_SHIFT)
 #define ARCH_TIMER_USR_VT_ACCESS_EN	(1 << 8) /* virtual timer registers */
 #define ARCH_TIMER_USR_PT_ACCESS_EN	(1 << 9) /* physical timer registers */
 
 #define ARCH_TIMER_EVT_STREAM_PERIOD_US	100
+
+/*
+ * IAMROOT, 2022.08.27:
+ * - 1000000 / 100 = 1000
+ */
 #define ARCH_TIMER_EVT_STREAM_FREQ				\
 	(USEC_PER_SEC / ARCH_TIMER_EVT_STREAM_PERIOD_US)
 

@@ -59,6 +59,12 @@ u64 get_jiffies_64(void)
 EXPORT_SYMBOL(get_jiffies_64);
 #endif
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - jiffes를 export symbol한다.
+ *   jiffes는 arch/arm64/kernel/vmlinux.lds.S.
+ *   실제 위치는 kernel/time/jiffies.c
+ */
 EXPORT_SYMBOL(jiffies);
 
 static int __init init_jiffies_clocksource(void)

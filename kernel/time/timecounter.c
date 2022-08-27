@@ -5,6 +5,10 @@
 #include <linux/export.h>
 #include <linux/timecounter.h>
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - @cc로 @tc를 초기화한다.
+ */
 void timecounter_init(struct timecounter *tc,
 		      const struct cyclecounter *cc,
 		      u64 start_tstamp)

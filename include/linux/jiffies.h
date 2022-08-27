@@ -76,6 +76,13 @@ extern int register_refined_jiffies(long clock_tick_rate);
  * without sampling the sequence number in jiffies_lock.
  * get_jiffies_64() will do this for you as appropriate.
  */
+/*
+ * IAMROOT, 2022.08.27:
+ * - jiffies    : kernel/time/jiffies.c에 export symbol
+ *                arm/arm64/kernel/vmlinux.lkds.S에서
+ *                jiffies_64를 jiffies로 사용하는것이 확인된다.
+ * - jiffies_64 : kernel/time/timer.c 
+ */
 extern u64 __cacheline_aligned_in_smp jiffies_64;
 extern unsigned long volatile __cacheline_aligned_in_smp __jiffy_arch_data jiffies;
 
@@ -169,6 +176,10 @@ static inline u64 get_jiffies_64(void)
 /*
  * Have the 32 bit jiffies value wrap 5 minutes after boot
  * so jiffies wrap bugs show up earlier.
+ */
+/*
+ * IAMROOT, 2022.08.27:
+ * - -5분. bug를 찾기 위한 용도.
  */
 #define INITIAL_JIFFIES ((unsigned long)(unsigned int) (-300*HZ))
 

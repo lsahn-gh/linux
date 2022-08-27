@@ -71,6 +71,10 @@
 OUTPUT_ARCH(aarch64)
 ENTRY(_text)
 
+/*
+ * IAMROOT, 2022.08.27:
+ * - jiffes 정의.
+ */
 jiffies = jiffies_64;
 
 #define HYPERVISOR_TEXT					\
