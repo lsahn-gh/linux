@@ -1003,20 +1003,49 @@ void resched_cpu(int cpu)
  * selecting an idle CPU will add more delays to the timers than intended
  * (as that CPU's timer base may not be uptodate wrt jiffies etc).
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papgo
+ *   semi idle 상태의 경우 유휴 CPU에서 타이머를 마이그레이션하기 위해 가장 가까운
+ *   사용 중인 CPU를 사용합니다. 절전에 좋습니다.
+ *
+ *   우리는 완전히 idle 상태인 시스템에 대해 유사한 최적화를 수행하지 않습니다.
+ *  idle CPU를 선택하면 타이머에 의도한 것보다 더 많은 지연이 추가되기
+ *  때문입니다(해당 CPU의 타이머 기반이 wrt jiffies 등으로 업데이트되지 않을 수
+ *  있음).
+ *
+ * - busy cpu를 찾는다.
+ */
 int get_nohz_timer_target(void)
 {
 	int i, cpu = smp_processor_id(), default_cpu = -1;
 	struct sched_domain *sd;
 	const struct cpumask *hk_mask;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - housekeeping이 가능한 cpu인지 확인(동작해도 되는 cpu인지 확인)
+ */
 	if (housekeeping_cpu(cpu, HK_FLAG_TIMER)) {
+/*
+ * IAMROOT, 2022.09.03:
+ * - busy이면 return.
+ */
 		if (!idle_cpu(cpu))
 			return cpu;
+/*
+ * IAMROOT, 2022.09.03:
+ * - 현재 cpu가 idle이면 idle이 아닌것을 찾으러간다.
+ */
 		default_cpu = cpu;
 	}
 
 	hk_mask = housekeeping_cpumask(HK_FLAG_TIMER);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 가장 가까운 domain. 인접한 cpu에서 busy cpu를 찾아온다.
+ */
 	rcu_read_lock();
 	for_each_domain(cpu, sd) {
 		for_each_cpu_and(i, sched_domain_span(sd), hk_mask) {
@@ -1030,6 +1059,11 @@ int get_nohz_timer_target(void)
 		}
 	}
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - idle이 아닌걸 못 찾고, 현재 cpu가 housekeeping이 아니였다면 hosekeeping중에
+ *   any cpu로 고른다.
+ */
 	if (default_cpu == -1)
 		default_cpu = housekeeping_any_cpu(HK_FLAG_TIMER);
 	cpu = default_cpu;
@@ -1085,6 +1119,14 @@ static bool wake_up_full_nohz_cpu(int cpu)
  * Wake up the specified CPU.  If the CPU is going offline, it is the
  * caller's responsibility to deal with the lost wakeup, for example,
  * by hooking into the CPU_DEAD notifier like timers and hrtimers do.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   지정된 CPU를 깨우십시오. CPU가 오프라인 상태가 되면 호출자의 책임은 타이머
+ *   및 hrtimers와 같이 CPU_DEAD 알리미에 연결하는 것과 같이 손실된 웨이크업을
+ *   처리하는 것입니다.
+ * -
  */
 void wake_up_nohz_cpu(int cpu)
 {
@@ -6989,6 +7031,12 @@ int task_prio(const struct task_struct *p)
  * @cpu: the processor in question.
  *
  * Return: 1 if the CPU is currently idle. 0 otherwise.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * @return 1 idle
+ *         0 run
+ * - 현재 idle인지 아닌지 판별한다.
  */
 int idle_cpu(int cpu)
 {

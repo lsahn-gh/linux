@@ -157,12 +157,45 @@ EXPORT_SYMBOL(jiffies_64);
 #define LVL_CLK_DIV	(1UL << LVL_CLK_SHIFT)
 #define LVL_CLK_MASK	(LVL_CLK_DIV - 1)
 #define LVL_SHIFT(n)	((n) * LVL_CLK_SHIFT)
+
+/*
+ * IAMROOT, 2022.09.03:
+ * ex) 1000hz 기준.
+ * n    LVL_SHIFT(n)  LVL_GRAN(n)
+ * 0    0 * 3 = 0     1 << 0   = 1
+ * 1    1 * 3 = 3     1 << 3   = 8
+ * 2    2 * 3 = 6     1 << 6   = 64
+ * 3    3 * 3 = 9     1 << 9   = 512
+ * 4    4 * 3 = 12    1 << 12  = 4096
+ * 5    5 * 3 = 15    1 << 15  = 32768
+ * 6    6 * 3 = 18    1 << 18  = 262144
+ * 7    7 * 3 = 21    1 << 21  = 2097152
+ * 8    8 * 3 = 24    1 << 24  = 16777216
+ */
 #define LVL_GRAN(n)	(1UL << LVL_SHIFT(n))
 
 /*
  * The time start value for each level to select the bucket at enqueue
  * time. We start from the last possible delta of the previous level
  * so that we can later add an extra LVL_GRAN(n) to n (see calc_index()).
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   대기열에 넣을 때 버킷을 선택하기 위한 각 레벨의 시간 시작 값입니다. 이전
+ *   레벨의 마지막 가능한 델타에서 시작하여 나중에 LVL_GRAN(n)을 n에 추가할 수
+ *   있습니다(calc_index() 참조).
+ *
+ * n  (((n) - 1) * LVL_CLK_SHIFT) LEVL_START(n)    
+ * 1  0                           0b111111 << 0 
+ * 2  3                           0b111111 << 3    
+ * 3  6                           0b111111 << 6
+ * 4  9                           0b111111 << 9
+ * 5  12                          0b111111 << 12
+ * 6  15                          0b111111 << 15
+ * 7  18                          0b111111 << 18
+ * 8  21                          0b111111 << 21
+ *
  */
 #define LVL_START(n)	((LVL_SIZE - 1) << (((n) - 1) * LVL_CLK_SHIFT))
 
@@ -187,11 +220,23 @@ EXPORT_SYMBOL(jiffies_64);
  * The resulting wheel size. If NOHZ is configured we allocate two
  * wheels so we have a separate storage for the deferrable timers.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - LVL_DEPTH == 9
+ *   2^6 * 9 = 576
+ *
+ * - LVL_DEPTH == 8
+ *   2^6 * 8 = 512
+ */
 #define WHEEL_SIZE	(LVL_SIZE * LVL_DEPTH)
 
 #ifdef CONFIG_NO_HZ_COMMON
 # define NR_BASES	2
 # define BASE_STD	0
+/*
+ * IAMROOT, 2022.09.03:
+ * - NOHZ용 (deffered 가능한).
+ */
 # define BASE_DEF	1
 #else
 # define NR_BASES	1
@@ -478,12 +523,19 @@ unsigned long round_jiffies_up_relative(unsigned long j)
 }
 EXPORT_SYMBOL_GPL(round_jiffies_up_relative);
 
-
+/*
+ * IAMROOT, 2022.09.03:
+ * - flags로부터 timer가 위치한 vector idx를 가져온다.
+ */
 static inline unsigned int timer_get_idx(struct timer_list *timer)
 {
 	return (timer->flags & TIMER_ARRAYMASK) >> TIMER_ARRAYSHIFT;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - flags에 timer vector @idx를 set한다.
+ */
 static inline void timer_set_idx(struct timer_list *timer, unsigned int idx)
 {
 	timer->flags = (timer->flags & ~TIMER_ARRAYMASK) |
@@ -493,6 +545,71 @@ static inline void timer_set_idx(struct timer_list *timer, unsigned int idx)
 /*
  * Helper function to calculate the array index for a given expiry
  * time.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - Git blame
+ *
+ *   timers: Use only bucket expiry for base->next_expiry value
+ *
+ *   The bucket expiry time is the effective expriy time of timers and is
+ *   greater than or equal to the requested timer expiry time. This is due
+ *   to the guarantee that timers never expire early and the reduced expiry
+ *   granularity in the secondary wheel levels.
+ *
+ *   When a timer is enqueued, trigger_dyntick_cpu() checks whether the
+ *   timer is the new first timer. This check compares next_expiry with
+ *   the requested timer expiry value and not with the effective expiry
+ *   value of the bucket into which the timer was queued.
+ *
+ *   Storing the requested timer expiry value in base->next_expiry can lead
+ *   to base->clk going backwards if the requested timer expiry value is
+ *   smaller than base->clk. Commit 30c66fc30ee7 ("timer: Prevent base->clk
+ *   from moving backward") worked around this by preventing the store when
+ *   timer->expiry is before base->clk, but did not fix the underlying
+ *   problem.
+ *
+ *   Use the expiry value of the bucket into which the timer is queued to
+ *   do the new first timer check. This fixes the base->clk going backward
+ *   problem.
+ *
+ *   The workaround of commit 30c66fc30ee7 ("timer: Prevent base->clk from
+ *   moving backward") in trigger_dyntick_cpu() is not longer necessary as the
+ *   timers bucket expiry is guaranteed to be greater than or equal base->clk.
+ *
+ * - papago
+ *   timers: base->next_expiry 값에 대해 버킷 만료만 사용합니다.
+ *
+ *   버킷 만료 시간은 타이머의 유효 만료 시간이며 요청된 타이머 만료 시간보다
+ *   크거나 같습니다. 이는 타이머가 일찍 만료되지 않는다는 보장과 보조 휠 레벨의
+ *   만료 세분성 감소 때문입니다.
+ *
+ *   타이머가 대기열에 추가되면 trigger_dyntick_cpu()는 타이머가 새로운 첫 번째
+ *   타이머인지 확인합니다. 이 검사는 next_expiry를 요청된 타이머 만료 값과
+ *   비교하며 타이머가 대기열에 포함된 버킷의 유효 만료 값과 비교하지 않습니다. 
+ *
+ *   요청된 타이머 만료 값을 base->next_expiry에 저장하면 요청된 타이머 만료 값이
+ *   base->clk보다 작은 경우 base->clk가 뒤로 이동할 수 있습니다. 커밋 
+ *   30c66fc30ee7("타이머: 기본->clk가 뒤로 이동하는 것을 방지")은 timer->expire가
+ *   기본->clk 이전일 때 저장소를 방지하여 이 문제를 해결했지만 근본적인 문제는
+ *   수정하지 않았습니다.
+ *
+ *   타이머가 대기 중인 버킷의 만료 값을 사용하여 새로운 첫 번째 타이머 확인을
+ *   수행합니다. 이것은 base->clk가 거꾸로 가는 문제를 수정합니다.
+ *
+ *   trigger_dyntick_cpu()의 커밋 30c66fc30ee7("타이머: 기본->clk가 뒤로 이동하는
+ *   것을 방지")의 해결 방법은 타이머 버킷 만료가 base->clk보다 크거나 같도록
+ *   보장되므로 더 이상 필요하지 않습니다.
+ *
+ * @bucket_expiry LVL_GRAN(lvl) 단위로 올림.
+ * ex) exipres = 0x43dd, lvl = 2일때 return, bucket_expiry
+ * expires_new = (0x43dd + LVL_GRAN(2)) >> LVL_SHIFT(2)
+ *             = (0x43dd + 0x40) >> 6 = 0x441d >> 6
+ *             = 0x110
+ * bucket_expiry = 0x110 << 6
+ *               = 0x4400 = 17408
+ * return  = LVL_OFFS(2) + (0x110 & 0x3f)
+ *         = 0x80 + 0x10 = 0x90
  */
 static inline unsigned calc_index(unsigned long expires, unsigned lvl,
 				  unsigned long *bucket_expiry)
@@ -511,12 +628,30 @@ static inline unsigned calc_index(unsigned long expires, unsigned lvl,
 	return LVL_OFFS(lvl) + (expires & LVL_MASK);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * @clk base->clk
+ * wheel idx를 구한다.
+ *
+ * ex) clk = 2, expires = 67
+ * delta = 65 -> calc_index(expires, 1, bucket_expiry) 호출
+ *
+ * expires_new = (67 + 8) >> 3 = 9
+ * bucket_expiry = 9 << 3 = 72
+ * return = 64 + (9 & 0x3f) = 73
+ *
+ * bucket_expiry = 72, idx = 73
+ */
 static int calc_wheel_index(unsigned long expires, unsigned long clk,
 			    unsigned long *bucket_expiry)
 {
 	unsigned long delta = expires - clk;
 	unsigned int idx;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - delta가 들어갈 idx를 찾는다.
+ */
 	if (delta < LVL_START(1)) {
 		idx = calc_index(expires, 0, bucket_expiry);
 	} else if (delta < LVL_START(2)) {
@@ -532,11 +667,24 @@ static int calc_wheel_index(unsigned long expires, unsigned long clk,
 	} else if (delta < LVL_START(7)) {
 		idx = calc_index(expires, 6, bucket_expiry);
 	} else if (LVL_DEPTH > 8 && delta < LVL_START(8)) {
+/*
+ * IAMROOT, 2022.09.03:
+ * - LVL_DEPTH가 9가 존재하면 lvl 7까지.(0 ~ 7)
+ *   LVL_DEPTH가 8까지라면 lvl 6까지만한다. (0 ~ 6)
+ */
 		idx = calc_index(expires, 7, bucket_expiry);
 	} else if ((long) delta < 0) {
+/*
+ * IAMROOT, 2022.09.03:
+ * - delta가 -면 lvl 0로 본다.
+ */
 		idx = clk & LVL_MASK;
 		*bucket_expiry = clk;
 	} else {
+/*
+ * IAMROOT, 2022.09.03:
+ * - delta가 너무 큰상황. 마지막 값으로 fixup 한후 idx를 재계산한다.
+ */
 		/*
 		 * Force expire obscene large timeouts to expire at the
 		 * capacity limit of the wheel.
@@ -549,6 +697,13 @@ static int calc_wheel_index(unsigned long expires, unsigned long clk,
 	return idx;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @base->cpu가 nohz로 동작중일때 깨운다.
+ *   1. 일반 timer인 경우 idle 상태면 깨운다.
+ *   2. defferable일경우 nohz full일 경우에만 깨운다.
+ *      nohz idle 상태일경우엔 그냥 빠져올것이다.
+ */
 static void
 trigger_dyntick_cpu(struct timer_base *base, struct timer_list *timer)
 {
@@ -559,6 +714,11 @@ trigger_dyntick_cpu(struct timer_base *base, struct timer_list *timer)
 	 * TODO: This wants some optimizing similar to the code below, but we
 	 * will do that when we switch from push to pull for deferrable timers.
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - deffered로 등록한 timer인 경우 deffer를 하지만, cpu가 nohz full인 상태라면
+ *   cpu를 wakeup.
+ */
 	if (timer->flags & TIMER_DEFERRABLE) {
 		if (tick_nohz_full_cpu(base->cpu))
 			wake_up_nohz_cpu(base->cpu);
@@ -570,6 +730,14 @@ trigger_dyntick_cpu(struct timer_base *base, struct timer_list *timer)
 	 * timer is not deferrable. If the other CPU is on the way to idle
 	 * then it can't set base->is_idle as we hold the base lock:
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * -papago
+ *  베이스가 idle 상태이고 타이머를 연기할 수 없는 경우 원격 CPU를 IPI해야 할 수도
+ *  있습니다. 다른 CPU가 유휴 상태가 되면 기본 잠금을 유지하므로 base->is_idle을
+ *  설정할 수 없습니다. 
+ * - base->is_idle : base쪽 timer tick이 꺼져있다는뜻.
+ */
 	if (base->is_idle)
 		wake_up_nohz_cpu(base->cpu);
 }
@@ -578,6 +746,11 @@ trigger_dyntick_cpu(struct timer_base *base, struct timer_list *timer)
  * Enqueue the timer into the hash bucket, mark it pending in
  * the bitmap, store the index in the timer flags then wake up
  * the target CPU if needed.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer를 idx에 add한다. cpu가 idle인 상태인경우 next_expiry가
+ *   갱신되는 상황에서 필요에 따라 cpu를 깨운다.
  */
 static void enqueue_timer(struct timer_base *base, struct timer_list *timer,
 			  unsigned int idx, unsigned long bucket_expiry)
@@ -594,6 +767,13 @@ static void enqueue_timer(struct timer_base *base, struct timer_list *timer,
 	 * effective expiry time of the timer is required here
 	 * (bucket_expiry) instead of timer->expires.
 	 */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - bucket_expire가 timer_base보다 먼저라면 bucket_expiry로 갱신한다.
+ * - 기존에 있었던 next timer보다 새로 추가되는 timer의 bucket_expiry가
+ *   빠르면 bucket_expiry로 갱신하라는것이다.
+ */
 	if (time_before(bucket_expiry, base->next_expiry)) {
 		/*
 		 * Set the next expiry time and kick the CPU so it
@@ -606,6 +786,10 @@ static void enqueue_timer(struct timer_base *base, struct timer_list *timer,
 	}
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - idx를 산출해서 enqueue 한다.
+ */
 static void internal_add_timer(struct timer_base *base, struct timer_list *timer)
 {
 	unsigned long bucket_expiry;
@@ -788,6 +972,10 @@ static inline void debug_assert_init(struct timer_list *timer)
 	debug_timer_assert_init(timer);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer를 초기화한다. 초기화시 함수를 실행한 cpu id를 flags에 기록한다.
+ */
 static void do_init_timer(struct timer_list *timer,
 			  void (*func)(struct timer_list *),
 			  unsigned int flags,
@@ -813,6 +1001,10 @@ static void do_init_timer(struct timer_list *timer,
  * init_timer_key() must be done to a timer prior calling *any* of the
  * other timer functions.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer를 초기화한다.
+ */
 void init_timer_key(struct timer_list *timer,
 		    void (*func)(struct timer_list *), unsigned int flags,
 		    const char *name, struct lock_class_key *key)
@@ -822,6 +1014,10 @@ void init_timer_key(struct timer_list *timer,
 }
 EXPORT_SYMBOL(init_timer_key);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 0timer를 detach 한다.
+ */
 static inline void detach_timer(struct timer_list *timer, bool clear_pending)
 {
 	struct hlist_node *entry = &timer->entry;
@@ -834,14 +1030,27 @@ static inline void detach_timer(struct timer_list *timer, bool clear_pending)
 	entry->next = LIST_POISON2;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer를 @base로부터 분리를 시도한다.
+ */
 static int detach_if_pending(struct timer_list *timer, struct timer_base *base,
 			     bool clear_pending)
 {
 	unsigned idx = timer_get_idx(timer);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 이미 분리 되있다. 아무것도 안한다.
+ */
 	if (!timer_pending(timer))
 		return 0;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @idx vector에 timer가 1개만 등록되있다면. pending_map을 clear한다.
+ *   최종적으로 한개를 분리해내면 idx에서 아무것도 없어지기 때문이다.
+ */
 	if (hlist_is_singular_node(&timer->entry, base->vectors + idx)) {
 		__clear_bit(idx, base->pending_map);
 		base->next_expiry_recalc = true;
@@ -851,6 +1060,10 @@ static int detach_if_pending(struct timer_list *timer, struct timer_base *base,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @cpu에 해당하는 timer_base를 가져온다.
+ */
 static inline struct timer_base *get_timer_cpu_base(u32 tflags, u32 cpu)
 {
 	struct timer_base *base = per_cpu_ptr(&timer_bases[BASE_STD], cpu);
@@ -859,11 +1072,19 @@ static inline struct timer_base *get_timer_cpu_base(u32 tflags, u32 cpu)
 	 * If the timer is deferrable and NO_HZ_COMMON is set then we need
 	 * to use the deferrable base.
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - nohz enable이면서 deffered로 등록한 timer라면 nohz용 timer_base를 가져온다.
+ */
 	if (IS_ENABLED(CONFIG_NO_HZ_COMMON) && (tflags & TIMER_DEFERRABLE))
 		base = per_cpu_ptr(&timer_bases[BASE_DEF], cpu);
 	return base;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 현재 cpu의 timer base를 가져온다.
+ */
 static inline struct timer_base *get_timer_this_cpu_base(u32 tflags)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
@@ -877,22 +1098,49 @@ static inline struct timer_base *get_timer_this_cpu_base(u32 tflags)
 	return base;
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @tflags의 cpu로 timer_base를 가져온다.
+ */
 static inline struct timer_base *get_timer_base(u32 tflags)
 {
 	return get_timer_cpu_base(tflags, tflags & TIMER_CPUMASK);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 1. busy cpu에서 timer base 얻어오기.
+ *   2. 현재 cpu로 timer base 얻어오기.
+ */
 static inline struct timer_base *
 get_target_base(struct timer_base *base, unsigned tflags)
 {
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
+/*
+ * IAMROOT, 2022.09.03:
+ * - migration이 가능하고, pinned를 해야된다는 flag가 없다면 busy cpu에서
+ *   timer_base를 가져온다.
+ *
+ */
 	if (static_branch_likely(&timers_migration_enabled) &&
 	    !(tflags & TIMER_PINNED))
 		return get_timer_cpu_base(tflags, get_nohz_timer_target());
 #endif
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - pinned요청이거나, migration을 못한다면 현재 cpu의 timer_base를 가져온다.
+ */
 	return get_timer_this_cpu_base(tflags);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @base를 현재 시간 기준으로 udpate한다.
+ *
+ * - 기본적으로 @base->clk을 현재 시간으로 update를 한다.
+ *   만약 next_expiry가 현재 과거(ex. nohz)라면 base->clk으로 update한다.
+ */
 static inline void forward_timer_base(struct timer_base *base)
 {
 	unsigned long jnow = READ_ONCE(jiffies);
@@ -902,6 +1150,10 @@ static inline void forward_timer_base(struct timer_base *base)
 	 * Also while executing timers, base->clk is 1 offset ahead
 	 * of jiffies to avoid endless requeuing to current jiffies.
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - 이미 timer start 시간이 지낫으면 return.
+ */
 	if ((long)(jnow - base->clk) < 1)
 		return;
 
@@ -909,11 +1161,47 @@ static inline void forward_timer_base(struct timer_base *base)
 	 * If the next expiry value is > jiffies, then we fast forward to
 	 * jiffies otherwise we forward to the next expiry value.
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - next_expiry가 현재시간 이후라면 현재시간을 base->clk에 등록.
+ *   그게 아니면 clk를 next_expiry로 등록.
+ */
 	if (time_after(base->next_expiry, jnow)) {
+/*
+ * IAMROOT, 2022.09.03:
+ * - 매 tick마다 갱신된다.(normal case)
+ *                 now
+ * -----------------|-----------|-------
+ *                  |          next
+ *           update base->clk
+ */
 		base->clk = jnow;
 	} else {
+/*
+ * IAMROOT, 2022.09.03:
+ * - error 처리.
+ * - timer가 이미 지낫으면 return.
+ * - next_expiry가 base->clk이전 warn후 return.
+ *                          now
+ *                           |
+ * ---------|-------|--------|----------
+ *        next    base->clk    
+ */
 		if (WARN_ON_ONCE(time_before(base->next_expiry, base->clk)))
 			return;
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - nohz로 인해서 발생하는 상황.
+ * - base->clk <--> now사이에 sleep timer가 tick이 들어오지 않아서
+ *   갱신이 안됬을때.
+ *                               now
+ *                                |
+ * --------|------------|---------|---
+ *       base->clk    next        
+ *                      |
+ *                update base->clk
+ */
 		base->clk = base->next_expiry;
 	}
 }
@@ -930,6 +1218,10 @@ static inline void forward_timer_base(struct timer_base *base)
  * When a timer is migrating then the TIMER_MIGRATING flag is set and we need
  * to wait until the migration is done.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - @flags에 등록된 cpu의 timer base를 가져온다.
+ */
 static struct timer_base *lock_timer_base(struct timer_list *timer,
 					  unsigned long *flags)
 	__acquires(timer->base->lock)
@@ -945,8 +1237,23 @@ static struct timer_base *lock_timer_base(struct timer_list *timer,
 		 */
 		tf = READ_ONCE(timer->flags);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - migrating 자체가 매우빠르기 때문에 for문으로 migrating이
+ *   풀릴때까지 적당히 기다린다.
+ * - migrating이 끝나면 기본적으로 cpu가 바뀐다.
+ */
 		if (!(tf & TIMER_MIGRATING)) {
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer의 flag(tf)에 timer를 생성한 cpu nr이 등록되있어, 해당
+ *   cpu의 timer_base를 가져온다.
+ */
 			base = get_timer_base(tf);
+/*
+ * IAMROOT, 2022.09.03:
+ * - tf가 같지 않으면 경쟁상황. loop를 계속돈다.
+ */
 			raw_spin_lock_irqsave(&base->lock, *flags);
 			if (timer->flags == tf)
 				return base;
@@ -960,6 +1267,10 @@ static struct timer_base *lock_timer_base(struct timer_list *timer,
 #define MOD_TIMER_REDUCE		0x02
 #define MOD_TIMER_NOTPENDING		0x04
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer를 추가하거나 expired를 변경한다.
+ */
 static inline int
 __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int options)
 {
@@ -975,16 +1286,45 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	 * the timer is re-modified to have the same timeout or ends up in the
 	 * same array bucket then just return:
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   이것은 네트워킹 코드에 의해 트리거되는 일반적인 최적화입니다. 타이머가 동일한
+ *   시간 초과를 갖도록 다시 수정되거나 동일한 어레이 버킷에서 끝나는 경우 다음을
+ *   반환합니다.
+ * - pending중인 timer이면서 option이
+ *   MOD_TIMER_PENDING_ONLY (mod_timer_pending())
+ *   MOD_TIMER_REDUCE       (timer_reduce()),
+ *   0                      (mod_timer())
+ *   경우 if문 동작.
+ *
+ * - 즉 add_timer()가 아닌 경우
+ */
 	if (!(options & MOD_TIMER_NOTPENDING) && timer_pending(timer)) {
 		/*
 		 * The downside of this optimization is that it can result in
 		 * larger granularity than you would get from adding a new
 		 * timer with this expiry.
 		 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   이 최적화의 단점은 이 만료로 새 타이머를 추가하는 것보다 더 큰 세분성을
+ *   초래할 수 있다는 것입니다.
+ */
 		long diff = timer->expires - expires;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 갱신하는 expires시간이 기존과 같다면 아무것도 할필요없을것이다.
+ */
 		if (!diff)
 			return 1;
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - reduce일때 expire 시간을 더 증가시키는 경우는 무시한다.
+ */
 		if (options & MOD_TIMER_REDUCE && diff <= 0)
 			return 1;
 
@@ -994,9 +1334,22 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		 * just update the expiry time and avoid the whole
 		 * dequeue/enqueue dance.
 		 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   여기에서 타이머 베이스를 잠그고 버킷 인덱스를 계산합니다. 타이머가
+ *   동일한 버킷에서 끝나면 만료 시간을 업데이트하고 전체 대기열에서
+ *   빼기/대기하기 댄스를 방지합니다.
+ *
+ * - lock을 건다.
+ */
 		base = lock_timer_base(timer, &flags);
 		forward_timer_base(base);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - reduce일때, @expires값이 기존보다 감소되지 않았으면 무시.
+ */
 		if (timer_pending(timer) && (options & MOD_TIMER_REDUCE) &&
 		    time_before_eq(timer->expires, expires)) {
 			ret = 1;
@@ -1011,6 +1364,14 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		 * timer. If it matches set the expiry to the new value so a
 		 * subsequent call will exit in the expires check above.
 		 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   보류 중인 타이머의 배열 인덱스를 검색하고 비교합니다. 일치하는 경우 만료를
+ *   새 값으로 설정하여 위의 만료 확인에서 후속 호출이 종료되도록 합니다.
+ * - idx가 변한게 없는경우, expires만 재갱신한다.
+ *   reduce인 경우 전진만 허용한다.
+ */
 		if (idx == timer_get_idx(timer)) {
 			if (!(options & MOD_TIMER_REDUCE))
 				timer->expires = expires;
@@ -1020,16 +1381,34 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 			goto out_unlock;
 		}
 	} else {
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer의 cpu에 해당하는 timer base를 가져오고 update한다.
+ */
 		base = lock_timer_base(timer, &flags);
 		forward_timer_base(base);
 	}
 
 	ret = detach_if_pending(timer, base, false);
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - mod_timer_pending()으로 pending중인 timer에 한해서 수정 요청이 왔는데
+ *   이미 timer가 없는 상황. 종료한다.
+ */
 	if (!ret && (options & MOD_TIMER_PENDING_ONLY))
 		goto out_unlock;
 
 	new_base = get_target_base(base, timer->flags);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer에서 사용하는 cpu와 변경되었는지 확인한다.
+ * - ex) cpu0에서 timer0를 add_timer했다고 가정.
+ *   cpu0 -> add_timer().   timer0가 cpu0번으로 등록
+ *   cpu1 -> mod_timer(timer0).
+ *   이런 상황일 경우 base != new_base가 된다.
+ */
 	if (base != new_base) {
 		/*
 		 * We are trying to schedule the timer on the new base.
@@ -1038,6 +1417,18 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 		 * handler yet has not finished. This also guarantees that the
 		 * timer is serialized wrt itself.
 		 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   new base에서 타이머를 예약하려고 합니다.,
+ *   그러나 타이머가 실행되는 동안에는 타이머의 기반을 변경할 수 없습니다.
+ *   그렇지 않으면 del_timer_sync()가 타이머의 핸들러가 아직 완료되지 않았음을
+ *   감지할 수 없습니다. 이것은 또한 타이머가 자체적으로 직렬화됨을 보장합니다.
+ *
+ * - running_timer : expired 되서 동작중인 timer.
+ * - running_timer와 현재 timer가 다를경우, 즉 동작중인 timer가 아닐경우.
+ *   new_base로 base를 갱신하고 timer의 cpu를 갱신된 new_base로 고친후 update.
+ */
 		if (likely(base->running_timer != timer)) {
 			/* See the comment in lock_timer_base() */
 			timer->flags |= TIMER_MIGRATING;
@@ -1060,6 +1451,16 @@ __mod_timer(struct timer_list *timer, unsigned long expires, unsigned int option
 	 * enqueue_timer() is required. Otherwise we need to (re)calculate
 	 * the wheel index via internal_add_timer().
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   'idx'가 위에서 계산되었고 기본 시간이 'idx' 계산과 기본 전환 사이에 진행되지
+ *   않은 경우 enqueue_timer()만 필요합니다. 그렇지 않으면 internal_add_timer()를
+ *   통해 휠 인덱스를 (재)계산해야 합니다.
+ *
+ * - 기존 timer가 존재하여 이미 idx를 알아온 경우 즉시. enqueue.
+ *   새로 들어온 timer인 경우 idx가 없으므로 idx를 새로 산출해서 enqueue한다.
+ */
 	if (idx != UINT_MAX && clk == base->clk)
 		enqueue_timer(base, timer, idx, bucket_expiry);
 	else
@@ -1080,6 +1481,10 @@ out_unlock:
  * but will not re-activate and modify already deleted timers.
  *
  * It is useful for unserialized use of timers.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer가 pending중일때, expires를 변경한다.
  */
 int mod_timer_pending(struct timer_list *timer, unsigned long expires)
 {
@@ -1107,6 +1512,25 @@ EXPORT_SYMBOL(mod_timer_pending);
  * (ie. mod_timer() of an inactive timer returns 0, mod_timer() of an
  * active timer returns 1.)
  */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   mod_timer()는 활성 타이머의 만료 필드를 업데이트하는 더 효율적인
+ *   방법입니다(타이머가 비활성화된 경우 활성화됨)
+ *
+ *   mod_timer(timer, expires)는 다음과 같습니다.
+ *
+ *     del_timer(timer); timer->expires = expires; add_timer(timer);
+ *
+ *   동일한 타이머의 직렬화되지 않은 동시 사용자가 여러 명 있는 경우
+ *   add_timer()가 이미 실행 중인 타이머를 수정할 수 없으므로
+ *   mod_timer()가 시간 초과를 수정하는 유일한 안전한 방법입니다.
+ *
+ *   함수는 보류 중인 타이머를 수정했는지 여부를 반환합니다.
+ *   (즉, 비활성 타이머의 mod_timer()는 0을 반환하고 활성 타이머의
+ *   mod_timer()는 1을 반환합니다.)
+ */
 int mod_timer(struct timer_list *timer, unsigned long expires)
 {
 	return __mod_timer(timer, expires, 0);
@@ -1121,6 +1545,10 @@ EXPORT_SYMBOL(mod_timer);
  * timer_reduce() is very similar to mod_timer(), except that it will only
  * modify a running timer if that would reduce the expiration time (it will
  * start a timer that isn't running).
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer가 pending중일때, expired를 줄인다.
  */
 int timer_reduce(struct timer_list *timer, unsigned long expires)
 {
@@ -1141,6 +1569,10 @@ EXPORT_SYMBOL(timer_reduce);
  *
  * Timers with an ->expires field in the past will be executed in the next
  * timer tick.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer 등록.
  */
 void add_timer(struct timer_list *timer)
 {
@@ -1199,6 +1631,10 @@ EXPORT_SYMBOL_GPL(add_timer_on);
  * (ie. del_timer() of an inactive timer returns 0, del_timer() of an
  * active timer returns 1.)
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer가 pending중이라면 detach.
+ */
 int del_timer(struct timer_list *timer)
 {
 	struct timer_base *base;
@@ -1224,6 +1660,12 @@ EXPORT_SYMBOL(del_timer);
  * This function tries to deactivate a timer. Upon successful (ret >= 0)
  * exit the timer is not queued and the handler is not running on any CPU.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * @return -1. running중인 timer라면 삭제를 못한다는것.
+ *          1. 삭제 성공.
+ *          0. 이미 expire되서 없다.
+ */
 int try_to_del_timer_sync(struct timer_list *timer)
 {
 	struct timer_base *base;
@@ -1244,16 +1686,30 @@ int try_to_del_timer_sync(struct timer_list *timer)
 EXPORT_SYMBOL(try_to_del_timer_sync);
 
 #ifdef CONFIG_PREEMPT_RT
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - spinlock을 사용한다.
+ */
 static __init void timer_base_init_expiry_lock(struct timer_base *base)
 {
 	spin_lock_init(&base->expiry_lock);
 }
 
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - spin_lock
+ */
 static inline void timer_base_lock_expiry(struct timer_base *base)
 {
 	spin_lock(&base->expiry_lock);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - spin_unlock
+ */
 static inline void timer_base_unlock_expiry(struct timer_base *base)
 {
 	spin_unlock(&base->expiry_lock);
@@ -1266,10 +1722,26 @@ static inline void timer_base_unlock_expiry(struct timer_base *base)
  * timer callback to finish. Drop expiry_lock and reacquire it. That allows
  * the waiter to acquire the lock and make progress.
  */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   del_timer_wait_running()의 대응물.
+ *
+ *   base->expiry_lock에 대한 웨이터가 있는 경우 타이머 콜백이 완료되기를 기다리고
+ *   있는 것입니다. expiry_lock을 삭제하고 다시 획득하십시오. 그러면 웨이터가
+ *   잠금을 획득하고 진행할 수 있습니다.
+ * - 
+ */
 static void timer_sync_wait_running(struct timer_base *base)
 {
 	if (atomic_read(&base->timer_waiters)) {
 		raw_spin_unlock_irq(&base->lock);
+/*
+ * IAMROOT, 2022.09.03:
+ * - del_timer_wait_running()에서 del wait를 하고 있는경우 deadlock풀어서
+ *   callback이 끝난걸 알려 delete가 가능하게 풀어준다.
+ */
 		spin_unlock(&base->expiry_lock);
 		spin_lock(&base->expiry_lock);
 		raw_spin_lock_irq(&base->lock);
@@ -1285,6 +1757,18 @@ static void timer_sync_wait_running(struct timer_base *base)
  * got preempted, and it prevents a life lock when the task which tries to
  * delete a timer preempted the softirq thread running the timer callback
  * function.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   이 함수는 타이머 콜백 함수가 실행 중이기 때문에 타이머의 빠른 경로 삭제가
+ *   실패한 경우 PREEMPT_RT 커널에서 호출됩니다.
+ *
+ *   이것은 원격 CPU의 softirq 스레드가 선점된 경우 우선 순위 반전을 방지하고
+ *   타이머를 삭제하려는 작업이 타이머 콜백 기능을 실행하는 softirq 스레드를
+ *   선점할 때 생명 잠금을 방지합니다.
+ * - timer가 irqsafe가 아니라면 timer_waiters에 등록하고 deadlock을 걸어
+ *   callback이 끝날떄까지 기다린다.
  */
 static void del_timer_wait_running(struct timer_list *timer)
 {
@@ -1303,6 +1787,11 @@ static void del_timer_wait_running(struct timer_list *timer)
 		 * causes another wait loop.
 		 */
 		atomic_inc(&base->timer_waiters);
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer_sync_wait_running()의 spin_unlock을 deadlock을 걸어 기다린다.
+ */
 		spin_lock_bh(&base->expiry_lock);
 		atomic_dec(&base->timer_waiters);
 		spin_unlock_bh(&base->expiry_lock);
@@ -1353,6 +1842,13 @@ static inline void del_timer_wait_running(struct timer_list *timer) { }
  *
  * The function returns whether it has deactivated a pending timer or not.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - @timer를 삭제한다.
+ *   1. pending중인 경우. 삭제후 return 0.
+ *   2. expire된 경우 별거 안하고 return 1.
+ *   3. running중인 경우 deadlock을 걸어 callback이 끝날때까지 wait.
+ */
 int del_timer_sync(struct timer_list *timer)
 {
 	int ret;
@@ -1385,6 +1881,12 @@ int del_timer_sync(struct timer_list *timer)
 	do {
 		ret = try_to_del_timer_sync(timer);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - running중인 timer를 삭제하라는 요청이 왔다.
+ *   irqsave가 없는 timer인 경우 callback이 완료 될때까지
+ *   deadlock으로 기다리고, 그렇지 않을 경우 cpu_relax를 한번한후 while.
+ */
 		if (unlikely(ret < 0)) {
 			del_timer_wait_running(timer);
 			cpu_relax();
@@ -1396,6 +1898,10 @@ int del_timer_sync(struct timer_list *timer)
 EXPORT_SYMBOL(del_timer_sync);
 #endif
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @fn callback 수행.
+ */
 static void call_timer_fn(struct timer_list *timer,
 			  void (*fn)(struct timer_list *),
 			  unsigned long baseclk)
@@ -1427,6 +1933,11 @@ static void call_timer_fn(struct timer_list *timer,
 
 	lock_map_release(&lockdep_map);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @fn 안에서 preempt_enable/disable을 증감 하면 count가 증감하게된다.
+ *   이러면안된다.
+ */
 	if (count != preempt_count()) {
 		WARN_ONCE(1, "timer: %pS preempt leak: %08x -> %08x\n",
 			  fn, count, preempt_count());
@@ -1436,10 +1947,21 @@ static void call_timer_fn(struct timer_list *timer,
 		 * callback kept a lock held, bad luck, but not worse
 		 * than the BUG() we had.
 		 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   선점 횟수를 복원합니다. 그것은 우리에게 생존하고 정보를 추출할 적절한 기회를
+ *   제공합니다. 콜백이 잠금을 유지했다면 운이 나빴지만 BUG()보다 나쁘지는
+ *   않았습니다.
+ */
 		preempt_count_set(count);
 	}
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @head에 있는 timer에 등록된 callback function을 호출한다.
+ */
 static void expire_timers(struct timer_base *base, struct hlist_head *head)
 {
 	/*
@@ -1447,12 +1969,24 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 	 * incremented directly before expire_timers was called. But expiry
 	 * is related to the old base->clk value.
 	 */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   이 값은 추적에만 필요합니다. base->clk는 expire_timers가 호출되기 직전에
+ *   증분되었습니다. 그러나 만료는 이전 base->clk 값과 관련이 있습니다.
+ */
 	unsigned long baseclk = base->clk - 1;
 
 	while (!hlist_empty(head)) {
 		struct timer_list *timer;
 		void (*fn)(struct timer_list *);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 1. timer를 한개빼고
+ *   2. running에 넣은후
+ *   3. callback 함수 호출.
+ */
 		timer = hlist_entry(head->first, struct timer_list, entry);
 
 		base->running_timer = timer;
@@ -1460,12 +1994,21 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 
 		fn = timer->function;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - timer가 irq safe라는 일반 spinlock, 그렇지 않은 경우 irq spinlock수행.
+ * - irq에 영향이 없는 timer인경우.
+ */
 		if (timer->flags & TIMER_IRQSAFE) {
 			raw_spin_unlock(&base->lock);
 			call_timer_fn(timer, fn, baseclk);
 			raw_spin_lock(&base->lock);
 			base->running_timer = NULL;
 		} else {
+/*
+ * IAMROOT, 2022.09.03:
+ * - irq에 영향이 있는경우,
+ */
 			raw_spin_unlock_irq(&base->lock);
 			call_timer_fn(timer, fn, baseclk);
 			raw_spin_lock_irq(&base->lock);
@@ -1475,6 +2018,11 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 	}
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * lvl 0..LVL_DEPTH 까지 순회하며 expired된 timer들을 heads에 옮기며 가장 높은
+ * level을 기록한다.
+ */
 static int collect_expired_timers(struct timer_base *base,
 				  struct hlist_head *heads)
 {
@@ -1483,6 +2031,17 @@ static int collect_expired_timers(struct timer_base *base,
 	int i, levels = 0;
 	unsigned int idx;
 
+/*
+ * IAMROOT, 2022.09.03:
+ *
+ * lvl 0..LVL_DEPTH 까지 순회하며 expired된 timer들을 heads에 옮기며 가져온
+ * 레벨 개수를 return 한다.
+ *
+ * level 0 -> timer0, timer1, timer2 -> heads[0]에 통째로 넣어진다.
+ * level 1 -> timer3, timer4,        -> heads[1]에 통째로 넣어진다.
+ * level 2 -> NULL                   -> 여기서 중단되고 return level2
+ * level 3 -> timer5.
+ */
 	for (i = 0; i < LVL_DEPTH; i++) {
 		idx = (clk & LVL_MASK) + i * LVL_SIZE;
 
@@ -1492,6 +2051,11 @@ static int collect_expired_timers(struct timer_base *base,
 			levels++;
 		}
 		/* Is it time to look at the next level? */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - 중간이 비면 그만한다.
+ */
 		if (clk & LVL_CLK_MASK)
 			break;
 		/* Shift clock for the next level granularity */
@@ -1522,6 +2086,10 @@ static int next_pending_bucket(struct timer_base *base, unsigned offset,
 /*
  * Search the first expiring timer in the various clock levels. Caller must
  * hold base->lock.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - TODO
  */
 static unsigned long __next_timer_interrupt(struct timer_base *base)
 {
@@ -1711,17 +2279,34 @@ void timer_clear_idle(void)
  * __run_timers - run all expired timers (if any) on this CPU.
  * @base: the timer vector to be processed.
  */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - 
+ */
 static inline void __run_timers(struct timer_base *base)
 {
 	struct hlist_head heads[LVL_DEPTH];
 	int levels;
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 만료시각이 아직 안됬다. return.
+ */
 	if (time_before(jiffies, base->next_expiry))
 		return;
 
 	timer_base_lock_expiry(base);
 	raw_spin_lock_irq(&base->lock);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * 
+ * time ---------|--------------|-------------------------|--------
+ *           base->clk      base->next_expiry        jiffies     
+ *               ---------------------------------------->
+ *                   이 사이에 있는 timer들을 expire 시킨다.
+ */
 	while (time_after_eq(jiffies, base->clk) &&
 	       time_after_eq(jiffies, base->next_expiry)) {
 		levels = collect_expired_timers(base, heads);
@@ -1734,6 +2319,10 @@ static inline void __run_timers(struct timer_base *base)
 		base->clk++;
 		base->next_expiry = __next_timer_interrupt(base);
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 가져온 timer들을 역순으로 expire 시킨다.
+ */
 		while (levels--)
 			expire_timers(base, heads + levels);
 	}
@@ -1743,6 +2332,10 @@ static inline void __run_timers(struct timer_base *base)
 
 /*
  * This function runs timers and the timer-tq in bottom half context.
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - TIMER_SOFTIRQ 발생시 동작하는 함수.
  */
 static __latent_entropy void run_timer_softirq(struct softirq_action *h)
 {
@@ -1998,6 +2591,10 @@ int timers_dead_cpu(unsigned int cpu)
 
 #endif /* CONFIG_HOTPLUG_CPU */
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @cpu의 lowres timer 자료구조를 초기화한다.
+ */
 static void __init init_timer_cpu(int cpu)
 {
 	struct timer_base *base;
@@ -2007,12 +2604,20 @@ static void __init init_timer_cpu(int cpu)
 		base = per_cpu_ptr(&timer_bases[i], cpu);
 		base->cpu = cpu;
 		raw_spin_lock_init(&base->lock);
+/*
+ * IAMROOT, 2022.09.03:
+ * - 현재 clock을 저장해놓는다.
+ */
 		base->clk = jiffies;
 		base->next_expiry = base->clk + NEXT_TIMER_MAX_DELTA;
 		timer_base_init_expiry_lock(base);
 	}
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 전체 cpu의 lowres timer 자료구조를 초기화한다.
+ */
 static void __init init_timer_cpus(void)
 {
 	int cpu;
@@ -2021,6 +2626,13 @@ static void __init init_timer_cpus(void)
 		init_timer_cpu(cpu);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - 1. 전체 cpu lowres timer 자료구조 초기화.
+ *   2. posix timer 초기화.
+ *   3. TIMER_SOFTIRQ callback 함수 등록.
+ *      (raise_softirq)
+ */
 void __init init_timers(void)
 {
 	init_timer_cpus();

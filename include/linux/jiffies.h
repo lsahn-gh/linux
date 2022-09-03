@@ -108,16 +108,60 @@ static inline u64 get_jiffies_64(void)
  * good compiler would generate better code (and a really good compiler
  * wouldn't care). Gcc is currently neither.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - return true가 되는 상황.
+ *
+ * i) A, B둘다 값이 작을때.
+ *
+ *           signed long
+ *    B A          |                 
+ *   --------------|-----------
+ *   
+ *
+ * ii) A, B둘다 값이 클때(signed long값 over가 안됬을때)
+ *
+ *           signed long
+ *                 |       B A                 
+ *   --------------|-----------
+ *    
+ * iii) A가 unsigned log값을 over flow
+ *
+ *           signed long
+ *    A            |         B                 
+ *   --------------|-----------
+ */
 #define time_after(a,b)		\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \
 	 ((long)((b) - (a)) < 0))
+
+/*
+ * IAMROOT, 2022.09.03:
+ * -
+ *         A   B
+ * time ----------->
+ * return true.
+ *
+ * - if (a < b)
+ *	return true;
+ *   return false;
+ */
 #define time_before(a,b)	time_after(b,a)
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - a가 b시각 이후이거나 같으면 true.
+ */
 #define time_after_eq(a,b)	\
 	(typecheck(unsigned long, a) && \
 	 typecheck(unsigned long, b) && \
 	 ((long)((a) - (b)) >= 0))
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - a가 b시각 이전이거나 같으면 true.
+ */
 #define time_before_eq(a,b)	time_after_eq(b,a)
 
 /*

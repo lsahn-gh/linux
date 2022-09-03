@@ -1153,6 +1153,11 @@ static inline bool fastpath_timer_check(struct task_struct *tsk)
 static void handle_posix_cpu_timers(struct task_struct *tsk);
 
 #ifdef CONFIG_POSIX_CPU_TIMERS_TASK_WORK
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - posix timer 초기화.(application timer)
+ */
 static void posix_cpu_timers_work(struct callback_head *work)
 {
 	handle_posix_cpu_timers(current);
@@ -1161,6 +1166,11 @@ static void posix_cpu_timers_work(struct callback_head *work)
 /*
  * Initialize posix CPU timers task work in init task. Out of line to
  * keep the callback static and to avoid header recursion hell.
+ */
+
+/*
+ * IAMROOT, 2022.09.03:
+ * - posix timer 초기화.(application timer)
  */
 void __init posix_cputimers_init_work(void)
 {

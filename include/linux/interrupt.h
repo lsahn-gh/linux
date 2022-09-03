@@ -515,6 +515,10 @@ DECLARE_STATIC_KEY_FALSE(force_irqthreads_key);
 enum
 {
 	HI_SOFTIRQ=0,
+/*
+ * IAMROOT, 2022.09.03:
+ * - softirq bottom half
+ */
 	TIMER_SOFTIRQ,
 	NET_TX_SOFTIRQ,
 	NET_RX_SOFTIRQ,

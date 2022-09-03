@@ -7,6 +7,10 @@
 #define PREEMPT_NEED_RESCHED	BIT(32)
 #define PREEMPT_ENABLED	(PREEMPT_NEED_RESCHED)
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - preempt count를 가져온다.
+ */
 static inline int preempt_count(void)
 {
 	return READ_ONCE(current_thread_info()->preempt.count);

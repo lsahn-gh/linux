@@ -17,6 +17,11 @@ enum hk_flags {
 	HK_FLAG_KTHREAD		= (1 << 8),
 };
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - ex) kernel param : nohz_full=4-7
+ *   4~7번 cpu를 nohz_full로 사용할수 있게 한다.
+ */
 #ifdef CONFIG_CPU_ISOLATION
 DECLARE_STATIC_KEY_FALSE(housekeeping_overridden);
 extern int housekeeping_any_cpu(enum hk_flags flags);

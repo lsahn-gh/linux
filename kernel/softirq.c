@@ -683,6 +683,10 @@ inline void raise_softirq_irqoff(unsigned int nr)
 		wakeup_softirqd();
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - @nr번의 softirq 처리요청.
+ */
 void raise_softirq(unsigned int nr)
 {
 	unsigned long flags;
@@ -699,6 +703,10 @@ void __raise_softirq_irqoff(unsigned int nr)
 	or_softirq_pending(1UL << nr);
 }
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - softirq @nr에 대한 @action함수를 등록한다.
+ */
 void open_softirq(int nr, void (*action)(struct softirq_action *))
 {
 	softirq_vec[nr].action = action;

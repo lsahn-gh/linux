@@ -949,6 +949,16 @@ static void arch_timer_configure_evtstream(void)
  * - evt_stream_div = arch_timer_rate / 2000
  *   arch_timer_rate = 19.2M이라고 했을대
  *   evt_stream_div = 19200000 / 2000 = 9600
+ * - ex) x us마다 evt 발생.
+ *   1us 마다
+ *   arch_timerr_rate / 1000_000
+ *   10us 마다
+ *   arch_timerr_rate / 100_000
+ *   100us 마다
+ *   arch_timerr_rate / 10_000
+ *   1000us 마다
+ *   arch_timerr_rate / 1_000
+ *
  */
 	evt_stream_div = arch_timer_rate / ARCH_TIMER_EVT_STREAM_FREQ / 2;
 

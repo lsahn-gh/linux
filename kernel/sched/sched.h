@@ -1736,6 +1736,10 @@ queue_balance_callback(struct rq *rq,
  * The domain tree of any CPU may only be accessed from within
  * preempt-disabled sections.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - tree 구조로 되있다. sched domain 위로 올라간다.
+ */
 #define for_each_domain(cpu, __sd) \
 	for (__sd = rcu_dereference_check_sched_domain(cpu_rq(cpu)->sd); \
 			__sd; __sd = __sd->parent)

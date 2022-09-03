@@ -16,6 +16,13 @@ struct timer_list {
 	struct hlist_node	entry;
 	unsigned long		expires;
 	void			(*function)(struct timer_list *);
+/*
+ * IAMROOT, 2022.09.03:
+ * - TIMER_BASEMASK 참고.
+ *   cpu id(TIMER_CPUMASK. 18bits)와 같이 field를 사용한다.
+ *   ex)
+ *   timer->flags = flags | raw_smp_processor_id();
+ */
 	u32			flags;
 
 #ifdef CONFIG_LOCKDEP
@@ -61,6 +68,33 @@ struct timer_list {
  * should be placed on a particular CPU, then add_timer_on() has to be
  * used.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * - papago
+ *   @TIMER_DEFERRABLE: 지연 가능한 타이머는 시스템이 사용 중일 때 정상적으로
+ *   작동하지만 CPU를 서비스하기 위해 유휴 상태에서 벗어나게 하지는 않습니다.
+ *   대신, CPU가 나중에 지연되지 않는 타이머로 깨어날 때 타이머가 서비스됩니다. 
+ *
+ *   @TIMER_IRQSAFE: irqsafe 타이머는 IRQ가 비활성화된 상태에서 실행되며, 예를 들어
+ *   del_timer_sync()를 호출하여 IRQ 처리기에서 실행 중인 인스턴스가 완료될 때까지
+ *   기다리는 것이 안전합니다.
+ *
+ *   Note: irq 비활성화된 콜백 실행은 작업 대기열 잠금 문제의 특별한 경우입니다.
+ *   인터럽트가 비활성화된 상태에서 무작위 쓰레기를 실행하기 위한 것이 아닙니다.
+ *   학대가 모니터링됩니다!
+ *
+ *   @TIMER_PINNED: 고정된 타이머는 타이머 배치 휴리스틱(예: NOHZ)의 영향을 받지 
+ *   않으며 타이머가 대기열에 추가된 CPU에서 항상 만료됩니다.
+ *
+ *  Note: 타이머를 대기열에 넣으면 한 CPU에서 다른 CPU로 타이머를 마이그레이션할
+ *  수 있으므로 고정된 타이머가 처음에 선택한 CPU에 유지된다는 보장은 없습니다.
+ *  enqueue 기능이 mod_timer() 또는 add_timer()를 통해 호출되는 CPU로 이동합니다.
+ *  타이머를 특정 CPU에 배치해야 하는 경우 add_timer_on()을 사용해야 합니다.
+ *
+ *  - field
+ *  | 10bits    | 4bits   | 18bits |
+ *  | timer idx | flags   | cpu id |
+ */
 #define TIMER_CPUMASK		0x0003FFFF
 #define TIMER_MIGRATING		0x00040000
 #define TIMER_BASEMASK		(TIMER_CPUMASK | TIMER_MIGRATING)
@@ -73,6 +107,10 @@ struct timer_list {
 
 #define TIMER_TRACE_FLAGMASK	(TIMER_MIGRATING | TIMER_DEFERRABLE | TIMER_PINNED | TIMER_IRQSAFE)
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - compile time시 timer 초기화.
+ */
 #define __TIMER_INITIALIZER(_function, _flags) {		\
 		.entry = { .next = TIMER_ENTRY_STATIC },	\
 		.function = (_function),			\
@@ -81,6 +119,11 @@ struct timer_list {
 			__FILE__ ":" __stringify(__LINE__))	\
 	}
 
+/*
+ * IAMROOT, 2022.09.03:
+ * - compile time시 timer 초기화.
+ * - runtime시는 timer_setup
+ */
 #define DEFINE_TIMER(_name, _function)				\
 	struct timer_list _name =				\
 		__TIMER_INITIALIZER(_function, 0)
@@ -122,6 +165,10 @@ static inline void init_timer_on_stack_key(struct timer_list *timer,
 					#_timer, &__key);		 \
 	} while (0)
 #else
+/*
+ * IAMROOT, 2022.09.03:
+ * - @_timer를 초기화한다.
+ */
 #define __init_timer(_timer, _fn, _flags)				\
 	init_timer_key((_timer), (_fn), (_flags), NULL, NULL)
 #define __init_timer_on_stack(_timer, _fn, _flags)			\
@@ -137,6 +184,11 @@ static inline void init_timer_on_stack_key(struct timer_list *timer,
  * Regular timer initialization should use either DEFINE_TIMER() above,
  * or timer_setup(). For timers on the stack, timer_setup_on_stack() must
  * be used and must be balanced with a call to destroy_timer_on_stack().
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - runtime시 timer초기화.
+ *   실제 timer 등록은 add_timer를 수행해야한다.
  */
 #define timer_setup(timer, callback, flags)			\
 	__init_timer((timer), (callback), (flags))
@@ -163,6 +215,13 @@ static inline void destroy_timer_on_stack(struct timer_list *timer) { }
  *
  * return value: 1 if the timer is pending, 0 if not.
  */
+/*
+ * IAMROOT, 2022.09.03:
+ * @return value 1 if the timer is pending, 0 if not.
+ * - @timer가 wheel에 등록이 되있는지 안되있는지 확인한다.
+ * - list의 pprev가 있다면 등록이 되있다는 의미.
+ *   없다면 expire가 됬거나 등록이 안 됬다는 의미.
+ */
 static inline int timer_pending(const struct timer_list * timer)
 {
 	return !hlist_unhashed_lockless(&timer->entry);
@@ -177,6 +236,10 @@ extern int timer_reduce(struct timer_list *timer, unsigned long expires);
 /*
  * The jiffies value which is added to now, when there is no timer
  * in the timer wheel:
+ */
+/*
+ * IAMROOT, 2022.09.03:
+ * - 2^30 - 1 
  */
 #define NEXT_TIMER_MAX_DELTA	((1UL << 30) - 1)
 
