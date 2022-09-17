@@ -215,6 +215,12 @@ struct hrtimer_clock_base *lock_hrtimer_base(const struct hrtimer *timer,
  *
  * Called with cpu_base->lock of target cpu held.
  */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 해당 cpu에서 대기 중인 타이머보다 더 앞쪽에 추가할 수 없으므로 
+ * 이를 확인한다. 안전하게 뒤로 들어갈 수 있으면 0을 반환하고,
+ * 그렇지 않은 경우 1을 반환하여 외부 루틴에서 다시 cpu를 선택해야 한다.
+ */
 static int
 hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
 {
@@ -224,6 +230,12 @@ hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
 	return expires < new_base->cpu_base->expires_next;
 }
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * hrtimer가 등록될 새로운 cpu를 찾는 경우이다.
+ * nohz가 적용된 시스템에서 pinned 요청이 없으면 this cpu(우선 처리) 및 
+ * 주변 cpu들 중 busy한 cpu르 선택한다.
+ */
 static inline
 struct hrtimer_cpu_base *get_target_base(struct hrtimer_cpu_base *base,
 					 int pinned)
@@ -256,6 +268,11 @@ switch_hrtimer_base(struct hrtimer *timer, struct hrtimer_clock_base *base,
 	int basenum = base->index;
 
 	this_cpu_base = this_cpu_ptr(&hrtimer_bases);
+/*
+ * IAMROOT, 2022.09.17: 
+ * nohz가 적용된 시스템이라면 현재 cpu(우선순위) 또는 다른 busu한 cpu를 
+ * 찾아서 변경할 수 있다. (pinned=0인 경우에만)
+ */
 	new_cpu_base = get_target_base(this_cpu_base, pinned);
 again:
 	new_base = &new_cpu_base->clock_base[basenum];
@@ -270,14 +287,28 @@ again:
 		 * completed. There is no conflict as we hold the lock until
 		 * the timer is enqueued.
 		 */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 타이머가 만료되어 callback이 호출되는 중이된 경우엔 cpu base를 바꿔
+ * 등록할 필요가 없어졌으므로 이대로 base 변경없이 빠져나간다.
+ */
 		if (unlikely(hrtimer_callback_running(timer)))
 			return base;
 
 		/* See the comment in lock_hrtimer_base() */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 기존 cpu base의 락을 해지하고 새로운 cpu base에서 락을 획득한다.
+ */
 		WRITE_ONCE(timer->base, &migration_base);
 		raw_spin_unlock(&base->cpu_base->lock);
 		raw_spin_lock(&new_base->cpu_base->lock);
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * cpu base가 현재 cpu로 바뀌지 않았고, 새로운 target으로 변경해야 하는 경우
+ * again: 레이블로 이동하여 새로운 cpu를 결정하게 한다.
+ */
 		if (new_cpu_base != this_cpu_base &&
 		    hrtimer_check_target(timer, new_base)) {
 			raw_spin_unlock(&new_base->cpu_base->lock);
@@ -641,6 +672,31 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
  *   따라서 softirq 값은 HRTIMER_ACTIVE_SOFT 클럭 기반의 값입니다.
  *   !softirq 값은 실제 softirq가 보류 중인 경우(이 경우 HRTIMER_ACTIVE_HARD의
  *   최소값)가 아닌 한 HRTIMER_ACTIVE_ALL 전체의 최소값입니다.
+ *
+ * - @active_mask 요청이 8개의 클럭들 중 soft, hard 또는 all로 요청을 하는데
+ *   해당 클럭에 대한 base들에 대해서 가장 빠른 타이머를 구한다.
+ *   각 clock base들은 각각의 offset을 가진 시각으로 관리되므로 8개 clock base에
+ *   등록된 타이머들과의 비교에는 각각의 offset을 뺀 값으로 비교되어야 한다.
+ *
+ * 예) 2개의 clock base에 있는 next 타이머들 중 빠른 타이머를 가려본다.
+ *      A) clock base->offset=1000, base->next_timer=3000
+ *      B) clock base->offset=3000, base->next_timer=4000
+ *
+ *                                a)
+ *                 <-------------->
+ *      A .........|--------------*---------------->
+ *               offset          next_timr
+ *               1000              3000
+ *
+ *                                       b) 
+ *                                <------>
+ *      B ........................|------*--------->
+ *                              offset  next_timr
+ *                              3000    4000
+ *      위의 A, B 두 클럭에서 동작하는 타이머 중 가장 빨리 만료시각이 
+ *      다가오는 타이머는 b) 타이머이다.
+ *      a) timer는 3000 - 1000 = 2000 ns의 시간 후에 expire될 예정
+ *      b) timer는 4000 - 3000 = 1000 ns의 시간 후에 expire될 예정
  */
 static ktime_t
 __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, unsigned int active_mask)
@@ -1166,17 +1222,33 @@ EXPORT_SYMBOL_GPL(hrtimer_forward);
  *
  * Returns 1 when the new timer is the leftmost timer in the tree.
  */
+/*
+ * IAMROOT, 2022.09.17: 
+ * clock base의 RB 트리 자료구조에 hrtimer를 추가한다.
+ * clock base의 hrtimer들 중 가장 빠른 만료시간을 가진 경우라면 1을 반환한다. 
+ */
+
 static int enqueue_hrtimer(struct hrtimer *timer,
 			   struct hrtimer_clock_base *base,
 			   enum hrtimer_mode mode)
 {
 	debug_activate(timer, mode);
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 8개의 clock base 비트맵인 active_bases에서 해당 clock base의 비트를
+ * set한다. 타이머가 추가된 상태라면 해당 clock base에 hrtimer가 
+ * 존재함을 의미한다.
+ */
 	base->cpu_base->active_bases |= 1 << base->index;
 
 	/* Pairs with the lockless read in hrtimer_is_queued() */
 	WRITE_ONCE(timer->state, HRTIMER_STATE_ENQUEUED);
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 등록된 hrtimer가 가장 빠른 타이머로 등록되는 경우 1을 반환된다.
+ */
 	return timerqueue_add(&base->active, &timer->node);
 }
 
@@ -1305,6 +1377,11 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
 static inline ktime_t hrtimer_update_lowres(struct hrtimer *timer, ktime_t tim,
 					    const enum hrtimer_mode mode)
 {
+/*
+ * IAMROOT, 2022.09.17: 
+ * 낮은 해상도를 가진 타이머를 사용하는 시스템에서는 상대 시간 요청으로 
+ * 타이머를 등록한 경우 타이머가 처리할 수 있는 최하 해상도를 추가합니다.
+ */
 #ifdef CONFIG_TIME_LOW_RES
 	/*
 	 * CONFIG_TIME_LOW_RES indicates that the system has no way to return
@@ -1345,7 +1422,7 @@ hrtimer_update_softirq_timer(struct hrtimer_cpu_base *cpu_base, bool reprogram)
 
 /*
  * IAMROOT, 2022.09.17:
- * - 새로시작 or 고치는 경우.
+ * - 타이머를 새롭게 추가하여 시작 or 만료 시각을 변경하는 경우.
  */
 static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 				    u64 delta_ns, const enum hrtimer_mode mode,
@@ -1377,6 +1454,9 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 /*
  * IAMROOT, 2022.09.17:
  * - next_timer(가장 빠른 timer)인 경우인지를 한번더 확인한다.
+ *  
+ * - 이미 등록된 가장 만료시각이 빠른 타이머의 만료시각을 변경하러 들어온
+ *   force_local=1이 된다.(조건은 cpu가 변경되지 않았다는 것)
  */
 	force_local &= base->cpu_base->next_timer == timer;
 
@@ -1404,14 +1484,35 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  */
 	remove_hrtimer(timer, base, true, force_local);
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 상대 시간을 요청한 경우 clock base에서 현재 시각을 알아온 후 요청한 @time을
+ * 더해 절대 시각을 구한다.
+ */
 	if (mode & HRTIMER_MODE_REL)
 		tim = ktime_add_safe(tim, base->get_time());
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 고해상도 타이머에서는 @tim 값이 변경되지 않지만,
+ * 저해상도 타이머를 사용하는 시스템에서는 최하 해상도 단위 값을 추가합니다.
+ */
 	tim = hrtimer_update_lowres(timer, tim, mode);
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 타이머의 만료시각(softexpires)과 연장가능한 슬랙 타임이 추가된 
+ *          만료시각(node.expires)를 지정한다.
+ * 최소 softexpires에서부터 최대 node.expires까지 만료될 수 있다.
+ */
 	hrtimer_set_expires_range_ns(timer, tim, delta_ns);
 
 	/* Switch the timer base, if necessary: */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 반드시 local cpu에서 처리해야하는 경우가 아니면 필요에 따라 cpu를 
+ * 스위치 할 수 있다.
+ */
 	if (!force_local) {
 		new_base = switch_hrtimer_base(timer, base,
 					       mode & HRTIMER_MODE_PINNED);
@@ -1419,6 +1520,12 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 		new_base = base;
 	}
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 등록된 hrtimer가 가장 빠른(first) 타이머로 등록되는 경우 1을 반환된다.
+ * force_local이 0인 경우에는 first 여부를 반환하여 리프로그램 여부를
+ * 결정합니다.
+ */
 	first = enqueue_hrtimer(timer, new_base, mode);
 	if (!force_local)
 		return first;
@@ -1442,8 +1549,27 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  *		softirq based mode is considered for debug purpose only!
  */
 /*
- * IAMROOT, 2022.09.17:
- * - 
+ * IAMROOT, 2022.09.17: 
+ * 타이머 시작은 @tim 시각에 expire될 예정으로 등록되는데, 
+ * @delta_ns를 0으로 요청하면 정확히 해당 시각에 expire되고,
+ * 이 값이 별도의 시간으로 주어지면 @tim 시각전에 @range_ns 이전부터 
+ * expire될 수 있게 범위시간을 제공합니다. 즉 다른 타이머로 인해 
+ * 등록한 타이머마저 같이 깨어날 수 있습니다.
+ *
+ * 이 시간을 슬랙 타임이라고 하는데 슬랙이 적용되면 여러 개의 타이머 
+ * 인터럽트들을 영역이 겹치는 시각에 모두 expire 시킬 수 있습니다.
+ *
+ * 예) *=expire 시각, <---------- 범위가 슬랙시간을 주어준 경우 
+ *
+ *                                    한꺼번에 expire
+ *                                      |
+ *    timer 1)               <----------|-----*
+ *    timer 2)                       <--|---------------*
+ *    timer 3)                          |  <-----*
+ *    timer 4)                  <-------*
+ * 
+ *    위의 4 타이머들 중 4)번 타이머가 가장 먼저 꺠어나게 되는데
+ *    슬랙 범위안에 든 타이머 1), 2) 4)번을 같이 깨워 처리합니다.
  */
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 			    u64 delta_ns, const enum hrtimer_mode mode)

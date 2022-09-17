@@ -32,6 +32,11 @@ static inline bool __timerqueue_less(struct rb_node *a, const struct rb_node *b)
  * value. Returns true if the newly added timer is the first expiring timer in
  * the queue.
  */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 추가된 노드가 가장 빠른 leftmost에 등록된 경우 true를 반환하고,
+ * 그렇지 않은 경우 false를 반환한다.
+ */
 bool timerqueue_add(struct timerqueue_head *head, struct timerqueue_node *node)
 {
 	/* Make sure we don't add nodes that are already added */

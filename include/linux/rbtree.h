@@ -161,6 +161,12 @@ static inline void rb_replace_node_cached(struct rb_node *victim,
  *
  * Returns @node when it is the new leftmost, or NULL.
  */
+/*
+ * IAMROOT, 2022.09.17: 
+ * 추가된 노드가 가장 빠른 leftmost에 등록된 경우 @node를 반환하고,
+ * 그렇지 않은 경우 NULL을 반환한다.
+ */
+
 static __always_inline struct rb_node *
 rb_add_cached(struct rb_node *node, struct rb_root_cached *tree,
 	      bool (*less)(struct rb_node *, const struct rb_node *))

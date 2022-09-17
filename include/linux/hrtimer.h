@@ -274,6 +274,16 @@ static inline void hrtimer_set_expires_range(struct hrtimer *timer, ktime_t time
 	timer->node.expires = ktime_add_safe(time, delta);
 }
 
+/*
+ * IAMROOT, 2022.09.17: 
+ * 
+ *              <-----------------------------*
+ *        _softexpires                    node.expires
+ *            @tim                         @time+@delta
+ *    
+ *        _softexpires 지점으로 타이머를 등록하지만, 
+ *        node.expires 지점까지 만료 시각을 연창할 수 있습니다.
+ */
 static inline void hrtimer_set_expires_range_ns(struct hrtimer *timer, ktime_t time, u64 delta)
 {
 	timer->_softexpires = time;
@@ -426,6 +436,7 @@ static inline void destroy_hrtimer_on_stack(struct hrtimer *timer) { }
 #endif
 
 /* Basic timer operations: */
+
 extern void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 				   u64 range_ns, const enum hrtimer_mode mode);
 
