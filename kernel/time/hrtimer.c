@@ -217,6 +217,9 @@ struct hrtimer_clock_base *lock_hrtimer_base(const struct hrtimer *timer,
  */
 /*
  * IAMROOT, 2022.09.17: 
+ * @return true migrate 불가
+ *         false migrate 가능.
+ *
  * 해당 cpu에서 대기 중인 타이머보다 더 앞쪽에 추가할 수 없으므로 
  * 이를 확인한다. 안전하게 뒤로 들어갈 수 있으면 0을 반환하고,
  * 그렇지 않은 경우 1을 반환하여 외부 루틴에서 다시 cpu를 선택해야 한다.
@@ -234,7 +237,7 @@ hrtimer_check_target(struct hrtimer *timer, struct hrtimer_clock_base *new_base)
  * IAMROOT, 2022.09.17: 
  * hrtimer가 등록될 새로운 cpu를 찾는 경우이다.
  * nohz가 적용된 시스템에서 pinned 요청이 없으면 this cpu(우선 처리) 및 
- * 주변 cpu들 중 busy한 cpu르 선택한다.
+ * 주변 cpu들 중 busy한 cpu를 선택한다.
  */
 static inline
 struct hrtimer_cpu_base *get_target_base(struct hrtimer_cpu_base *base,
@@ -270,7 +273,7 @@ switch_hrtimer_base(struct hrtimer *timer, struct hrtimer_clock_base *base,
 	this_cpu_base = this_cpu_ptr(&hrtimer_bases);
 /*
  * IAMROOT, 2022.09.17: 
- * nohz가 적용된 시스템이라면 현재 cpu(우선순위) 또는 다른 busu한 cpu를 
+ * nohz가 적용된 시스템이라면 현재 cpu(우선순위) 또는 다른 busy한 cpu를 
  * 찾아서 변경할 수 있다. (pinned=0인 경우에만)
  */
 	new_cpu_base = get_target_base(this_cpu_base, pinned);
@@ -307,7 +310,7 @@ again:
 /*
  * IAMROOT, 2022.09.17: 
  * cpu base가 현재 cpu로 바뀌지 않았고, 새로운 target으로 변경해야 하는 경우
- * again: 레이블로 이동하여 새로운 cpu를 결정하게 한다.
+ * 현재 cpu로 바꿔서 again lable로 이동한다.
  */
 		if (new_cpu_base != this_cpu_base &&
 		    hrtimer_check_target(timer, new_base)) {
@@ -728,6 +731,12 @@ __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, unsigned int active_
 	return expires_next;
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - soft일 경우 softirq_next_timer, hard일 경우 next_timer를 update한다.
+ *   softirq가 동작중일때는 hard base clock들중에서 가장 expire 시간을 가져온다.
+ *   그렇지 않을 경우 둘중에 가장빠른 expire 시간을 가져온다.
+ */
 static ktime_t hrtimer_update_next_event(struct hrtimer_cpu_base *cpu_base)
 {
 	ktime_t expires_next, soft = KTIME_MAX;
@@ -755,6 +764,10 @@ static ktime_t hrtimer_update_next_event(struct hrtimer_cpu_base *cpu_base)
 	 * If a softirq timer is expiring first, update cpu_base->next_timer
 	 * and program the hardware with the soft expiry time.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - softirq가 activate 아닐때만 hard, soft중에 빠른걸로 갱신한다.
+ */
 	if (expires_next > soft) {
 		cpu_base->next_timer = cpu_base->softirq_next_timer;
 		expires_next = soft;
@@ -782,6 +795,10 @@ static inline ktime_t hrtimer_update_base(struct hrtimer_cpu_base *base)
 /*
  * Is the high resolution mode active ?
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - hres가 동작중인지의 여부.
+ */
 static inline int __hrtimer_hres_active(struct hrtimer_cpu_base *cpu_base)
 {
 	return IS_ENABLED(CONFIG_HIGH_RES_TIMERS) ?
@@ -793,6 +810,10 @@ static inline int hrtimer_hres_active(void)
 	return __hrtimer_hres_active(this_cpu_ptr(&hrtimer_bases));
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - force reporgram을 수행한다. hres을 미지원하거나 hang중이면 안한다.
+ */
 static void __hrtimer_reprogram(struct hrtimer_cpu_base *cpu_base,
 				struct hrtimer *next_timer,
 				ktime_t expires_next)
@@ -816,9 +837,31 @@ static void __hrtimer_reprogram(struct hrtimer_cpu_base *cpu_base,
 	 * set. So we'd effectively block all timers until the T2 event
 	 * fires.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   hres가 활성 상태가 아니면 하드웨어를 아직 다시 프로그래밍할 필요가 없습니다.
+ *
+ *   마지막 타이머 인터럽트에서 hang이 감지되면 하드웨어에서 hang delay을 활성
+ *   상태로 둡니다. 우리는 시스템이 발전하기를 바랍니다. 또한 다음 시나리오를
+ *   방지합니다.
+ *
+ *   scenario:
+ *   T1은 지금부터 50ms 후에 만료됩니다.
+ *   T2는 지금부터 5초 후에 만료됩니다.
+ *
+ *   따라서 이 코드가 호출되고 하드웨어를 지금부터 5초로 다시 프로그래밍합니다.
+ *   그 이후의 hrtimer_start는 hang_detected가 설정되어 있기 때문에 하드웨어를
+ *   다시 프로그래밍하지 않습니다. 따라서 T2 이벤트가 발생할 때까지 모든 타이머를
+ *   효과적으로 차단합니다.
+ */
 	if (!__hrtimer_hres_active(cpu_base) || cpu_base->hang_detected)
 		return;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - expires_next로 force reprogram 요청.
+ */
 	tick_program_event(expires_next, 1);
 }
 
@@ -829,7 +872,7 @@ static void __hrtimer_reprogram(struct hrtimer_cpu_base *cpu_base,
  */
 /*
  * IAMROOT, 2022.09.17:
- * - 
+ * - force reprogram.
  */
 static void
 hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
@@ -838,6 +881,11 @@ hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
 
 	expires_next = hrtimer_update_next_event(cpu_base);
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - update후 가져온 expire시간이 변경되지 않았다면 return.
+ *   그게 아니라면 reporgram.
+ */
 	if (skip_equal && expires_next == cpu_base->expires_next)
 		return;
 
@@ -950,6 +998,23 @@ static void retrigger_next_event(void *arg)
  *
  * Called with interrupts disabled and base->cpu_base.lock held
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - timer reprogram을 수행한다.
+ * - reprogram을 하지 않은 경우
+ *   1. @timer가 soft irq일때
+ *   1-1. soft irq가 activate일 경우 : soft irq가 끝나고 알아서 처리할것이므로 여기서
+ *                                안한다.
+ *   1-2. @timer의 softirq_expires_next보다 느린 경우.
+ *   1-3. @timer의 hard base clock보다 느린 경우.
+ *   1-4. @reprogram요청이 없는 경우.
+ *
+ *   2. hard, soft 둘다 해당.
+ *   2-1 @timer->base의 cpu_base와 this_cpu base와 같지 않은 경우
+ *        : 해당 cpu에서 언젠가 처리할것이므로 안함.
+ *   2-2 this cpu base의 hard base clock보다 느린 경우.
+ *   2-3 hrtimer가 expire 진행중인 경우 : 끝나면 알아서 reevaluate를 할것이다.
+ */
 static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 {
 	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
@@ -965,6 +1030,14 @@ static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 	if (expires < 0)
 		expires = 0;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - return
+ * 1. activated중. 
+ * 2. 현재 등록된 softirq_expires_next보다 이후라면.
+ * 3. softirq next를 갱신하고나서, 현재 등록된 hardirq보다 이후라면 return.
+ * 4. reporgram 요청이 없으면 return.
+ */
 	if (timer->is_soft) {
 		/*
 		 * soft hrtimer could be started on a remote CPU. In this
@@ -973,6 +1046,14 @@ static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 		 * first hard hrtimer on the remote CPU -
 		 * hrtimer_check_target() prevents this case.
 		 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   soft hrtimer는 원격 CPU에서 시작할 수 있습니다. 이 경우 원격 CPU에서
+ *   softirq_expires_next를 업데이트해야 합니다. 소프트 hrtimer는 원격 CPU의
+ *   첫 번째 하드 hrtimer 전에 만료되지 않습니다. hrtimer_check_target()은
+ *   이 경우를 방지합니다.
+ */
 		struct hrtimer_cpu_base *timer_cpu_base = base->cpu_base;
 
 		if (timer_cpu_base->softirq_activated)
@@ -981,6 +1062,10 @@ static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 		if (!ktime_before(expires, timer_cpu_base->softirq_expires_next))
 			return;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - expires가 가장빠른 softirq_expires_next보다 빠른상태이므로 갱신해준다.
+ */
 		timer_cpu_base->softirq_next_timer = timer;
 		timer_cpu_base->softirq_expires_next = expires;
 
@@ -989,10 +1074,18 @@ static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 			return;
 	}
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - 여기까지 왔을때 hard base clock보다 빠른상태일 것이다.
+ */
 	/*
 	 * If the timer is not on the current cpu, we cannot reprogram
 	 * the other cpus clock event device.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - @timer의 base 와 this cpu의 base가 같은 경우에만 reprogram 가능.
+ */
 	if (base->cpu_base != cpu_base)
 		return;
 
@@ -1003,6 +1096,11 @@ static void hrtimer_reprogram(struct hrtimer *timer, bool reprogram)
 	 * If the hrtimer interrupt is running, then it will reevaluate the
 	 * clock bases and reprogram the clock event device.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 이미 hrtimer가 expire되서 진행되고 있는 경우. 끝나면 어짜피 reevaluate를
+ *   할거이므로 그냥 return.
+ */
 	if (cpu_base->in_hrtirq)
 		return;
 
@@ -1346,6 +1444,8 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
  *   강제로 재프로그래밍합니다. 다른 CPU에서 타이머를 제거하면 재프로그래밍을
  *   건너뜁니다. 이 CPU의 인터럽트 이벤트가 발생하고 인터럽트 핸들러에서
  *   재프로그래밍이 발생합니다. 이것은 드문 경우이며 smp 호출보다 저렴합니다.*
+ *
+ * - @base가 this_cpu base인 경우 reprogram을 수행한다.
  */
 		debug_deactivate(timer);
 		reprogram = base->cpu_base == this_cpu_ptr(&hrtimer_bases);
@@ -1362,6 +1462,12 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
  *   타이머가 다시 시작되지 않으면 타이머가 로컬이면 다시 프로그래밍해야 합니다.
  *   로컬이고 다시 시작하려고 하는 경우 두 번 프로그래밍하지 마십시오(제거 시와
  *   잠시 후 다시 큐에 추가됨).
+ *
+ * - reporgram이 이전에 true였을경우(this_cpu와 @base가 동일한상태)
+ *   계속 true가 되는 상태.
+ *   1. restart요청을 안한 경우.
+ *   2. keep_local이 false인 경우.(true라면 여기서 reporgram을 안하고 불렀던
+ *   곳에서 reprogram을 수행할것이다.)
  */
 		if (!restart)
 			state = HRTIMER_STATE_INACTIVE;
@@ -1481,6 +1587,10 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  *   타이머를 로컬로 유지하고 첫 번째 만료 타이머인 경우 나중에 재프로그래밍을
  *   시행합니다. 이렇게 하면 기본 클록 이벤트를 두 번(제거 시 한 번, 대기열에
  *   넣은 후 한 번) 프로그래밍하지 않아도 됩니다.
+ *
+ * - force_local이 false라면 remove_hrtimer()안에서 reprogram, true라면 현재함수
+ *   맨 뒤에서 reprogram을 수행한다.
+ *   두번 reprogram을 할 수 있는 경우를 방지하는것.
  */
 	remove_hrtimer(timer, base, true, force_local);
 
@@ -1535,6 +1645,10 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	 * reprogramming on removal and enqueue. Force reprogram the
 	 * hardware by evaluating the new first expiring timer.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 현재 cpu에서 반드시 처리해야되는 경우. reprogramming.
+ */
 	hrtimer_force_reprogram(new_base->cpu_base, 1);
 	return 0;
 }
@@ -1552,9 +1666,8 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  * IAMROOT, 2022.09.17: 
  * 타이머 시작은 @tim 시각에 expire될 예정으로 등록되는데, 
  * @delta_ns를 0으로 요청하면 정확히 해당 시각에 expire되고,
- * 이 값이 별도의 시간으로 주어지면 @tim 시각전에 @range_ns 이전부터 
- * expire될 수 있게 범위시간을 제공합니다. 즉 다른 타이머로 인해 
- * 등록한 타이머마저 같이 깨어날 수 있습니다.
+ * 이 값이 별도의 slack 시간으로 주어지면 slack시간 만큼 깨어나는 시각을
+ * 유보할수있다. 즉 다른 타이머로 인해 등록한 타이머까지 같이 깨어날 수 있습니다.
  *
  * 이 시간을 슬랙 타임이라고 하는데 슬랙이 적용되면 여러 개의 타이머 
  * 인터럽트들을 영역이 겹치는 시각에 모두 expire 시킬 수 있습니다.
@@ -1596,6 +1709,10 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 
 	base = lock_hrtimer_base(timer, &flags);
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - return 0인경우 이미 reprogram을 한상태이다.
+ */
 	if (__hrtimer_start_range_ns(timer, tim, delta_ns, mode, base))
 		hrtimer_reprogram(timer, true);
 
@@ -1735,6 +1852,10 @@ static inline void hrtimer_sync_wait_running(struct hrtimer_cpu_base *base,
  * Returns:
  *  0 when the timer was not active
  *  1 when the timer was active
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - TODO
  */
 int hrtimer_cancel(struct hrtimer *timer)
 {

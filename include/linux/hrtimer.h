@@ -279,7 +279,7 @@ static inline void hrtimer_set_expires_range(struct hrtimer *timer, ktime_t time
  * 
  *              <-----------------------------*
  *        _softexpires                    node.expires
- *            @tim                         @time+@delta
+ *            @time                         @time+@delta
  *    
  *        _softexpires 지점으로 타이머를 등록하지만, 
  *        node.expires 지점까지 만료 시각을 연창할 수 있습니다.

@@ -10,6 +10,11 @@
  * idea of the (in)accuracy of timers. Timer values are rounded up to
  * this resolution values.
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - ex) hz = 1000
+ *   (10^9 + 1000 / 2) / 1000 = 1000_000 nsec = 1 msec
+ */
 #define LOW_RES_NSEC		TICK_NSEC
 #define KTIME_LOW_RES		(LOW_RES_NSEC)
 
