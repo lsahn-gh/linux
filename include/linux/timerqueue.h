@@ -30,6 +30,10 @@ extern struct timerqueue_node *timerqueue_iterate_next(
  *
  * Returns a pointer to the timer node that has the earliest expiration time.
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - rbtree에서 제일 빠른 timer node를 가져온다.
+ */
 static inline
 struct timerqueue_node *timerqueue_getnext(struct timerqueue_head *head)
 {
@@ -53,6 +57,10 @@ static inline bool timerqueue_node_expires(struct timerqueue_node *node)
 	return node->expires;
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - hrtimer는 rbtree로 되있다.
+ */
 static inline void timerqueue_init_head(struct timerqueue_head *head)
 {
 	head->rb_root = RB_ROOT_CACHED;

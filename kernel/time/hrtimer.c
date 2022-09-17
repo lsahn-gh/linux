@@ -52,6 +52,14 @@
  * Masks for selecting the soft and hard context timers from
  * cpu_base->active
  */
+
+/*
+ * IAMROOT, 2022.09.17:
+ *           7                    4                     0
+ * |          |HRTIMER_ACTIVE_SOFT | HRTIMER_ACTIVE_HARD |
+ *
+ * - active중인 base.
+ */
 #define MASK_SHIFT		(HRTIMER_BASE_MONOTONIC_SOFT)
 #define HRTIMER_ACTIVE_HARD	((1U << MASK_SHIFT) - 1)
 #define HRTIMER_ACTIVE_SOFT	(HRTIMER_ACTIVE_HARD << MASK_SHIFT)
@@ -64,6 +72,10 @@
  * into the timer bases by the hrtimer_base_type enum. When trying
  * to reach a base using a clockid, hrtimer_clockid_to_base()
  * is used to convert from clockid to the proper hrtimer_base_type.
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - hard_irq 4종류, sort_irq 4종류.
  */
 DEFINE_PER_CPU(struct hrtimer_cpu_base, hrtimer_bases) =
 {
@@ -85,6 +97,11 @@ DEFINE_PER_CPU(struct hrtimer_cpu_base, hrtimer_bases) =
 			.clockid = CLOCK_BOOTTIME,
 			.get_time = &ktime_get_boottime,
 		},
+/*
+ * IAMROOT, 2022.09.17:
+ * - TAI(Temps Atomique International)
+ *   국제원자시.
+ */
 		{
 			.index = HRTIMER_BASE_TAI,
 			.clockid = CLOCK_TAI,
@@ -113,6 +130,11 @@ DEFINE_PER_CPU(struct hrtimer_cpu_base, hrtimer_bases) =
 	}
 };
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - 0 ~ 15까지 HRTIMER_MAX_CLOCK_BASES초기화를 해놓고, posix의 4가지에 대해서
+ *   kernel에 대응하는걸로 정의해놓는다.
+ */
 static const int hrtimer_clock_to_base_table[MAX_CLOCKS] = {
 	/* Make sure we catch unsupported clockids */
 	[0 ... MAX_CLOCKS - 1]	= HRTIMER_MAX_CLOCK_BASES,
@@ -160,6 +182,10 @@ static inline bool is_migration_base(struct hrtimer_clock_base *base)
  * When the timer's base is locked, and the timer removed from list, it is
  * possible to set timer->base = &migration_base and drop the lock: the timer
  * remains locked.
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - migration중이면 loop를 돌면서 확인한다.
  */
 static
 struct hrtimer_clock_base *lock_hrtimer_base(const struct hrtimer *timer,
@@ -482,6 +508,10 @@ static inline void debug_deactivate(struct hrtimer *timer)
 	trace_hrtimer_cancel(timer);
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - @active의 첫번째 bit에 대한 base를 return한다. return 되는 bit는 clear된다.
+ */
 static struct hrtimer_clock_base *
 __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 {
@@ -490,6 +520,10 @@ __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 	if (!*active)
 		return NULL;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - 현재 idx를 구하고, active에서 idx를 뺀값으로 갱신한다.
+ */
 	idx = __ffs(*active);
 	*active &= ~(1U << idx);
 
@@ -499,6 +533,11 @@ __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 #define for_each_active_base(base, cpu_base, active)	\
 	while ((base = __next_base((cpu_base), &(active))))
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - @expires_next보다 빠른 expire를 구하는걸 시도한다.
+ * 
+ */
 static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 					 const struct hrtimer *exclude,
 					 unsigned int active,
@@ -521,7 +560,16 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 
 			timer = container_of(next, struct hrtimer, node);
 		}
+/*
+ * IAMROOT, 2022.09.17:
+ * - base의 기준 offset시간을 뺀 시각이 실제 expire 시각.
+ */
 		expires = ktime_sub(hrtimer_get_expires(timer), base->offset);
+
+/*
+ * IAMROOT, 2022.09.17:
+ * - 가장 빠른 expire 시각이면 갱ㄷ신한다.
+ */
 		if (expires < expires_next) {
 			expires_next = expires;
 
@@ -529,6 +577,10 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 			if (exclude)
 				continue;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - soft면 soft, hard면 hard측을 갱신한다.
+ */
 			if (timer->is_soft)
 				cpu_base->softirq_next_timer = timer;
 			else
@@ -540,6 +592,14 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
 	 * the clock bases so the result might be negative. Fix it up
 	 * to prevent a false positive in clockevents_program_event().
 	 */
+
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   clock_was_set()이 클럭 베이스의 base->offset을 변경했을 수 있으므로 결과가
+ *   음수일 수 있습니다. clockevents_program_event()에서 거짓 긍정을 방지하도록
+ *   수정하십시오.
+ */
 	if (expires_next < 0)
 		expires_next = 0;
 	return expires_next;
@@ -565,6 +625,23 @@ static ktime_t __hrtimer_next_event_base(struct hrtimer_cpu_base *cpu_base,
  *  - HRTIMER_ACTIVE_SOFT, or
  *  - HRTIMER_ACTIVE_HARD.
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   cpu_base를 다시 계산합니다.::*next_timer 및 가장 빠른 expires_next를
+ *   반환하지만 cpu_base는 설정하지 않습니다. ::*expires_next, 이는
+ *   hrtimer[_force]_reprogram 및 hrtimer_interrupt에서만 수행됩니다.
+ *   cpu_base를 업데이트할 때:: *expires_next 즉시 재프로그래밍 로직이 작동하지
+ *   않습니다.
+ *
+ *   softirq가 보류 중인 경우 HRTIMER_ACTIVE_SOFT 기반을 무시할 수 있습니다.
+ *   해당 타이머는 softirq가 처리될 때마다 실행되고 hrtimer_run_softirq()가 끝날
+ *   때 hrtimer_update_softirq_timer()가 이러한 기반을 다시 추가합니다. 
+ *
+ *   따라서 softirq 값은 HRTIMER_ACTIVE_SOFT 클럭 기반의 값입니다.
+ *   !softirq 값은 실제 softirq가 보류 중인 경우(이 경우 HRTIMER_ACTIVE_HARD의
+ *   최소값)가 아닌 한 HRTIMER_ACTIVE_ALL 전체의 최소값입니다.
+ */
 static ktime_t
 __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, unsigned int active_mask)
 {
@@ -573,6 +650,10 @@ __hrtimer_get_next_event(struct hrtimer_cpu_base *cpu_base, unsigned int active_
 	ktime_t expires_next = KTIME_MAX;
 
 	if (!cpu_base->softirq_activated && (active_mask & HRTIMER_ACTIVE_SOFT)) {
+/*
+ * IAMROOT, 2022.09.17:
+ * - soft base중에 actvie중인 base.
+ */
 		active = cpu_base->active_bases & HRTIMER_ACTIVE_SOFT;
 		cpu_base->softirq_next_timer = NULL;
 		expires_next = __hrtimer_next_event_base(cpu_base, NULL,
@@ -600,6 +681,10 @@ static ktime_t hrtimer_update_next_event(struct hrtimer_cpu_base *cpu_base)
 	 * soft bases. They will be handled in the already raised soft
 	 * interrupt.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - soft irq요청이 된게 없는 상황.  softirq_expires_next를 갱신한다.
+ */
 	if (!cpu_base->softirq_activated) {
 		soft = __hrtimer_get_next_event(cpu_base, HRTIMER_ACTIVE_SOFT);
 		/*
@@ -685,6 +770,10 @@ static void __hrtimer_reprogram(struct hrtimer_cpu_base *cpu_base,
  * Reprogram the event source with checking both queues for the
  * next event
  * Called with interrupts disabled and base->lock held
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 
  */
 static void
 hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
@@ -1101,6 +1190,19 @@ static int enqueue_hrtimer(struct hrtimer *timer,
  * reprogram to zero. This is useful, when the context does a reprogramming
  * anyway (e.g. timer interrupt)
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   __remove_hrtimer - 타이머를 제거하는 내부 함수.
+ *
+ *   caller base lock을 잡고 있어야 합니다.
+ *
+ *   고해상도 타이머 모드는 타이머가 다음에 만료되는 타이머일 때 clock event device를
+ *   다시 프로그래밍합니다. 호출자는 reprogram을 0으로 설정하여 이를 비활성화할
+ *   수 있습니다. 이것은 컨텍스트가 어쨌든 재프로그래밍을 수행할 때
+ *   (예: 타이머 인터럽트) 유용합니다.
+ *
+ */
 static void __remove_hrtimer(struct hrtimer *timer,
 			     struct hrtimer_clock_base *base,
 			     u8 newstate, int reprogram)
@@ -1113,6 +1215,10 @@ static void __remove_hrtimer(struct hrtimer *timer,
 	if (!(state & HRTIMER_STATE_ENQUEUED))
 		return;
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - 삭제했는데 비어있다면. 즉 첫 timer라면 bitmap에서 해당 base의 bit를 clear 해준다.
+ */
 	if (!timerqueue_del(&base->active, &timer->node))
 		cpu_base->active_bases &= ~(1 << base->index);
 
@@ -1124,12 +1230,25 @@ static void __remove_hrtimer(struct hrtimer *timer,
 	 * an superfluous call to hrtimer_force_reprogram() on the
 	 * remote cpu later on if the same timer gets enqueued again.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papgo
+ *   Note: reprogram이 false이면 cpu_base->next_timer를 업데이트하지 않습니다.
+ *   이것은 remote CPU에서 첫 번째 타이머를 제거할 때 발생합니다.
+ *   cpu_base->next_timer를 역참조하지 않으므로 아무런 해가 없습니다. 따라서 발생할
+ *   수 있는 최악의 상황은 나중에 동일한 타이머가 다시 대기열에 추가될 경우 원격
+ *   CPU에서 hrtimer_force_reprogram()을 불필요하게 호출하는 것입니다.
+ */
 	if (reprogram && timer == cpu_base->next_timer)
 		hrtimer_force_reprogram(cpu_base, 1);
 }
 
 /*
  * remove hrtimer, called with base lock held
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 
  */
 static inline int
 remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
@@ -1148,6 +1267,14 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
 		 * reprogramming happens in the interrupt handler. This is a
 		 * rare case and less expensive than a smp call.
 		 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   고해상도 모드가 활성화되고 타이머가 현재 CPU에 있을 때 타이머를 제거하고
+ *   강제로 재프로그래밍합니다. 다른 CPU에서 타이머를 제거하면 재프로그래밍을
+ *   건너뜁니다. 이 CPU의 인터럽트 이벤트가 발생하고 인터럽트 핸들러에서
+ *   재프로그래밍이 발생합니다. 이것은 드문 경우이며 smp 호출보다 저렴합니다.*
+ */
 		debug_deactivate(timer);
 		reprogram = base->cpu_base == this_cpu_ptr(&hrtimer_bases);
 
@@ -1157,6 +1284,13 @@ remove_hrtimer(struct hrtimer *timer, struct hrtimer_clock_base *base,
 		 * to be restarted, avoid programming it twice (on removal
 		 * and a moment later when it's requeued).
 		 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   타이머가 다시 시작되지 않으면 타이머가 로컬이면 다시 프로그래밍해야 합니다.
+ *   로컬이고 다시 시작하려고 하는 경우 두 번 프로그래밍하지 마십시오(제거 시와
+ *   잠시 후 다시 큐에 추가됨).
+ */
 		if (!restart)
 			state = HRTIMER_STATE_INACTIVE;
 		else
@@ -1209,6 +1343,10 @@ hrtimer_update_softirq_timer(struct hrtimer_cpu_base *cpu_base, bool reprogram)
 	hrtimer_reprogram(cpu_base->softirq_next_timer, reprogram);
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - 새로시작 or 고치는 경우.
+ */
 static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 				    u64 delta_ns, const enum hrtimer_mode mode,
 				    struct hrtimer_clock_base *base)
@@ -1224,7 +1362,22 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	 * and enforce reprogramming after it is queued no matter whether
 	 * it is the new first expiring timer again or not.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   타이머가 로컬 CPU 기반에 있고 첫 번째 만료 타이머인 경우 하드웨어를
+ *   두 번(제거 및 대기열에 넣을 때) 다시 프로그래밍하게 될 수 있습니다. 제거 시
+ *   재프로그래밍을 방지하여 이를 방지하려면 타이머를 현재 CPU에 로컬로 유지하고
+ *   새로운 첫 번째 만료 타이머인지 여부에 관계없이 대기열에 넣은 후 재프로그래밍을
+ *   시행하십시오.
+ * - lock걸고 들어온 base가 현재 cpu인지 force_local에 저장한다.
+ */
 	force_local = base->cpu_base == this_cpu_ptr(&hrtimer_bases);
+
+/*
+ * IAMROOT, 2022.09.17:
+ * - next_timer(가장 빠른 timer)인 경우인지를 한번더 확인한다.
+ */
 	force_local &= base->cpu_base->next_timer == timer;
 
 	/*
@@ -1238,6 +1391,17 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	 * avoids programming the underlying clock event twice (once at
 	 * removal and once after enqueue).
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   대기열에서 활성 타이머를 제거합니다. 현재 CPU에 대기 중이 아닌 경우
+ *   remove_hrtimer()가 원격 데이터를 올바르게 업데이트하는지 확인하십시오.
+ *
+ *   현재 CPU에 있고 첫 번째 만료 타이머에 있는 경우 재프로그래밍을 건너뛰고
+ *   타이머를 로컬로 유지하고 첫 번째 만료 타이머인 경우 나중에 재프로그래밍을
+ *   시행합니다. 이렇게 하면 기본 클록 이벤트를 두 번(제거 시 한 번, 대기열에
+ *   넣은 후 한 번) 프로그래밍하지 않아도 됩니다.
+ */
 	remove_hrtimer(timer, base, true, force_local);
 
 	if (mode & HRTIMER_MODE_REL)
@@ -1277,6 +1441,10 @@ static int __hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  *		relative (HRTIMER_MODE_REL), and pinned (HRTIMER_MODE_PINNED);
  *		softirq based mode is considered for debug purpose only!
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 
+ */
 void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 			    u64 delta_ns, const enum hrtimer_mode mode)
 {
@@ -1288,6 +1456,13 @@ void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
 	 * match on CONFIG_PREEMPT_RT = n. With PREEMPT_RT check the hard
 	 * expiry mode because unmarked timers are moved to softirq expiry.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 일반 kernel
+ *   soft 요청과 is_soft가 일치해야된다.
+ * - rt kernel
+ *   hard 요청과 is_hard가 일치해야된다.
+ */
 	if (!IS_ENABLED(CONFIG_PREEMPT_RT))
 		WARN_ON_ONCE(!(mode & HRTIMER_MODE_SOFT) ^ !timer->is_soft);
 	else
@@ -1526,6 +1701,10 @@ u64 hrtimer_next_event_without(const struct hrtimer *exclude)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - clock_id를 kernel에서 사용하는 base로 변경한다.
+ */
 static inline int hrtimer_clockid_to_base(clockid_t clock_id)
 {
 	if (likely(clock_id < MAX_CLOCKS)) {
@@ -1534,10 +1713,23 @@ static inline int hrtimer_clockid_to_base(clockid_t clock_id)
 		if (likely(base != HRTIMER_MAX_CLOCK_BASES))
 			return base;
 	}
+/*
+ * prifri, 2022.09.17:
+ * - 할당이 안된 clock_id. monotonic으로 고정시켜버린다.
+ */
 	WARN(1, "Invalid clockid %d. Using MONOTONIC\n", clock_id);
 	return HRTIMER_BASE_MONOTONIC;
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ *                   |           CONFIG_PREEMPT_RT	         |
+ *                   |       false       |       true        |
+ *                   | is_soft   is_hard | is_soft   is_hard |
+ *     OPTION 없음   | false   | false   | true    | false   |
+ * HRTIMER_MODE_SOFT | true    | false   | true    | false   |
+ * HRTIMER_MODE_HARD | false   | true    | false   | true    |
+ */
 static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 			   enum hrtimer_mode mode)
 {
@@ -1551,6 +1743,26 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 	 * interrupt context for latency reasons and because the callbacks
 	 * can invoke functions which might sleep on RT, e.g. spin_lock().
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - papago
+ *   PREEMPT_RT가 활성화된 커널에서 명시적으로 하드 인터럽트 만료 모드로 표시되지
+ *   않은 hrtimer는 대기 시간과 콜백이 RT에서 휴면할 수 있는 기능을 호출할 수 있기
+ *   때문에 소프트 인터럽트 컨텍스트로 이동됩니다. spin_lock().
+ *
+ * - 사용자 요청에 상관없이. preempt rt kernel이면,  HRTIMER_MODE_HARD가
+ *   아닐대 softtimer로 고정한다.
+ * ---
+ * - 기존 kernel
+ *   hrtimer는 hard irq에서 무조건 동작
+ *
+ * - 현재 kernel
+ *   rt 에서는 hard로 요청하지 않는한 soft irq로 동작.
+ *
+ * - hard irq : isr에서 timer에서 등록되있는 callback 호출.
+ *   soft irq : isr에서 soft irq raise를 시켜서 soft irq task(bottomhalf)가
+ *              callback 호출
+ */
 	if (IS_ENABLED(CONFIG_PREEMPT_RT) && !(mode & HRTIMER_MODE_HARD))
 		softtimer = true;
 
@@ -1563,11 +1775,28 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 	 * clock modifications, so they needs to become CLOCK_MONOTONIC to
 	 * ensure POSIX compliance.
 	 */
+/*
+ * IAMROOT, 2022.09.17:
+ * - user측에서 잘못 설정(realtime을 기준으로 relative 요청)
+ *   MONOTONIC 기준으로 하는게 정상이므로(realtime이 임의로 바뀔경우
+ *   오류동작 하기 때문에) 바꿔준다.
+ */
 	if (clock_id == CLOCK_REALTIME && mode & HRTIMER_MODE_REL)
 		clock_id = CLOCK_MONOTONIC;
 
+/*
+ * prifri, 2022.09.17:
+ * - softimer 요청이면 HRTIMER_BASE_MONOTONIC_SOFT(4)를 base로, 아니면
+ *   HRTIMER_BASE_MONOTONIC(0)를 base로 시작한다.
+ */
 	base = softtimer ? HRTIMER_MAX_CLOCK_BASES / 2 : 0;
+
+/*
+ * IAMROOT, 2022.09.17:
+ * - clock_id(9개)를 기준으로 monotonic, realtime,boottime, tai(2 * 4개)를 고른다.
+ */
 	base += hrtimer_clockid_to_base(clock_id);
+
 	timer->is_soft = softtimer;
 	timer->is_hard = !!(mode & HRTIMER_MODE_HARD);
 	timer->base = &cpu_base->clock_base[base];
@@ -1585,6 +1814,10 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
  *              The PINNED variants of the above can be handed in,
  *              but the PINNED bit is ignored as pinning happens
  *              when the hrtimer is started
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * - hrtimer 초기화.
  */
 void hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		  enum hrtimer_mode mode)
@@ -1753,6 +1986,10 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now,
 	}
 }
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - TODO
+ */
 static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
 {
 	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
@@ -2157,6 +2394,10 @@ SYSCALL_DEFINE2(nanosleep_time32, struct old_timespec32 __user *, rqtp,
 /*
  * Functions related to boot-time initialization:
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - 자료구조 초기화
+ */
 int hrtimers_prepare_cpu(unsigned int cpu)
 {
 	struct hrtimer_cpu_base *cpu_base = &per_cpu(hrtimer_bases, cpu);
@@ -2261,6 +2502,10 @@ int hrtimers_dead_cpu(unsigned int scpu)
 
 #endif /* CONFIG_HOTPLUG_CPU */
 
+/*
+ * IAMROOT, 2022.09.17:
+ * - hrtimers init.
+ */
 void __init hrtimers_init(void)
 {
 	hrtimers_prepare_cpu(smp_processor_id());

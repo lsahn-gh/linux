@@ -46,6 +46,10 @@ struct timezone {
 /*
  * The IDs of the various system clocks (for POSIX.1b interval timers):
  */
+/*
+ * IAMROOT, 2022.09.17:
+ * - posix clock은 10개가 제공된다.
+ */
 #define CLOCK_REALTIME			0
 #define CLOCK_MONOTONIC			1
 #define CLOCK_PROCESS_CPUTIME_ID	2

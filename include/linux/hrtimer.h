@@ -36,6 +36,12 @@ struct hrtimer_cpu_base;
  * HRTIMER_MODE_HARD		- Timer callback function will be executed in
  *				  hard irq context even on PREEMPT_RT.
  */
+
+/*
+ * IAMROOT, 2022.09.17:
+ * - ABS : 절대적인 시각
+ *   REL : 현재시간 + X시간 후 시각.
+ */
 enum hrtimer_mode {
 	HRTIMER_MODE_ABS	= 0x00,
 	HRTIMER_MODE_REL	= 0x01,
@@ -211,9 +217,28 @@ enum  hrtimer_base_type {
  *	 Do not dereference the pointer because it is not reliable on
  *	 cross cpu removals.
  */
+
+/*
+ * IAMROOT, 2022.09.17:
+ * @softirq_activated: softirq가 처리되고 있는 도중(interrupt). 곧 demon도작.
+ * @softirq_expires_next: 
+ */
 struct hrtimer_cpu_base {
 	raw_spinlock_t			lock;
 	unsigned int			cpu;
+/*
+ * IAMROOT, 2022.09.17:
+ *
+ * - base->index(enum hrtimer_base_type)에 rbtree가 하나라도 존재하는지를 표시한다.
+ * - ex) HRTIMER_BASE_REALTIME가 set이라면
+ * idx |0|1|2|3|4|5|6|7|
+ *     |0|1|0|0|0|0|0|0|
+ *        ^
+ *        rbtree
+ *         /\
+ *        .. ..
+ * 해당 base에 timer 가 존재하는지 빠르게 알아보기 위함이다.
+ */
 	unsigned int			active_bases;
 	unsigned int			clock_was_set_seq;
 	unsigned int			hres_active		: 1,
@@ -411,6 +436,11 @@ extern void hrtimer_start_range_ns(struct hrtimer *timer, ktime_t tim,
  * @mode:	timer mode: absolute (HRTIMER_MODE_ABS) or
  *		relative (HRTIMER_MODE_REL), and pinned (HRTIMER_MODE_PINNED);
  *		softirq based mode is considered for debug purpose only!
+ */
+/*
+ * IAMROOT, 2022.09.17:
+ * @tim nano sec
+ * - timer 요청.
  */
 static inline void hrtimer_start(struct hrtimer *timer, ktime_t tim,
 				 const enum hrtimer_mode mode)
