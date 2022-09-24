@@ -27,6 +27,11 @@ static inline u64 clocksource_delta(u64 now, u64 last, u64 mask)
 	return ret & ~(mask >> 1) ? 0 : ret;
 }
 #else
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - cycle delta
+ */
 static inline u64 clocksource_delta(u64 now, u64 last, u64 mask)
 {
 	return (now - last) & mask;

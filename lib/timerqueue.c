@@ -17,6 +17,11 @@
 #define __node_2_tq(_n) \
 	rb_entry((_n), struct timerqueue_node, node)
 
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - expires를 기준으로 정렬한다.
+ */
 static inline bool __timerqueue_less(struct rb_node *a, const struct rb_node *b)
 {
 	return __node_2_tq(a)->expires < __node_2_tq(b)->expires;

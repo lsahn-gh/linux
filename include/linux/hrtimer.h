@@ -123,6 +123,14 @@ enum hrtimer_restart {
  */
 struct hrtimer {
 	struct timerqueue_node		node;
+
+/*
+ * IAMROOT, 2022.09.24:
+ *  
+ * - slack --|---------------|---
+ *           ^               ^
+ *           _softexpires    node.expires
+ */
 	ktime_t				_softexpires;
 	enum hrtimer_restart		(*function)(struct hrtimer *);
 	struct hrtimer_clock_base	*base;

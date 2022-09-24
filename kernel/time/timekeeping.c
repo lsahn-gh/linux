@@ -45,6 +45,10 @@ DEFINE_RAW_SPINLOCK(timekeeper_lock);
  * The most important data for readout fits into a single 64 byte
  * cache line.
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - 현새 시각을 관리하기 위한 구조체.
+ */
 static struct {
 	seqcount_raw_spinlock_t	seq;
 	struct timekeeper	timekeeper;
@@ -186,6 +190,10 @@ static inline void tk_update_sleep_time(struct timekeeper *tk, ktime_t delta)
  * a read of the fast-timekeeper tkrs (which is protected by its own locking
  * and update logic).
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - read 함수를 통해 clocksource의 clock을 알아 온다.
+ */
 static inline u64 tk_clock_read(const struct tk_read_base *tkr)
 {
 	struct clocksource *clock = READ_ONCE(tkr->clock);
@@ -279,6 +287,11 @@ static inline u64 timekeeping_get_delta(const struct tk_read_base *tkr)
 static inline void timekeeping_check_update(struct timekeeper *tk, u64 offset)
 {
 }
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - clock delta = now(tk_clock_read) - old(tkr->cycle_last)
+ */
 static inline u64 timekeeping_get_delta(const struct tk_read_base *tkr)
 {
 	u64 cycle_now, delta;
@@ -368,7 +381,10 @@ static void tk_setup_internals(struct timekeeper *tk, struct clocksource *clock)
 }
 
 /* Timekeeper helper functions. */
-
+/*
+ * IAMROOT, 2022.09.24:
+ * - clock을 ns로 변환한다.
+ */
 static inline u64 timekeeping_delta_to_ns(const struct tk_read_base *tkr, u64 delta)
 {
 	u64 nsec;
@@ -379,6 +395,12 @@ static inline u64 timekeeping_delta_to_ns(const struct tk_read_base *tkr, u64 de
 	return nsec;
 }
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - tkr에 저장된 시간을오부터 지나간 시간(ns)를 알아온다.
+ * - delta = now(clock을 callback에서 읽음) - old(tkr에 있는값)
+ *   delta를 ns로 변환하여 return.
+ */
 static inline u64 timekeeping_get_ns(const struct tk_read_base *tkr)
 {
 	u64 delta;
@@ -2285,6 +2307,11 @@ void do_timer(unsigned long ticks)
  *
  * Called from hrtimer_interrupt() or retrigger_next_event()
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - timekeeper로 인자값들을 update해준다.
+ *   mono는 항상 offset이 0이기 때문에 할필요가 없다.
+ */
 ktime_t ktime_get_update_offsets_now(unsigned int *cwsseq, ktime_t *offs_real,
 				     ktime_t *offs_boot, ktime_t *offs_tai)
 {
@@ -2293,13 +2320,25 @@ ktime_t ktime_get_update_offsets_now(unsigned int *cwsseq, ktime_t *offs_real,
 	ktime_t base;
 	u64 nsecs;
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - seqlock으로 인자값들을 tk 값으로 갱신한다.
+ */
 	do {
 		seq = read_seqcount_begin(&tk_core.seq);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - base + delta nsec로 now의 완전한 시각을 구한다.
+ */
 		base = tk->tkr_mono.base;
 		nsecs = timekeeping_get_ns(&tk->tkr_mono);
 		base = ktime_add_ns(base, nsecs);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - sequence가 바뀌엇을대만 갱신을 한다. 즉 interrupt 발생 시간을 저장한다.
+ */
 		if (*cwsseq != tk->clock_was_set_seq) {
 			*cwsseq = tk->clock_was_set_seq;
 			*offs_real = tk->offs_real;
@@ -2308,6 +2347,11 @@ ktime_t ktime_get_update_offsets_now(unsigned int *cwsseq, ktime_t *offs_real,
 		}
 
 		/* Handle leapsecond insertion adjustments */
+/*
+ * IAMROOT, 2022.09.24:
+ * - tk가 발생한 interrupt 시간보다 한참 지나서 이 루틴에 들어왔다면
+ *   real time은 overflow된 1초를 빼준다.
+ */
 		if (unlikely(base >= tk->next_leap_ktime))
 			*offs_real = ktime_sub(tk->offs_real, ktime_set(1, 0));
 

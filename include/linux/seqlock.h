@@ -326,6 +326,23 @@ SEQCOUNT_LOCKNAME(ww_mutex,     struct ww_mutex, true,     &s->lock->base, ww_mu
  *
  * Return: count to be passed to read_seqcount_retry()
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   __read_seqcount_begin() - 장벽 없이 seqcount_t 읽기 섹션을 시작합니다. 
+ *
+ *   @s: seqcount_t 또는 seqcount_LOCKNAME_t 변형에 대한 포인터입니다.
+ *
+ *   __read_seqcount_begin은 read_seqcount_begin과 비슷하지만 smp_rmb() 장벽이
+ *   없습니다. 호출자는 이 중요한 섹션에서 보호할 변수를 실제로 로드하기 전에
+ *   smp_rmb() 또는 이에 상응하는 순서가 제공되었는지 확인해야 합니다.
+ *
+ *   중요한 코드에서만 신중하게 사용하고 장벽이 제공되는 방식을 설명합니다. 
+ *
+ *   return: read_seqcount_retry()에 전달할 카운트.
+ *
+ * - raw_write_seqcount_barrier()과 같이 본다.
+ */
 #define __read_seqcount_begin(s)					\
 ({									\
 	unsigned __seq;							\
@@ -621,6 +638,24 @@ static inline void do_write_seqcount_end(seqcount_t *s)
  *
  *		WRITE_ONCE(X, false);
  *      }
+ */
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   이것은 일반적인 일관성 보증 대신 주문 보증을 제공하는 데 사용할 수 있습니다.
+ *   두 개의 연속적인 wmb()를 접을 수 있기 때문에 하나의 wmb가 더 저렴합니다. 
+ *
+ *   장벽을 둘러싼 쓰기는 원자성으로 선언되어야 합니다(예: WRITE_ONCE를 통해):
+ *   a) 컴파일러 최적화를 피하면서 쓰기를 원자적으로 다른 스레드에서 볼 수 있도록
+ *   합니다. b) 어떤 쓰기가 독자의 임계 영역에 전파될 것인지 문서화합니다.
+ *   이는 독자가 진행 중인 쓰기를 인식할 수 있도록 장벽 전후의 쓰기가 모두
+ *   seq-writer 임계 섹션에 포함되지 않기 때문에 필요합니다.
+ *
+ * - 빈번한 갱신상황에 다른 core들이 빠르게 인지해야될때
+ * - __read_seqcount_begin(), __read_seqcount_retry()와 같이 본다.
+ *
+ * - write를 한시점에서 모든 core가 sequence를 읽을때 갱신된것을 보장해야 될때.
  */
 #define raw_write_seqcount_barrier(s)					\
 	do_raw_write_seqcount_barrier(seqprop_ptr(s))

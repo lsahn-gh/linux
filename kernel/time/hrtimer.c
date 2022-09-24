@@ -262,6 +262,10 @@ struct hrtimer_cpu_base *get_target_base(struct hrtimer_cpu_base *base,
  * to the current CPU or leave it on the previously assigned CPU if
  * the timer callback is currently running.
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - cpu상황에 따라 timer를 다른 cpu의 clock base로 옮긴다.
+ */
 static inline struct hrtimer_clock_base *
 switch_hrtimer_base(struct hrtimer *timer, struct hrtimer_clock_base *base,
 		    int pinned)
@@ -564,6 +568,10 @@ __next_base(struct hrtimer_cpu_base *cpu_base, unsigned int *active)
 	return &cpu_base->clock_base[idx];
 }
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - cpu_base의 active mask의 clock base를 iterate한다.
+ */
 #define for_each_active_base(base, cpu_base, active)	\
 	while ((base = __next_base((cpu_base), &(active))))
 
@@ -776,6 +784,11 @@ static ktime_t hrtimer_update_next_event(struct hrtimer_cpu_base *cpu_base)
 	return expires_next;
 }
 
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - hard irq offset 을 갱신한다음에 soft irq에도 적용한다.
+ */
 static inline ktime_t hrtimer_update_base(struct hrtimer_cpu_base *base)
 {
 	ktime_t *offs_real = &base->clock_base[HRTIMER_BASE_REALTIME].offset;
@@ -805,6 +818,10 @@ static inline int __hrtimer_hres_active(struct hrtimer_cpu_base *cpu_base)
 		cpu_base->hres_active : 0;
 }
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - this_cpu의 hrtime 동작여부 확인.
+ */
 static inline int hrtimer_hres_active(void)
 {
 	return __hrtimer_hres_active(this_cpu_ptr(&hrtimer_bases));
@@ -899,6 +916,10 @@ hrtimer_force_reprogram(struct hrtimer_cpu_base *cpu_base, int skip_equal)
  * High resolution timer enabled ?
  */
 static bool hrtimer_hres_enabled __read_mostly  = true;
+/*
+ * IAMROOT, 2022.09.24:
+ * - hr timer가 동작하는 최소 실행 시간.
+ */
 unsigned int hrtimer_resolution __read_mostly = LOW_RES_NSEC;
 EXPORT_SYMBOL_GPL(hrtimer_resolution);
 
@@ -1277,6 +1298,34 @@ void unlock_hrtimer_base(const struct hrtimer *timer, unsigned long *flags)
  * Note: This only updates the timer expiry value and does not requeue
  * the timer.
  */
+/*
+ * IAMROOT, 2022.09.24:
+ * - ex) orun = 0 (old time ----------> new time)
+ *
+ *   1. 만료시각이 now보다 뒤에 이미 설정되있다.
+ *   vNow    vExpire
+ *   |-------|
+ *
+ *   2. timer가 enqueued 상태.
+ *
+ * - ex) orun = 1
+ *   1. delta가 interval보다 짧은상태.
+ *   <---delta --->
+ *   vExpire       vNow
+ *   |-------------*---|-----------------|
+ *   <-interval-------->            
+ *                     ^NewExpire
+ *
+ * - ex) orun = 2
+ *
+ *   1. delta가 interval보다 나중일때
+ *   <---delta --------------->
+ *   vExpire                   vNow
+ *   |-----------------|-------*---------|
+ *   <-interval-------->                 ^NewExpire
+ *
+ * - next expire 시간을 interval 단위로 갱신한다.
+ */
 u64 hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
 {
 	u64 orun = 1;
@@ -1284,20 +1333,67 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
 
 	delta = ktime_sub(now, hrtimer_get_expires(timer));
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - expire시간이 아직 안지낫으면 return.
+ *   over_run이 없어서 return 0.
+ */
 	if (delta < 0)
 		return 0;
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - 이미 실행 대기중. 
+ */
 	if (WARN_ON(timer->state & HRTIMER_STATE_ENQUEUED))
 		return 0;
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - @internal이 hardware 지원시간보다 낮을경우 보정한다.
+ */
 	if (interval < hrtimer_resolution)
 		interval = hrtimer_resolution;
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - 실행되야될 timer가 internal보다 지낫다면.
+ */
 	if (unlikely(delta >= interval)) {
 		s64 incr = ktime_to_ns(interval);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - interval 개수 = delta / interval.
+ */
 		orun = ktime_divns(delta, incr);
+
+/*
+ * IAMROOT, 2022.09.24:
+ * -
+ *  1
+ *   <----------- delta -------------------->
+ *   vExpire                                 vNow
+ *   |-------|-------|-------|-------|-------|
+ *   <-incr->
+ *   orun = delta / incr = 5
+ *
+ *  2.
+ *   <----------- delta -------->
+ *   vExpire                      vNow
+ *   |-------|-------|-------|-------|----
+ *   <-incr->                    <------->
+ *                                <-incr->
+ *   orun = delta / incr = 3.
+ *   now보다 전시간이므로 orun을 하나 더 추가.
+ *   orun = 3 + 1 = 4
+ *
+ */
 		hrtimer_add_expires_ns(timer, incr * orun);
+/*
+ * IAMROOT, 2022.09.24:
+ * - 예외처리.
+ */
 		if (hrtimer_get_expires_tv64(timer) > now)
 			return orun;
 		/*
@@ -1501,6 +1597,10 @@ static inline ktime_t hrtimer_update_lowres(struct hrtimer *timer, ktime_t tim,
 	return tim;
 }
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - softirq만 갱신해준다. next timer가 있다면 reprogram
+ */
 static void
 hrtimer_update_softirq_timer(struct hrtimer_cpu_base *cpu_base, bool reprogram)
 {
@@ -2081,6 +2181,11 @@ EXPORT_SYMBOL_GPL(hrtimer_init);
  *
  * It is important for this function to not return a false negative.
  */
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - @timer가 queue에 있거나 running중인지 확인한다.
+ */
 bool hrtimer_active(const struct hrtimer *timer)
 {
 	struct hrtimer_clock_base *base;
@@ -2090,6 +2195,12 @@ bool hrtimer_active(const struct hrtimer *timer)
 		base = READ_ONCE(timer->base);
 		seq = raw_read_seqcount_begin(&base->seq);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - 탈출조건
+ *   1. timer가 queue에 있다.
+ *   2. running중인 timer가 timer다.
+ */
 		if (timer->state != HRTIMER_STATE_INACTIVE ||
 		    base->running == timer)
 			return true;
@@ -2097,6 +2208,10 @@ bool hrtimer_active(const struct hrtimer *timer)
 	} while (read_seqcount_retry(&base->seq, seq) ||
 		 base != READ_ONCE(timer->base));
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - timer->state == HRTIMER_STATE_INACTIVE && base->running != timer
+ */
 	return false;
 }
 EXPORT_SYMBOL_GPL(hrtimer_active);
@@ -2119,6 +2234,31 @@ EXPORT_SYMBOL_GPL(hrtimer_active);
  * __run_hrtimer() invocations.
  */
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   __run_hrtimer()의 write_seqcount_barrier()는 사물을 3개의 개별 섹션으로
+ *   나눕니다.
+ *
+ *  - queued:	the timer is queued
+ *  - callback:	the timer is being ran
+ *  - post:	the timer is inactive or (re)queued
+ *
+ *  read side측에서 우리는 같은 섹션에서 실행 중인 timer->state 및 cpu_base->state를
+ *  관찰했는지 확인하고, 보는 동안 변경된 사항이 있으면 재시도합니다.
+ *  여기에는 sequence number만으로는 충분하지 않기 때문에 timer->base 변경이
+ *  포함됩니다.
+ *
+ *  그렇지 않으면 read side측이 여러 연속 __run_hrtimer()호출로 번지는 경우
+ *  여전히 false negative를 관찰할수 있기 때문에 sequence number가 필요 합니다.
+ *
+ * - timer를 실행시킨다.
+ *   timer를 queue에서 빼와(remove, state = HRTIMER_STATE_INACTIVE)
+ *   base->running에 갱신하고, 실행이 끝나면 base->running을 NULL로 다시 갱신한다.
+ * - read side(hrtimer_active()) 측에서 동기화를 위해 barrier seqcount를 사용한다.
+ *   (__run_timers()가 많이 호출되는 상황에서, read side가 true가 되야되는
+ *   상황임에도 false가 호출되는 상황이 있을수 있기 때문에)
+ */
 static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 			  struct hrtimer_clock_base *base,
 			  struct hrtimer *timer, ktime_t *now,
@@ -2131,7 +2271,21 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	lockdep_assert_held(&cpu_base->lock);
 
 	debug_deactivate(timer);
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - 1.
+ *   base->running == NULL
+ *   timer->state  == HRTIMER_STATE_ENQUEUED
+ */
 	base->running = timer;
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - 2.
+ *   base->running == timer
+ *   timer->state  == HRTIMER_STATE_ENQUEUED
+ */
 
 	/*
 	 * Separate the ->running assignment from the ->state assignment.
@@ -2140,8 +2294,27 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 * hrtimer_active() cannot observe base->running == NULL &&
 	 * timer->state == INACTIVE.
 	 */
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   Separate the ->running assignment from the ->state assignment. 
+ *
+ *   일반 쓰기 장벽과 마찬가지로 이것은 hrtimer_active()의 읽기 측이
+ *   base->running == NULL && timer->state == INACTIVE를 관찰할 수 없도록 합니다.
+ *
+ * - 3. seq홀수 -> smp_wmb -> seq짝수 
+ *   base->running == timer
+ *   timer->state  == HRTIMER_STATE_ENQUEUED
+ */
 	raw_write_seqcount_barrier(&base->seq);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - @timer를 실행할 예정이다. 등록되있는 대기열에서 뺀다음에 실행을 준비한다.
+ * - 4.
+ *   base->running == timer
+ *   timer->state  == HRTIMER_STATE_INACTIVE
+ */
 	__remove_hrtimer(timer, base, HRTIMER_STATE_INACTIVE, 0);
 	fn = timer->function;
 
@@ -2150,6 +2323,13 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 * timer is restarted with a period then it becomes an absolute
 	 * timer. If its not restarted it does not matter.
 	 */
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   TIME_LOW_RES 경우에 대해 '상대적' 플래그를 지웁니다. 타이머가 마침표와 함께
+ *   다시 시작되면 절대 타이머가 됩니다. 다시 시작하지 않으면 문제가 되지
+ *   않습니다.
+ */
 	if (IS_ENABLED(CONFIG_TIME_LOW_RES))
 		timer->is_rel = false;
 
@@ -2162,6 +2342,10 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	trace_hrtimer_expire_entry(timer, now);
 	expires_in_hardirq = lockdep_hrtimer_enter(timer);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - 실행
+ */
 	restart = fn(timer);
 
 	lockdep_hrtimer_exit(expires_in_hardirq);
@@ -2177,6 +2361,11 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 * hrtimer_start_range_ns() can have popped in and enqueued the timer
 	 * for us already.
 	 */
+/*
+ * IAMROOT, 2022.09.24:
+ * - @timer가 restart를 해야되는데, 그사이에 다시 queue에 안들어 가있다면
+ *   queue에 넣는다.
+ */
 	if (restart != HRTIMER_NORESTART &&
 	    !(timer->state & HRTIMER_STATE_ENQUEUED))
 		enqueue_hrtimer(timer, base, HRTIMER_MODE_ABS);
@@ -2188,12 +2377,22 @@ static void __run_hrtimer(struct hrtimer_cpu_base *cpu_base,
 	 * hrtimer_active() cannot observe base->running.timer == NULL &&
 	 * timer->state == INACTIVE.
 	 */
+
 	raw_write_seqcount_barrier(&base->seq);
 
 	WARN_ON_ONCE(base->running != timer);
+
+/*
+ * IAMROOT, 2022.09.24:
+ * - running이 완료 됬다.
+ */
 	base->running = NULL;
 }
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - clock base를 iterate하며 slack range에따라 timer를 실행한다. 
+ */
 static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now,
 				 unsigned long flags, unsigned int active_mask)
 {
@@ -2206,6 +2405,23 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now,
 
 		basenow = ktime_add(now, base->offset);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - 가장 빨리 wakeup되야 되는 timer를 가져온다.
+ *
+ *
+ * - ex) timer1, timer2, timer3이 다음과 같은상황
+ *        (_softexpires --------------- node.expire)
+ *
+ *                           vinterrup 
+ *     timer1 ----------------
+ *     timer2     ----------------------
+ *     timer3               ---------
+ *
+ *  next_expire는 node.expire가 제일빠른 timer1로 선택되고, timer1이 실행될때
+ *  timer2, timer3도 같이 실행된다.
+ *  (node.expire 순서대로 실행. timer1->timer3->timer2)
+ */
 		while ((node = timerqueue_getnext(&base->active))) {
 			struct hrtimer *timer;
 
@@ -2223,6 +2439,19 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now,
 			 * are right-of a not yet expired timer, because that
 			 * timer will have to trigger a wakeup anyway.
 			 */
+/*
+ * IAMROOT, 2022.09.24:
+ * - papago
+ *   softexpire를 사용하는 즉각적인 목표는 소프트 만료 후 가장 빠른 인터럽트에서
+ *   타이머를 실행하지 않고 깨우기를 최소화하는 것입니다.
+ *   이를 통해 겹치는 간격에 대한 찌르는 쿼리에 응답할 수 있는 우선 순위 검색
+ *   트리를 사용하지 않고 대신 이미 가지고 있는 간단한 BST를 사용할 수 있습니다.
+ *   아직 만료되지 않은 타이머의 오른쪽에 있는 타이머를 지연시켜 추가 깨우기를
+ *   추가하지 않습니다. 해당 타이머는 어쨌든 깨우기를 트리거해야 하기 때문입니다.
+ *
+ * - 현재시각이 _softexpires에 도래하지 않았다면, 즉 제일 빠른 timer의 slack
+ *   범위이내로 들어오지 않았다면 그냥 종료.
+ */
 			if (basenow < hrtimer_get_softexpires_tv64(timer))
 				break;
 
@@ -2235,7 +2464,8 @@ static void __hrtimer_run_queues(struct hrtimer_cpu_base *cpu_base, ktime_t now,
 
 /*
  * IAMROOT, 2022.09.17:
- * - TODO
+ * - this_cpu의 expire된 softirq용 hrtimer를 clock base를 순회하며
+ *   _softexpires를 지난 timer들을 전부 실행한다.
  */
 static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
 {
@@ -2243,9 +2473,17 @@ static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
 	unsigned long flags;
 	ktime_t now;
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - cpu_base->softirq_expiry_lock, cpu_base->lock 을 lock 건다.
+ */
 	hrtimer_cpu_base_lock_expiry(cpu_base);
 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
 
+/*
+ * IAMROOT, 2022.09.24:
+ * - clock base들의 offset 갱신.
+ */
 	now = hrtimer_update_base(cpu_base);
 	__hrtimer_run_queues(cpu_base, now, flags, HRTIMER_ACTIVE_SOFT);
 
