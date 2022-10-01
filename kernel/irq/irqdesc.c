@@ -348,7 +348,7 @@ static void irq_sysfs_del(struct irq_desc *desc) {}
 static RADIX_TREE(irq_desc_tree, GFP_KERNEL);
 
 static void irq_insert_desc(unsigned int irq, struct irq_desc *desc)
-
+{
 	radix_tree_insert(&irq_desc_tree, irq, desc);
 }
 
