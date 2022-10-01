@@ -28,6 +28,10 @@ void (*handle_arch_irq)(struct pt_regs *) __ro_after_init;
  *
  * Handles spurious and unhandled IRQ's. It also prints a debugmessage.
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * - invalid handle이 등록될려할때 대신 등록되는것. 
+ */
 void handle_bad_irq(struct irq_desc *desc)
 {
 	unsigned int irq = irq_desc_get_irq(desc);

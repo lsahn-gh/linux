@@ -136,6 +136,28 @@ EXPORT_SYMBOL_GPL(irq_domain_free_fwnode);
  * Allocates and initializes an irq_domain structure.
  * Returns pointer to IRQ domain, or NULL on failure.
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * - legacy
+ *   legacy irq_domain_create_legacy
+ * - simple
+ *   irq_domain_create_simple
+ * - linear
+ *   irq_domain_create_linear
+ * - nomap
+ *   irq_domain_add_nomap
+ * - tree
+ *   irq_domain_create_tree
+ * 
+ *          size                hwirq_max          direct_max (mapping)
+ * nomap  | 0                   max_irq            max_irq
+ * linear | size                size               0
+ * tree   | 0                   ~0                 0
+ * simple | size                size               0           yes
+ * legacy | size + first_hwirq  size + first_hwirq 0           yes
+ *
+ * - ops example : gic_irq_domain_ops
+ */
 struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int size,
 				    irq_hw_number_t hwirq_max, int direct_max,
 				    const struct irq_domain_ops *ops,
@@ -146,16 +168,31 @@ struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int s
 
 	static atomic_t unknown_domains;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - size && direct_max 인 경우는 없다.
+ * - nomap인 경우만 direct_max가 존재한다.
+ */
 	if (WARN_ON((size && direct_max) ||
 		    (!IS_ENABLED(CONFIG_IRQ_DOMAIN_NOMAP) && direct_max)))
 		return NULL;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - linear mapping 배열을 size만큼 만든다.
+ *   reverse map. struct irq_data __rcu
+ *
+ */
 	domain = kzalloc_node(struct_size(domain, revmap, size),
 			      GFP_KERNEL, of_node_to_nid(to_of_node(fwnode)));
 	if (!domain)
 		return NULL;
 
 	if (is_fwnode_irqchip(fwnode)) {
+/*
+ * IAMROOT, 2022.10.01:
+ * - dt에서 왔으면 type에 따라 name, fwnode, flags를 초기화한다.
+ */
 		fwid = container_of(fwnode, struct irqchip_fwid, fwnode);
 
 		switch (fwid->type) {
@@ -169,6 +206,10 @@ struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int s
 			}
 			domain->flags |= IRQ_DOMAIN_NAME_ALLOCATED;
 			break;
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQCHIP_FWNODE_REAL
+ */
 		default:
 			domain->fwnode = fwnode;
 			domain->name = fwid->name;
@@ -176,6 +217,11 @@ struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int s
 		}
 	} else if (is_of_node(fwnode) || is_acpi_device_node(fwnode) ||
 		   is_software_node(fwnode)) {
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - 이경우엔 이름을 %pfw형식으로 만들어서 넣는다.
+ */
 		char *name;
 
 		/*
@@ -196,6 +242,10 @@ struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int s
 		domain->flags |= IRQ_DOMAIN_NAME_ALLOCATED;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 이렇게 했는데도 이름이 없으면 unknown으로 만든다.
+ */
 	if (!domain->name) {
 		if (fwnode)
 			pr_err("Invalid fwnode type for irqdomain\n");
@@ -218,6 +268,10 @@ struct irq_domain *__irq_domain_add(struct fwnode_handle *fwnode, unsigned int s
 	domain->host_data = host_data;
 	domain->hwirq_max = hwirq_max;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - direct_max는 nomap만 해당된다.
+ */
 	if (direct_max) {
 		size = direct_max;
 		domain->flags |= IRQ_DOMAIN_FLAG_NO_MAP;
@@ -1296,6 +1350,12 @@ static int irq_domain_alloc_irq_data(struct irq_domain *domain,
  * @domain:	domain to match
  * @virq:	IRQ number to get irq_data
  */
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - child부터 시작해서 parent에 거슬러 올라가며 domain이 같은 irq_data를
+ *   return 한다.
+ */
 struct irq_data *irq_domain_get_irq_data(struct irq_domain *domain,
 					 unsigned int virq)
 {
@@ -1317,6 +1377,11 @@ EXPORT_SYMBOL_GPL(irq_domain_get_irq_data);
  * @hwirq:	The hwirq number
  * @chip:	The associated interrupt chip
  * @chip_data:	The associated chip data
+ */
+/*
+ * IAMROOT, 2022.10.01:
+ * - virq를 가진 irq_data 계층에서 @domain과 일치하는 irq_data를 가져오고,
+ *   해당 irq_data에 @hwirq, @chip, @chip_data를 넣는다.
  */
 int irq_domain_set_hwirq_and_chip(struct irq_domain *domain, unsigned int virq,
 				  irq_hw_number_t hwirq, struct irq_chip *chip,
@@ -1345,6 +1410,10 @@ EXPORT_SYMBOL_GPL(irq_domain_set_hwirq_and_chip);
  * @handler:		The interrupt flow handler
  * @handler_data:	The interrupt flow handler data
  * @handler_name:	The interrupt handler name
+ */
+/*
+ * IAMROOT, 2022.10.01:
+ * - 
  */
 void irq_domain_set_info(struct irq_domain *domain, unsigned int virq,
 			 irq_hw_number_t hwirq, struct irq_chip *chip,
@@ -1749,6 +1818,10 @@ static void __irq_domain_deactivate_irq(struct irq_data *irq_data)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - parent부터 activate. gic v3 its같은경우엔 actiate ops가 존재한다.
+ */
 static int __irq_domain_activate_irq(struct irq_data *irqd, bool reserve)
 {
 	int ret = 0;
@@ -1756,12 +1829,26 @@ static int __irq_domain_activate_irq(struct irq_data *irqd, bool reserve)
 	if (irqd && irqd->domain) {
 		struct irq_domain *domain = irqd->domain;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - parent 재귀.
+ */
 		if (irqd->parent_data)
 			ret = __irq_domain_activate_irq(irqd->parent_data,
 							reserve);
+/*
+ * IAMROOT, 2022.10.01:
+ * - parent에서 성공했으면 수행한다.
+ * - activate가 있으면 activate.
+ *   ops ex) its_domain_ops
+ */
 		if (!ret && domain->ops->activate) {
 			ret = domain->ops->activate(domain, irqd, reserve);
 			/* Rollback in case of error */
+/*
+ * IAMROOT, 2022.10.01:
+ * - 하나라도 실패하면 다시 타고올라가면서 deactivate.
+ */
 			if (ret && irqd->parent_data)
 				__irq_domain_deactivate_irq(irqd->parent_data);
 		}
@@ -1777,6 +1864,11 @@ static int __irq_domain_activate_irq(struct irq_data *irqd, bool reserve)
  *
  * This is the second step to call domain_ops->activate to program interrupt
  * controllers, so the interrupt could actually get delivered.
+ */
+/*
+ * IAMROOT, 2022.10.01:
+ * - activate 안되있면 activate 수행. actiavte는 gic v3 its.
+ *   activate가 정상적으로 수행되면 irq_data에 activate bit를 set한다.
  */
 int irq_domain_activate_irq(struct irq_data *irq_data, bool reserve)
 {
@@ -1805,6 +1897,13 @@ void irq_domain_deactivate_irq(struct irq_data *irq_data)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 계층구조로 만들 필요가 있는지를 표시
+ * - ex)
+ *    hw1 --> hw2
+ *        \-> hw3
+ */
 static void irq_domain_check_hierarchy(struct irq_domain *domain)
 {
 	/* Hierarchy irq_domains must implement callback alloc() */

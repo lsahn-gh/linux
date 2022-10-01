@@ -155,6 +155,10 @@ int irq_set_chip_data(unsigned int irq, void *data)
 }
 EXPORT_SYMBOL(irq_set_chip_data);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - virq로 desc를 가져와서 irq_data를 가져온다.
+ */
 struct irq_data *irq_get_irq_data(unsigned int irq)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
@@ -190,6 +194,12 @@ enum {
 };
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2022.10.01:
+ * @return IRQ_STARTUP_NORMAL : affinity managed가 아니면 그냥 normal로 return.
+ *         IRQ_STARTUP_MANAGED : 모든 parent까지 activate 성공.
+ *         IRQ_STARTUP_ABORT : ativate 실패
+ */
 static int
 __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 {
@@ -200,6 +210,11 @@ __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 
 	irqd_clr_managed_shutdown(d);
 
+/*
+ * prifri, 2022.10.01:
+ * - online cpu중에 aff와 겹치는게 없다면 return IRQ_STARTUP_ABORT.
+ *   @force 요청이 있다면 warning print를 해준다.
+ */
 	if (cpumask_any_and(aff, cpu_online_mask) >= nr_cpu_ids) {
 		/*
 		 * Catch code which fiddles with enable_irq() on a managed
@@ -207,6 +222,13 @@ __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 		 * installment or irq auto probing should not happen on
 		 * managed irqs either.
 		 */
+/*
+ * IAMROOT, 2022.10.01:
+ * - papago
+ *   관리되고 잠재적으로 종료되는 IRQ에서 enable_irq()를 사용하는 코드를 잡아라.
+ *   체인 인터럽트 설치 또는 irq 자동 프로빙은 관리되는 irq에서도 발생하지 않아야
+ *   합니다.
+ */
 		if (WARN_ON_ONCE(force))
 			return IRQ_STARTUP_ABORT;
 		/*
@@ -215,6 +237,13 @@ __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 		 * state and let the cpu hotplug mechanism start it up once
 		 * a CPU in the mask becomes available.
 		 */
+/*
+ * IAMROOT, 2022.10.01:
+ * - papago
+ *   인터럽트가 요청되었지만 해당 선호도 마스크에 온라인 CPU가 없습니다.
+ *   관리 종료 상태로 전환하고 마스크의 CPU를 사용할 수 있게 되면 CPU 핫플러그
+ *   메커니즘이 이를 시작하도록 합니다.
+ */
 		return IRQ_STARTUP_ABORT;
 	}
 	/*
@@ -233,6 +262,13 @@ __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - startup이 있으면 startup -> clr disable, clr mask.
+ *   그게 아니면 irq_enable
+ * - 주로 gpio control등을 수행한다. ex)npcmgpio_irq_startup
+ * - set bit IRQD_IRQ_STARTED
+ */
 static int __irq_startup(struct irq_desc *desc)
 {
 	struct irq_data *d = irq_desc_get_irq_data(desc);
@@ -252,6 +288,10 @@ static int __irq_startup(struct irq_desc *desc)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 진행중
+ */
 int irq_startup(struct irq_desc *desc, bool resend, bool force)
 {
 	struct irq_data *d = irq_desc_get_irq_data(desc);
@@ -260,11 +300,21 @@ int irq_startup(struct irq_desc *desc, bool resend, bool force)
 
 	desc->depth = 0;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 이미 started면 enable.
+ */
 	if (irqd_is_started(d)) {
 		irq_enable(desc);
 	} else {
 		switch (__irq_startup_managed(desc, aff, force)) {
 		case IRQ_STARTUP_NORMAL:
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQCHIP_AFFINITY_PRE_STARTUP이 있으면 먼저 irq_setup_affinity를 먼저 수행하고
+ *   그게 아니면 __irq_startup후에 수행한다.
+ */
 			if (d->chip->flags & IRQCHIP_AFFINITY_PRE_STARTUP)
 				irq_setup_affinity(desc);
 			ret = __irq_startup(desc);
@@ -295,8 +345,17 @@ int irq_activate(struct irq_desc *desc)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 
+ */
 int irq_activate_and_startup(struct irq_desc *desc, bool resend)
 {
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - 이미 activate 상태라면 warning
+ */
 	if (WARN_ON(irq_activate(desc)))
 		return 0;
 	return irq_startup(desc, resend, IRQ_START_FORCE);
@@ -332,21 +391,45 @@ void irq_shutdown_and_deactivate(struct irq_desc *desc)
 	irq_domain_deactivate_irq(&desc->irq_data);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq_enable.
+ *   enable엔 unmask도 포함된다.
+ */
 void irq_enable(struct irq_desc *desc)
 {
+/*
+ * IAMROOT, 2022.10.01:
+ * - disable 상태가 아니면 unmask. 
+ */
 	if (!irqd_irq_disabled(&desc->irq_data)) {
 		unmask_irq(desc);
 	} else {
+/*
+ * IAMROOT, 2022.10.01:
+ * - disable 상태라면 irq_enable이 필요한 hw일 경우
+ *   disable clr -> irq_enable -> irq_state_clr_masked로 진행한다.
+ */
 		irq_state_clr_disabled(desc);
 		if (desc->irq_data.chip->irq_enable) {
 			desc->irq_data.chip->irq_enable(&desc->irq_data);
 			irq_state_clr_masked(desc);
 		} else {
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq_enable이 없다면 unmask만 해주면되는듯
+ *   irq_unmask + irq_state_clr_masked
+ */
 			unmask_irq(desc);
 		}
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq disable
+ *   disable엔 unmask도 포함된다.
+ */
 static void __irq_disable(struct irq_desc *desc, bool mask)
 {
 	if (irqd_irq_disabled(&desc->irq_data)) {
@@ -418,17 +501,39 @@ static inline void mask_ack_irq(struct irq_desc *desc)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - controller에 있는 irq_mask를 막는다.
+ *   ex) gic_mask_irq
+ */
 void mask_irq(struct irq_desc *desc)
 {
+/*
+ * IAMROOT, 2022.10.01:
+ * - @desc의 irqd에 이미 mask되있다고 하면 return.
+ */
 	if (irqd_irq_masked(&desc->irq_data))
 		return;
 
 	if (desc->irq_data.chip->irq_mask) {
+/*
+ * IAMROOT, 2022.10.01:
+ * - regiset 조작.
+ */
 		desc->irq_data.chip->irq_mask(&desc->irq_data);
+/*
+ * IAMROOT, 2022.10.01:
+ * - @desc의 irqd에 mask set.
+ */
 		irq_state_set_masked(desc);
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq_unmask + irq_state_clr_masked 수행
+ * - unmask가 되있다면 안한다. unmask수행
+ */
 void unmask_irq(struct irq_desc *desc)
 {
 	if (!irqd_irq_masked(&desc->irq_data))
@@ -989,6 +1094,10 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		 * cannot enable/startup the interrupt at this point.
 		 */
 		while (irq_data) {
+/*
+ * IAMROOT, 2022.10.01:
+ * - chip 설정이 안된 irq_data를 찾는다.
+ */
 			if (irq_data->chip != &no_irq_chip)
 				break;
 			/*
@@ -1015,9 +1124,14 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 			desc->action = NULL;
 		desc->depth = 1;
 	}
+
 	desc->handle_irq = handle;
 	desc->name = name;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - install이 됬고 계층구조에서 child로 요청된경우.
+ */
 	if (handle != handle_bad_irq && is_chained) {
 		unsigned int type = irqd_get_trigger_type(&desc->irq_data);
 
@@ -1034,6 +1148,10 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 			desc->handle_irq = handle;
 		}
 
+/*
+ * prifri, 2022.10.01:
+ * - bit flag set.
+ */
 		irq_settings_set_noprobe(desc);
 		irq_settings_set_norequest(desc);
 		irq_settings_set_nothread(desc);
@@ -1042,6 +1160,10 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 
+ */
 void
 __irq_set_handler(unsigned int irq, irq_flow_handler_t handle, int is_chained,
 		  const char *name)
@@ -1083,6 +1205,10 @@ irq_set_chip_and_handler_name(unsigned int irq, struct irq_chip *chip,
 }
 EXPORT_SYMBOL_GPL(irq_set_chip_and_handler_name);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @irq에 대한 irq_desc를 구해와 flag를 @clr, @set한다.
+ */
 void irq_modify_status(unsigned int irq, unsigned long clr, unsigned long set)
 {
 	unsigned long flags, trigger, tmp;

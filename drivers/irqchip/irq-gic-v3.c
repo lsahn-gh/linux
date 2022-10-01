@@ -59,10 +59,22 @@ struct gic_chip_data {
 };
 
 static struct gic_chip_data gic_data __read_mostly;
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - gic_init_bases에서 hyp_mode가 안켜져있으면 disable시킨다.
+ *   eoi를 drop / deactivate의 두개의 기능으로 나누는 것에 대한 지원여부
+ */
 static DEFINE_STATIC_KEY_TRUE(supports_deactivate_key);
 
 #define GIC_ID_NR	(1U << GICD_TYPER_ID_BITS(gic_data.rdists.gicd_typer))
 #define GIC_LINE_NR	min(GICD_TYPER_SPIS(gic_data.rdists.gicd_typer), 1020U)
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - SPIs 확장. Extended SPIs
+ *   1020개 이상 확장 시킬수있는것인지.
+ */
 #define GIC_ESPI_NR	GICD_TYPER_ESPIS(gic_data.rdists.gicd_typer)
 
 /*
@@ -130,6 +142,10 @@ static DEFINE_PER_CPU(bool, has_rss);
 #define MPIDR_RS(mpidr)			(((mpidr) & 0xF0UL) >> 4)
 #define gic_data_rdist()		(this_cpu_ptr(gic_data.rdists.rdist))
 #define gic_data_rdist_rd_base()	(gic_data_rdist()->rd_base)
+/*
+ * IAMROOT, 2022.10.01:
+ * - sgi_base = rd_base + 64k
+ */
 #define gic_data_rdist_sgi_base()	(gic_data_rdist_rd_base() + SZ_64K)
 
 /* Our default, arbitrary priority value. Linux only uses one anyway. */
@@ -145,6 +161,10 @@ enum gic_intid_range {
 	__INVALID_RANGE__
 };
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @hwirq로 어떤 gic인지 알아온다.
+ */
 static enum gic_intid_range __get_intid_range(irq_hw_number_t hwirq)
 {
 	switch (hwirq) {
@@ -175,6 +195,10 @@ static inline unsigned int gic_irq(struct irq_data *d)
 	return d->hwirq;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - rdist(redirect distribute)에 있는 interrupt인지 확인
+ */
 static inline bool gic_irq_in_rdist(struct irq_data *d)
 {
 	switch (get_intid_range(d)) {
@@ -206,6 +230,10 @@ static inline void __iomem *gic_dist_base(struct irq_data *d)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - rwp가 풀릴때까지 기다린다. max 1초
+ */
 static void gic_do_wait_for_rwp(void __iomem *base)
 {
 	u32 count = 1000000;	/* 1s! */
@@ -222,12 +250,20 @@ static void gic_do_wait_for_rwp(void __iomem *base)
 }
 
 /* Wait for completion of a distributor change */
+/*
+ * IAMROOT, 2022.10.01:
+ * - rwp wait.
+ */
 static void gic_dist_wait_for_rwp(void)
 {
 	gic_do_wait_for_rwp(gic_data.dist_base);
 }
 
 /* Wait for completion of a redistributor change */
+/*
+ * IAMROOT, 2022.10.01:
+ * - rd base에서 rwp wait.
+ */
 static void gic_redist_wait_for_rwp(void)
 {
 	gic_do_wait_for_rwp(gic_data_rdist_rd_base());
@@ -284,6 +320,12 @@ static void gic_enable_redist(bool enable)
 /*
  * Routines to disable, enable, EOI and route interrupts
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * @index hwirq
+ * @offset base register offset
+ * @return base register offset
+ */
 static u32 convert_offset_index(struct irq_data *d, u32 offset, u32 *index)
 {
 	switch (get_intid_range(d)) {
@@ -334,6 +376,10 @@ static u32 convert_offset_index(struct irq_data *d, u32 offset, u32 *index)
 	return offset;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - offset에 해당하는 bit가 set이면 return 1, 없으면 0
+ */
 static int gic_peek_irq(struct irq_data *d, u32 offset)
 {
 	void __iomem *base;
@@ -350,13 +396,26 @@ static int gic_peek_irq(struct irq_data *d, u32 offset)
 	return !!(readl_relaxed(base + offset + (index / 32) * 4) & mask);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @d에 해당하는 irq bit를 set하고 rwp wait를 한다.
+ */
 static void gic_poke_irq(struct irq_data *d, u32 offset)
 {
 	void (*rwp_wait)(void);
 	void __iomem *base;
 	u32 index, mask;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - index에 hwirq 번호가 가져와지고,
+ */
 	offset = convert_offset_index(d, offset, &index);
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - 가져온 hwirq번호로 irq bit를 찾아 mask에 기록한다.
+ */
 	mask = 1 << (index % 32);
 
 	if (gic_irq_in_rdist(d)) {
@@ -371,6 +430,11 @@ static void gic_poke_irq(struct irq_data *d, u32 offset)
 	rwp_wait();
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * -  Interrupt Clear-Enable Registers
+ *    clear 요청. interrupt를 disable한다.
+ */
 static void gic_mask_irq(struct irq_data *d)
 {
 	gic_poke_irq(d, GICD_ICENABLER);
@@ -391,6 +455,11 @@ static void gic_eoimode1_mask_irq(struct irq_data *d)
 		gic_poke_irq(d, GICD_ICACTIVER);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * -  Interrupt Set-Enable Registers
+ *    Set 요청. interrupt를 enable한다.
+ */
 static void gic_unmask_irq(struct irq_data *d)
 {
 	gic_poke_irq(d, GICD_ISENABLER);
@@ -570,6 +639,10 @@ static void gic_eoimode1_eoi_irq(struct irq_data *d)
 	gic_write_dir(gic_irq(d));
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * @return 0 = IRQ_SET_MASK_OK
+ */
 static int gic_set_type(struct irq_data *d, unsigned int type)
 {
 	enum gic_intid_range range;
@@ -581,10 +654,18 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 
 	range = get_intid_range(d);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - sgi는 항상 EDGE_RISING이여야 한다. 맞다면 IRQ_SET_MASK_OK를 return.
+ */
 	/* Interrupt configuration for SGIs can't be changed */
 	if (range == SGI_RANGE)
 		return type != IRQ_TYPE_EDGE_RISING ? -EINVAL : 0;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - spi는 IRQ_TYPE_LEVEL_HIGH이거나 EDGE_RISING이여야 한다.
+ */
 	/* SPIs have restrictions on the supported types */
 	if ((range == SPI_RANGE || range == ESPI_RANGE) &&
 	    type != IRQ_TYPE_LEVEL_HIGH && type != IRQ_TYPE_EDGE_RISING)
@@ -1231,6 +1312,11 @@ static void __init gic_smp_init(void)
 	set_smp_ipi_range(base_sgi, 8);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @d에 해당하는 gic register를 가져와 @mask_val의 cpu중 하나를 골라서
+ *   mpidr을 가져와 gic register에 기록한다.
+ */
 static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 			    bool force)
 {
@@ -1240,6 +1326,10 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	int enabled;
 	u64 val;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - mask_val중에 한개 선택한다.
+ */
 	if (force)
 		cpu = cpumask_first(mask_val);
 	else
@@ -1248,11 +1338,20 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	if (cpu >= nr_cpu_ids)
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - spi류들만 가능하다. per cpu류들은 안된다.
+ */
 	if (gic_irq_in_rdist(d))
 		return -EINVAL;
 
 	/* If interrupt was enabled, disable it first */
 	enabled = gic_peek_irq(d, GICD_ISENABLER);
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - enabled되있있으면 잠깐 mask해놓는다.
+ */
 	if (enabled)
 		gic_mask_irq(d);
 
@@ -1260,12 +1359,21 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	reg = gic_dist_base(d) + offset + (index * 8);
 	val = gic_mpidr_to_affinity(cpu_logical_map(cpu));
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 해당 irq에 대한 gic register를 가져와서 cpu mpdir을 write한다
+ * - *reg = val
+ */
 	gic_write_irouter(val, reg);
 
 	/*
 	 * If the interrupt was enabled, enabled it again. Otherwise,
 	 * just wait for the distributor to have digested our changes.
 	 */
+/*
+ * IAMROOT, 2022.10.01:
+ * - mask해놨으면 다시 unmask한다. 그게 아니면 wait rwp
+ */
 	if (enabled)
 		gic_unmask_irq(d);
 	else
@@ -1357,6 +1465,10 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	struct irq_chip *chip = &gic_chip;
 	struct irq_data *irqd = irq_desc_get_irq_data(irq_to_desc(irq));
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - supports_deactivate_key를 지원하면 eoimode1로 한다.
+ */
 	if (static_branch_likely(&supports_deactivate_key))
 		chip = &gic_eoimode1_chip;
 
@@ -1364,6 +1476,11 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	case SGI_RANGE:
 	case PPI_RANGE:
 	case EPPI_RANGE:
+/*
+ * IAMROOT, 2022.10.01:
+ * - 위 irq들은 cpu별로 하는것이므로 per cpu로 설정해줘야한다. 
+ * - flow handler(handle_percpu_devid_irq())를 per cpu방식으로 설정한다.
+ */
 		irq_set_percpu_devid(irq);
 		irq_domain_set_info(d, irq, hw, chip, d->host_data,
 				    handle_percpu_devid_irq, NULL, NULL);
@@ -1393,17 +1510,42 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @fwspec 정보로 @d를 통해서 @hwirq, @type을 알아온다.
+ */
 static int gic_irq_domain_translate(struct irq_domain *d,
 				    struct irq_fwspec *fwspec,
 				    unsigned long *hwirq,
 				    unsigned int *type)
 {
+/*
+ * IAMROOT, 2022.10.01:
+ * - 1개의 인자 + 16미만의 번호. coner case로 변환 없이 그대로 반환한다.
+ */
 	if (fwspec->param_count == 1 && fwspec->param[0] < 16) {
 		*hwirq = fwspec->param[0];
 		*type = IRQ_TYPE_EDGE_RISING;
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - __get_intid_range() 참고
+ * - dt에서 왓으면 인자는 3개정도 와야된다.
+ *   param[0]                param[1] (irq nr)
+ *   0 => spi라는 의미.      spi. +32
+ *   1 => ppi                ppi. +16
+ *   2 => ESPI               ESPI. +ESPI_BASE_INTID
+ *   3 => EPPI               EPPI. +EPPI_BASE_INTID
+ *   GIC_IRQ_TYPE_LPI        LPI. 그대로 사용.
+ *   GIC_IRQ_TYPE_PARTITION  PMU처리를 위해 한개의 계층을 또 만드는 개념.
+ *                           16이상이면 +EPPI_BASE_INTID - 16
+ *                           16미만이면 +16
+ *
+ *   param[2] = irq line trigger 속성.
+ * - SGI는 여기에 진입할 일이 없다.
+ */
 	if (is_of_node(fwspec->fwnode)) {
 		if (fwspec->param_count < 3)
 			return -EINVAL;
@@ -1446,6 +1588,12 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 		return 0;
 	}
 
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - fwnode는 param이 2개여야한다.
+ *   0번은 hwirq, 1번은 type 고정
+ */
 	if (is_fwnode_irqchip(fwspec->fwnode)) {
 		if(fwspec->param_count != 2)
 			return -EINVAL;
@@ -1460,6 +1608,10 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 	return -EINVAL;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @
+ */
 static int gic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs, void *arg)
 {
@@ -1468,10 +1620,18 @@ static int gic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	unsigned int type = IRQ_TYPE_NONE;
 	struct irq_fwspec *fwspec = arg;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - base가 되는 hwirq를 알아온다.
+ */
 	ret = gic_irq_domain_translate(domain, fwspec, &hwirq, &type);
 	if (ret)
 		return ret;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @virq와 hwirq로 nr_irqs만큼 mapping을 해준다.
+ */
 	for (i = 0; i < nr_irqs; i++) {
 		ret = gic_irq_domain_map(domain, virq + i, hwirq + i);
 		if (ret)
@@ -1544,6 +1704,10 @@ static int gic_irq_domain_select(struct irq_domain *d,
 	return d == partition_get_domain(gic_data.ppi_descs[ppi_idx]);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - tree
+ */
 static const struct irq_domain_ops gic_irq_domain_ops = {
 	.translate = gic_irq_domain_translate,
 	.alloc = gic_irq_domain_alloc,
@@ -1725,6 +1889,10 @@ static void gic_enable_nmi_support(void)
 		gic_chip.flags |= IRQCHIP_SUPPORTS_NMI;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 
+ */
 static int __init gic_init_bases(void __iomem *dist_base,
 				 struct redist_region *rdist_regs,
 				 u32 nr_redist_regions,
@@ -1755,6 +1923,13 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	gic_enable_quirks(readl_relaxed(gic_data.dist_base + GICD_IIDR),
 			  gic_quirks, &gic_data);
 
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - SPIs(Shared Peripherals Interrupts)
+ *   core에 공용으로 사용될 수 있는 IRQ 들로 INTID32 ~ 1019까지 사용한다.
+ *   GIC에서 사용하는 클럭과 연동된다
+ */
 	pr_info("%d SPIs implemented\n", GIC_LINE_NR - 32);
 	pr_info("%d Extended SPIs implemented\n", GIC_ESPI_NR);
 
@@ -1818,6 +1993,10 @@ out_free:
 	return err;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - GICD_PIDR2 register의 GIC_PIDR2_ARCH를 읽어서 v3 or v4인지 확인한다.
+ */
 static int __init gic_validate_dist_version(void __iomem *dist_base)
 {
 	u32 reg = readl_relaxed(dist_base + GICD_PIDR2) & GIC_PIDR2_ARCH_MASK;
@@ -1949,6 +2128,33 @@ static void __init gic_of_setup_kvm_info(struct device_node *node)
 	vgic_set_kvm_info(&gic_v3_kvm_info);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - index 0 : dist_base register
+ *   index 1 ~ nr_redist_regions + 1 : redist register 0 ~ nr_redist_regions의
+ *                                     register
+ * - #redistributors-regions : nr_redist_regions개수
+ * - ex)
+ *   gic: interrupt-controller@4d000000 {
+ *		compatible = "arm,gic-v3";
+ *		#interrupt-cells = <3>;
+ *		#address-cells = <2>;
+ *		#size-cells = <2>;
+ *		ranges;
+ *		interrupt-controller;
+ *		#redistributor-regions = <4>;
+ *		redistributor-stride = <0x0 0x40000>;
+ *		reg = <0x0 0x4d000000 0x0 0x10000>,	// GICD
+ *		<0x0 0x4d100000 0x0 0x400000>,	// p0 GICR node 0
+ *		<0x0 0x6d100000 0x0 0x400000>,	// p0 GICR node 1
+ *		<0x400 0x4d100000 0x0 0x400000>,	// p1 GICR node 2
+ *		<0x400 0x6d100000 0x0 0x400000>,	// p1 GICR node 3
+ *		<0x0 0xfe000000 0x0 0x10000>,	// GICC
+ *		<0x0 0xfe010000 0x0 0x10000>,	// GICH
+ *		<0x0 0xfe020000 0x0 0x10000>;	// GICV
+ *		interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
+ *		...
+ */
 static int __init gic_of_init(struct device_node *node, struct device_node *parent)
 {
 	void __iomem *dist_base;
@@ -1957,6 +2163,10 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 	u32 nr_redist_regions;
 	int err, i;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 0 index에 대한 register의 가상 address를 dist_base로 가져온다.
+ */
 	dist_base = of_iomap(node, 0);
 	if (!dist_base) {
 		pr_err("%pOF: unable to map gic dist registers\n", node);
@@ -1969,9 +2179,18 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_dist;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - redistributor-regions가 없으면 1. 있으면 읽어온 값으로.
+ */
 	if (of_property_read_u32(node, "#redistributor-regions", &nr_redist_regions))
 		nr_redist_regions = 1;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 읽어온 redist_regions의 개수만큼 할당한다.
+ *   (nr_redist_regions * sizeof(*rdist_regs))
+ */
 	rdist_regs = kcalloc(nr_redist_regions, sizeof(*rdist_regs),
 			     GFP_KERNEL);
 	if (!rdist_regs) {
@@ -1979,6 +2198,11 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		goto out_unmap_dist;
 	}
 
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - index 1번 ~ nr_redist_regions + 1까지 읽으면서 redist register를 초기화한다.
+ */
 	for (i = 0; i < nr_redist_regions; i++) {
 		struct resource res;
 		int ret;
@@ -1993,6 +2217,14 @@ static int __init gic_of_init(struct device_node *node, struct device_node *pare
 		rdist_regs[i].phys_base = res.start;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - redistributor-stride
+ * - 없으면 0로 초기화.
+ *   redist_base의 간격을 64배수간격으로 조정
+ * - ex) redistributor-stride = <0x0 0x40000>
+ *   256k 간격으로 조정.
+ */
 	if (of_property_read_u64(node, "redistributor-stride", &redist_stride))
 		redist_stride = 0;
 

@@ -140,6 +140,10 @@ static inline int irq_setup_affinity(struct irq_desc *desc) { return 0; }
 #endif
 
 /* Inline functions for support of irq chips on slow busses */
+/*
+ * IAMROOT, 2022.10.01:
+ * - callback  irq_bus_lock으로 lock을 건다.(mutex, pm resume등 기타)
+ */
 static inline void chip_bus_lock(struct irq_desc *desc)
 {
 	if (unlikely(desc->irq_data.chip->irq_bus_lock))
@@ -166,6 +170,10 @@ __irq_get_desc_lock(unsigned int irq, unsigned long *flags, bool bus,
 		    unsigned int check);
 void __irq_put_desc_unlock(struct irq_desc *desc, unsigned long flags, bool bus);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - spinlock + buslock
+ */
 static inline struct irq_desc *
 irq_get_desc_buslock(unsigned int irq, unsigned long *flags, unsigned int check)
 {
@@ -240,6 +248,10 @@ static inline void irq_state_set_disabled(struct irq_desc *desc)
 	irqd_set(&desc->irq_data, IRQD_IRQ_DISABLED);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq disable
+ */
 static inline void irq_state_set_masked(struct irq_desc *desc)
 {
 	irqd_set(&desc->irq_data, IRQD_IRQ_MASKED);

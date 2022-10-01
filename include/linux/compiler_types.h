@@ -42,6 +42,10 @@ static inline void __chk_io_ptr(const volatile void __iomem *ptr) { }
 # define __force	__attribute__((force))
 # define __nocast	__attribute__((nocast))
 # define __safe		__attribute__((safe))
+/*
+ * IAMROOT, 2022.10.01:
+ * - 순수 pointer 전달금지.
+ */
 # define __private	__attribute__((noderef))
 # define ACCESS_PRIVATE(p, member) (*((typeof((p)->member) __force *) &(p)->member))
 #else /* __CHECKER__ */

@@ -31,6 +31,10 @@ EXPORT_SYMBOL(cpumask_next);
  *
  * Returns >= nr_cpu_ids if no further cpus set in both.
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * - 겹치는게 없으면 return >= nr_cpu_ids
+ */
 int cpumask_next_and(int n, const struct cpumask *src1p,
 		     const struct cpumask *src2p)
 {

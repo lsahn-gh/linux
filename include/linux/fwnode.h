@@ -186,6 +186,10 @@ static inline void fwnode_init(struct fwnode_handle *fwnode,
 	INIT_LIST_HEAD(&fwnode->suppliers);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - fwnode의 init / deinit여부를 저장.
+ */
 static inline void fwnode_dev_initialized(struct fwnode_handle *fwnode,
 					  bool initialized)
 {

@@ -74,6 +74,11 @@
 
 #if !defined(____cacheline_internodealigned_in_smp)
 #if defined(CONFIG_SMP)
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - l1 cache단위로 정렬. 기본 64byte
+ */
 #define ____cacheline_internodealigned_in_smp \
 	__attribute__((__aligned__(1 << (INTERNODE_CACHE_SHIFT))))
 #else

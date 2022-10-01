@@ -143,6 +143,10 @@ EXPORT_SYMBOL(synchronize_irq);
 #ifdef CONFIG_SMP
 cpumask_var_t irq_default_affinity;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - set affinity가 가능한지 확인한다.
+ */
 static bool __irq_can_set_affinity(struct irq_desc *desc)
 {
 	if (!desc || !irqd_can_balance(&desc->irq_data) ||
@@ -185,6 +189,17 @@ bool irq_can_set_affinity_usr(unsigned int irq)
  *	set_cpus_allowed_ptr() here as we hold desc->lock and this
  *	code can be called from hard interrupt context.
  */
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - papago
+ *   방금 IRQTF_AFFINITY를 설정하고 선호도 설정을 인터럽트 스레드 자체에
+ *   위임했습니다. desc->lock을 유지하고 이 코드는 하드 인터럽트 컨텍스트에서
+ *   호출할 수 있으므로 여기에서 set_cpus_allowed_ptr()을 호출할 수 없습니다.
+ *
+ * - action handler들의 thread_flags에 IRQTF_AFFINITY를 set한다.
+ *   notify irq threads
+ */
 void irq_set_thread_affinity(struct irq_desc *desc)
 {
 	struct irqaction *action;
@@ -195,6 +210,10 @@ void irq_set_thread_affinity(struct irq_desc *desc)
 }
 
 #ifdef CONFIG_GENERIC_IRQ_EFFECTIVE_AFF_MASK
+/*
+ * IAMROOT, 2022.10.01:
+ * - affinity cpumask가 비어있다면 print를 한번 출력해준다.
+ */
 static void irq_validate_effective_affinity(struct irq_data *data)
 {
 	const struct cpumask *m = irq_data_get_effective_affinity_mask(data);
@@ -217,6 +236,10 @@ static inline void irq_init_effective_affinity(struct irq_data *data,
 					       const struct cpumask *mask) { }
 #endif
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @mask에 해당하는 cpu중에 하나를  @data irq의 gic register에 set한다.
+ */
 int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 			bool force)
 {
@@ -246,6 +269,25 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	 * housekeeping CPU which belongs to the affinity mask comes
 	 * online.
 	 */
+/*
+ * IAMROOT, 2022.10.01:
+ * - papago
+ *   이것이 관리되는 인터럽트이고 하우스키핑이 활성화된 경우 요청된 선호도
+ *   마스크가 하우스키핑 CPU와 교차하는지 확인합니다. 그렇다면 마스크에서 격리된
+ *   CPU를 제거하고 하우스키핑 CPU만 유지합니다. 이렇게 하면 선호도 설정자가
+ *   인터럽트를 격리된 CPU로 라우팅하여 하우스키핑 CPU에서 제출된 I/O가 격리된
+ *   CPU에서 인터럽트를 일으키는 것을 방지합니다.
+ *
+ *   마스크가 교차하지 않거나 온라인 CPU를 포함하지 않는 경우 요청된 마스크를
+ *   유지합니다. 격리된 대상 CPU는 I/O 작업이 직접 제출된 경우에만 인터럽트를
+ *   수신합니다.
+ *
+ *   선호도 마스크의 모든 하우스키핑 CPU가 오프라인인 경우, 선호도 마스크에 속한
+ *   하우스키핑 CPU가 온라인 상태가 되면 인터럽트가 CPU 핫플러그 코드에 의해
+ *   마이그레이션됩니다.
+ *
+ * - interrupt 용 housekeeping cpu가 있는지 한번더 and해서 set affinity를 한다.
+ */
 	if (irqd_affinity_is_managed(data) &&
 	    housekeeping_enabled(HK_FLAG_MANAGED_IRQ)) {
 		const struct cpumask *hk_mask, *prog_mask;
@@ -257,6 +299,14 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 
 		raw_spin_lock(&tmp_mask_lock);
 		cpumask_and(&tmp_mask, mask, hk_mask);
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - housekeeping cpu가 전체 대상이 되서 쓸수있는 cpu가 없다. 그냥 들어온 인자로
+ *   사용한다.
+ *   그게 아니라면 housekeeping cpu까지 고려한 mask를 사용한다.
+ *   (online cpu + node cpu + affinity cpu + housekeeping cpu)
+ */
 		if (!cpumask_intersects(&tmp_mask, cpu_online_mask))
 			prog_mask = mask;
 		else
@@ -266,6 +316,13 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	} else {
 		ret = chip->irq_set_affinity(data, mask, force);
 	}
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - NOCOPY가 아니면 copy를 한번해준다.
+ *   그후 다시 읽어 cpumask를 한번 검사해주고 irq thread한테 변경됬다는것을
+ *   알려준다.
+ */
 	switch (ret) {
 	case IRQ_SET_MASK_OK:
 	case IRQ_SET_MASK_OK_DONE:
@@ -575,9 +632,18 @@ irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify)
 }
 EXPORT_SYMBOL_GPL(irq_set_affinity_notifier);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - ALPHA를 제외한 모든 머신이 not define
+ */
 #ifndef CONFIG_AUTO_IRQ_AFFINITY
 /*
  * Generic version of the affinity autoselector.
+ */
+/*
+ * IAMROOT, 2022.10.01:
+ * - @desc에 해당하는 irq, cpumask, irq gic register에 cpumask중 하나를 골라
+ *   mpidr를 write한다.
  */
 int irq_setup_affinity(struct irq_desc *desc)
 {
@@ -595,6 +661,11 @@ int irq_setup_affinity(struct irq_desc *desc)
 	 * Preserve the managed affinity setting and a userspace affinity
 	 * setup, but make sure that one of the targets is online.
 	 */
+/*
+ * IAMROOT, 2022.10.01:
+ * - affinity managed가 되있으면 irqd에 IRQD_AFFINITY_SET을 한다.
+ *   online cpu와 affinity중에 겹치는게 있으면 
+ */
 	if (irqd_affinity_is_managed(&desc->irq_data) ||
 	    irqd_has_set(&desc->irq_data, IRQD_AFFINITY_SET)) {
 		if (cpumask_intersects(desc->irq_common_data.affinity,
@@ -605,9 +676,19 @@ int irq_setup_affinity(struct irq_desc *desc)
 	}
 
 	cpumask_and(&mask, cpu_online_mask, set);
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - 겹치는게 없으면 online으로 .
+ */
 	if (cpumask_empty(&mask))
 		cpumask_copy(&mask, cpu_online_mask);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - 결국에 affinity cpu, online cpu 와, @desc node, cpu가 전부 겹치는 mask를
+ *   구한다.
+ */
 	if (node != NUMA_NO_NODE) {
 		const struct cpumask *nodemask = cpumask_of_node(node);
 
@@ -615,6 +696,11 @@ int irq_setup_affinity(struct irq_desc *desc)
 		if (cpumask_intersects(&mask, nodemask))
 			cpumask_and(&mask, &mask, nodemask);
 	}
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - 위 조건에 해당하는 mask로 sete affinity를 수행한다.
+ */
 	ret = irq_do_set_affinity(&desc->irq_data, &mask, false);
 	raw_spin_unlock(&mask_lock);
 	return ret;
@@ -936,6 +1022,11 @@ int can_request_irq(unsigned int irq, unsigned long irqflags)
 	return canrequest;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @desc의 irq에 tigger @flags를 설정한다.
+ *   IRQCHIP_SET_TYPE_MASKED요청이 있다면 잠깐 mask를 한후 설정후 unmask한다.
+ */
 int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 {
 	struct irq_chip *chip = desc->irq_data.chip;
@@ -952,13 +1043,28 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQCHIP_SET_TYPE_MASKED
+ *   chip.irq_set_type을 호출하기전에 controller interrupt를 막아야된다는 요청.
+ *   해당 요청이 있으면 gic의 해당 interrupt막는다.
+ */
 	if (chip->flags & IRQCHIP_SET_TYPE_MASKED) {
 		if (!irqd_irq_masked(&desc->irq_data))
 			mask_irq(desc);
+/*
+ * IAMROOT, 2022.10.01:
+ * - 해당 irq가 이미 enable상태라면, 아래 설정이 끝나고나서
+ *   unmask을 해야한다.
+ */
 		if (!irqd_irq_disabled(&desc->irq_data))
 			unmask = 1;
 	}
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - ex)gic_set_type
+ */
 	/* Mask all flags except trigger mode */
 	flags &= IRQ_TYPE_SENSE_MASK;
 	ret = chip->irq_set_type(&desc->irq_data, flags);
@@ -966,11 +1072,26 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 	switch (ret) {
 	case IRQ_SET_MASK_OK:
 	case IRQ_SET_MASK_OK_DONE:
+/*
+ * IAMROOT, 2022.10.01:
+ * - trigger bits들을 clear후 flags로 set한다.
+ */
 		irqd_clear(&desc->irq_data, IRQD_TRIGGER_MASK);
 		irqd_set(&desc->irq_data, flags);
 		fallthrough;
 
 	case IRQ_SET_MASK_OK_NOCOPY:
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - read  trriger_type  <-   irq_data state --+
+ *   write trriger_type  ->   irq_desc state   |
+ *   clear  IRQD_LEVEL   ->   irq_data state   |
+ *   clear  IRQD_LEVEL   ->   irq_desc state   |
+ *   if (IRQ_TYPE_LEVEL_MASK & trriger_type) <-+
+ *      write IRQD_LEVEL ->   irq_desc state
+ *      write IRQD_LEVEL ->   irq_data state
+ */
 		flags = irqd_get_trigger_type(&desc->irq_data);
 		irq_settings_set_trigger_mask(desc, flags);
 		irqd_clear(&desc->irq_data, IRQD_LEVEL);
@@ -986,6 +1107,11 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned long flags)
 		pr_err("Setting trigger mode %lu for irq %u failed (%pS)\n",
 		       flags, irq_desc_get_irq(desc), chip->irq_set_type);
 	}
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - unmask 요청이 있었으면 unmask.
+ */
 	if (unmask)
 		unmask_irq(desc);
 	return ret;

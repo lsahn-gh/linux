@@ -133,6 +133,10 @@ EXPORT_SYMBOL_GPL(nr_irqs);
 static DEFINE_MUTEX(sparse_irq_lock);
 static DECLARE_BITMAP(allocated_irqs, IRQ_BITMAP_BITS);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - arm64는 sparse.
+ */
 #ifdef CONFIG_SPARSE_IRQ
 
 static void irq_kobj_release(struct kobject *kobj);
@@ -344,10 +348,14 @@ static void irq_sysfs_del(struct irq_desc *desc) {}
 static RADIX_TREE(irq_desc_tree, GFP_KERNEL);
 
 static void irq_insert_desc(unsigned int irq, struct irq_desc *desc)
-{
+
 	radix_tree_insert(&irq_desc_tree, irq, desc);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - sparse에선 irq desc를 radix tree에서 찾는다.
+ */
 struct irq_desc *irq_to_desc(unsigned int irq)
 {
 	return radix_tree_lookup(&irq_desc_tree, irq);
@@ -835,6 +843,19 @@ unsigned int irq_get_next_irq(unsigned int offset)
 	return find_next_bit(allocated_irqs, nr_irqs, offset);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - spinlock을 건다.
+ *   이때 @bus가 true이면 chip_bus_lock도 건다.
+ * - check
+ *   -- percpu인지 검사한다.
+ *
+ *   _IRQ_DESC_CHECK + _IRQ_DESC_PERCPU
+ *   per_cpu_devid가 없으면 NULL
+ *   _IRQ_DESC_CHECK
+ *   per_cpu_devid가 있으면 NULL
+ *
+ */
 struct irq_desc *
 __irq_get_desc_lock(unsigned int irq, unsigned long *flags, bool bus,
 		    unsigned int check)
@@ -867,6 +888,11 @@ void __irq_put_desc_unlock(struct irq_desc *desc, unsigned long flags, bool bus)
 		chip_bus_sync_unlock(desc);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq에 대한 cpu affinity를 정한다. @affinity가 NULL로 오면 possible로 고정한다.
+ * - percpu로 사용하고, 수동 enable, 수동 probe로 flag를 set한다.
+ */
 int irq_set_percpu_devid_partition(unsigned int irq,
 				   const struct cpumask *affinity)
 {
@@ -878,11 +904,19 @@ int irq_set_percpu_devid_partition(unsigned int irq,
 	if (desc->percpu_enabled)
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - cpumask alloc
+ */
 	desc->percpu_enabled = kzalloc(sizeof(*desc->percpu_enabled), GFP_KERNEL);
 
 	if (!desc->percpu_enabled)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - NULL이면 cpu_possible_mask로 한다.
+ */
 	if (affinity)
 		desc->percpu_affinity = affinity;
 	else
@@ -892,6 +926,10 @@ int irq_set_percpu_devid_partition(unsigned int irq,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @irq의 irq_desc에 percpu방식으로 운영을 하고 모든 cpu로 affinity를 한다.
+ */
 int irq_set_percpu_devid(unsigned int irq)
 {
 	return irq_set_percpu_devid_partition(irq, NULL);

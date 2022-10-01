@@ -95,6 +95,14 @@ enum {
 	IRQ_NO_BALANCING	= (1 << 13),
 	IRQ_MOVE_PCNTXT		= (1 << 14),
 	IRQ_NESTED_THREAD	= (1 << 15),
+/*
+ * IAMROOT, 2022.10.01:
+ *   hardirq, threaded irq의 2가지로 처리한다.
+ * - threaded irq
+ *   보통 irq가 발생하면 hardirq로 처리를 하는데(isr에서 직접처리)
+ *   rt kernel에서는 flag등을 set하고 bottom half에서 후에 처리하는 식을 사용한다.
+ *   이것을 threaded irq라고 부른다. 여기서는 threaded를 사용하지 말라는것.
+ */
 	IRQ_NOTHREAD		= (1 << 16),
 	IRQ_PER_CPU_DEVID	= (1 << 17),
 	IRQ_IS_POLLED		= (1 << 18),
@@ -145,6 +153,10 @@ struct irq_domain;
  * @ipi_offset:		Offset of first IPI target cpu in @affinity. Optional.
  */
 struct irq_common_data {
+/*
+ * IAMROOT, 2022.10.01:
+ * - irqd에 대한 state. IRQ_TYPE_SENSE_MASK에 대한 값등이 올수있다.
+ */
 	unsigned int		__private state_use_accessors;
 #ifdef CONFIG_NUMA
 	unsigned int		node;
@@ -173,6 +185,12 @@ struct irq_common_data {
  *			irq_domain
  * @chip_data:		platform-specific per-chip private data for the chip
  *			methods, to allow shared chip implementations
+ */
+/*
+ * IAMROOT, 2022.10.01:
+ * - 계층구조를 지원할려고 irq_desc에서 irq_data만 빼놓았다.
+ * - chip으로 해당 irq의 소속 hw와 연결된다.
+ * - domain을 통해서 해당 irq가 소속된 domain(tree, linear...)과 연결된다.
  */
 struct irq_data {
 	u32			mask;
@@ -223,6 +241,10 @@ struct irq_data {
  *				  irqchip have flag IRQCHIP_ENABLE_WAKEUP_ON_SUSPEND set.
  */
 enum {
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQ_TYPE_SENSE_MASK
+ */
 	IRQD_TRIGGER_MASK		= 0xf,
 	IRQD_SETAFFINITY_PENDING	= (1 <<  8),
 	IRQD_ACTIVATED			= (1 <<  9),
@@ -281,6 +303,10 @@ static inline bool irqd_trigger_type_was_set(struct irq_data *d)
 	return __irqd_to_state(d) & IRQD_DEFAULT_TRIGGER_SET;
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQ_TYPE_SENSE_MASK
+ */
 static inline u32 irqd_get_trigger_type(struct irq_data *d)
 {
 	return __irqd_to_state(d) & IRQD_TRIGGER_MASK;
@@ -756,6 +782,10 @@ irq_set_chained_handler_and_data(unsigned int irq, irq_flow_handler_t handle,
 
 void irq_modify_status(unsigned int irq, unsigned long clr, unsigned long set);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @irq의 irq_desc에 @set bits를 set한다.
+ */
 static inline void irq_set_status_flags(unsigned int irq, unsigned long set)
 {
 	irq_modify_status(irq, 0, set);
@@ -794,6 +824,20 @@ static inline void irq_set_nested_thread(unsigned int irq, bool nest)
 		irq_clear_status_flags(irq, IRQ_NESTED_THREAD);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @irq의 irq_desc에 flag들을 추가한다.
+ * - IRQ_NOAUTOEN
+ *   수동으로 enable하겠다는것.
+ * - IRQ_PER_CPU
+ *   per cpu로 만들라는 것.
+ * - IRQ_NOTHREAD
+ *   threaded를 쓰지 말라는것.
+ * - IRQ_NOPROBE
+ *   수동으로 probe하겠다는것.
+ * - IRQ_PER_CPU_DEVID
+ *   per cpu id
+ */
 static inline void irq_set_percpu_devid_flags(unsigned int irq)
 {
 	irq_set_status_flags(irq,
@@ -875,6 +919,11 @@ static inline int irq_data_get_node(struct irq_data *d)
 	return irq_common_data_get_node(d->common);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * @return affinity cpu mask
+ * - irq_data 설정시 별다른 Affinity 요청이 없었으면 possible cpu로 되있을 것이다.
+ */
 static inline struct cpumask *irq_get_affinity_mask(int irq)
 {
 	struct irq_data *d = irq_get_irq_data(irq);

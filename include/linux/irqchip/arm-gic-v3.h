@@ -27,6 +27,10 @@
 #define GICD_ISACTIVER			0x0300
 #define GICD_ICACTIVER			0x0380
 #define GICD_IPRIORITYR			0x0400
+/*
+ * IAMROOT, 2022.10.01:
+ * - Interrupt Configuration Registers
+ */
 #define GICD_ICFGR			0x0C00
 #define GICD_IGRPMODR			0x0D00
 #define GICD_NSACR			0x0E00
@@ -55,6 +59,11 @@
 #define GICD_CPENDSGIR			0x0F10
 #define GICD_SPENDSGIR			0x0F20
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - Register Write Pending.
+ *   Read only. Indicates whether a register write is in progress or not
+ */
 #define GICD_CTLR_RWP			(1U << 31)
 #define GICD_CTLR_nASSGIreq		(1U << 8)
 #define GICD_CTLR_DS			(1U << 6)
@@ -86,6 +95,12 @@
 
 #define GICD_TYPER_ID_BITS(typer)	((((typer) >> 19) & 0x1f) + 1)
 #define GICD_TYPER_NUM_LPIS(typer)	((((typer) >> 11) & 0x1f) + 1)
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - If the value of this field is N, the maximum SPI INTID is 32(N+1) minus 1.
+ *   For example, 00011 specifies that the maximum SPI INTID in is 127 
+ */
 #define GICD_TYPER_SPIS(typer)		((((typer) & 0x1f) + 1) * 32)
 #define GICD_TYPER_ESPIS(typer)						\
 	(((typer) & GICD_TYPER_ESPI) ? GICD_TYPER_SPIS((typer) >> 27) : 0)

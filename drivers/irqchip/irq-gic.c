@@ -1116,12 +1116,22 @@ static int gic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	return 0;
 }
 
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - linear
+ */
 static const struct irq_domain_ops gic_irq_domain_hierarchy_ops = {
 	.translate = gic_irq_domain_translate,
 	.alloc = gic_irq_domain_alloc,
 	.free = irq_domain_free_irqs_top,
 };
 
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - Legacy
+ */
 static const struct irq_domain_ops gic_irq_domain_ops = {
 	.map = gic_irq_domain_map,
 	.unmap = gic_irq_domain_unmap,

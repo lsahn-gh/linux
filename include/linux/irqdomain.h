@@ -118,6 +118,11 @@ struct irq_domain_ops {
 		     unsigned int nr_irqs);
 	int (*activate)(struct irq_domain *d, struct irq_data *irqd, bool reserve);
 	void (*deactivate)(struct irq_domain *d, struct irq_data *irq_data);
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq로 desc를 찾는목적.
+ */
 	int (*translate)(struct irq_domain *d, struct irq_fwspec *fwspec,
 			 unsigned long *out_hwirq, unsigned int *out_type);
 #endif
@@ -160,6 +165,10 @@ struct irq_domain {
 	const char *name;
 	const struct irq_domain_ops *ops;
 	void *host_data;
+/*
+ * IAMROOT, 2022.10.01:
+ * - IRQ_DOMAIN_NAME_ALLOCATED등
+ */
 	unsigned int flags;
 	unsigned int mapcount;
 
@@ -173,9 +182,36 @@ struct irq_domain {
 
 	/* reverse map data. The linear map gets appended to the irq_domain */
 	irq_hw_number_t hwirq_max;
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - linear일때 size가 정해진다. tree, nomap일때는 0
+ */
 	unsigned int revmap_size;
 	struct radix_tree_root revmap_tree;
 	struct mutex revmap_mutex;
+
+/*
+ * IAMROOT, 2022.10.01:
+ * - linear reverse mapping. radix tree
+ * - hwirq로 virq를 찾을려고하는 배열.
+ * -
+ *             +------+
+ *  hwirq 0 -> |      | -> virqA1
+ *  hwirq 1 -> | hw1  | -> virqA2
+ *  hwirq 2 -> |      | -> virqA3
+ *  ...       ..     .. 
+ *  hwirq n -> |      | -> virqAn
+ *             +------+
+ *
+ *             +------+
+ *  hwirq 0 -> |      | -> virqB1
+ *  hwirq 1 -> | hw2  | -> virqB2
+ *  hwirq 2 -> |      | -> virqB3
+ *  ...       ..     .. 
+ *  hwirq n -> |      | -> virqBn
+ *             +------+
+ */
 	struct irq_data __rcu *revmap[];
 };
 
@@ -288,6 +324,10 @@ static inline struct fwnode_handle *of_node_to_fwnode(struct device_node *node)
 
 extern const struct fwnode_operations irqchip_fwnode_ops;
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - acpi + 기타(kvm등) 에서 왔는지를 확인한다.
+ */
 static inline bool is_fwnode_irqchip(struct fwnode_handle *fwnode)
 {
 	return fwnode && fwnode->ops == &irqchip_fwnode_ops;
@@ -375,6 +415,12 @@ static inline struct irq_domain *irq_domain_create_linear(struct fwnode_handle *
 	return __irq_domain_add(fwnode, size, size, 0, ops, host_data);
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * @ops ex)gic_irq_domain_ops
+ *
+ * irq domain을 tree로 생성한다.
+ */
 static inline struct irq_domain *irq_domain_create_tree(struct fwnode_handle *fwnode,
 					 const struct irq_domain_ops *ops,
 					 void *host_data)

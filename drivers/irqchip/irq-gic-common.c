@@ -12,6 +12,10 @@
 
 static DEFINE_RAW_SPINLOCK(irq_controller_lock);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - @quirks(ex gic_quirks)를 돌며 init 처리. 에라타같은것.
+ */
 void gic_enable_of_quirks(const struct device_node *np,
 			  const struct gic_quirk *quirks, void *data)
 {
@@ -24,6 +28,10 @@ void gic_enable_of_quirks(const struct device_node *np,
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - gic_enable_of_quirks랑 비슷한데 iddr이 일치하는지만 한번더 따진것.
+ */
 void gic_enable_quirks(u32 iidr, const struct gic_quirk *quirks,
 		void *data)
 {
@@ -38,6 +46,14 @@ void gic_enable_quirks(u32 iidr, const struct gic_quirk *quirks,
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.01:
+ * @return 0 = IRQ_SET_MASK_OK
+ *
+ * -0b00 Corresponding interrupt is level-sensitive.
+ *  0b10 Corresponding interrupt is edge-triggered.
+ * - level인지, edge인지에 따라 @irq에 해당하는 bit 자리를 찾아서 set한다.
+ */
 int gic_configure_irq(unsigned int irq, unsigned int type,
 		       void __iomem *base, void (*sync_access)(void))
 {

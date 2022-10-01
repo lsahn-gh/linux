@@ -52,8 +52,17 @@ struct pt_regs;
  * @debugfs_file:	dentry for the debugfs file
  * @name:		flow handler name for /proc/interrupts output
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * - 한개의 irq번호에 대해 관리하는 자료구조.
+ * - 한개이상의 hwirq를 irq_data를 통해서 관리한다.
+ */
 struct irq_desc {
 	struct irq_common_data	irq_common_data;
+/*
+ * IAMROOT, 2022.10.01:
+ * - irq_data를 통해서 계층구조가 형성될수있다.
+ */
 	struct irq_data		irq_data;
 	unsigned int __percpu	*kstat_irqs;
 	irq_flow_handler_t	handle_irq;

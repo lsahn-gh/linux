@@ -806,6 +806,10 @@ EXPORT_SYMBOL_GPL(device_get_named_child_node);
  *
  * Returns the fwnode handle.
  */
+/*
+ * IAMROOT, 2022.10.01:
+ * - ref up
+ */
 struct fwnode_handle *fwnode_handle_get(struct fwnode_handle *fwnode)
 {
 	if (!fwnode_has_op(fwnode, get))

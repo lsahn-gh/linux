@@ -213,6 +213,10 @@ extern raw_spinlock_t devtree_lock;
 #ifdef CONFIG_OF
 void of_core_init(void);
 
+/*
+ * IAMROOT, 2022.10.01:
+ * - dt에서 불러왔는지 확인.
+ */
 static inline bool is_of_node(const struct fwnode_handle *fwnode)
 {
 	return !IS_ERR_OR_NULL(fwnode) && fwnode->ops == &of_fwnode_ops;
