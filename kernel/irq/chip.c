@@ -87,6 +87,10 @@ EXPORT_SYMBOL(irq_set_irq_type);
  *
  *	Set the hardware irq controller data for an irq
  */
+/*
+ * IAMROOT, 2022.10.08:
+ * - private data를 설정해준다.
+ */
 int irq_set_handler_data(unsigned int irq, void *data)
 {
 	unsigned long flags;
@@ -290,7 +294,10 @@ static int __irq_startup(struct irq_desc *desc)
 
 /*
  * IAMROOT, 2022.10.01:
- * - 진행중
+ * - @desc에 해당하는 irq를 startup한다.
+ *   1. 이미 되있다면 enable.
+ *   2. 안되있다면 domain activate 및 affinity를 설정하고 startup 수행.
+ * - @resend가 true이면, pending이 startup전에 되있었다면 irq를 처리해준다.
  */
 int irq_startup(struct irq_desc *desc, bool resend, bool force)
 {
@@ -347,7 +354,8 @@ int irq_activate(struct irq_desc *desc)
 
 /*
  * IAMROOT, 2022.10.01:
- * - 
+ * - irq domain activate 및 irq startup 수행.
+ *   @resend가 true이면 startup전에 irq pending이 들어왔을시 처리해준다.
  */
 int irq_activate_and_startup(struct irq_desc *desc, bool resend)
 {
@@ -1077,6 +1085,11 @@ void handle_percpu_devid_fasteoi_nmi(struct irq_desc *desc)
 		chip->irq_eoi(&desc->irq_data);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - irq desc의 flow handler 설정을한다.
+ *   성공했으면 irq startup까지 수행한다.
+ */
 static void
 __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		     int is_chained, const char *name)
@@ -1162,7 +1175,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 
 /*
  * IAMROOT, 2022.10.01:
- * - 
+ * - @handle을 set한다.
  */
 void
 __irq_set_handler(unsigned int irq, irq_flow_handler_t handle, int is_chained,
@@ -1585,6 +1598,11 @@ EXPORT_SYMBOL_GPL(irq_chip_set_type_parent);
  *
  * Iterate through the domain hierarchy of the interrupt and check
  * whether a hw retrigger function exists. If yes, invoke it.
+ */
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 상위로 올라가면서 irq_retrigger수행한다.
  */
 int irq_chip_retrigger_hierarchy(struct irq_data *data)
 {

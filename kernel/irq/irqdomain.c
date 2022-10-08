@@ -326,11 +326,19 @@ void irq_domain_remove(struct irq_domain *domain)
 }
 EXPORT_SYMBOL_GPL(irq_domain_remove);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - @bus_token으로 @domain의 bus_token을 설정하고 debugfs에 등록한다.
+ */
 void irq_domain_update_bus_token(struct irq_domain *domain,
 				 enum irq_domain_bus_token bus_token)
 {
 	char *name;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 이미 @bus_token으로 설정되있다면 return.
+ */
 	if (domain->bus_token == bus_token)
 		return;
 
@@ -1413,7 +1421,9 @@ EXPORT_SYMBOL_GPL(irq_domain_set_hwirq_and_chip);
  */
 /*
  * IAMROOT, 2022.10.01:
- * - 
+ * - @virq에 대한 @domain을 찾아서 irq_data에 @chip, @chip_datg,
+ *   @hwirq등을 등록하고 @handler, @handler_data등을 설정하고 @virq를
+ *   activate 및 startup을 한다.
  */
 void irq_domain_set_info(struct irq_domain *domain, unsigned int virq,
 			 irq_hw_number_t hwirq, struct irq_chip *chip,

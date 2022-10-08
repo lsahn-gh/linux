@@ -47,6 +47,22 @@
 #define __GIC_PRIO_IRQOFF_NS		0xa0
 #define GIC_PRIO_PSR_I_SET		(1 << 4)
 
+
+/*
+ * IAMROOT, 2022.10.08:
+ * priority low
+ *               0xff
+ *               ..
+ * 0b1110_0000   0xe0 enable (0b1110_0000)
+ *               
+ * 0b1010_0000   0xa0 normal irq(GICD_INT_DEF_PRI)
+ *               
+ * 0b0110_0000   0x60 disable   
+ *               ..           ^
+ *               ..           | disalbe시 이쪽만 interrupt를 부분적으로 허용한다.
+ *               0x00         v
+ * priority high     
+ */
 #define GIC_PRIO_IRQOFF							\
 	({								\
 		extern struct static_key_false gic_nonsecure_priorities;\

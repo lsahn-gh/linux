@@ -73,6 +73,11 @@ struct irq_fwspec {
  */
 enum irq_domain_bus_token {
 	DOMAIN_BUS_ANY		= 0,
+/*
+ * IAMROOT, 2022.10.08:
+ * - 일반적인게 DOMAIN_BUS_WIRED(SPI, PPI 방식을 의미한다.).
+ *   나머진 msg기반의 버스방식.
+ */
 	DOMAIN_BUS_WIRED,
 	DOMAIN_BUS_GENERIC_MSI,
 	DOMAIN_BUS_PCI_MSI,

@@ -10,6 +10,10 @@
  * Distributor registers. We assume we're running non-secure, with ARE
  * being set. Secure-only and non-ARE registers are not described.
  */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 
+ */
 #define GICD_CTLR			0x0000
 #define GICD_TYPER			0x0004
 #define GICD_IIDR			0x0008
@@ -19,9 +23,21 @@
 #define GICD_CLRSPI_NSR			0x0048
 #define GICD_SETSPI_SR			0x0050
 #define GICD_CLRSPI_SR			0x0058
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - Interrupt Group Registers,
+ *   Controls whether the corresponding interrupt is in Group 0 or Group 1.
+ *   SPI들이 0번으로 갈지 1번으로 갈지를 설정한다.
+ */
 #define GICD_IGROUPR			0x0080
 #define GICD_ISENABLER			0x0100
 #define GICD_ICENABLER			0x0180
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - set / clear
+ */
 #define GICD_ISPENDR			0x0200
 #define GICD_ICPENDR			0x0280
 #define GICD_ISACTIVER			0x0300
@@ -34,14 +50,38 @@
 #define GICD_ICFGR			0x0C00
 #define GICD_IGRPMODR			0x0D00
 #define GICD_NSACR			0x0E00
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - GICD_IGROUPR<n>E, Interrupt Group Registers (extended SPI range)
+ */
 #define GICD_IGROUPRnE			0x1000
 #define GICD_ISENABLERnE		0x1200
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - Interrupt Clear-Enable Registers
+ */
 #define GICD_ICENABLERnE		0x1400
 #define GICD_ISPENDRnE			0x1600
 #define GICD_ICPENDRnE			0x1800
 #define GICD_ISACTIVERnE		0x1A00
 #define GICD_ICACTIVERnE		0x1C00
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - GICD_IPRIORITYR<n>E, Holds the priority of the corresponding interrupt
+ *   for each extended SPI
+ * - GICD_INT_DEF_PRI_X4값등이 설정된다.
+ */
 #define GICD_IPRIORITYRnE		0x2000
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - GICD_ICFGR<n>E, Interrupt Configuration Registers (Extended SPI Range),
+ *   0b00 Corresponding interrupt is level-sensitive. 
+ *   0b10 Corresponding interrupt is edge-triggered.
+ */
 #define GICD_ICFGRnE			0x3000
 #define GICD_IROUTER			0x6000
 #define GICD_IROUTERnE			0x8000
@@ -66,6 +106,16 @@
  */
 #define GICD_CTLR_RWP			(1U << 31)
 #define GICD_CTLR_nASSGIreq		(1U << 8)
+
+/*
+ * prifri, 2022.10.08:
+ * - GICD_CTLR_DS(Disable Security)
+ *   Disable Security.
+ *   0b0 Non-secure accesses are not permitted to access and modify registers that
+ *   control Group 0 interrupts.
+ *   0b1 Non-secure accesses are permitted to access and modify registers that
+ *   control Group 0 interrupts.
+ */
 #define GICD_CTLR_DS			(1U << 6)
 #define GICD_CTLR_ARE_NS		(1U << 4)
 #define GICD_CTLR_ENABLE_G1A		(1U << 1)
@@ -88,20 +138,63 @@
 #define GICD_CTLR_ENABLE_SS_G1		(1U << 1)
 #define GICD_CTLR_ENABLE_SS_G0		(1U << 0)
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - range selector support
+ *   0b0 The IRI supports targeted SGIs with affinity level 0 values of 0 - 15. 
+ *   0b1 The IRI supports targeted SGIs with affinity level 0 values of 0 - 255.
+ */
 #define GICD_TYPER_RSS			(1U << 26)
+/*
+ * IAMROOT, 2022.10.08:
+ * -0b0 The implementation does not support LPIs.
+ *  0b1 The implementation supports LPIs. 
+ */
 #define GICD_TYPER_LPIS			(1U << 17)
+/*
+ * IAMROOT, 2022.10.08:
+ * - Indicates whether the implementation supports message-based interrupts by
+ *   writing to Distributor registers.
+ *
+ *   0b0 The implementation does not support message-based interrupts by writing to
+ *   Distributor registers.
+ *   The GICD_CLRSPI_NSR, GICD_SETSPI_NSR, GICD_CLRSPI_SR, and GICD_SETSPI_SR
+ *   registers are reserved.
+ *
+ *   0b1 The implementation supports message-based interrupts by writing to the
+ *   GICD_CLRSPI_NSR, GICD_SETSPI_NSR, GICD_CLRSPI_SR, or GICD_SETSPI_SR registers. 
+ */
 #define GICD_TYPER_MBIS			(1U << 16)
+/*
+ * IAMROOT, 2022.10.08:
+ * - Extended SPI.
+ *   0b0 Extended SPI range not implemented.
+ *   0b1 Extended SPI range implemented.
+ */
 #define GICD_TYPER_ESPI			(1U << 8)
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - The number of interrupt identifier bits supported, minus one.
+ */
 #define GICD_TYPER_ID_BITS(typer)	((((typer) >> 19) & 0x1f) + 1)
+/*
+ * IAMROOT, 2022.10.08:
+ * - lpi 수
+ */
 #define GICD_TYPER_NUM_LPIS(typer)	((((typer) >> 11) & 0x1f) + 1)
 
 /*
  * IAMROOT, 2022.10.01:
  * - If the value of this field is N, the maximum SPI INTID is 32(N+1) minus 1.
  *   For example, 00011 specifies that the maximum SPI INTID in is 127 
+ * - spi 수
  */
 #define GICD_TYPER_SPIS(typer)		((((typer) & 0x1f) + 1) * 32)
+/*
+ * IAMROOT, 2022.10.08:
+ * -  espi range
+ */
 #define GICD_TYPER_ESPIS(typer)						\
 	(((typer) & GICD_TYPER_ESPI) ? GICD_TYPER_SPIS((typer) >> 27) : 0)
 
@@ -130,6 +223,14 @@
 #define GICR_IIDR			0x0004
 #define GICR_TYPER			0x0008
 #define GICR_STATUSR			GICD_STATUSR
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - Redistributor Wake Register
+ * - Permits software to control the behavior of the WakeRequest power management
+ *   signal corresponding to the Redistributor. Power management operations follow
+ *   the rules in.
+ */
 #define GICR_WAKER			0x0014
 #define GICR_SETLPIR			0x0040
 #define GICR_CLRLPIR			0x0048
@@ -148,6 +249,26 @@
 
 #define EPPI_BASE_INTID			1056
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - read ppi_nr  0 | 1                | 2  |
+ *   __nr_ppis   16 | 16 + 1 * 32 = 48 | 80 |
+ * - manual
+ *   The value derived from this field specifies the maximum PPI INTID that a
+ *   GIC implementation can support. An implementation might not implement all PPIs
+ *   up to this maximum.
+ *   0b00000 Maximum PPI INTID is 31.
+ *   0b00001 Maximum PPI INTID is 1087.
+ *   0b00010 Maximum PPI INTID is 1119.
+ * - PPI INITID 마지막 ppi id를 의미한다.
+ *
+ * - irq 번호 구성
+ *   | SGI  | PPI  | SPI     | EPPI    | EPPI    |
+ *   0    15 16  31 32   1055 1056 1087 1088 1119
+ *   |16개  | 16개 |  1024개 |   32개  | 32개    | 
+ *           ^0번일때         ^1번일때  ^2번일때
+ *                  0번개수 + 1번개수    0번 개수 + 1번개수 + 2번개수
+ */
 #define GICR_TYPER_NR_PPIS(r)						\
 	({								\
 		unsigned int __ppinum = ((r) >> 27) & 0x1f;		\
@@ -158,7 +279,28 @@
 		__nr_ppis;						\
 	 })
 
+/*
+ * IAMROOT, 2022.10.08:
+ * -Indicates whether the Redistributor can assert the WakeRequest signal:
+ *  0b0 This PE is not in, and is not entering, a low power state.
+ *  0b1 The PE is either in, or is in the process of entering, a low power state.
+ *  All interrupts that arrive at the Redistributor: 
+ * - clear : 저전력상태로 안들어가게 한다.
+ */
 #define GICR_WAKER_ProcessorSleep	(1U << 1)
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - Read-only. Indicates whether the connected PE is quiescent:
+ *   0b0 An interface to the connected PE might be active.
+ *   0b1 All interfaces to the connected PE are quiescent.
+ *
+ * - GICR_WAKER_ProcessorSleep 이 set인 경우
+ *   모든 cpu들이 sleep 된 상태가 되면 set된다.
+ *
+ * - GICR_WAKER_ProcessorSleep 이 clear인 경우
+ *   하나의 cpu라도 깨어있는 상태가 되면 clear 된다.
+ */
 #define GICR_WAKER_ChildrenAsleep	(1U << 2)
 
 #define GIC_BASER_CACHE_nCnB		0ULL
@@ -253,6 +395,13 @@
 #define GICR_NSACR			GICD_NSACR
 
 #define GICR_TYPER_PLPIS		(1U << 0)
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - giv v4이후 지원giv v4이후 지원
+ *   The implementation supports virtual LPIs and the direct injection
+ *   of virtual LPIs.
+ */
 #define GICR_TYPER_VLPIS		(1U << 1)
 #define GICR_TYPER_DIRTY		(1U << 2)
 #define GICR_TYPER_DirectLPIS		(1U << 3)
@@ -558,6 +707,11 @@
 /*
  * CPU interface registers
  */
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - ICC_CTLR_EL1, Interrupt Controller Control Register
+ */
 #define ICC_CTLR_EL1_EOImode_SHIFT	(1)
 #define ICC_CTLR_EL1_EOImode_drop_dir	(0U << ICC_CTLR_EL1_EOImode_SHIFT)
 #define ICC_CTLR_EL1_EOImode_drop	(1U << ICC_CTLR_EL1_EOImode_SHIFT)
@@ -566,6 +720,12 @@
 #define ICC_CTLR_EL1_CBPR_MASK		(1 << ICC_CTLR_EL1_CBPR_SHIFT)
 #define ICC_CTLR_EL1_PMHE_SHIFT		6
 #define ICC_CTLR_EL1_PMHE_MASK		(1 << ICC_CTLR_EL1_PMHE_SHIFT)
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 우선순위 평탄화(leveling). 비슷한 priority끼리는 동일하게 취급한다.
+ *   read 값에서 + 1로 생각한다.(gic_get_pribits() 참고)
+ */
 #define ICC_CTLR_EL1_PRI_BITS_SHIFT	8
 #define ICC_CTLR_EL1_PRI_BITS_MASK	(0x7 << ICC_CTLR_EL1_PRI_BITS_SHIFT)
 #define ICC_CTLR_EL1_ID_BITS_SHIFT	11
@@ -575,6 +735,11 @@
 #define ICC_CTLR_EL1_A3V_SHIFT		15
 #define ICC_CTLR_EL1_A3V_MASK		(0x1 << ICC_CTLR_EL1_A3V_SHIFT)
 #define ICC_CTLR_EL1_RSS		(0x1 << 18)
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - CPU interface INTIDs in the range 1024..8191. ESPI 지원여부
+ */
 #define ICC_CTLR_EL1_ExtRange		(0x1 << 19)
 #define ICC_PMR_EL1_SHIFT		0
 #define ICC_PMR_EL1_MASK		(0xff << ICC_PMR_EL1_SHIFT)
@@ -588,6 +753,16 @@
 #define ICC_IGRPEN1_EL1_MASK		(1 << ICC_IGRPEN1_EL1_SHIFT)
 #define ICC_SRE_EL1_DIB			(1U << 2)
 #define ICC_SRE_EL1_DFB			(1U << 1)
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 0b0 The memory-mapped interface must be used. Access at EL1 to any ICC_*
+ *   System register other than ICC_SRE_EL1 is trapped to EL1.
+ *   0b1 The System register interface for the current Security state is enabled. 
+ *
+ *   0로 하면 memory에 system register를 mapping해서 사용해야된다는것.. 1로 하면
+ *   msr, mrs의 명령어로 접근가능하다는것.
+ */
 #define ICC_SRE_EL1_SRE			(1U << 0)
 
 /* These are for GICv2 emulation only */
@@ -639,6 +814,12 @@ struct rdists {
 	u64			flags;
 	u32			gicd_typer;
 	u32			gicd_typer2;
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic v3이후는 전부 true(gic_init_bases() 참고)로 됬다가 실제 register를
+ *   읽어서 정확히 설정한다(__gic_update_rdist_properties() 참고)
+ */
 	bool			has_vlpis;
 	bool			has_rvpeid;
 	bool			has_direct_lpi;
@@ -652,6 +833,12 @@ int its_init(struct fwnode_handle *handle, struct rdists *rdists,
 	     struct irq_domain *domain);
 int mbi_init(struct fwnode_handle *fwnode, struct irq_domain *parent);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * @return true. enable성공. false. enable 실패.
+ *
+ * - sre를 enable한다.
+ */
 static inline bool gic_enable_sre(void)
 {
 	u32 val;

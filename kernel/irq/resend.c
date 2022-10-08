@@ -27,6 +27,10 @@ static DECLARE_BITMAP(irqs_resend, IRQ_BITMAP_BITS);
 /*
  * Run software resends of IRQ's
  */
+/*
+ * IAMROOT, 2022.10.08:
+ * - irq에 해당하는 handle_irq를 호출한다
+ */
 static void resend_irqs(struct tasklet_struct *unused)
 {
 	struct irq_desc *desc;
@@ -47,6 +51,10 @@ static void resend_irqs(struct tasklet_struct *unused)
 /* Tasklet to handle resend: */
 static DECLARE_TASKLET(resend_tasklet, resend_irqs);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - irq_retrigger등이 구현이 안됬을경우 들어올수있다.
+ */
 static int irq_sw_resend(struct irq_desc *desc)
 {
 	unsigned int irq = irq_desc_get_irq(desc);
@@ -55,6 +63,11 @@ static int irq_sw_resend(struct irq_desc *desc)
 	 * Validate whether this interrupt can be safely injected from
 	 * non interrupt context
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - sw 지원 여부를 확인한다.
+ * - gic같은 경우엔 hw방식을 지원하기 때문에 sw 방식은 지원하지 않는다.
+ */
 	if (handle_enforce_irqctx(&desc->irq_data))
 		return -EINVAL;
 
@@ -86,6 +99,13 @@ static int irq_sw_resend(struct irq_desc *desc)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - @irq_retrigger:	resend an IRQ to the CPU
+ * - resend하기전에 irq_retrigger callback func을 수행한다.
+ * - ex) gic v3의 경우 gic_irq_set_irqchip_state을 통해
+ *   GICD_ISPENDR bit를 set한다.
+ */
 static int try_retrigger(struct irq_desc *desc)
 {
 	if (desc->irq_data.chip->irq_retrigger)
@@ -103,6 +123,10 @@ static int try_retrigger(struct irq_desc *desc)
  *
  * Is called with interrupts disabled and desc->lock held.
  */
+/*
+ * IAMROOT, 2022.10.08:
+ * - irq_retrigger를 수행한다. 중복수행 여부, busy check등을 겸한다.
+ */
 int check_irq_resend(struct irq_desc *desc, bool inject)
 {
 	int err = 0;
@@ -112,19 +136,38 @@ int check_irq_resend(struct irq_desc *desc, bool inject)
 	 * are resent by hardware when they are still active. Clear the
 	 * pending bit so suspend/resume does not get confused.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - level type은 안한다.
+ */
 	if (irq_settings_is_level(desc)) {
 		desc->istate &= ~IRQS_PENDING;
 		return -EINVAL;
 	}
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 방금 보냈다면.
+ */
 	if (desc->istate & IRQS_REPLAY)
 		return -EBUSY;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - inject가 false인 경우, pending flag를 확인한다.
+ *   inject가 true인 경우엔 pedning flag가 없어도 수행한다.
+ */
 	if (!(desc->istate & IRQS_PENDING) && !inject)
 		return 0;
 
 	desc->istate &= ~IRQS_PENDING;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 실패하거나 구현이 안된경우  irq_sw_resend.
+ *   실패조건은 잘못된 irq번호등의 이유가된다.
+ *   아마 보통은 구현이 안됬을때 sw로 resend를 한다는 의미일것이다.
+ */
 	if (!try_retrigger(desc))
 		err = irq_sw_resend(desc);
 

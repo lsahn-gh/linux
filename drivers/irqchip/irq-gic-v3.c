@@ -54,6 +54,11 @@ struct gic_chip_data {
 	u32			nr_redist_regions;
 	u64			flags;
 	bool			has_rss;
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - __gic_update_rdist_properties() 참고
+ */
 	unsigned int		ppi_nr;
 	struct partition_desc	**ppi_descs;
 };
@@ -141,6 +146,10 @@ static DEFINE_PER_CPU(bool, has_rss);
 
 #define MPIDR_RS(mpidr)			(((mpidr) & 0xF0UL) >> 4)
 #define gic_data_rdist()		(this_cpu_ptr(gic_data.rdists.rdist))
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic_populate_rdist()에서 설정된다.
+ */
 #define gic_data_rdist_rd_base()	(gic_data_rdist()->rd_base)
 /*
  * IAMROOT, 2022.10.01:
@@ -149,6 +158,10 @@ static DEFINE_PER_CPU(bool, has_rss);
 #define gic_data_rdist_sgi_base()	(gic_data_rdist_rd_base() + SZ_64K)
 
 /* Our default, arbitrary priority value. Linux only uses one anyway. */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 모든 interrupt 허용.
+ */
 #define DEFAULT_PMR_VALUE	0xf0
 
 enum gic_intid_range {
@@ -280,6 +293,11 @@ static u64 __maybe_unused gic_read_iar(void)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - @enable true이면 rdist에 연결된 cpu wakeup.
+ *           false이면 rdist에 연결된 cpu sleep.
+ */
 static void gic_enable_redist(bool enable)
 {
 	void __iomem *rbase;
@@ -291,7 +309,16 @@ static void gic_enable_redist(bool enable)
 
 	rbase = gic_data_rdist_rd_base();
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 
+ */
 	val = readl_relaxed(rbase + GICR_WAKER);
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 저전력 상태를 막는다.
+ */
 	if (enable)
 		/* Wake up this CPU redistributor */
 		val &= ~GICR_WAKER_ProcessorSleep;
@@ -299,6 +326,11 @@ static void gic_enable_redist(bool enable)
 		val |= GICR_WAKER_ProcessorSleep;
 	writel_relaxed(val, rbase + GICR_WAKER);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - GICR_WAKER_ProcessorSleep를 set했는데도 불구하고 set이 안됫으면
+ *   No PM support라고 생각해서 그냥 빠져 나간다.
+ */
 	if (!enable) {		/* Check that GICR_WAKER is writeable */
 		val = readl_relaxed(rbase + GICR_WAKER);
 		if (!(val & GICR_WAKER_ProcessorSleep))
@@ -307,11 +339,26 @@ static void gic_enable_redist(bool enable)
 
 	while (--count) {
 		val = readl_relaxed(rbase + GICR_WAKER);
+/*
+ * IAMROOT, 2022.10.08:
+ * - enable 1 -> GICR_WAKER_ProcessorSleep == 0. wakeup 요청
+ *   GICR_WAKER_ChildrenAsleep == 0이면 break.
+ *   (하나의 cpu라도 깨어있는 상태).
+ *
+ * - enable 0 -> GICR_WAKER_ProcessorSleep == 1. sleep 요청
+ *   GICR_WAKER_ChildrenAsleep == 1이면 break.
+ *   (모든 rdist에 연결된 cpu가 잠든상태.)
+ */
 		if (enable ^ (bool)(val & GICR_WAKER_ChildrenAsleep))
 			break;
 		cpu_relax();
 		udelay(1);
 	}
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - timeout
+ */
 	if (!count)
 		pr_err_ratelimited("redistributor failed to %s...\n",
 				   enable ? "wakeup" : "sleep");
@@ -465,12 +512,22 @@ static void gic_unmask_irq(struct irq_data *d)
 	gic_poke_irq(d, GICD_ISENABLER);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - nmi를 위해서 pmr로 제어 하는지에 대한 여부. arm에는 실제 nmi가 구현되있지 않아
+ *   pmr로 간접적으로 사용한다.
+ */
 static inline bool gic_supports_nmi(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_PSEUDO_NMI) &&
 	       static_branch_likely(&supports_pseudo_nmis);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - IRQCHIP_STATE_PENDING
+ *   irq_retrigger(gic_retrigger). GICD_ISPENDR bit set.
+ */
 static int gic_irq_set_irqchip_state(struct irq_data *d,
 				     enum irqchip_irq_state which, bool val)
 {
@@ -783,6 +840,12 @@ static u32 do_read_iar(struct pt_regs *regs)
 	return iar;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic control handler.
+ *   interrupt가 vector table다음으로 받는 handler.
+ * - vector table -> gic_handle_irq -> irq flow handler
+ */
 static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
 {
 	u32 irqnr;
@@ -815,6 +878,22 @@ static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - pribits(우선순위 평탄화 bits) 를 가져온다.
+ * - PRIbits, bits [10:8] 
+ *
+ *   ICC_CTLR_EL1.PRIbits         GROUP0, GROUP1      support group1
+ *   (Read only)          pribits single    사용여부  two             사용여부
+ *   0                    1       g.sssssss  X        ssssssss         X
+ *   1                    2       gg.ssssss  X        g.sssssss        X
+ *   2                    3       ggg.sssss  X        gg.ssssss        X
+ *   3                    4       gggg.ssss  O        ggg.sssss        X
+ *   4                    5       ggggg.sss  O        gggg.ssss        O
+ *   5                    6       gggggg.ss  O        ggggg.sss        O
+ *   6                    7       ggggggg.s  O        gggggg.ss        O
+ *   7                    8       gggggggg.  O        ggggggg.s        O
+ */
 static u32 gic_get_pribits(void)
 {
 	u32 pribits;
@@ -827,6 +906,10 @@ static u32 gic_get_pribits(void)
 	return pribits;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - pmr에 prbits를 set해보아 kernel이 group0를 다룰수있는지 확인한다.
+ */
 static bool gic_has_group0(void)
 {
 	u32 val;
@@ -845,14 +928,64 @@ static bool gic_has_group0(void)
 	 * becomes 0x80. Reading it back returns 0, indicating that
 	 * we're don't have access to Group0.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - papago
+ *   PMR에서 0이 아닌 가능한 가장 높은 우선 순위를 설정하여 Group0이 EL3의 제어
+ *   하에 있는지 여부를 알아보겠습니다.
+ *
+ *   SCR_EL3.FIQ가 설정되면 CPU 인터페이스가 비트 7을 설정하고 실제 우선 순위를
+ *   비보안 범위로 유지하기 위해 우선 순위가 아래로 이동합니다. 이 과정에서
+ *   최하위 비트가 손실되고 실제 우선 순위는 0x80이 됩니다. 다시 읽으면 0이
+ *   반환되어 Group0에 액세스할 수 없음을 나타냅니다.
+ *
+ * - GIC문서 4.8 Interrupt prioritization 참고
+ *
+ *   ICC_CTLR_EL1.PRIbits         GROUP0, GROUP1      support group1
+ *   (Read only)          pribits single    사용여부  two             사용여부
+ *   0                    1       g.sssssss  X        ssssssss         X
+ *   1                    2       gg.ssssss  X        g.sssssss        X
+ *   2                    3       ggg.sssss  X        gg.ssssss        X
+ *   3                    4       gggg.ssss  O        ggg.sssss        X
+ *   4                    5       ggggg.sss  O        gggg.ssss        O
+ *   5                    6       gggggg.ss  O        ggggg.sss        O
+ *   6                    7       ggggggg.s  O        gggggg.ss        O
+ *   7                    8       gggggggg.  O        ggggggg.s        O
+ *
+ *   - ex) gic_get_pribits == 5, BIT(3)
+ *        
+ *                                GROUP0, GROUP1      support group1
+ *   ICC_CTLR_EL1.PRIbits pribits single              two                     
+ *   4                    5       ggggg.sss           gggg.ssss         
+ *                                    ^                    ^
+ *                                kernel이            kernel이
+ *                                group0를 다를수     group0를 못다루는 상태
+ *                                있는 상태.          set후 값을 읽으면 없다.
+ *                                set후 읽으면
+ *                                값이 있다.
+ */
 	gic_write_pmr(BIT(8 - gic_get_pribits()));
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 값이 다시 읽어지면 single secure state으로 동작하고, 이때는 kernel이
+ *   group0, group1을 다룰수있다.
+ */
 	val = gic_read_pmr();
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 원복
+ */
 	gic_write_pmr(old_pmr);
 
 	return val != 0;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - GICD류를 초기값으로 설정한다.
+ */
 static void __init gic_dist_init(void)
 {
 	unsigned int i;
@@ -860,8 +993,18 @@ static void __init gic_dist_init(void)
 	void __iomem *base = gic_data.dist_base;
 	u32 val;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - disable후 register를 초기화 하고 다시 enable한다.
+ *   GICD_CTLR.DS = 0.
+ */
 	/* Disable the distributor */
 	writel_relaxed(0, base + GICD_CTLR);
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - disable wait
+ */
 	gic_dist_wait_for_rwp();
 
 	/*
@@ -870,27 +1013,64 @@ static void __init gic_dist_init(void)
 	 * do the right thing if the kernel is running in secure mode,
 	 * but that's not the intended use case anyway.
 	 */
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - group 개념
+ * - group0 secure
+ *   group1 - non-secure 
+ *          - secure
+ * - all bits set
+ * - 현재 상태(GICD_CTLR.DS==0)
+ *   0b1 When GICD_CTLR.DS==0, the corresponding interrupt is Non-secure Group 1.
+ *   non secure group1로 가게 한다.
+ */
 	for (i = 32; i < GIC_LINE_NR; i += 32)
 		writel_relaxed(~0, base + GICD_IGROUPR + i / 8);
 
 	/* Extended SPI range, not handled by the GICv2/GICv3 common code */
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic espi 까지 전부 disable, inactivate
+ */
 	for (i = 0; i < GIC_ESPI_NR; i += 32) {
 		writel_relaxed(~0U, base + GICD_ICENABLERnE + i / 8);
 		writel_relaxed(~0U, base + GICD_ICACTIVERnE + i / 8);
 	}
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 위에 GICD_IGROUPR와 똑같이 설정한다. espi측.
+ */
 	for (i = 0; i < GIC_ESPI_NR; i += 32)
 		writel_relaxed(~0U, base + GICD_IGROUPRnE + i / 8);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - level-sensitive로 초기화한다.
+ */
 	for (i = 0; i < GIC_ESPI_NR; i += 16)
 		writel_relaxed(0, base + GICD_ICFGRnE + i / 4);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - default interrupt 우선순위를 0xa0(실제는 0xd0)으로 전부 설정한다.
+ */
 	for (i = 0; i < GIC_ESPI_NR; i += 4)
 		writel_relaxed(GICD_INT_DEF_PRI_X4, base + GICD_IPRIORITYRnE + i);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - v1, v2 common들도 초기화해준다.
+ */
 	/* Now do the common stuff, and wait for the distributor to drain */
 	gic_dist_config(base, GIC_LINE_NR, gic_dist_wait_for_rwp);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - When access is Non-secure, in a system that supports two Security states.
+ *   G1A, G1, ARE_NS enable.
+ */
 	val = GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1A | GICD_CTLR_ENABLE_G1;
 	if (gic_data.rdists.gicd_typer2 & GICD_TYPER2_nASSGIcap) {
 		pr_info("Enabling SGIs without active state\n");
@@ -904,6 +1084,10 @@ static void __init gic_dist_init(void)
 	 * Set all global interrupts to the boot CPU only. ARE must be
 	 * enabled.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - affinity를 읽어서 gic에 기록한다.
+ */
 	affinity = gic_mpidr_to_affinity(cpu_logical_map(smp_processor_id()));
 	for (i = 32; i < GIC_LINE_NR; i++)
 		gic_write_irouter(affinity, base + GICD_IROUTER + i * 8);
@@ -912,11 +1096,20 @@ static void __init gic_dist_init(void)
 		gic_write_irouter(affinity, base + GICD_IROUTERnE + i * 8);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * @fn giv3의 경우 __gic_update_rdist_properties
+ * - nr_redist_regions수만큼 iterate하며 v3, v4 gic에 대해 fn을 호출한다.
+ */
 static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
 {
 	int ret = -ENODEV;
 	int i;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - nr_redist_regions은 일반적으로 numa수와 비슷하다.
+ */
 	for (i = 0; i < gic_data.nr_redist_regions; i++) {
 		void __iomem *ptr = gic_data.redist_regions[i].redist_base;
 		u64 typer;
@@ -935,6 +1128,10 @@ static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
 			if (!ret)
 				return 0;
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - single이 아니면 건너뛰면서 last까지 재실행.
+ */
 			if (gic_data.redist_regions[i].single_redist)
 				break;
 
@@ -951,6 +1148,11 @@ static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
 	return ret ? -ENODEV : 0;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 현재 cpu에 해당하는 rdist를 찾아서 현재 cpu에 해당하는
+ *   rdist_rd_base와 phy address를 저장한다.
+ */
 static int __gic_populate_rdist(struct redist_region *region, void __iomem *ptr)
 {
 	unsigned long mpidr = cpu_logical_map(smp_processor_id());
@@ -967,6 +1169,10 @@ static int __gic_populate_rdist(struct redist_region *region, void __iomem *ptr)
 	       MPIDR_AFFINITY_LEVEL(mpidr, 0));
 
 	typer = gic_read_typer(ptr + GICR_TYPER);
+/*
+ * IAMROOT, 2022.10.08:
+ * - 현재 cpu인것을 찾는다.
+ */
 	if ((typer >> 32) == aff) {
 		u64 offset = ptr - region->redist_base;
 		raw_spin_lock_init(&gic_data_rdist()->rd_lock);
@@ -977,13 +1183,25 @@ static int __gic_populate_rdist(struct redist_region *region, void __iomem *ptr)
 			smp_processor_id(), mpidr,
 			(int)(region - gic_data.redist_regions),
 			&gic_data_rdist()->phys_base);
+/*
+ * IAMROOT, 2022.10.08:
+ * - 찾은 시점에서 종료.
+ */
 		return 0;
 	}
 
 	/* Try next one */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 못찾았으면 continue
+ */
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 현재 cpu를 찾아서__gic_populate_rdist()를 설정한다.
+ */
 static int gic_populate_rdist(void)
 {
 	if (gic_iterate_rdists(__gic_populate_rdist) == 0)
@@ -996,6 +1214,11 @@ static int gic_populate_rdist(void)
 	return -ENODEV;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - cpu별의 GICR_TYPER를 읽어서 지원하는 feature를 설정한다.
+ *   ppi개수도 여기서 읽어 진다.
+ */
 static int __gic_update_rdist_properties(struct redist_region *region,
 					 void __iomem *ptr)
 {
@@ -1021,6 +1244,12 @@ static int __gic_update_rdist_properties(struct redist_region *region,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - redist_regions 개수 * redist set만큼 iterate하며(cpu개수와 동일) 각각의
+ *   redist register에서 __gic_update_rdist_properties 수행
+ * - 설정된 feature에 대한 정보를 print한다.
+ */
 static void gic_update_rdist_properties(void)
 {
 	gic_data.ppi_nr = UINT_MAX;
@@ -1041,6 +1270,10 @@ static inline bool gic_dist_security_disabled(void)
 	return readl_relaxed(gic_data.dist_base + GICD_CTLR) & GICD_CTLR_DS;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 
+ */
 static void gic_cpu_sys_reg_init(void)
 {
 	int i, cpu = smp_processor_id();
@@ -1056,15 +1289,36 @@ static void gic_cpu_sys_reg_init(void)
 	 *
 	 * Kindly inform the luser.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - papgo
+ *   SRE 비트가 실제로 설정되었는지 확인해야 합니다. 그렇지 않은 경우 SRE가
+ *   EL2에서 비활성화되었음을 의미합니다. 우리는 고통스럽게 죽을 것이고 우리가
+ *   그것에 대해 할 수 있는 것은 아무것도 없습니다.
+ *
+ *   루저에게 알려주세요.
+ */
 	if (!gic_enable_sre())
 		pr_err("GIC: unable to set SRE (disabled at EL2), panic ahead\n");
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - pribits(우선순위 평탄화 bits) 를 가져온다.
+ */
 	pribits = gic_get_pribits();
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - kernel이 group0를 지원하는지.
+ */
 	group0 = gic_has_group0();
 
 	/* Set priority mask register */
 	if (!gic_prio_masking_enabled()) {
+/*
+ * prifri, 2022.10.08:
+ * - masking을 지원안하는경우 pmr을 통해서 막는건 지원안한다.
+ */
 		write_gicreg(DEFAULT_PMR_VALUE, ICC_PMR_EL1);
 	} else if (gic_supports_nmi()) {
 		/*
@@ -1076,6 +1330,17 @@ static void gic_cpu_sys_reg_init(void)
 		 * and as a result we'll never see this warning in the boot path
 		 * for that CPU.
 		 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - papago
+ *   부팅 CPU와 구성이 일치하지 않습니다. 모든 CPU에서 인터럽트 마스킹이 제대로
+ *   작동하지 않기 때문에 시스템이 중단될 가능성이 높습니다. 부팅 CPU는 NMI
+ *   지원을 활성화하기 전에 이 함수를 호출합니다. 따라서 해당 CPU의 부팅 경로에는
+ *   이 경고가 표시되지 않습니다.
+ *
+ * - single secure state일때 group0 & group1 둘다 kernel이 제어한다.
+ *   secure라면 group1만 제어한다.
+ */
 		if (static_branch_unlikely(&gic_nonsecure_priorities))
 			WARN_ON(!group0 || gic_dist_security_disabled());
 		else
@@ -1088,8 +1353,19 @@ static void gic_cpu_sys_reg_init(void)
 	 * any pre-emptive interrupts from working at all). Writing a zero
 	 * to BPR restores is reset value.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - papago
+ *   일부 펌웨어는 리셋 값에서 변경된 BPR(선점형 인터럽트가 전혀 작동하지 않도록
+ *   충분히 큰 값)과 함께 커널로 전달합니다. BPR 복원에 0을 쓰는 것은 값을
+ *   재설정하는 것입니다.
+ */
 	gic_write_bpr1(0);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - eoimode 1로 할지, mode 0로 할지 결정.
+ */
 	if (static_branch_likely(&supports_deactivate_key)) {
 		/* EOI drops priority only (mode 1) */
 		gic_write_ctlr(ICC_CTLR_EL1_EOImode_drop);
@@ -1099,6 +1375,16 @@ static void gic_cpu_sys_reg_init(void)
 	}
 
 	/* Always whack Group0 before Group1 */
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - ICC_AP0R<n>_EL1, Interrupt Controller Active Priorities Group 0 Registers
+ * - Group 0 active priorities.
+ * - R0는 무조건
+ *   R1는 6bit이상일때,
+ *   R2, R3는 7bit이상일때.
+ * - ICC_AP0R을 reset한다.
+ */
 	if (group0) {
 		switch(pribits) {
 		case 8:
@@ -1117,6 +1403,10 @@ static void gic_cpu_sys_reg_init(void)
 		isb();
 	}
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - group1에 대한것도 수행한다.
+ */
 	switch(pribits) {
 	case 8:
 	case 7:
@@ -1176,17 +1466,30 @@ static int gic_dist_supports_lpis(void)
 		!gicv3_nolpi);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - 
+ */
 static void gic_cpu_init(void)
 {
 	void __iomem *rbase;
 	int i;
 
 	/* Register ourselves with the rest of the world */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 현재 cpu에 대한 rdist설정이 성공했으면 다음으로 넘어간다.
+ */
 	if (gic_populate_rdist())
 		return;
 
 	gic_enable_redist(true);
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - ppi 16개 초과한다는건 Extend range를 지원하고있다는 의미다.
+ *   그런데 정작 register가 extend range를 지원안하고있으면 말이 안되므로 warning.
+ */
 	WARN((gic_data.ppi_nr > 16 || GIC_ESPI_NR != 0) &&
 	     !(gic_read_ctlr() & ICC_CTLR_EL1_ExtRange),
 	     "Distributor has extended ranges, but CPU%d doesn't\n",
@@ -1195,6 +1498,10 @@ static void gic_cpu_init(void)
 	rbase = gic_data_rdist_sgi_base();
 
 	/* Configure SGIs/PPIs as non-secure Group-1 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - non-secure group1로 전부 설정한다.
+ */
 	for (i = 0; i < gic_data.ppi_nr + 16; i += 32)
 		writel_relaxed(~0, rbase + GICR_IGROUPR0 + i / 8);
 
@@ -1389,6 +1696,10 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 #define gic_smp_init()		do { } while(0)
 #endif
 
+/*
+ * IAMROOT, 2022.10.08:
+ * @return 1. success. 0. fail.
+ */
 static int gic_retrigger(struct irq_data *data)
 {
 	return !gic_irq_set_irqchip_state(data, IRQCHIP_STATE_PENDING, true);
@@ -1459,6 +1770,12 @@ static struct irq_chip gic_eoimode1_chip = {
 				  IRQCHIP_MASK_ON_SUSPEND,
 };
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - @virq로 @hw를 등록한다. 
+ *   1. chip ops 선택
+ *   2. @hw irq type에따라 flow handler를 설정.
+ */
 static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 			      irq_hw_number_t hw)
 {
@@ -1490,6 +1807,10 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	case ESPI_RANGE:
 		irq_domain_set_info(d, irq, hw, chip, d->host_data,
 				    handle_fasteoi_irq, NULL, NULL);
+/*
+ * IAMROOT, 2022.10.08:
+ * - driver용 irq개념이라 probe set.
+ */
 		irq_set_probe(irq);
 		irqd_set_single_target(irqd);
 		break;
@@ -1506,6 +1827,11 @@ static int gic_irq_domain_map(struct irq_domain *d, unsigned int irq,
 	}
 
 	/* Prevents SW retriggers which mess up the ACK/EOI ordering */
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic는 hw를 지원하기때문에 sw방식은 disable한다.
+ * - irq_sw_resend() 참고
+ */
 	irqd_set_handle_enforce_irqctx(irqd);
 	return 0;
 }
@@ -1610,7 +1936,7 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 
 /*
  * IAMROOT, 2022.10.01:
- * - @
+ * - @virq 부터 @nr_irqs개 까지 virq를 할당한다.
  */
 static int gic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs, void *arg)
@@ -1959,12 +2285,20 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	pr_info("Distributor has %sRange Selector support\n",
 		gic_data.has_rss ? "" : "no ");
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - MBIS를 지원하면.
+ */
 	if (typer & GICD_TYPER_MBIS) {
 		err = mbi_init(handle, gic_data.domain);
 		if (err)
 			pr_err("Failed to initialize MBIs\n");
 	}
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic v3 interrupt handler를 등록한다.
+ */
 	set_handle_irq(gic_handle_irq);
 
 	gic_update_rdist_properties();

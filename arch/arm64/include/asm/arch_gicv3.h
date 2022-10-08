@@ -147,6 +147,10 @@ static inline u32 gic_read_rpr(void)
 #define gicr_write_vpendbaser(v, c)	writeq_relaxed(v, c)
 #define gicr_read_vpendbaser(c)		readq_relaxed(c)
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - priority masking 지원여부 확인.
+ */
 static inline bool gic_prio_masking_enabled(void)
 {
 	return system_uses_irq_prio_masking();

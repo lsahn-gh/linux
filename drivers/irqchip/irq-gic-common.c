@@ -100,6 +100,11 @@ int gic_configure_irq(unsigned int irq, unsigned int type,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - v1 ~ v2는 이 함수만 호출하고, v3는 다른걸(extend register등) 설정하고
+ *   이걸 호출한다.
+ */
 void gic_dist_config(void __iomem *base, int gic_irqs,
 		     void (*sync_access)(void))
 {
@@ -108,6 +113,10 @@ void gic_dist_config(void __iomem *base, int gic_irqs,
 	/*
 	 * Set all global interrupts to be level triggered, active low.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - active low lvl trigger로 설정.
+ */
 	for (i = 32; i < gic_irqs; i += 16)
 		writel_relaxed(GICD_INT_ACTLOW_LVLTRIG,
 					base + GIC_DIST_CONFIG + i / 4);
@@ -133,6 +142,11 @@ void gic_dist_config(void __iomem *base, int gic_irqs,
 		sync_access();
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - v1 ~ v2는 이 함수만 호출하고, v3는 다른걸(extend register등) 설정하고
+ *   이걸 호출한다.
+ */
 void gic_cpu_config(void __iomem *base, int nr, void (*sync_access)(void))
 {
 	int i;
@@ -141,6 +155,10 @@ void gic_cpu_config(void __iomem *base, int nr, void (*sync_access)(void))
 	 * Deal with the banked PPI and SGI interrupts - disable all
 	 * private interrupts. Make sure everything is deactivated.
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 끈다.
+ */
 	for (i = 0; i < nr; i += 32) {
 		writel_relaxed(GICD_INT_EN_CLR_X32,
 			       base + GIC_DIST_ACTIVE_CLEAR + i / 8);
@@ -151,6 +169,10 @@ void gic_cpu_config(void __iomem *base, int nr, void (*sync_access)(void))
 	/*
 	 * Set priority on PPI and SGI interrupts
 	 */
+/*
+ * IAMROOT, 2022.10.08:
+ * - 0xA0A0A0A0으로 설정한다.
+ */
 	for (i = 0; i < nr; i += 4)
 		writel_relaxed(GICD_INT_DEF_PRI_X4,
 					base + GIC_DIST_PRI + i * 4 / 4);

@@ -332,6 +332,12 @@ static inline bool irqd_is_level_type(struct irq_data *d)
  * Must only be called of irqchip.irq_set_affinity() or low level
  * hierarchy domain allocation functions.
  */
+/*
+ * IAMROOT, 2022.10.08:
+ * - GIC의 경우 SPI, ESPI일때만 set.
+ * - PPI같은 percpu irq인 경우 같은 번호의 irq가 여러 cpu에 가는 개념이라 사용안한다.
+ * - LPI는 무조건 single인 개념(message)이라 따로 설정안한다.
+ */
 static inline void irqd_set_single_target(struct irq_data *d)
 {
 	__irqd_to_state(d) |= IRQD_SINGLE_TARGET;
@@ -342,6 +348,11 @@ static inline bool irqd_is_single_target(struct irq_data *d)
 	return __irqd_to_state(d) & IRQD_SINGLE_TARGET;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - hw방법으로 지원을 하므로 sw로 사용하지 말라는것.
+ * - irq_sw_resend 참고
+ */
 static inline void irqd_set_handle_enforce_irqctx(struct irq_data *d)
 {
 	__irqd_to_state(d) |= IRQD_HANDLE_ENFORCE_IRQCTX;
@@ -412,6 +423,10 @@ static inline bool irqd_is_activated(struct irq_data *d)
 	return __irqd_to_state(d) & IRQD_ACTIVATED;
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - irq_domain_activate_irq
+ */
 static inline void irqd_set_activated(struct irq_data *d)
 {
 	__irqd_to_state(d) |= IRQD_ACTIVATED;
@@ -801,6 +816,10 @@ static inline void irq_set_noprobe(unsigned int irq)
 	irq_modify_status(irq, 0, IRQ_NOPROBE);
 }
 
+/*
+ * IAMROOT, 2022.10.08:
+ * - driver(SPI, ESPI)의 경우 probe가 됫을경우 set해준다.
+ */
 static inline void irq_set_probe(unsigned int irq)
 {
 	irq_modify_status(irq, IRQ_NOPROBE, 0);

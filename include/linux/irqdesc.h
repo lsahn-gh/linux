@@ -65,6 +65,13 @@ struct irq_desc {
  */
 	struct irq_data		irq_data;
 	unsigned int __percpu	*kstat_irqs;
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - gic의 경우
+ *   SGI,PPI,EPPI : handle_percpu_devid_irq
+ *   SPI,ESPI,LPI : handle_fasteoi_irq
+ */
 	irq_flow_handler_t	handle_irq;
 	struct irqaction	*action;	/* IRQ action list */
 	unsigned int		status_use_accessors;

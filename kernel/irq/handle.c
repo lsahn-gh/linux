@@ -222,6 +222,12 @@ irqreturn_t handle_irq_event(struct irq_desc *desc)
 }
 
 #ifdef CONFIG_GENERIC_IRQ_MULTI_HANDLER
+
+/*
+ * IAMROOT, 2022.10.08:
+ * - 전역 함수에 등록한다. 이미 있으면 busy
+ * - gic의 경우 gic_handle_irq
+ */
 int __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
 {
 	if (handle_arch_irq)
