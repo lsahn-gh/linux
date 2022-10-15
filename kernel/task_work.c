@@ -29,6 +29,10 @@ static struct callback_head work_exited; /* all we need is ->next == NULL */
  * RETURNS:
  * 0 if succeeds or -ESRCH.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - TODO
+ */
 int task_work_add(struct task_struct *task, struct callback_head *work,
 		  enum task_work_notify_mode notify)
 {

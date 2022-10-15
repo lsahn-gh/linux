@@ -90,6 +90,10 @@ enum {
 	IRQ_LEVEL		= (1 <<  8),
 	IRQ_PER_CPU		= (1 <<  9),
 	IRQ_NOPROBE		= (1 << 10),
+/*
+ * IAMROOT, 2022.10.15:
+ * - 사용자가 실제 irq를 사용한다고 설정을하면(request_irq) set된다.
+ */
 	IRQ_NOREQUEST		= (1 << 11),
 	IRQ_NOAUTOEN		= (1 << 12),
 	IRQ_NO_BALANCING	= (1 << 13),
@@ -107,6 +111,10 @@ enum {
 	IRQ_PER_CPU_DEVID	= (1 << 17),
 	IRQ_IS_POLLED		= (1 << 18),
 	IRQ_DISABLE_UNLAZY	= (1 << 19),
+/*
+ * IAMROOT, 2022.10.15:
+ * - Don't show up in /proc/interrupts
+ */
 	IRQ_HIDDEN		= (1 << 20),
 	IRQ_NO_DEBUG		= (1 << 21),
 };
@@ -191,6 +199,10 @@ struct irq_common_data {
  * - 계층구조를 지원할려고 irq_desc에서 irq_data만 빼놓았다.
  * - chip으로 해당 irq의 소속 hw와 연결된다.
  * - domain을 통해서 해당 irq가 소속된 domain(tree, linear...)과 연결된다.
+ *
+ * - domain이 계층구조인경우 다음의 값들이  child irq_data와 동일하게 유지된다.
+ *   (irq_domain_insert_irq_data() 참고)
+ *   irq, common
  */
 struct irq_data {
 	u32			mask;
@@ -244,6 +256,9 @@ enum {
 /*
  * IAMROOT, 2022.10.01:
  * - IRQ_TYPE_SENSE_MASK
+ * - IRQD_AFFINITY_MANAGED, IRQD_MANAGED_SHUTDOWN (alloc_descs() 참고)
+ *   affinity->is_managed가 되있는경우 irq desc할당에서 flag로 사용한다.
+ *
  */
 	IRQD_TRIGGER_MASK		= 0xf,
 	IRQD_SETAFFINITY_PENDING	= (1 <<  8),

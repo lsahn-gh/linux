@@ -27,6 +27,10 @@
 #if defined(CONFIG_IRQ_FORCED_THREADING) && !defined(CONFIG_PREEMPT_RT)
 DEFINE_STATIC_KEY_FALSE(force_irqthreads_key);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - threaded irq가 가능하게 한다.
+ */
 static int __init setup_forced_irqthreads(char *arg)
 {
 	static_branch_enable(&force_irqthreads_key);
@@ -1139,6 +1143,10 @@ EXPORT_SYMBOL_GPL(irq_set_parent);
  * assigned as primary handler when request_threaded_irq is called
  * with handler == NULL. Useful for oneshot interrupts.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_setup_forced_threading() 참고.
+ */
 static irqreturn_t irq_default_primary_handler(int irq, void *dev_id)
 {
 	return IRQ_WAKE_THREAD;
@@ -1244,6 +1252,11 @@ out_unlock:
 /*
  * Check whether we need to change the affinity of the interrupt thread.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - @action의 affinity IRQTF_AFFINITY를 확인한다.
+ *   존재하면 current task에 해당 affinity mask를 설정해놓는다.
+ */
 static void
 irq_thread_check_affinity(struct irq_desc *desc, struct irqaction *action)
 {
@@ -1257,6 +1270,10 @@ irq_thread_check_affinity(struct irq_desc *desc, struct irqaction *action)
 	 * In case we are out of memory we set IRQTF_AFFINITY again and
 	 * try again next time
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - oom처리.
+ */
 	if (!alloc_cpumask_var(&mask, GFP_KERNEL)) {
 		set_bit(IRQTF_AFFINITY, &action->thread_flags);
 		return;
@@ -1292,6 +1309,12 @@ irq_thread_check_affinity(struct irq_desc *desc, struct irqaction *action) { }
  * context. So we need to disable bh here to avoid deadlocks and other
  * side effects.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - threaded irq(bottom half thread fn)
+ * - @action->thread_fn 호출.
+ * - TODO
+ */
 static irqreturn_t
 irq_forced_thread_fn(struct irq_desc *desc, struct irqaction *action)
 {
@@ -1316,6 +1339,10 @@ irq_forced_thread_fn(struct irq_desc *desc, struct irqaction *action)
  * preemptible - many of them need to sleep and wait for slow busses to
  * complete.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_forced_thread_fn()의 lock없는 버전.
+ */
 static irqreturn_t irq_thread_fn(struct irq_desc *desc,
 		struct irqaction *action)
 {
@@ -1335,6 +1362,10 @@ static void wake_threads_waitq(struct irq_desc *desc)
 		wake_up(&desc->wait_for_threads);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - TODO
+ */
 static void irq_thread_dtor(struct callback_head *unused)
 {
 	struct task_struct *tsk = current;
@@ -1377,6 +1408,10 @@ static void irq_wake_secondary(struct irq_desc *desc, struct irqaction *action)
 /*
  * Interrupt handler thread
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - TODO
+ */
 static int irq_thread(void *data)
 {
 	struct callback_head on_exit_work;
@@ -1385,6 +1420,10 @@ static int irq_thread(void *data)
 	irqreturn_t (*handler_fn)(struct irq_desc *desc,
 			struct irqaction *action);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq가 forced 방식동작 여부에 따라 handler_fn을 선택한다.
+ */
 	if (force_irqthreads() && test_bit(IRQTF_FORCED_THREAD,
 					   &action->thread_flags))
 		handler_fn = irq_forced_thread_fn;
@@ -1394,6 +1433,10 @@ static int irq_thread(void *data)
 	init_task_work(&on_exit_work, irq_thread_dtor);
 	task_work_add(current, &on_exit_work, TWA_NONE);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @action의 affinity를 current task에 set.
+ */
 	irq_thread_check_affinity(desc, action);
 
 	while (!irq_wait_for_interrupt(action)) {
@@ -1445,10 +1488,24 @@ void irq_wake_thread(unsigned int irq, void *dev_id)
 }
 EXPORT_SYMBOL_GPL(irq_wake_thread);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @new를 forced thread로 사용하도록 등록한다.
+ */
 static int irq_setup_forced_threading(struct irqaction *new)
 {
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - setup_forced_irqthreads() 참고. early param(threadirqs)
+ */
 	if (!force_irqthreads())
 		return 0;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - SPI류들만 들어올수 있을 것이다.
+ */
 	if (new->flags & (IRQF_NO_THREAD | IRQF_PERCPU | IRQF_ONESHOT))
 		return 0;
 
@@ -1456,9 +1513,18 @@ static int irq_setup_forced_threading(struct irqaction *new)
 	 * No further action required for interrupts which are requested as
 	 * threaded interrupts already
 	 */
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - 이미 threaded irq가 설정됬다는 간접적인 의미.
+ */
 	if (new->handler == irq_default_primary_handler)
 		return 0;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - threaded이므로 oneshot.
+ */
 	new->flags |= IRQF_ONESHOT;
 
 	/*
@@ -1466,6 +1532,10 @@ static int irq_setup_forced_threading(struct irqaction *new)
 	 * thread handler. We force thread them as well by creating a
 	 * secondary action.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 두개다 있는 경우엔 secondary를 만들어서 거기에 thread_fn을 설정한다.
+ */
 	if (new->handler && new->thread_fn) {
 		/* Allocate the secondary action */
 		new->secondary = kzalloc(sizeof(struct irqaction), GFP_KERNEL);
@@ -1484,6 +1554,11 @@ static int irq_setup_forced_threading(struct irqaction *new)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_request_resources callback.
+ * - gic에는 구현되있지 않다.
+ */
 static int irq_request_resources(struct irq_desc *desc)
 {
 	struct irq_data *d = &desc->irq_data;
@@ -1534,6 +1609,12 @@ static void irq_nmi_teardown(struct irq_desc *desc)
 		c->irq_nmi_teardown(d);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * @return 0. thread 생성 성공.
+ *         not 0. 생성실패.
+ * - thread를 생성한다.
+ */
 static int
 setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
 {
@@ -1550,6 +1631,10 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
 	if (IS_ERR(t))
 		return PTR_ERR(t);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - t를 rt sched로 설정한다.
+ */
 	sched_set_fifo(t);
 
 	/*
@@ -1567,6 +1652,15 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
 	 * correct as we want the thread to move to the cpu(s)
 	 * on which the requesting code placed the interrupt.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   스레드에게 affinity를 설정하도록 지시합니다. 이것은 모든 것이 이미 설정되어
+ *   있으므로 secondary handler에 대해 setup_affinity()를 호출하지 않기 때문에
+ *   shared interrupt handler에 중요합니다.
+ *   IRQF_NO_BALANCE로 표시된 인터럽트의 경우에도 요청 코드가 인터럽트를 배치한
+ *   CPU로 스레드를 이동하기를 원하므로 이는 정확합니다.
+ */
 	set_bit(IRQTF_AFFINITY, &new->thread_flags);
 	return 0;
 }
@@ -1584,6 +1678,10 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
  * chip_bus_lock and desc->lock are sufficient for all other management and
  * interrupt related functions. desc->request_mutex solely serializes
  * request/free_irq().
+ */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 
  */
 static int
 __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
@@ -1606,6 +1704,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * If the trigger type is not specified by the caller,
 	 * then use the default for this interrupt.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - flags에 IRQF_TRIGGER_MASK가 없으면 한번 irq_data에서 확인해서 있으면 가져온다.
+ */
 	if (!(new->flags & IRQF_TRIGGER_MASK))
 		new->flags |= irqd_get_trigger_type(&desc->irq_data);
 
@@ -1613,6 +1715,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * Check whether the interrupt nests into another interrupt
 	 * thread.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - virq가 nested된 경우가 있다. 그런 경우에 대한 처리.
+ */
 	nested = irq_settings_is_nested_thread(desc);
 	if (nested) {
 		if (!new->thread_fn) {
@@ -1626,6 +1732,12 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 */
 		new->handler = irq_nested_primary_handler;
 	} else {
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - threaded irq가능하면. PPI류들은 안한다.(ex). request_percpu_irq()등.)
+ *   SPI류들만 해당될것이다.
+ */
 		if (irq_settings_can_thread(desc)) {
 			ret = irq_setup_forced_threading(new);
 			if (ret)
@@ -1638,6 +1750,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * and the interrupt does not nest into another interrupt
 	 * thread.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - action에 thread_fn이 있고, not nested라면
+ */
 	if (new->thread_fn && !nested) {
 		ret = setup_irq_thread(new, irq, false);
 		if (ret)
@@ -1658,6 +1774,17 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * chip flags, so we can avoid the unmask dance at the end of
 	 * the threaded handler for those.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   드라이버는 기본 irq 칩 구현에 대한 지식 없이 작동하도록 작성되는 경우가
+ *   많으므로 기본 hard irq 컨텍스트 핸들러가 없는 스레드된 irq에 대한 요청은
+ *   ONESHOT 플래그를 설정해야 합니다. MSI 기반 인터럽트와 같은 일부 irq 칩은
+ *   그 자체로 one shot safe 입니다. 칩 플래그를 확인하여 스레드 처리기 끝에서 마스크
+ *   해제 춤을 피할 수 있습니다.
+ * - chip handler에 대한 IRQCHIP_ONESHOT_SAFE이 있으면 chip handler단에서 oneshot
+ *   처리를 할것이므로 action handelr에선 불필요하므로 빼준다.
+ */
 	if (desc->irq_data.chip->flags & IRQCHIP_ONESHOT_SAFE)
 		new->flags &= ~IRQF_ONESHOT;
 
@@ -1668,6 +1795,14 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * a recycled oneshot thread_mask bit while it's still in use by
 	 * its previous owner.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   선택적 칩 버스 잠금 및 desc->lock을 유지하지 않고 synchronize_hardirq()가
+ *   완료될 때까지 기다릴 수 있는 동시 __free_irq() 호출로부터 보호합니다.
+ *   또한 이전 소유자가 아직 사용 중인 동안 재활용된 oneshot thread_mask 비트를
+ *   배포하는 것을 방지합니다.
+ */
 	mutex_lock(&desc->request_mutex);
 
 	/*
@@ -1675,6 +1810,12 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * might rely on the serialization or the magic power management
 	 * functions which are abusing the irq_bus_lock() callback,
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *  *아래의 irq_request_resources() 콜백이 직렬화 또는 irq_bus_lock() 콜백을 남용하는 
+ *  마법의 전원 관리 기능에 의존할 수 있으므로 버스 잠금을 획득하십시오.
+ */
 	chip_bus_lock(desc);
 
 	/* First installed action requests resources. */
@@ -1693,9 +1834,20 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * management calls which are not serialized via
 	 * desc->request_mutex or the optional bus lock.
 	 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   다음 코드 블록은 동시 인터럽트 및 desc->request_mutex 또는 선택적 버스 잠금을 통해
+ *   직렬화되지 않은 다른 관리 호출에 대해 원자적으로 보호되어 실행되어야 합니다.
+ */
 	raw_spin_lock_irqsave(&desc->lock, flags);
 	old_ptr = &desc->action;
 	old = *old_ptr;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - 이전 action이 있다.
+ */
 	if (old) {
 		/*
 		 * Can't share interrupts unless both agree to and are
@@ -1705,8 +1857,20 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * agree on ONESHOT.
 		 * Interrupt lines used for NMIs cannot be shared.
 		 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   둘 다 동의하고 동일한 유형(레벨, 에지, 극성)이 아니면 인터럽트를 공유할 수 없습니다.
+ *   따라서 두 플래그 필드 모두 IRQF_SHARED가 설정되어야 하고 트리거 유형을 설정하는 비트가
+ *   일치해야 합니다. 또한 모두 ONESHOT에 동의해야 합니다.
+ *   NMI에 사용되는 인터럽트 라인은 공유할 수 없습니다.
+ */
 		unsigned int oldtype;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - NMI는 공유할수없다.
+ */
 		if (desc->istate & IRQS_NMI) {
 			pr_err("Invalid attempt to share NMI for %s (irq %d) on irqchip %s.\n",
 				new->name, irq, desc->irq_data.chip->name);
@@ -1718,10 +1882,23 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * If nobody did set the configuration before, inherit
 		 * the one provided by the requester.
 		 */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   아무도 이전에 구성을 설정하지 않은 경우 요청자가 제공한 구성을 상속합니다.
+ */
 		if (irqd_trigger_type_was_set(&desc->irq_data)) {
+/*
+ * IAMROOT, 2022.10.15:
+ * - 이전에 trigger설정이였다면 desc의 type을 가져온다.
+ */
 			oldtype = irqd_get_trigger_type(&desc->irq_data);
 		} else {
 			oldtype = new->flags & IRQF_TRIGGER_MASK;
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_desc를 new flags의 trigger로 설정한다.
+ */
 			irqd_set_trigger_type(&desc->irq_data, oldtype);
 		}
 
@@ -2689,6 +2866,22 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
  *	the handler gets called with the interrupted CPU's instance of
  *	that variable.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   이 호출은 인터럽트 리소스를 할당하고 로컬 CPU에서 인터럽트를 활성화합니다.
+ *   인터럽트가 다른 CPU에서 활성화되어야 하는 경우 enable_percpu_irq()를 사용하여
+ *   각 CPU에서 인터럽트를 수행해야 합니다. 
+ *
+ *   Dev_id는 전역적으로 고유해야 합니다. 이것은 CPU당 변수이며 핸들러는
+ *   해당 변수의 인터럽트된 CPU 인스턴스와 함께 호출됩니다.
+ *
+ * - ex) ipi의 경우 ipi_handler()
+ *
+ * - irq 흐름.
+ *   vector -> chip handler -> flow handler -> irq_handler(현재) ->
+ *   action handler(option)
+ */
 int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 			 unsigned long flags, const char *devname,
 			 void __percpu *dev_id)
@@ -2701,10 +2894,22 @@ int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		return -EINVAL;
 
 	desc = irq_to_desc(irq);
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - !irq_settings_can_request
+ *   다른데서 request됬는지 확인.
+ * - !irq_settings_is_per_cpu_devid(desc)
+ *   percpu용인지 확인.
+ */
 	if (!desc || !irq_settings_can_request(desc) ||
 	    !irq_settings_is_per_cpu_devid(desc))
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - flags가 있다면, IRQF_TIMER인것만 허락한다.
+ */
 	if (flags && flags != IRQF_TIMER)
 		return -EINVAL;
 
@@ -2713,10 +2918,19 @@ int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		return -ENOMEM;
 
 	action->handler = handler;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - percpu용이라 percpu가 추가된다.
+ */
 	action->flags = flags | IRQF_PERCPU | IRQF_NO_SUSPEND;
 	action->name = devname;
 	action->percpu_dev_id = dev_id;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - chip이 절전인 경우에 대비해서 한번 wakeup시도를 한다.
+ */
 	retval = irq_chip_pm_get(&desc->irq_data);
 	if (retval < 0) {
 		kfree(action);

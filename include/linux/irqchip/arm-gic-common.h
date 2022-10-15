@@ -12,7 +12,8 @@
 /*
  * IAMROOT, 2022.10.08:
  * - default priority.
- *   일반 interrupt용 우선순위.
+ *   일반 interrupt용 우선순위. local_irq_disable(), arch_local_irq_disable(),
+ *   GIC_PRIO_IRQOFF참고
  */
 #define GICD_INT_DEF_PRI		0xa0
 

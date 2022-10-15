@@ -388,6 +388,10 @@ static inline int pm_runtime_get(struct device *dev)
  * if its return value is checked by the caller, as this is likely to result
  * in cleaner code.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 기다리면서 깨운다. driver쪽에 pm등이 존재하는 경우가 있다. 이런 api로 깨운다.
+ */
 static inline int pm_runtime_get_sync(struct device *dev)
 {
 	return __pm_runtime_resume(dev, RPM_GET_PUT);

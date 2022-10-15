@@ -52,6 +52,11 @@ static void __init init_irq_default_affinity(void)
 #endif
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2022.10.15:
+ * - mask들을 @node 할당해온다. cpu가 많을경우 동적으로 mask를 할당해와야 될수도
+ *   있다.
+ */
 static int alloc_masks(struct irq_desc *desc, int node)
 {
 	if (!zalloc_cpumask_var_node(&desc->irq_common_data.affinity,
@@ -78,6 +83,11 @@ static int alloc_masks(struct irq_desc *desc, int node)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - smp(cpumask) 에 대한 값설정.
+ * - @affinity 요청이 없으면 default로 irq_default_affinity를 사용한다.
+ */
 static void desc_smp_init(struct irq_desc *desc, int node,
 			  const struct cpumask *affinity)
 {
@@ -100,6 +110,10 @@ static inline void
 desc_smp_init(struct irq_desc *desc, int node, const struct cpumask *affinity) { }
 #endif
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 초기값들 + cpumask 설정.
+ */
 static void desc_set_defaults(unsigned int irq, struct irq_desc *desc, int node,
 			      const struct cpumask *affinity, struct module *owner)
 {
@@ -347,6 +361,10 @@ static void irq_sysfs_del(struct irq_desc *desc) {}
 
 static RADIX_TREE(irq_desc_tree, GFP_KERNEL);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_desc_tree에 irq desc를 추가한다.
+ */
 static void irq_insert_desc(unsigned int irq, struct irq_desc *desc)
 {
 	radix_tree_insert(&irq_desc_tree, irq, desc);
@@ -394,6 +412,11 @@ void irq_unlock_sparse(void)
 	mutex_unlock(&sparse_irq_lock);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - struct irq_desc를 인자에 따라 할당하고 초기화한다.
+ * - @flags는 irq_data에 set된다.
+ */
 static struct irq_desc *alloc_desc(int irq, int node, unsigned int flags,
 				   const struct cpumask *affinity,
 				   struct module *owner)
@@ -408,6 +431,10 @@ static struct irq_desc *alloc_desc(int irq, int node, unsigned int flags,
 	if (!desc->kstat_irqs)
 		goto err_desc;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - desc에 필요한 mask들을 할당한다.
+ */
 	if (alloc_masks(desc, node))
 		goto err_kstat;
 
@@ -473,6 +500,12 @@ static void free_desc(unsigned int irq)
 	call_rcu(&desc->rcu, delayed_free_desc);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @start 에서 @cnt만큼 virq 할당시도.
+ *   virq desc를 실제로 할당하고 초기화 한다.
+ *   sysfs, debugfs에 등록한다.
+ */
 static int alloc_descs(unsigned int start, unsigned int cnt, int node,
 		       const struct irq_affinity_desc *affinity,
 		       struct module *owner)
@@ -492,16 +525,30 @@ static int alloc_descs(unsigned int start, unsigned int cnt, int node,
 		const struct cpumask *mask = NULL;
 		unsigned int flags = 0;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - affinity가 있으면 해당 affinity의 is_managed를 확인한다.
+ */
 		if (affinity) {
 			if (affinity->is_managed) {
 				flags = IRQD_AFFINITY_MANAGED |
 					IRQD_MANAGED_SHUTDOWN;
 			}
 			mask = &affinity->mask;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - affinity mask로 포함되있는 cpu가 위치한 node로 node를 고친다.
+ */
 			node = cpu_to_node(cpumask_first(mask));
 			affinity++;
 		}
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - start + i에 해당하는 desc를 할당해오고 초기화한다.
+ *   irq_data에 flags가 set된다.
+ */
 		desc = alloc_desc(start + i, node, flags, mask, owner);
 		if (!desc)
 			goto err;
@@ -790,6 +837,20 @@ EXPORT_SYMBOL_GPL(irq_free_descs);
  *
  * Returns the first irq number or error code
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * @irq 사용자가 원하는 virq번호
+ * @from 시작번호. @irq가 존재하면(>=0) @irq부터 시작. 그게 아니라면 주어진 from
+ *                부터 시작한다.
+ * - @cnt개수 만큼 irq desc자료구조가 실제로 할당되고 초기화된다.
+ *   생성된 virq는 sysfs, debugfs에 등록된다.
+ * --- virq 시작번호 설정.
+ * 1. irq가 주어진경우 (>=0)
+ *    주어진 irq부터 virq할당을 시도한다. cnt만큼 연속된 bitmap을 못찾으면
+ *    할당 실패한다.
+ * 2. irq가 주어지지 않은 경우
+ *    hwirq번호로 virq시작번호를 설정한다. 단 hwirq가 0번이면 1번부터 시작한다.
+ */
 int __ref
 __irq_alloc_descs(int irq, unsigned int from, unsigned int cnt, int node,
 		  struct module *owner, const struct irq_affinity_desc *affinity)
@@ -800,6 +861,10 @@ __irq_alloc_descs(int irq, unsigned int from, unsigned int cnt, int node,
 		return -EINVAL;
 
 	if (irq >= 0) {
+/*
+ * IAMROOT, 2022.10.15:
+ * - 원하는 irq번호가 시작범위보다 작으면 말이안된다.
+ */
 		if (from > irq)
 			return -EINVAL;
 		from = irq;
@@ -814,17 +879,36 @@ __irq_alloc_descs(int irq, unsigned int from, unsigned int cnt, int node,
 
 	mutex_lock(&sparse_irq_lock);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - cnt 개만큼 0으로 연속된 bit들의 start 번호를 찾는다.
+ */
 	start = bitmap_find_next_zero_area(allocated_irqs, IRQ_BITMAP_BITS,
 					   from, cnt, 0);
 	ret = -EEXIST;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq번호 요청이 있는 상태에서, start가 요청 irq번호랑 다르면 실패처리.
+ *   요청 irq번호랑 다르게 구한경우가 된다.
+ */
 	if (irq >=0 && start != irq)
 		goto unlock;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 총 irq수보다 많은 범위를 준 경우. 확장을 시도한다. 너무너무 많으면 실패.
+ */
 	if (start + cnt > nr_irqs) {
 		ret = irq_expand_nr_irqs(start + cnt);
 		if (ret)
 			goto unlock;
 	}
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - start ~ start + cnt - 1까지 번호를 할당한다.
+ */
 	ret = alloc_descs(start, cnt, node, affinity, owner);
 unlock:
 	mutex_unlock(&sparse_irq_lock);

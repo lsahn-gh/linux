@@ -31,6 +31,11 @@
 
 #include "irq-gic-common.h"
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - GICD_INT_DEF_PRI == 0xA0
+ *   GICD_INT_NMI_PRI = (0xA0 & ~0x80) = 0x20
+ */
 #define GICD_INT_NMI_PRI	(GICD_INT_DEF_PRI & ~0x80)
 
 #define FLAGS_WORKAROUND_GICR_WAKER_MSM8996	(1ULL << 0)
@@ -128,6 +133,20 @@ EXPORT_SYMBOL(gic_nonsecure_priorities);
  * If both are true (which is when gic_nonsecure_priorities gets enabled),
  * we need to shift down the priority programmed by software to match it
  * against the value returned by ICC_RPR_EL1.
+ */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   non-secure world가 group 0 인터럽트에 액세스할 때(SCR_EL3.FIQ == 0의 결과로),
+ *   ICC_RPR_EL1 레지스터를 읽으면 인터럽트 우선순위에 대한 distributor의 view가
+ *   반환됩니다.
+ *
+ *   GIC 보안이 활성화되면(GICD_CTLR.DS == 0) 소프트웨어에 의해 작성된 인터럽트
+ *   우선 순위가 distributor에 의해 non-secure 범위로 이동됩니다.
+ *
+ *   둘 다 true인 경우(gic_nonsecure_priorities가 활성화된 경우) ICC_RPR_EL1에서
+ *   반환된 값과 일치하도록 소프트웨어에 의해 프로그래밍된 우선 순위를 낮추어야
+ *   합니다.
  */
 #define GICD_INT_RPR_PRI(priority)					\
 	({								\
@@ -985,6 +1004,8 @@ static bool gic_has_group0(void)
 /*
  * IAMROOT, 2022.10.08:
  * - GICD류를 초기값으로 설정한다.
+ * - GICv3 Software Overview Official 의 4. Configuring the GIC참고
+ *   register 초기화 방법이 있다.
  */
 static void __init gic_dist_init(void)
 {
@@ -1021,9 +1042,40 @@ static void __init gic_dist_init(void)
  *   group1 - non-secure 
  *          - secure
  * - all bits set
- * - 현재 상태(GICD_CTLR.DS==0)
- *   0b1 When GICD_CTLR.DS==0, the corresponding interrupt is Non-secure Group 1.
- *   non secure group1로 가게 한다.
+ *
+ * - GICD_CTLR.DS 상태에서 따라 아래 초기화하는 레지스터의 기능이 바뀐다.
+ *
+ * --- GICD_CTLR는 다음 상태에 따라 register가 바뀐다. (Bank register)
+ *  - When access is Secure, in a system that supports two Security states:
+ *    EL3를 제외하고 나머지 EL에서 secure 상태를 나눠서 운영을 할지 말지.
+ *    secure가 접근하게되는 GICD_CTLR.
+ *
+ *  - When access is Non-secure, in a system that supports two Security states:
+ *    secure가 있는상태. kernel이 DS를 조작할이유가 없으므로 아에 DS bit가 없다.
+ *
+ *  - When in a system that supports only a single Security state:
+ *    secure가 없는상태.(kernel만 있는 상태) 무조건 disable security이므로
+ *    DS가 RAO/WI.
+ *
+ * --- GICD_CTLR.DS(disable security)
+
+ *  0b0 Non-secure accesses are not permitted to access and modify registers
+ *  that control Group 0 interrupts.
+ *  0b1 Non-secure accesses are permitted to access and modify registers
+ *  that control Group 0 interrupts.
+ *
+ *  If DS is written from 0 to 1 when GICD_CTLR.ARE_S == 1, then GICD_CTLR.ARE
+ *  for the single Security state is RAO/WI.
+ *  If the Distributor only supports a single Security state, this bit is RAO/WI.
+ *  If the Distributor supports two Security states, it IMPLEMENTATION
+ *  whether this bit is programmable or implemented as RAZ/WI.
+ *  When this field is set to 1, all accesses to GICD_CTLR access the single
+ *  Security state view, and all bits are accessible.
+ *
+ *  - DS가 RAO/WI(read as one / write ignore) 인 경우
+ *    1. ARE_S set인 경우
+ *    2. Distributor가 single security state만을 지원하는 경우
+ *
  */
 	for (i = 32; i < GIC_LINE_NR; i += 32)
 		writel_relaxed(~0, base + GICD_IGROUPR + i / 8);
@@ -1272,7 +1324,7 @@ static inline bool gic_dist_security_disabled(void)
 
 /*
  * IAMROOT, 2022.10.08:
- * - 
+ * -  group0, group1 int에 대한 설정 및 group1 int enable.
  */
 static void gic_cpu_sys_reg_init(void)
 {
@@ -1359,11 +1411,35 @@ static void gic_cpu_sys_reg_init(void)
  *   일부 펌웨어는 리셋 값에서 변경된 BPR(선점형 인터럽트가 전혀 작동하지 않도록
  *   충분히 큰 값)과 함께 커널로 전달합니다. BPR 복원에 0을 쓰는 것은 값을
  *   재설정하는 것입니다.
+ * - BPR(Binary Point Register)
  */
 	gic_write_bpr1(0);
 
 /*
  * IAMROOT, 2022.10.08:
+ * - eoimode 설명(GICv3 Software Overview Official 참고)
+ *   EOImode = 0
+ *   A write to ICC_EOIR0_EL1 for Group 0 interrupts, or ICC_EOIR1_EL1 for Group 1
+ *   interrupts, performs both the priority drop and deactivation. This is the
+ *   model typically used for a simple bare metal environment.
+ *
+ *   EOImode = 1
+ *   A write to ICC_EOIR_EL10 for Group 0 interrupts, or ICC_EOIR1_EL1
+ *   for Group 1 interrupts results in a priority drop. A separate write to
+ *   ICC_DIR_EL1 is required for deactivation. This mode is often used for
+ *   virtualization purposes.
+ *
+ * --- eoimode example,  guest os한테 int50이 들어오는 상황
+ *  1. eoimode0
+ *    guest os한테 넘겨줌. drop / inactivate 둘다 발생. 
+ *    guest of가 다 처리할때까지 in50을 못받음.
+ *
+ *  1. eoimode1
+ *    guest os한테 넘겨줌. drop 발생. 
+ *    guest os가 처리중이여도 int50을 다시 받을수 있는 상태. 다른 guest os한테도
+ *    넘길수있음.
+ * ---
+ *
  * - eoimode 1로 할지, mode 0로 할지 결정.
  */
 	if (static_branch_likely(&supports_deactivate_key)) {
@@ -1424,12 +1500,20 @@ static void gic_cpu_sys_reg_init(void)
 	isb();
 
 	/* ... and let's hit the road... */
+/*
+ * IAMROOT, 2022.10.15:
+ * - group1 int enable
+ */
 	gic_write_grpen1(1);
 
 	/* Keep the RSS capability status in per_cpu variable */
 	per_cpu(has_rss, cpu) = !!(gic_read_ctlr() & ICC_CTLR_EL1_RSS);
 
 	/* Check all the CPUs have capable of sending SGIs to other CPUs */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 현재 cpu가 다른 cpu에 대해서 rss가 필요한데 rss가 없는 경우를 확인한다.
+ */
 	for_each_online_cpu(i) {
 		bool have_rss = per_cpu(has_rss, i) && per_cpu(has_rss, cpu);
 
@@ -1468,7 +1552,7 @@ static int gic_dist_supports_lpis(void)
 
 /*
  * IAMROOT, 2022.10.08:
- * - 
+ * - redist, group0/1등에 대한 설정.
  */
 static void gic_cpu_init(void)
 {
@@ -1516,6 +1600,10 @@ static void gic_cpu_init(void)
 #define MPIDR_TO_SGI_RS(mpidr)	(MPIDR_RS(mpidr) << ICC_SGI1R_RS_SHIFT)
 #define MPIDR_TO_SGI_CLUSTER_ID(mpidr)	((mpidr) & ~0xFUL)
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - secondary cpu들의 gic초기화.
+ */
 static int gic_starting_cpu(unsigned int cpu)
 {
 	gic_cpu_init();
@@ -1597,6 +1685,10 @@ static void gic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 	isb();
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 
+ */
 static void __init gic_smp_init(void)
 {
 	struct irq_fwspec sgi_fwspec = {
@@ -1610,12 +1702,20 @@ static void __init gic_smp_init(void)
 				  gic_starting_cpu, NULL);
 
 	/* Register all 8 non-secure SGIs */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 8개만큼(non-secure SGI개수)의 virq를 할당한다.
+ */
 	base_sgi = __irq_domain_alloc_irqs(gic_data.domain, -1, 8,
 					   NUMA_NO_NODE, &sgi_fwspec,
 					   false, NULL);
 	if (WARN_ON(base_sgi <= 0))
 		return;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 위에서 구해온 start sgi virq번호로 set.
+ */
 	set_smp_ipi_range(base_sgi, 8);
 }
 
@@ -1936,7 +2036,7 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 
 /*
  * IAMROOT, 2022.10.01:
- * - @virq 부터 @nr_irqs개 까지 virq를 할당한다.
+ * - @virq 부터 @nr_irqs개 까지 hwirq를 찾아 @domain과 함께 mapping한다.
  */
 static int gic_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs, void *arg)

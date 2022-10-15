@@ -83,6 +83,12 @@
 #define IRQF_NO_AUTOEN		0x00080000
 #define IRQF_NO_DEBUG		0x00100000
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - timer방식으로 동작.
+ * - suspend 금지.
+ * - hardirq로 동작
+ */
 #define IRQF_TIMER		(__IRQF_TIMER | IRQF_NO_SUSPEND | IRQF_NO_THREAD)
 
 /*
@@ -122,6 +128,11 @@ struct irqaction {
 	struct irqaction	*next;
 	irq_handler_t		thread_fn;
 	struct task_struct	*thread;
+/*
+ * IAMROOT, 2022.10.15:
+ * - force threading에서는 secondary로 thread_fn을 설정한다.
+ *   (irq_setup_forced_threading() 참고)
+ */
 	struct irqaction	*secondary;
 	unsigned int		irq;
 	unsigned int		flags;
@@ -181,6 +192,10 @@ extern int __must_check
 request_nmi(unsigned int irq, irq_handler_t handler, unsigned long flags,
 	    const char *name, void *dev);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - ppi류의 int를 위한 request irq.
+ */
 static inline int __must_check
 request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		   const char *devname, void __percpu *percpu_dev_id)
@@ -473,6 +488,17 @@ extern int irq_get_irqchip_state(unsigned int irq, enum irqchip_irq_state which,
 extern int irq_set_irqchip_state(unsigned int irq, enum irqchip_irq_state which,
 				 bool state);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - forced threading 지원 안함 -> false
+ * - force thread 지원시
+ *   preempt rt -> true
+ *   일반 kernel -> force_irqthreads_key. 
+ *
+ * - force_irqthreads_key
+ *   rt kernel 아니지만 force thread를 해볼려고 하는 기능.
+ *   setup_forced_irqthreads() 참고. early param(threadirqs)
+ */
 #ifdef CONFIG_IRQ_FORCED_THREADING
 # ifdef CONFIG_PREEMPT_RT
 #  define force_irqthreads()	(true)

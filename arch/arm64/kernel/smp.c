@@ -85,6 +85,11 @@ enum ipi_msg_type {
 
 static int ipi_irq_base __read_mostly;
 static int nr_ipi __read_mostly = NR_IPI;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - set_smp_ipi_range()에서 설정된다.
+ */
 static struct irq_desc *ipi_desc[NR_IPI] __read_mostly;
 
 static void ipi_setup(int cpu);
@@ -1047,11 +1052,20 @@ static void ipi_teardown(int cpu)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 
+ */
 void __init set_smp_ipi_range(int ipi_base, int n)
 {
 	int i;
 
 	WARN_ON(n < NR_IPI);
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - gic_smp_init()에서 @n은 8개로 왔다. kernel은 7개까지만 사용하는듯 하다.
+ */
 	nr_ipi = min(n, NR_IPI);
 
 	for (i = 0; i < nr_ipi; i++) {
@@ -1062,6 +1076,10 @@ void __init set_smp_ipi_range(int ipi_base, int n)
 		WARN_ON(err);
 
 		ipi_desc[i] = irq_to_desc(ipi_base + i);
+/*
+ * IAMROOT, 2022.10.15:
+ * - ipi는 내부용이기 때문에 proc에서 보여줄 필요가 없다.
+ */
 		irq_set_status_flags(ipi_base + i, IRQ_HIDDEN);
 	}
 

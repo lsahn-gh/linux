@@ -1709,11 +1709,20 @@ int irq_chip_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
  * Enable the power to the IRQ chip referenced by the interrupt data
  * structure.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - chip control를 절전상태라면 깨운다.
+ */
 int irq_chip_pm_get(struct irq_data *data)
 {
 	int retval;
 
 	if (IS_ENABLED(CONFIG_PM) && data->chip->parent_device) {
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - 동기화(기다리면서) 깨운다 라는것.
+ */
 		retval = pm_runtime_get_sync(data->chip->parent_device);
 		if (retval < 0) {
 			pm_runtime_put_noidle(data->chip->parent_device);

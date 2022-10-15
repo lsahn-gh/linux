@@ -575,6 +575,10 @@ static void irq_domain_clear_mapping(struct irq_domain *domain,
 	mutex_unlock(&domain->revmap_mutex);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @domain에 hwirq번호를 key로 irq_data를 mapping한다.
+ */
 static void irq_domain_set_mapping(struct irq_domain *domain,
 				   irq_hw_number_t hwirq,
 				   struct irq_data *irq_data)
@@ -1101,20 +1105,45 @@ int irq_domain_translate_twocell(struct irq_domain *d,
 }
 EXPORT_SYMBOL_GPL(irq_domain_translate_twocell);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @virq 번호가 있는경우 @virq부터 @cnt만큼 할당시도를 한다,.
+ * - 그게 아니라면 hwirq로 virq start번호를 만들어 시도를 한다.
+ */
 int irq_domain_alloc_descs(int virq, unsigned int cnt, irq_hw_number_t hwirq,
 			   int node, const struct irq_affinity_desc *affinity)
 {
 	unsigned int hint;
 
 	if (virq >= 0) {
+/*
+ * IAMROOT, 2022.10.15:
+ * - 특정 번호의 virq요청이있으면, 해당 번호로 시작해서, cnt만큼 구해오는걸
+ *   시도한다.
+ */
 		virq = __irq_alloc_descs(virq, virq, cnt, node, THIS_MODULE,
 					 affinity);
 	} else {
+/*
+ * IAMROOT, 2022.10.15:
+ * - 시작번호를 선정한다. 가능하면 virq번호를 hwirq와 맞추고 싶어한다.
+ */
 		hint = hwirq % nr_irqs;
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - virq는 0번부터 시작할수없다. 예외처리.
+ */
 		if (hint == 0)
 			hint++;
 		virq = __irq_alloc_descs(-1, hint, cnt, node, THIS_MODULE,
 					 affinity);
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - hint ~ hint + cnt - 1에서 실패를 했다면, 1번부터로 범위를 바꿔 다시 한번
+ *   시도한다.
+ */
 		if (virq <= 0 && hint > 1) {
 			virq = __irq_alloc_descs(-1, 1, cnt, node, THIS_MODULE,
 						 affinity);
@@ -1174,6 +1203,10 @@ struct irq_domain *irq_domain_create_hierarchy(struct irq_domain *parent,
 }
 EXPORT_SYMBOL_GPL(irq_domain_create_hierarchy);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @domain에 virq의 hwirq를 key로 irq_data를 mapping한다.
+ */
 static void irq_domain_insert_irq(int virq)
 {
 	struct irq_data *data;
@@ -1189,6 +1222,10 @@ static void irq_domain_insert_irq(int virq)
 			domain->name = data->chip->name;
 	}
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 자료구조가 완성됬고, 이제 사용자 요청만을 기다리면 되는 상태.
+ */
 	irq_clear_status_flags(virq, IRQ_NOREQUEST);
 }
 
@@ -1210,6 +1247,13 @@ static void irq_domain_remove_irq(int virq)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * @domain parent domain
+ *
+ * - @child의 parent irq_data를 생성한다.
+ *   child의 irq, common을 동일한 값을 가져간다.
+ */
 static struct irq_data *irq_domain_insert_irq_data(struct irq_domain *domain,
 						   struct irq_data *child)
 {
@@ -1227,6 +1271,10 @@ static struct irq_data *irq_domain_insert_irq_data(struct irq_domain *domain,
 	return irq_data;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq_data 부터 모든 parent를 free한다.
+ */
 static void __irq_domain_free_hierarchy(struct irq_data *irq_data)
 {
 	struct irq_data *tmp;
@@ -1266,6 +1314,12 @@ static void irq_domain_free_irq_data(unsigned int virq, unsigned int nr_irqs)
  * have any real meaning for this interrupt, and that the driver marks
  * as such from its .alloc() callback.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - 일부 hwirq가 cascade처리를 안하는 경우가 있다. 이 경우 empty function등을
+ *   해서 fake 계층 처리를 해도 되지만, 이렇게 복잡하게 안하고 ENOTCONN을
+ *   사용해 계층을 축소 시키는 방법이 추가 됬다.
+ */
 int irq_domain_disconnect_hierarchy(struct irq_domain *domain,
 				    unsigned int virq)
 {
@@ -1280,6 +1334,10 @@ int irq_domain_disconnect_hierarchy(struct irq_domain *domain,
 }
 EXPORT_SYMBOL_GPL(irq_domain_disconnect_hierarchy);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - ENOTCONN된 parent irq_data을 찾아서 trim(free) 시킨다.
+ */
 static int irq_domain_trim_hierarchy(unsigned int virq)
 {
 	struct irq_data *tail, *irqd, *irq_data;
@@ -1309,6 +1367,10 @@ static int irq_domain_trim_hierarchy(unsigned int virq)
 			if (PTR_ERR(irqd->chip) != -ENOTCONN)
 				return -EINVAL;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - irqd->chip ENOTCONN가 있는 마지막 irq_data를 찾는다.
+ */
 			tail = irq_data;
 		}
 	}
@@ -1317,6 +1379,10 @@ static int irq_domain_trim_hierarchy(unsigned int virq)
 	if (!tail)
 		return 0;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - ENOTCONN가 된 irqd에서 trim을 시키고 trim된 irqd의 parent들을 전부 free.
+ */
 	pr_info("IRQ%d: trimming hierarchy from %s\n",
 		virq, tail->parent_data->domain->name);
 
@@ -1324,11 +1390,17 @@ static int irq_domain_trim_hierarchy(unsigned int virq)
 	irqd = tail;
 	tail = tail->parent_data;
 	irqd->parent_data = NULL;
+
 	__irq_domain_free_hierarchy(tail);
 
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @virq부터 nr_irqs수의 irq data에 @domain을 등록한다. @domain이 계층 구조인경우
+ *   타고 올라가면서 irq_data를 할당해준다.(부분적 설정. 일단 할당만 하는 개념)
+ */
 static int irq_domain_alloc_irq_data(struct irq_domain *domain,
 				     unsigned int virq, unsigned int nr_irqs)
 {
@@ -1336,11 +1408,21 @@ static int irq_domain_alloc_irq_data(struct irq_domain *domain,
 	struct irq_domain *parent;
 	int i;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 첫번째 desc에는 irq_data가 이미 embed 되있다. 도메인이 계층구조인 경우엔
+ *   irq_data도 동일하게 parent 구조로 등록시켜준다.
+ */
 	/* The outermost irq_data is embedded in struct irq_desc */
 	for (i = 0; i < nr_irqs; i++) {
 		irq_data = irq_get_irq_data(virq + i);
 		irq_data->domain = domain;
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 계층구조라면 위로 올라가면서 등록시켜준다.
+ *   irq_data는 domain, common, irq만을 일당 할당해준다.
+ */
 		for (parent = domain->parent; parent; parent = parent->parent) {
 			irq_data = irq_domain_insert_irq_data(parent, irq_data);
 			if (!irq_data) {
@@ -1490,6 +1572,12 @@ static void irq_domain_free_irqs_hierarchy(struct irq_domain *domain,
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @domain의 alloc ops를 호출해서 mapping한다.
+ * - ex)
+ *   gic_irq_domain_alloc
+ */
 int irq_domain_alloc_irqs_hierarchy(struct irq_domain *domain,
 				    unsigned int irq_base,
 				    unsigned int nr_irqs, void *arg)
@@ -1524,6 +1612,25 @@ int irq_domain_alloc_irqs_hierarchy(struct irq_domain *domain,
  * resources. In this way, it's easier to rollback when failing to
  * allocate resources.
  */
+/*
+ * IAMROOT, 2022.10.15:
+ * - papago
+ *   계층 구조 IRQ 도메인을 지원하기 위해 IRQ 번호를 할당하고 모든 데이터 구조를
+ *   초기화합니다.
+ *   @realloc 매개변수는 주로 레거시 IRQ를 지원하기 위한 것입니다.
+ *   오류 코드 또는 할당된 IRQ 번호를 반환합니다. IRQ를 설정하는 전체 프로세스는
+ *   두 단계로 분할되었습니다.
+ *   첫 번째 단계인 __irq_domain_alloc_irqs()는 IRQ 설명자와 필요한 하드웨어
+ *   리소스를 할당하는 것입니다. 두 번째 단계인 irq_domain_activate_irq()는 미리
+ *   할당된 리소스로 하드웨어를 프로그래밍하는 것입니다. 이런 식으로 리소스 할당에
+ *   실패했을 때 롤백하기가 더 쉽습니다.
+ *
+ * - irq_desc 할당(irq_desc radix에 virq로 insert)(realloc == false인경우)
+ *   -> irq data를 domain 에 맞게 할당
+ *   -> domain alloc ops로 virq mapping
+ *   -> ENOTCONN된 parent irq_data trim
+ *   -> domain에 irq_data추가(domain revmap에 hwirq를 key로 irq_data mapping.)
+ */
 int __irq_domain_alloc_irqs(struct irq_domain *domain, int irq_base,
 			    unsigned int nr_irqs, int node, void *arg,
 			    bool realloc, const struct irq_affinity_desc *affinity)
@@ -1536,9 +1643,25 @@ int __irq_domain_alloc_irqs(struct irq_domain *domain, int irq_base,
 			return -EINVAL;
 	}
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - realloc == true 
+ *   @irq_base가 이미 할당되 있다고 생각하고 있는경우. irq_desc가 생성되있기
+ *   때문에 desc 자체는 생성할 필요가없다.
+ * - realloc == false, irq_base >= 0
+ *   irq_base에 해당하는 irq desc가 없다고 생각해서, irq_base에 해당하는 desc도
+ *   만들어야 된다.
+ * - irq_base < 0
+ *   0번부터 @nr_irqs개수만큼 virq를 만들어서 desc부터 만들어야된다.
+ */
 	if (realloc && irq_base >= 0) {
 		virq = irq_base;
 	} else {
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - irq desc를 만든다.
+ */
 		virq = irq_domain_alloc_descs(irq_base, nr_irqs, 0, node,
 					      affinity);
 		if (virq < 0) {
@@ -1548,6 +1671,11 @@ int __irq_domain_alloc_irqs(struct irq_domain *domain, int irq_base,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - 위에서 만들어진 or 이미 존재하던 irq desc의 irq_data들을 domain 계층 구조에 맞게
+ *   할당한다.
+ */
 	if (irq_domain_alloc_irq_data(domain, virq, nr_irqs)) {
 		pr_debug("cannot allocate memory for IRQ%d\n", virq);
 		ret = -ENOMEM;
@@ -1555,12 +1683,21 @@ int __irq_domain_alloc_irqs(struct irq_domain *domain, int irq_base,
 	}
 
 	mutex_lock(&irq_domain_mutex);
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - domain alloc ops로 domain에 mapping한다. (hwirq가 mapping된다.)
+ */
 	ret = irq_domain_alloc_irqs_hierarchy(domain, virq, nr_irqs, arg);
 	if (ret < 0) {
 		mutex_unlock(&irq_domain_mutex);
 		goto out_free_irq_data;
 	}
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - ENOTCONN된 parent irq_data가 있는지 한번 검색하고, 있으면 trim
+ */
 	for (i = 0; i < nr_irqs; i++) {
 		ret = irq_domain_trim_hierarchy(virq + i);
 		if (ret) {
@@ -1569,6 +1706,10 @@ int __irq_domain_alloc_irqs(struct irq_domain *domain, int irq_base,
 		}
 	}
 	
+/*
+ * IAMROOT, 2022.10.15:
+ * - domain에 virq를 mapping한다.
+ */
 	for (i = 0; i < nr_irqs; i++)
 		irq_domain_insert_irq(virq + i);
 	mutex_unlock(&irq_domain_mutex);

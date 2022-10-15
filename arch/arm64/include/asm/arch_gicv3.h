@@ -77,6 +77,19 @@ static inline u32 gic_read_ctlr(void)
 	return read_sysreg_s(SYS_ICC_CTLR_EL1);
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @val을 write한다.
+ *   group1 interrupts are en/disable for the current security state.
+ *
+ * --- group1 interrupt은 security state 따라 다음과 같이 동작한다.
+ *
+ * - single security
+ *   irq로써 kernel이 받게된다.
+ *
+ * - two security
+ *   fiq로써 secure os가 받은후 el3를 통해서 kernel이 받게된다.
+ */
 static inline void gic_write_grpen1(u32 val)
 {
 	write_sysreg_s(val, SYS_ICC_IGRPEN1_EL1);
@@ -114,6 +127,12 @@ static __always_inline void gic_write_pmr(u32 val)
 	write_sysreg_s(val, SYS_ICC_PMR_EL1);
 }
 
+
+/*
+ * IAMROOT, 2022.10.15:
+ * - Interrupt Controller Running Priority Register
+ *   rpr은 64bits register지만 [7:0] priority만을 사용하기 위해 32bits로 가져온다.
+ */
 static inline u32 gic_read_rpr(void)
 {
 	return read_sysreg_s(SYS_ICC_RPR_EL1);

@@ -50,6 +50,10 @@ static inline bool irq_settings_is_per_cpu(struct irq_desc *desc)
 	return desc->status_use_accessors & _IRQ_PER_CPU;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - percpu용인지 확인.
+ */
 static inline bool irq_settings_is_per_cpu_devid(struct irq_desc *desc)
 {
 	return desc->status_use_accessors & _IRQ_PER_CPU_DEVID;
@@ -97,6 +101,12 @@ static inline void irq_settings_set_level(struct irq_desc *desc)
 	desc->status_use_accessors |= _IRQ_LEVEL;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * @return false. 다른데서 사용중.
+ *         true. 사용중인곳 없음.
+ * - 다른데서 request를 했는지에 대한 여부.
+ */
 static inline bool irq_settings_can_request(struct irq_desc *desc)
 {
 	return !(desc->status_use_accessors & _IRQ_NOREQUEST);
@@ -112,6 +122,11 @@ static inline void irq_settings_set_norequest(struct irq_desc *desc)
 	desc->status_use_accessors |= _IRQ_NOREQUEST;
 }
 
+/*
+ * IAMROOT, 2022.10.15:
+ * @return false. nothread만으로만 동작.(hardirq로만 동작)
+ *         true.  thread방식으로 동작가능.
+ */
 static inline bool irq_settings_can_thread(struct irq_desc *desc)
 {
 	return !(desc->status_use_accessors & _IRQ_NOTHREAD);

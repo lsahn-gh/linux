@@ -7,6 +7,10 @@
 
 typedef void (*task_work_func_t)(struct callback_head *);
 
+/*
+ * IAMROOT, 2022.10.15:
+ * - @twork에 @func를 등록한다.
+ */
 static inline void
 init_task_work(struct callback_head *twork, task_work_func_t func)
 {
