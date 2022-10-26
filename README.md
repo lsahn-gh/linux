@@ -323,5 +323,3 @@
 - 2022.10.15, Zoom 온라인(5명 참석)
 - gicv3 - gic_of_init() 진행중
 
----
-push test
