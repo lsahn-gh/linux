@@ -332,6 +332,12 @@ extern const struct fwnode_operations irqchip_fwnode_ops;
 /*
  * IAMROOT, 2022.10.01:
  * - acpi + 기타(kvm등) 에서 왔는지를 확인한다.
+ *   ex)
+ *   irq_domain_alloc_named_fwnode(),
+ *   irq_domain_alloc_named_id_fwnode(),
+ *   irq_domain_alloc_fwnode(),
+ *   의 함수를 통하여
+ *    == > __irq_domain_alloc_fwnode() 함수로 irqchip_fwnode_ops가 등록된경우
  */
 static inline bool is_fwnode_irqchip(struct fwnode_handle *fwnode)
 {
@@ -422,7 +428,7 @@ static inline struct irq_domain *irq_domain_create_linear(struct fwnode_handle *
 
 /*
  * IAMROOT, 2022.10.01:
- * @ops ex)gic_irq_domain_ops
+ * @ops ex)gic_init_bases()에서, gic_irq_domain_ops
  *
  * irq domain을 tree로 생성한다.
  */

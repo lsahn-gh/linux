@@ -263,6 +263,7 @@ static int mbi_allocate_domains(struct irq_domain *parent)
 /*
  * IAMROOT, 2022.10.08:
  * - TODO
+ *   GICD_TYPER_MBIS(message-based interrupts)
  */
 int __init mbi_init(struct fwnode_handle *fwnode, struct irq_domain *parent)
 {

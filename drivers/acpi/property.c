@@ -1413,6 +1413,10 @@ DECLARE_ACPI_FWNODE_OPS(acpi_device_fwnode_ops);
 DECLARE_ACPI_FWNODE_OPS(acpi_data_fwnode_ops);
 const struct fwnode_operations acpi_static_fwnode_ops;
 
+/*
+ * IAMROOT, 2022.10.27:
+ * - acpi_init_device_object() 함수등으로 acpi_device_fwnode_ops가 등록 된 경우
+ */
 bool is_acpi_device_node(const struct fwnode_handle *fwnode)
 {
 	return !IS_ERR_OR_NULL(fwnode) &&

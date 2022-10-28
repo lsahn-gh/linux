@@ -1730,12 +1730,19 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * the driver for non nested interrupt handling by the
 		 * dummy function which warns when called.
 		 */
+/*
+ * IAMROOT, 2022.10.28:
+ * - papgo
+ *   중첩되지 않은 인터럽트 처리를 위해 드라이버에서 제공한 기본 핸들러를 호출
+ *   시 경고하는 더미 함수로 교체하십시오.
+ */
 		new->handler = irq_nested_primary_handler;
 	} else {
 
 /*
  * IAMROOT, 2022.10.15:
- * - threaded irq가능하면. PPI류들은 안한다.(ex). request_percpu_irq()등.)
+ * - threaded irq가능한 경우를 확인한다.
+ *   PPI류들은 안한다.(ex). request_percpu_irq()등.)
  *   SPI류들만 해당될것이다.
  */
 		if (irq_settings_can_thread(desc)) {

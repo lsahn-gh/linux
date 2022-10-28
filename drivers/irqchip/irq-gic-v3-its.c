@@ -5184,6 +5184,11 @@ static int redist_disable_lpis(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.28:
+ * - TODO
+ * - ITS(Interrupt Translation Service)
+ */
 int its_cpu_init(void)
 {
 	if (!list_empty(&its_nodes)) {

@@ -1054,7 +1054,7 @@ static void ipi_teardown(int cpu)
 
 /*
  * IAMROOT, 2022.10.15:
- * - 
+ * - IPI(inter-processor interrupts)
  */
 void __init set_smp_ipi_range(int ipi_base, int n)
 {

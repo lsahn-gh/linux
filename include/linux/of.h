@@ -215,7 +215,7 @@ void of_core_init(void);
 
 /*
  * IAMROOT, 2022.10.01:
- * - dt에서 불러왔는지 확인.
+ * - dt에서 불러왔는지 확인.(of_node_init())
  */
 static inline bool is_of_node(const struct fwnode_handle *fwnode)
 {

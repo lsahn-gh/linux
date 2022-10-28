@@ -711,6 +711,8 @@
 /*
  * IAMROOT, 2022.10.08:
  * - ICC_CTLR_EL1, Interrupt Controller Control Register
+ *   ICC_CTLR_EL1_EOImode_drop_dir : eoimode0. both drop, deactivation
+ *   ICC_CTLR_EL1_EOImode_drop : eoimode1. only drop.
  */
 #define ICC_CTLR_EL1_EOImode_SHIFT	(1)
 #define ICC_CTLR_EL1_EOImode_drop_dir	(0U << ICC_CTLR_EL1_EOImode_SHIFT)

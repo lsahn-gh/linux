@@ -163,6 +163,14 @@ static refcount_t *ppi_nmi_refs;
 static struct gic_kvm_info gic_v3_kvm_info __initdata;
 static DEFINE_PER_CPU(bool, has_rss);
 
+/*
+ * IAMROOT, 2022.10.28:
+ * - affinity가 RS(Range Selector)가 필요한지 확인한다.
+ * - The ICC_CTLR_EL1.RSS
+ *   0 Targeted SGIs with affinity level 0 values of 0 - 15 are supported.
+ *   1 Targeted SGIs with affinity level 0 values of 0 - 255 are supported.*
+ *   즉 0xf0를 추출한다. 해당값이 있으면 RSS를 지원해줘야한다.
+ */
 #define MPIDR_RS(mpidr)			(((mpidr) & 0xF0UL) >> 4)
 #define gic_data_rdist()		(this_cpu_ptr(gic_data.rdists.rdist))
 /*
@@ -264,7 +272,7 @@ static inline void __iomem *gic_dist_base(struct irq_data *d)
 
 /*
  * IAMROOT, 2022.10.01:
- * - rwp가 풀릴때까지 기다린다. max 1초
+ * - rwp(register write pendig)가 풀릴때까지 기다린다. max 1초
  */
 static void gic_do_wait_for_rwp(void __iomem *base)
 {
@@ -328,10 +336,6 @@ static void gic_enable_redist(bool enable)
 
 	rbase = gic_data_rdist_rd_base();
 
-/*
- * IAMROOT, 2022.10.08:
- * - 
- */
 	val = readl_relaxed(rbase + GICR_WAKER);
 
 /*
@@ -861,6 +865,7 @@ static u32 do_read_iar(struct pt_regs *regs)
 
 /*
  * IAMROOT, 2022.10.08:
+ * - TODO
  * - gic control handler.
  *   interrupt가 vector table다음으로 받는 handler.
  * - vector table -> gic_handle_irq -> irq flow handler
@@ -1189,6 +1194,24 @@ static int gic_iterate_rdists(int (*fn)(struct redist_region *, void __iomem *))
 
 			if (gic_data.redist_stride) {
 				ptr += gic_data.redist_stride;
+/*
+ * IAMROOT, 2022.10.27:
+ * - gic 문서 참고
+ *   Each Redistributor defines two 64KB frames in the physical address map:
+ *   • RD_base for controlling the overall behavior of the Redistributor,
+ *     for controlling LPIs, and for generating LPIs in a system that does not include
+ *     at least one ITS..
+ *   • SGI_base for controlling and generating PPIs and SGIs. 
+ *     The frame for each Redistributor must be contiguous and must be ordered as
+ *     follows: 
+ *     1. RD_base
+ *     2. SGI_base
+ *
+ *   In GICv4, there are two additional 64KB frames:
+ *   • A frame to control virtual LPIs. The base address of this frame is referred to
+ *     as VLPI_base.
+ *   • A frame for a reserved page.
+ */
 			} else {
 				ptr += SZ_64K * 2; /* Skip RD_base + SGI_base */
 				if (typer & GICR_TYPER_VLPIS)
@@ -1432,7 +1455,7 @@ static void gic_cpu_sys_reg_init(void)
  * --- eoimode example,  guest os한테 int50이 들어오는 상황
  *  1. eoimode0
  *    guest os한테 넘겨줌. drop / inactivate 둘다 발생. 
- *    guest of가 다 처리할때까지 in50을 못받음.
+ *    guest of가 다 처리할때까지 int50을 못받음.
  *
  *  1. eoimode1
  *    guest os한테 넘겨줌. drop 발생. 
@@ -1513,6 +1536,10 @@ static void gic_cpu_sys_reg_init(void)
 /*
  * IAMROOT, 2022.10.15:
  * - 현재 cpu가 다른 cpu에 대해서 rss가 필요한데 rss가 없는 경우를 확인한다.
+ *
+ * - MPID_RS를 통해 0xF0를 검사함으로써 RSS가 필요한지 확인한다.
+ *   have_rss가 false. 즉 ICC_CTLR_EL1.RSS = 0인데 affinity가 0x0f를 넘어버리면
+ *   error가 된다.
  */
 	for_each_online_cpu(i) {
 		bool have_rss = per_cpu(has_rss, i) && per_cpu(has_rss, cpu);
@@ -1543,6 +1570,14 @@ static int __init gicv3_nolpi_cfg(char *buf)
 }
 early_param("irqchip.gicv3_nolpi", gicv3_nolpi_cfg);
 
+/*
+ * IAMROOT, 2022.10.28:
+ * - LPIS. gic 문서참고
+ *   Locality-specific Peripheral Interrupts (LPIs) are edge-triggered
+ *   message-based interrupts that can use an Interrupt Translation Service
+ *   (ITS), if it is implemented, to route an interrupt to a specific
+ *   Redistributor and connected PE.
+ */
 static int gic_dist_supports_lpis(void)
 {
 	return (IS_ENABLED(CONFIG_ARM_GIC_V3_ITS) &&
@@ -1585,6 +1620,7 @@ static void gic_cpu_init(void)
 /*
  * IAMROOT, 2022.10.08:
  * - non-secure group1로 전부 설정한다.
+ * - 16은 sgi 개수. GICR_TYPER_NR_PPIS 참고
  */
 	for (i = 0; i < gic_data.ppi_nr + 16; i += 32)
 		writel_relaxed(~0, rbase + GICR_IGROUPR0 + i / 8);
