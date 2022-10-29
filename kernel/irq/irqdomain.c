@@ -461,6 +461,10 @@ EXPORT_SYMBOL_GPL(irq_domain_create_legacy);
  * @fwspec: FW specifier for an interrupt
  * @bus_token: domain-specific data
  */
+/*
+ * IAMROOT, 2022.10.29:
+ * - fwspec과 매칭되는 irq_domain을 irq_domain_list에서 찾는다.
+ */
 struct irq_domain *irq_find_matching_fwspec(struct irq_fwspec *fwspec,
 					    enum irq_domain_bus_token bus_token)
 {
@@ -478,6 +482,13 @@ struct irq_domain *irq_find_matching_fwspec(struct irq_fwspec *fwspec,
 	 * selected.
 	 */
 	mutex_lock(&irq_domain_mutex);
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - ex) gic_irq_domain_ops에서
+ *      select의 경우 : gic_irq_domain_select
+ * fwspec과 매칭되는 irq_domain을 irq_domain_list에서 찾는다.
+ */
 	list_for_each_entry(h, &irq_domain_list, link) {
 		if (h->ops->select && fwspec->param_count)
 			rc = h->ops->select(h, fwspec, bus_token);
@@ -625,6 +636,11 @@ static void irq_domain_disassociate(struct irq_domain *domain, unsigned int irq)
 	irq_domain_clear_mapping(domain, hwirq);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @virq에 @domain, hwirq를 mapping한다.
+ *   map ops가 있으면 실행을 해준다. @domain 자료구조에는 무조건  넣어준다.
+ */
 int irq_domain_associate(struct irq_domain *domain, unsigned int virq,
 			 irq_hw_number_t hwirq)
 {
@@ -642,6 +658,10 @@ int irq_domain_associate(struct irq_domain *domain, unsigned int virq,
 	mutex_lock(&irq_domain_mutex);
 	irq_data->hwirq = hwirq;
 	irq_data->domain = domain;
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic는 map ops가 없다.
+ */
 	if (domain->ops->map) {
 		ret = domain->ops->map(domain, virq, hwirq);
 		if (ret != 0) {
@@ -745,6 +765,10 @@ EXPORT_SYMBOL_GPL(irq_create_direct_mapping);
  * If the sense/trigger is to be specified, set_irq_type() should be called
  * on the number returned from that call.
  */
+/*
+ * IAMROOT, 2022.10.29:
+ * - @hwirq의 virq를 @domain에서 얻어온다. 없을경우 생성 및 mapping을 한다.
+ */
 unsigned int irq_create_mapping_affinity(struct irq_domain *domain,
 				       irq_hw_number_t hwirq,
 				       const struct irq_affinity_desc *affinity)
@@ -766,6 +790,11 @@ unsigned int irq_create_mapping_affinity(struct irq_domain *domain,
 	of_node = irq_domain_get_of_node(domain);
 
 	/* Check if mapping already exists */
+/*
+ * IAMROOT, 2022.10.29:
+ * - @domain에서 hwirq를 구해봐서 virq가 있으면 return. 없으면 생성후 @domain에
+ *   등록, mapping하여 return 한다.
+ */
 	virq = irq_find_mapping(domain, hwirq);
 	if (virq) {
 		pr_debug("-> existing mapping on virq %d\n", virq);
@@ -823,6 +852,11 @@ static void of_phandle_args_to_fwspec(struct device_node *np, const u32 *args,
 		fwspec->param[i] = args[i];
 }
 
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - @fwspec의 hwirq로 virq를 등록 및 mapping한다.
+ */
 unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 {
 	struct irq_domain *domain;
@@ -832,6 +866,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 	int virq;
 
 	if (fwspec->fwnode) {
+/*
+ * IAMROOT, 2022.10.29:
+ * - 처음에 가장 많이 쓰는 wired로 먼저 검색해보고 아니면 any로 검사한다.
+ */
 		domain = irq_find_matching_fwspec(fwspec, DOMAIN_BUS_WIRED);
 		if (!domain)
 			domain = irq_find_matching_fwspec(fwspec, DOMAIN_BUS_ANY);
@@ -845,6 +883,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 찾아온 domain으로 hwirq, type을 구해온다.
+ */
 	if (irq_domain_translate(domain, fwspec, &hwirq, &type))
 		return 0;
 
@@ -852,6 +894,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 	 * WARN if the irqchip returns a type with bits
 	 * outside the sense mask set and clear these bits.
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - IRQ_TYPE_SENSE_MASK외에 다른값들이 있으면 안된다. IRQ_TYPE_SENSE_MASK만 남긴다.
+ */
 	if (WARN_ON(type & ~IRQ_TYPE_SENSE_MASK))
 		type &= IRQ_TYPE_SENSE_MASK;
 
@@ -860,12 +906,21 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 	 * don't do it again, or hell will break loose.
 	 */
 	virq = irq_find_mapping(domain, hwirq);
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - hwirq에 해당하는 virq가 있으면 fwspec에서 정의된값과 일치한경우 즉시 return.
+ */
 	if (virq) {
 		/*
 		 * If the trigger type is not specified or matches the
 		 * current trigger type then we are done so return the
 		 * interrupt number.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - fwspec에 type 지정이 안됬거나, virq와 fwspec type과 동일한 경우 return..
+ */
 		if (type == IRQ_TYPE_NONE || type == irq_get_trigger_type(virq))
 			return virq;
 
@@ -873,6 +928,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 		 * If the trigger type has not been set yet, then set
 		 * it now and return the interrupt number.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - virq에 아직 type설정이 안된경우 fwspec의 type으로 지정한다.
+ */
 		if (irq_get_trigger_type(virq) == IRQ_TYPE_NONE) {
 			irq_data = irq_get_irq_data(virq);
 			if (!irq_data)
@@ -882,11 +941,24 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 			return virq;
 		}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 이미 virq에 설정되있는데 fwspec과 일치하지 않는다. 바꾸진 않고 warn후 return err.
+ */
 		pr_warn("type mismatch, failed to map hwirq-%lu for %s!\n",
 			hwirq, of_node_full_name(to_of_node(fwspec->fwnode)));
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 아직 hwirq에 대한 virq가 없는상태. virq를 구해와야된다.
+ */
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - @fwspec으로 @domain에 virq 1개를 아무노드에서 구해온다.
+ */
 	if (irq_domain_is_hierarchy(domain)) {
 		virq = irq_domain_alloc_irqs(domain, 1, NUMA_NO_NODE, fwspec);
 		if (virq <= 0)
@@ -899,6 +971,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 	}
 
 	irq_data = irq_get_irq_data(virq);
+/*
+ * IAMROOT, 2022.10.29:
+ * - error처리.
+ */
 	if (!irq_data) {
 		if (irq_domain_is_hierarchy(domain))
 			irq_domain_free_irqs(virq, 1);
@@ -907,6 +983,10 @@ unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @type을 irq_data에 설정한다.
+ */
 	/* Store trigger type */
 	irqd_set_trigger_type(irq_data, type);
 
@@ -958,6 +1038,10 @@ EXPORT_SYMBOL_GPL(irq_dispose_mapping);
  *
  * Returns the interrupt descriptor.
  */
+/*
+ * IAMROOT, 2022.10.29:
+ * - nomap, linear, tree인지에 따라 검색해온다.
+ */
 struct irq_desc *__irq_resolve_mapping(struct irq_domain *domain,
 				       irq_hw_number_t hwirq,
 				       unsigned int *irq)
@@ -971,6 +1055,10 @@ struct irq_desc *__irq_resolve_mapping(struct irq_domain *domain,
 	if (domain == NULL)
 		return desc;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - nomap
+ */
 	if (irq_domain_is_nomap(domain)) {
 		if (hwirq < domain->revmap_size) {
 			data = irq_domain_get_irq_data(domain, hwirq);
@@ -981,6 +1069,10 @@ struct irq_desc *__irq_resolve_mapping(struct irq_domain *domain,
 		return desc;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - linear & tree
+ */
 	rcu_read_lock();
 	/* Check if the hwirq is in the linear revmap. */
 	if (hwirq < domain->revmap_size)
@@ -1576,7 +1668,7 @@ static void irq_domain_free_irqs_hierarchy(struct irq_domain *domain,
  * IAMROOT, 2022.10.15:
  * - @domain의 alloc ops를 호출해서 mapping한다.
  * - ex)
- *   gic_irq_domain_alloc
+ *   gic_irq_domain_alloc. arg는 fwspec.
  */
 int irq_domain_alloc_irqs_hierarchy(struct irq_domain *domain,
 				    unsigned int irq_base,

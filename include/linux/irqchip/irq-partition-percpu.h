@@ -13,6 +13,10 @@
 
 struct partition_affinity {
 	cpumask_t			mask;
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic_populate_ppi_partitions()의 경우 fwnode가 들어간다.
+ */
 	void				*partition_id;
 };
 

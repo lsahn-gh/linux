@@ -75,12 +75,28 @@ struct irq_desc {
 	irq_flow_handler_t	handle_irq;
 	struct irqaction	*action;	/* IRQ action list */
 	unsigned int		status_use_accessors;
+/*
+ * IAMROOT, 2022.10.29:
+ * - istate define.
+ *   밖에서(driver) 건들지 말라는것.
+ */
 	unsigned int		core_internal_state__do_not_mess_with_it;
+/*
+ * IAMROOT, 2022.10.29:
+ * - __enable_irq(), disable_irq()참고.
+ *   disable depth. 0인경우 암묵적으로 이미 enable인 상태라고 본다.
+ */
 	unsigned int		depth;		/* nested irq disables */
 	unsigned int		wake_depth;	/* nested wake enables */
 	unsigned int		tot_count;
 	unsigned int		irq_count;	/* For detecting broken IRQs */
 	unsigned long		last_unhandled;	/* Aging timer for unhandled count */
+/*
+ * IAMROOT, 2022.10.29:
+ * - note_interrupt()에서 0.1초 이내에 여러번 irq가 IRQ_NONE일 경우 증가한다.
+ * - IRQ_NONE
+ *   정해진 handler가 호출이 안됫거나, dummy가 실행된경우등.
+ */
 	unsigned int		irqs_unhandled;
 	atomic_t		threads_handled;
 	int			threads_handled_last;

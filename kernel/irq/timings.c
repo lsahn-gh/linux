@@ -602,6 +602,10 @@ void irq_timings_free(int irq)
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irqt_stats에 없으면 memory 할당후 irqt_stats에 넣는다.
+ */
 int irq_timings_alloc(int irq)
 {
 	struct irqt_stat __percpu *s;
@@ -777,12 +781,20 @@ static int __init irq_timings_test_irqs(struct timings_intervals *ti)
 	struct irqt_stat *irqs;
 	int i, index, ret, irq = 0xACE5;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irqt_stats에 있으면 아무것도 안하고, 없으면 alloc.
+ */
 	ret = irq_timings_alloc(irq);
 	if (ret) {
 		pr_err("Failed to allocate irq timings\n");
 		return ret;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irq를 irqt_stats에서 찾는다 없으면 error.
+ */
 	s = idr_find(&irqt_stats, irq);
 	if (!s) {
 		ret = -EIDRM;

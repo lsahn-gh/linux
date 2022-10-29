@@ -761,6 +761,10 @@ int irq_set_vcpu_affinity(unsigned int irq, void *vcpu_info)
 }
 EXPORT_SYMBOL_GPL(irq_set_vcpu_affinity);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - depth가 0일때만 disable.
+ */
 void __disable_irq(struct irq_desc *desc)
 {
 	if (!desc->depth++)
@@ -856,6 +860,11 @@ void disable_nmi_nosync(unsigned int irq)
 	disable_irq_nosync(irq);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - depth가 1인 경우만 enable(irq_startup)을 한다.
+ *   irq_startup에서 depth는 0이 될것이다.
+ */
 void __enable_irq(struct irq_desc *desc)
 {
 	switch (desc->depth) {
@@ -865,6 +874,10 @@ void __enable_irq(struct irq_desc *desc)
 		     irq_desc_get_irq(desc));
 		break;
 	case 1: {
+/*
+ * IAMROOT, 2022.10.29:
+ * - sleep상태라는것. enable 못한다.
+ */
 		if (desc->istate & IRQS_SUSPENDED)
 			goto err_out;
 		/* Prevent probing on this irq: */
@@ -1681,7 +1694,52 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
  */
 /*
  * IAMROOT, 2022.10.15:
- * - 
+ * - 1. irq에 등록된 thread_fn에 대해 create. 및 wakeup
+ *   2. old action이 있는지 판단하여 shared irq인지 결정.
+ *   3. shared 인지 아닌지 에 따라 flag검사 및, flag를  보며 irq_activate, enable_irq 결정
+ *   4. thread_mask set 처리.
+ *   5. onshot 관련 flag 처리.
+ *   6. irqt_stat에 생성된 irq번호로 자료구조 추가.
+ *   7. /proc/에 생성된 irq번호로 자료구조 추가.
+ *
+ * - irq 흐름.
+ *   vector
+ *     v
+ *   chip handler
+ *     v
+ *   flow handler
+ *     v
+ *   irq_handler(현재)
+ *
+ * - new->thread_fn이 존재하고 nested가 안됬다면
+ *   setup_irq_thread()에서 irq_thread를 생성하여 new->thread에 넣어놓고,
+ *   __setup_irq 마무리 시점에서 wakeup 시켜놓는다.
+ *   wakeup된 irq_thread()는 irq_wait_for_interrupt로 기다리면서 
+ *   thread_fn을 실행한다.
+ *
+ *  ====== __setup_irq =====
+ *   thread_fn()존재, !nested
+ *          |
+ *          v
+ *    new->thread = irq_thread
+ *          |
+ *          v
+ *    irq_thread() wakeup
+ *  ======================
+ *
+ *  ====== irq_thread() ======
+ *   threa_fn()이 있는경우 __setup_irq에서 create된후 wakeup됨.
+ *            |
+ *            v
+ *        irq_wait_for_interrupt()대기 <---------------------------------------+
+ *            |                                                                |
+*             (interrupt발생 후 handler 호출후 return IRQ_WAKE_THREAD)         |
+ *            |                                                                |
+ *            v                                                                |
+ *        thread_fn()실행 -----------------------------------------------------+
+ * ==========================
+ *
+ *
  */
 static int
 __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
@@ -1909,6 +1967,18 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 			irqd_set_trigger_type(&desc->irq_data, oldtype);
 		}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 다음 상황이면 mismatch
+ * 1. !((old->flags & new->flags) & IRQF_SHARED)
+ *	old, new 하나라도 shared가 없는 상황..
+ * 2. (oldtype != (new->flags & IRQF_TRIGGER_MASK))
+ *  서로 타입이 다른 경우.
+ * 3. ((old->flags ^ new->flags) & IRQF_ONESHOT))
+ *   둘중 하나만 oneshot이 있는 경우.
+ * 4. (old->flags & IRQF_PERCPU) != (new->flags & IRQF_PERCPU)
+ *   percpu flag가 다른경우.
+ */
 		if (!((old->flags & new->flags) & IRQF_SHARED) ||
 		    (oldtype != (new->flags & IRQF_TRIGGER_MASK)) ||
 		    ((old->flags ^ new->flags) & IRQF_ONESHOT))
@@ -1919,6 +1989,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		    (new->flags & IRQF_PERCPU))
 			goto mismatch;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - old를 전부 iter하면서 thread_mask에 old의 thread_mask를 전부 or해준다.
+ */
 		/* add new interrupt at end of irq queue */
 		do {
 			/*
@@ -1938,11 +2012,24 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * !ONESHOT irqs the thread mask is 0 so we can avoid a
 	 * conditional in irq_wake_thread().
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   ONESHOT에 대한 이 irqaction에 대한 스레드 마스크를 설정합니다.
+ *   !ONESHOT irqs의 경우 스레드 마스크는 0이므로 irq_wake_thread()에서 조건부를
+ *   피할 수 있습니다.
+ */
 	if (new->flags & IRQF_ONESHOT) {
 		/*
 		 * Unlikely to have 32 resp 64 irqs sharing one line,
 		 * but who knows.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   한 줄을 공유하는 32개의 resp 64 irq를 가질 가능성은 없지만 누가 알겠습니까.
+ * - 한개의 interrupt line에 대해서 너무 많이 공유를 하고 있는 경우.
+ */
 		if (thread_mask == ~0UL) {
 			ret = -EBUSY;
 			goto out_unlock;
@@ -1967,6 +2054,26 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * thread_mask assigned. See the loop above which or's
 		 * all existing action->thread_mask bits.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   작업에 대한 thread_mask는 IRQF_ONESHOT 스레드 핸들러가 깨웠지만 아직 완료되지
+ *   않았음을 나타내기 위해 desc->thread_active로 지정됩니다. 스레드가 완료되면
+ *   비트가 지워집니다. 공유 인터럽트 라인의 모든 스레드가 완료되면
+ *   desc->threads_active는 0이 되고 인터럽트 라인은 마스크 해제됩니다.
+ *   handle.c 참조: 자세한 내용은 irq_wake_thread()를 참조하십시오. 
+ *
+ *   기본(하드 irq 컨텍스트) 인터럽트 핸들러에 의해 깨어난 스레드가 없으면 영향을
+ *   받는 하드 irq 흐름 핸들러(handle_[fasteoi|level]_irq)에서 irq 라인의 마스크를
+ *   해제하기 위해 desc->threads_active도 0으로 확인됩니다. 
+ *
+ *   새 작업은 할당된 thread_mask의 첫 번째 0비트를 가져옵니다. 위의 모든 기존
+ *   action->thread_mask 비트가 있는 루프를 참조하십시오.
+ *
+ * - 비어있는 threadmask bit를 가져오고 thread가 완료되기 전까지 해당 bit를 set
+ *   할 것이다.
+ * - thread가 완료되면 해당 bit는 unset이 될것이다.(irq_wake_thread()참조)
+ */
 		new->thread_mask = 1UL << ffz(thread_mask);
 
 	} else if (new->handler == irq_default_primary_handler &&
@@ -1986,17 +2093,47 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * has. The type flags are unreliable as the
 		 * underlying chip implementation can override them.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   핸들러 = NULL로 인터럽트가 요청되었으므로 기본 기본 핸들러를 사용합니다.
+ *   그러나 oneshot 플래그가 설정되어 있지 않습니다. 레벨 인터럽트와 함께 이것은
+ *   치명적입니다. 기본 기본 핸들러가 스레드를 깨우기만 하면 irq 라인이 다시
+ *   활성화되지만 장치에는 여전히 irq 레벨이 지정되어 있기 때문입니다. 헹구고
+ *   반복...
+ *   이것은 에지 유형 인터럽트에 대해 작동하지만 이 인터럽트가 실제로 어떤
+ *   유형인지 말할 수 없기 때문에 안전하게 처리하고 무조건 거부합니다. 기본 칩
+ *   구현에서 유형 플래그를 재정의할 수 있으므로 유형 플래그를 신뢰할 수 없습니다. 
+ *
+ * - handler 지정이 안된 상황에서 , oneshot이 아닐경우 해당 irq가 계속 들어와 default
+ *   handler를 계속 호출할 것이다. 의미 없는 행동이므로 error.
+ * - edge trigger일 경우 interrupt가 한번 들어올때마다 한번씩 호출 될것이지만
+ *   level trigeer일 경우 level이 끝날때까지 계속 여러번 호출될 위험이 있다.
+ */
 		pr_err("Threaded irq requested with handler=NULL and !ONESHOT for %s (irq %d)\n",
 		       new->name, irq);
 		ret = -EINVAL;
 		goto out_unlock;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - old가 이미 있는 상황(irqaction이 2개이상)인지 검사한다.
+ */
 	if (!shared) {
+/*
+ * IAMROOT, 2022.10.29:
+ * - shared가 아닌 경우.
+ */
 		init_waitqueue_head(&desc->wait_for_threads);
 
 		/* Setup the type (level, edge polarity) if configured: */
 		if (new->flags & IRQF_TRIGGER_MASK) {
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - 요청 trigger로 irq를 변경해준다.
+ */
 			ret = __irq_set_trigger(desc,
 						new->flags & IRQF_TRIGGER_MASK);
 
@@ -2015,6 +2152,16 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 * fails. Interrupts which are in managed shutdown mode
 		 * will simply ignore that activation request.
 		 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   인터럽트를 활성화합니다. 해당 활성화는 IRQ_NOAUTOEN과 독립적으로 발생해야
+ *   합니다. request_irq()는 실패할 수 있으며 호출자는 이를 처리해야 합니다.
+ *   IRQ_NOAUTOEN으로 요청된 인터럽트의 enable_irq()는 실패하지 않아야 합니다.
+ *   활성화는 시스템을 종료 모드로 유지하고 필요한 경우 리소스를 연결하고 이것이
+ *   가능하지 않은 경우 실패합니다. 관리 종료 모드에 있는 인터럽트는 해당 활성화
+ *   요청을 무시합니다.
+ */
 		ret = irq_activate(desc);
 		if (ret)
 			goto out_unlock;
@@ -2030,6 +2177,10 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 				irq_settings_set_no_debug(desc);
 		}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - kernel/irq/spurious.c
+ */
 		if (noirqdebug)
 			irq_settings_set_no_debug(desc);
 
@@ -2042,6 +2193,11 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 			irqd_set(&desc->irq_data, IRQD_NO_BALANCING);
 		}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - auto enable 한다.
+ *   irq_startup을 하면서 desc->depth = 0이 된다.
+ */
 		if (!(new->flags & IRQF_NO_AUTOEN) &&
 		    irq_settings_can_autoenable(desc)) {
 			irq_startup(desc, IRQ_RESEND, IRQ_START_COND);
@@ -2052,6 +2208,20 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 			 * it while it's still disabled and then wait for
 			 * interrupts forever.
 			 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   공유 인터럽트는 자동 활성화를 비활성화하는 데 적합하지 않습니다. 공유
+ *   인터럽트는 여전히 비활성화되어 있는 동안 요청한 다음 인터럽트를 영원히 기다릴
+ *   수 있습니다.
+ *
+ * - no auto enable.
+ *   shared interrupt는 따로 enable하기가 까다로울있어서 영원히 enable안될수있다.
+ *
+ * - desc->depth = 1
+ *   disable 상태에서 출발을 한다는 의미. __enalbe_irq시 depth == 1인 경우
+ *   irq_startup을 하면서 depth = 0이 될것이다.
+ */
 			WARN_ON_ONCE(new->flags & IRQF_SHARED);
 			/* Undo nested disables: */
 			desc->depth = 1;
@@ -2061,6 +2231,11 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		unsigned int nmsk = new->flags & IRQF_TRIGGER_MASK;
 		unsigned int omsk = irqd_get_trigger_type(&desc->irq_data);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - shared인 상황에서, 현재 shared중인 irq와, 요청 trigger가 다른경우 shared
+ *   인것을 바꾸는건 안되므로 경고출력.
+ */
 		if (nmsk != omsk)
 			/* hope the handler works with current  trigger mode */
 			pr_warn("irq %d uses trigger mode %u; requested %u\n",
@@ -2079,6 +2254,14 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	 * Check whether we disabled the irq via the spurious handler
 	 * before. Reenable it and give it another chance.
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - shared irq이면서, spurious를 허용을 안한경우. 이 시점에서 enable을 한다.
+ *   shared는 spurious disable를 용납안한다.
+ *   A, B, C driver가 irq를 shared한다고 할때, A, B가 동작중이고, C가 새로 등록되기전에
+ *   C interrupt가 들어올수가 있어 spurious가 될수밖에 없다. 이러한 상황때문에
+ *   spurious를 반드시 해야되므로 spurious disable은 불가능하다.
+ */
 	if (shared && (desc->istate & IRQS_SPURIOUS_DISABLED)) {
 		desc->istate &= ~IRQS_SPURIOUS_DISABLED;
 		__enable_irq(desc);
@@ -2088,12 +2271,20 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	chip_bus_sync_unlock(desc);
 	mutex_unlock(&desc->request_mutex);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irqt_stat에 new에 대한 자료구조를 생성한다.
+ */
 	irq_setup_timings(desc, new);
 
 	/*
 	 * Strictly no need to wake it up, but hung_task complains
 	 * when no hard interrupt wakes the thread up.
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - new->thread, new->secondary를 실행한다.
+ */
 	if (new->thread)
 		wake_up_process(new->thread);
 	if (new->secondary)
@@ -2647,6 +2838,10 @@ err_out:
 	return retval;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @type에 따라 trigger 설정후 current cpu에 대한 enable irq수행.
+ */
 void enable_percpu_irq(unsigned int irq, unsigned int type)
 {
 	unsigned int cpu = smp_processor_id();
@@ -2661,6 +2856,10 @@ void enable_percpu_irq(unsigned int irq, unsigned int type)
 	 * use the default for this interrupt.
 	 */
 	type &= IRQ_TYPE_SENSE_MASK;
+/*
+ * IAMROOT, 2022.10.29:
+ * - @type 요청이 없으면 desc에서 type을 가져와서 설정한다.
+ */
 	if (type == IRQ_TYPE_NONE)
 		type = irqd_get_trigger_type(&desc->irq_data);
 
@@ -2886,8 +3085,13 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
  * - ex) ipi의 경우 ipi_handler()
  *
  * - irq 흐름.
- *   vector -> chip handler -> flow handler -> irq_handler(현재) ->
- *   action handler(option)
+ *   vector
+ *     v
+ *   chip handler
+ *     v
+ *   flow handler
+ *     v
+ *   irq_handler(현재)
  */
 int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 			 unsigned long flags, const char *devname,
@@ -2944,8 +3148,16 @@ int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 		return retval;
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irq에 대한 setup.
+ */
 	retval = __setup_irq(irq, desc, action);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - error 처리.,
+ */
 	if (retval) {
 		irq_chip_pm_put(&desc->irq_data);
 		kfree(action);

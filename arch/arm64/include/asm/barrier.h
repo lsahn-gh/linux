@@ -39,6 +39,12 @@
 #define csdb()		asm volatile("hint #20" : : : "memory")
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - ICC_CTLR_EL1_PMHE_MASK가 set이면 enable되서 dsb(sy)이 동작할것이다.
+ *   gic_enable_nmi_support() 참고
+ */
 #define pmr_sync()						\
 	do {							\
 		extern struct static_key_false gic_pmr_sync;	\

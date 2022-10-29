@@ -39,12 +39,20 @@
  */
 enum cpu_pm_event {
 	/* A single cpu is entering a low power state */
+/*
+ * IAMROOT, 2022.10.29:
+ * - 절전 시작.
+ */
 	CPU_PM_ENTER,
 
 	/* A single cpu failed to enter a low power state */
 	CPU_PM_ENTER_FAILED,
 
 	/* A single cpu is exiting a low power state */
+/*
+ * IAMROOT, 2022.10.29:
+ * - 절전 해제
+ */
 	CPU_PM_EXIT,
 
 	/* A cpu power domain is entering a low power state */

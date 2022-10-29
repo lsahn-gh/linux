@@ -17,6 +17,10 @@
 # define IRQ_BITMAP_BITS	NR_IRQS
 #endif
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - struct irq_desc
+ */
 #define istate core_internal_state__do_not_mess_with_it
 
 extern bool noirqdebug;
@@ -321,6 +325,10 @@ static inline void irq_remove_timings(struct irq_desc *desc)
 	irq_timings_free(irq_desc_get_irq(desc));
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irqt_stats에 irq번호로 자료구조를 하나 넣어놓는다.
+ */
 static inline void irq_setup_timings(struct irq_desc *desc, struct irqaction *act)
 {
 	int irq = irq_desc_get_irq(desc);

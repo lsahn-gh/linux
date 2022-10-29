@@ -453,6 +453,10 @@ extern unsigned int irq_create_mapping_affinity(struct irq_domain *host,
 extern unsigned int irq_create_fwspec_mapping(struct irq_fwspec *fwspec);
 extern void irq_dispose_mapping(unsigned int virq);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @hwirq의 virq를 @host에서 얻어온다. 없을경우 생성 및 mapping을 한다.
+ */
 static inline unsigned int irq_create_mapping(struct irq_domain *host,
 					      irq_hw_number_t hwirq)
 {
@@ -473,6 +477,10 @@ static inline struct irq_desc *irq_resolve_mapping(struct irq_domain *domain,
  * irq_find_mapping() - Find a linux irq from a hw irq number.
  * @domain: domain owning this hardware interrupt
  * @hwirq: hardware irq number in that domain space
+ */
+/*
+ * IAMROOT, 2022.10.29:
+ * - @hwirq로 virq를 domain에서 구해온다.
  */
 static inline unsigned int irq_find_mapping(struct irq_domain *domain,
 					    irq_hw_number_t hwirq)
@@ -552,6 +560,16 @@ extern void irq_domain_free_irqs(unsigned int virq, unsigned int nr_irqs);
 extern int irq_domain_activate_irq(struct irq_data *irq_data, bool early);
 extern void irq_domain_deactivate_irq(struct irq_data *irq_data);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 0번부터 scan하여 nr_irqs만큼 빈차리를 찾아 irq를 만든다.
+ *   @arg는 @domain->ops->alloc 실행히 마지막 인자로 private data로 들어간다.
+ * ex)
+ * gic_irq_domain_ops   : alloc = gic_irq_domain_alloc. arg = fwspec
+ * partition_domain_ops : default alloc = NULL.
+ *                        parition irq만(partition_create_desc())
+ *                        alloc = partition_domain_alloc
+ */
 static inline int irq_domain_alloc_irqs(struct irq_domain *domain,
 			unsigned int nr_irqs, int node, void *arg)
 {
@@ -587,6 +605,16 @@ extern void irq_domain_free_irqs_parent(struct irq_domain *domain,
 extern int irq_domain_disconnect_hierarchy(struct irq_domain *domain,
 					   unsigned int virq);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irq_domain_check_hierarchy() 참고.
+ *   alloc ops가 있으면 domain 생성시 set해준다.
+ * ex)
+ * gic_irq_domain_ops   : alloc = gic_irq_domain_alloc. arg = fwspec
+ * partition_domain_ops : default alloc = NULL.
+ *                        parition irq만(partition_create_desc())
+ *                        alloc = partition_domain_alloc
+ */
 static inline bool irq_domain_is_hierarchy(struct irq_domain *domain)
 {
 	return domain->flags & IRQ_DOMAIN_FLAG_HIERARCHY;

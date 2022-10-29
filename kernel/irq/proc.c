@@ -316,6 +316,10 @@ static int name_unique(unsigned int irq, struct irqaction *new_action)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - /proc/irq/(번호)/handler/ 를 만든다.
+ */
 void register_handler_proc(unsigned int irq, struct irqaction *action)
 {
 	char name [MAX_NAMELEN];
@@ -335,6 +339,10 @@ void register_handler_proc(unsigned int irq, struct irqaction *action)
 
 #define MAX_NAMELEN 10
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @irq로 /proc/irq에 만든다.
+ */
 void register_irq_proc(unsigned int irq, struct irq_desc *desc)
 {
 	static DEFINE_MUTEX(register_lock);

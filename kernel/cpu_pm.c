@@ -67,6 +67,10 @@ static int cpu_pm_notify_robust(enum cpu_pm_event event_up, enum cpu_pm_event ev
  *
  * This function has the same return conditions as raw_notifier_chain_register.
  */
+/*
+ * IAMROOT, 2022.10.29:
+ * - @nb(callback)등록.
+ */
 int cpu_pm_register_notifier(struct notifier_block *nb)
 {
 	unsigned long flags;

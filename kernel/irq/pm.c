@@ -30,6 +30,10 @@ bool irq_pm_check_wakeup(struct irq_desc *desc)
  * Called from __setup_irq() with desc->lock held after @action has
  * been installed in the action chain.
  */
+/*
+ * IAMROOT, 2022.10.29:
+ * - pm에 action을 추가한다.
+ */
 void irq_pm_install_action(struct irq_desc *desc, struct irqaction *action)
 {
 	desc->nr_actions++;

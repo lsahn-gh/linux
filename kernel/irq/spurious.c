@@ -382,6 +382,11 @@ void note_interrupt(struct irq_desc *desc, irqreturn_t action_ret)
 		}
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 실패된 경우, irqs_unhandled를 1로 reset할지 증가할지를 판단한다.
+ *   마지막 실패이후 0.1초 이상 지낫으면 reset. 아니면 증가.
+ */
 	if (unlikely(action_ret == IRQ_NONE)) {
 		/*
 		 * If we are seeing only the odd spurious IRQ caused by
@@ -431,6 +436,11 @@ void note_interrupt(struct irq_desc *desc, irqreturn_t action_ret)
 	desc->irqs_unhandled = 0;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - __setup_irq()함수등에서 irq_settings_set_no_debug()를 호출하게 한다. 
+ *   _IRQ_NO_DEBUG set용도.
+ */
 bool noirqdebug __read_mostly;
 
 int noirqdebug_setup(char *str)

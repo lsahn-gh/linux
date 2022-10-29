@@ -16,6 +16,10 @@
 #include <linux/gfp.h>
 #include <linux/percpu.h>
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 정수기반의 radix tree.
+ */
 struct idr {
 	struct radix_tree_root	idr_rt;
 	unsigned int		idr_base;

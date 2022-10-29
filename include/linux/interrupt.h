@@ -68,6 +68,39 @@
  * IRQF_NO_DEBUG - Exclude from runnaway detection for IPI and similar handlers,
  *		   depends on IRQF_PERCPU.
  */
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   이 플래그는 irq 처리 루틴의 일부로 커널에서만 사용됩니다.
+ *
+ *   IRQF_SHARED - 여러 장치 간에 irq를 공유할 수 있습니다.
+ *   IRQF_PROBE_SHARED - 공유 불일치가 발생할 것으로 예상할 때 호출자가 설정합니다.
+ *   IRQF_TIMER - 이 인터럽트를 타이머 인터럽트로 표시하는 플래그입니다.
+ *   IRQF_PERCPU - percpu interrupt.
+ *   IRQF_NOBALANCER - 이 인터럽트를 irq 밸런싱에서 제외하기 위한 플래그입니다. 
+ *   IRQF_IRQPOLL - 인터럽트가 폴링에 사용됩니다(성능상의 이유로 공유 인터럽트에
+ *                  먼저 등록된 인터럽트만 고려됨). 
+ *   IRQF_ONESHOT - hardirq 처리기가 완료된 후 인터럽트가 다시 활성화되지 않습니다. 
+ *     스레드 처리기가 실행될 때까지 irq 라인을 비활성화 상태로 유지해야 하는
+ *     스레드 인터럽트에서 사용됩니다.
+ *   IRQF_NO_SUSPEND - 일시 중단 중에 이 IRQ를 비활성화하지 마십시오. 이 인터럽트가
+ *     시스템을 일시 중단된 상태에서 깨우도록 보장하지 않습니다.
+ *     Documentation/power/suspend-and-interrupts.rst를 참조하십시오. 
+ *   IRQF_FORCE_RESUME - IRQF_NO_SUSPEND가 설정되어 있어도 다시 시작할 때 강제로
+ *     활성화합니다.
+ *   IRQF_NO_THREAD - 인터럽트를 스레드할 수 없습니다.
+ *   IRQF_EARLY_RESUME - 장치 재개 시간이 아닌 시스템 코어 중에 일찍 IRQ를 재개합니다.
+ *   IRQF_COND_SUSPEND - IRQ가 NO_SUSPEND 사용자와 공유되는 경우 인터럽트를 일시
+ *     중단한 후 이 인터럽트 핸들러를 실행합니다. 시스템 깨우기 장치의 경우
+ *     사용자는 인터럽트 처리기에서 깨우기 감지를 구현해야 합니다.
+ *   IRQF_NO_AUTOEN - 사용자가 요청할 때 IRQ 또는 NMI를 자동으로 활성화하지
+ *   마십시오.  사용자는 나중에 enable_irq() 또는 enable_nmi()를 통해 명시적으로
+ *   활성화합니다.
+ *   IRQF_NO_DEBUG - IRQF_PERCPU에 따라 IPI 및 유사한 처리기에 대한 런어웨이
+ *   감지에서 제외됩니다.
+.
+ */
 #define IRQF_SHARED		0x00000080
 #define IRQF_PROBE_SHARED	0x00000100
 #define __IRQF_TIMER		0x00000200
@@ -122,6 +155,11 @@ typedef irqreturn_t (*irq_handler_t)(int, void *);
  * @dir:	pointer to the proc/irq/NN/name entry
  */
 struct irqaction {
+/*
+ * IAMROOT, 2022.10.29:
+ * - primary hardirq handler
+ *   handler 호출 -- (return IRQ_WAKE_THREAD) -> thread_fn 호출 식의 흐름이 된다.
+ */
 	irq_handler_t		handler;
 	void			*dev_id;
 	void __percpu		*percpu_dev_id;

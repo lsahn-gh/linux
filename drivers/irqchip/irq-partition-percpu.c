@@ -132,6 +132,10 @@ static void partition_handle_irq(struct irq_desc *desc)
 	chained_irq_exit(chip, desc);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - 
+ */
 static int partition_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				  unsigned int nr_irqs, void *arg)
 {
@@ -142,6 +146,12 @@ static int partition_domain_alloc(struct irq_domain *domain, unsigned int virq,
 	struct partition_desc *part;
 
 	BUG_ON(nr_irqs != 1);
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic parition의 경우(partition_domain_ops)의 경우
+ *   translate = partition_domain_translate
+ */
 	ret = domain->ops->translate(domain, fwspec, &hwirq, &type);
 	if (ret)
 		return ret;
@@ -171,6 +181,10 @@ static void partition_domain_free(struct irq_domain *domain, unsigned int virq,
 	irq_domain_reset_irq_data(d);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @pariton_id와 일치하는 desc->parts의 index를 구해온다.
+ */
 int partition_translate_id(struct partition_desc *desc, void *partition_id)
 {
 	struct partition_affinity *part = NULL;
@@ -191,6 +205,13 @@ int partition_translate_id(struct partition_desc *desc, void *partition_id)
 	return i;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - partition_desc를 생성한다. 생성시 domain은 linear domain.
+ *   ops는 @ops를 따르되 free, alloc만 parition꺼로 고친다.
+ * - parition을 사용하는 interrupt에 한해 alloc과 free ops가 추가된다.
+ * 
+ */
 struct partition_desc *partition_create_desc(struct fwnode_handle *fwnode,
 					     struct partition_affinity *parts,
 					     int nr_parts,
@@ -232,6 +253,10 @@ out:
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @dsc의 domain을 가져온다. (partition domain)
+ */
 struct irq_domain *partition_get_domain(struct partition_desc *dsc)
 {
 	if (dsc)

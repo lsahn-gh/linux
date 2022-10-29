@@ -1028,6 +1028,10 @@ static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
 	__ipi_send_mask(ipi_desc[ipinr], target);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - nr_ipi 만큼 current cpu에 대한 ipi irq enable.
+ */
 static void ipi_setup(int cpu)
 {
 	int i;
@@ -1055,6 +1059,7 @@ static void ipi_teardown(int cpu)
 /*
  * IAMROOT, 2022.10.15:
  * - IPI(inter-processor interrupts)
+ * - ipi_handler로 handelr등록후 current cpu에 대해서 ipi 개수만큼 irq enable한다.
  */
 void __init set_smp_ipi_range(int ipi_base, int n)
 {
@@ -1068,6 +1073,19 @@ void __init set_smp_ipi_range(int ipi_base, int n)
  */
 	nr_ipi = min(n, NR_IPI);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - nr_ipi 개수만큼 irq_base + i irq를 설정한다.
+ *
+ * - irq 흐름.
+ *   vector
+ *     v
+ *   chip handler
+ *     v
+ *   flow handler
+ *     v
+ *   irq_handler <--- ipi_handler
+ */
 	for (i = 0; i < nr_ipi; i++) {
 		int err;
 

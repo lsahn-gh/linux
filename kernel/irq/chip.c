@@ -343,6 +343,10 @@ int irq_startup(struct irq_desc *desc, bool resend, bool force)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - affinity managed가 설정이 되있다면 이미 activate했다고 가정하고 즉시 성공.
+ */
 int irq_activate(struct irq_desc *desc)
 {
 	struct irq_data *d = irq_desc_get_irq_data(desc);
@@ -479,6 +483,12 @@ void irq_disable(struct irq_desc *desc)
 	__irq_disable(desc, irq_settings_disable_unlazy(desc));
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - irq_enable or irq_unmask 실행.
+ * - ex) giv3
+ *   irq_enable이 없다. gic_unmask_irq() 가 실행될것이다.
+ */
 void irq_percpu_enable(struct irq_desc *desc, unsigned int cpu)
 {
 	if (desc->irq_data.chip->irq_enable)

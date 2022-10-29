@@ -158,6 +158,10 @@ EXPORT_SYMBOL(gic_nonsecure_priorities);
 	})
 
 /* ppi_nmi_refs[n] == number of cpus having ppi[n + 16] set as NMI */
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic_enable_nmi_support()에서 gic_data.ppi_nr개수만큼 초기화된다. 
+ */
 static refcount_t *ppi_nmi_refs;
 
 static struct gic_kvm_info gic_v3_kvm_info __initdata;
@@ -616,6 +620,10 @@ static void gic_irq_set_prio(struct irq_data *d, u8 prio)
 	writeb_relaxed(prio, base + offset + index);
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - @hwirq로 ppi index를 구해온다. ppi가 아닐경우 unreachable.
+ */
 static u32 __gic_get_ppi_index(irq_hw_number_t hwirq)
 {
 	switch (__get_intid_range(hwirq)) {
@@ -1340,6 +1348,14 @@ static void gic_update_rdist_properties(void)
 }
 
 /* Check whether it's single security state view */
+/*
+ * IAMROOT, 2022.10.29:
+ * return true : security disable
+ *        false : security enable
+ *
+ * - DS.0 == two security
+ * - DS.1 == single security
+ */
 static inline bool gic_dist_security_disabled(void)
 {
 	return readl_relaxed(gic_data.dist_base + GICD_CTLR) & GICD_CTLR_DS;
@@ -1723,7 +1739,7 @@ static void gic_ipi_send_mask(struct irq_data *d, const struct cpumask *mask)
 
 /*
  * IAMROOT, 2022.10.15:
- * - 
+ * - sgi irq 설정.
  */
 static void __init gic_smp_init(void)
 {
@@ -1842,10 +1858,23 @@ static int gic_retrigger(struct irq_data *data)
 }
 
 #ifdef CONFIG_CPU_PM
+/*
+ * IAMROOT, 2022.10.29:
+ * - 절전 해제, 진입, security 상태에 따라 gic 설정.
+ */
 static int gic_cpu_pm_notifier(struct notifier_block *self,
 			       unsigned long cmd, void *v)
 {
+/*
+ * IAMROOT, 2022.10.29:
+ * - CPU_PM_EXIT -> 절전 해제
+ * - CPU_PM_ENTER -> 절전
+ */
 	if (cmd == CPU_PM_EXIT) {
+/*
+ * IAMROOT, 2022.10.29:
+ * - single이면 kernel이 제어.
+ */
 		if (gic_dist_security_disabled())
 			gic_enable_redist(true);
 		gic_cpu_sys_reg_init();
@@ -1860,6 +1889,10 @@ static struct notifier_block gic_cpu_pm_notifier_block = {
 	.notifier_call = gic_cpu_pm_notifier,
 };
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic에 대한 pm을 등록한다.
+ */
 static void gic_cpu_pm_init(void)
 {
 	cpu_pm_register_notifier(&gic_cpu_pm_notifier_block);
@@ -1869,6 +1902,10 @@ static void gic_cpu_pm_init(void)
 static inline void gic_cpu_pm_init(void) { }
 #endif /* CONFIG_CPU_PM */
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - guest os or hyp가 없을때.
+ */
 static struct irq_chip gic_chip = {
 	.name			= "GICv3",
 	.irq_mask		= gic_mask_irq,
@@ -1887,6 +1924,10 @@ static struct irq_chip gic_chip = {
 				  IRQCHIP_MASK_ON_SUSPEND,
 };
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - eoimode1 (hypmode 운영)
+ */
 static struct irq_chip gic_eoimode1_chip = {
 	.name			= "GICv3",
 	.irq_mask		= gic_eoimode1_mask_irq,
@@ -2028,6 +2069,10 @@ static int gic_irq_domain_translate(struct irq_domain *d,
 		case GIC_IRQ_TYPE_LPI:	/* LPI */
 			*hwirq = fwspec->param[1];
 			break;
+/*
+ * IAMROOT, 2022.10.29:
+ * - gic_populate_ppi_partitions() 참고
+ */
 		case GIC_IRQ_TYPE_PARTITION:
 			*hwirq = fwspec->param[1];
 			if (fwspec->param[1] >= 16)
@@ -2115,6 +2160,22 @@ static void gic_irq_domain_free(struct irq_domain *domain, unsigned int virq,
 	}
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - param, range등의 값 검사.
+ * - 통과 조건.
+ *   1. ppi_desc가 존재
+ *   2. fwnode가 of_node 측이여야된다.
+ *   3. param이 4개이상이고 param[3]이 NULL이 아니여야 된다.
+ *   4. range가 ppi류여야 된다.
+ *
+ * ex) dts(rk3399.dtsi)
+ * pmu_a53 {
+ *		compatible = "arm,cortex-a53-pmu";
+ *		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_LOW &ppi_cluster0>;
+ * }
+ * 마지막엔 반드시 연결된 cluster phandle이 등록되있다.
+ */
 static bool fwspec_is_partitioned_ppi(struct irq_fwspec *fwspec,
 				      irq_hw_number_t hwirq)
 {
@@ -2136,6 +2197,14 @@ static bool fwspec_is_partitioned_ppi(struct irq_fwspec *fwspec,
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * @return 1 success. 0 false.
+ *
+ * - @fwspec와 @d가 매칭이 되는지 검사한다.
+ * - @d, @fwspec으로 hwirq, type을 구하고, @d가 해당 hwriq의
+ *   ppi parition domain인지 검사한다.
+ */
 static int gic_irq_domain_select(struct irq_domain *d,
 				 struct irq_fwspec *fwspec,
 				 enum irq_domain_bus_token bus_token)
@@ -2155,6 +2224,10 @@ static int gic_irq_domain_select(struct irq_domain *d,
 	if (WARN_ON_ONCE(ret))
 		return 0;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - domain이 gic_data.domain이면 true로 인정한다.
+ */
 	if (!fwspec_is_partitioned_ppi(fwspec, hwirq))
 		return d == gic_data.domain;
 
@@ -2162,6 +2235,10 @@ static int gic_irq_domain_select(struct irq_domain *d,
 	 * If this is a PPI and we have a 4th (non-null) parameter,
 	 * then we need to match the partition domain.
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - 위에서 true로 왔을경우 hwirq->ppi->idx->partition domain으로 얻어온다.
+ */
 	ppi_idx = __gic_get_ppi_index(hwirq);
 	return d == partition_get_domain(gic_data.ppi_descs[ppi_idx]);
 }
@@ -2177,6 +2254,10 @@ static const struct irq_domain_ops gic_irq_domain_ops = {
 	.select = gic_irq_domain_select,
 };
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - hwirq에 partition id를 얻어온다. type은 IRQ_NONE
+ */
 static int partition_domain_translate(struct irq_domain *d,
 				      struct irq_fwspec *fwspec,
 				      unsigned long *hwirq,
@@ -2190,14 +2271,26 @@ static int partition_domain_translate(struct irq_domain *d,
 	if (!gic_data.ppi_descs)
 		return -ENOMEM;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - cluster phandle.
+ */
 	np = of_find_node_by_phandle(fwspec->param[3]);
 	if (WARN_ON(!np))
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - hwirq(ppi_intid), type구해오고
+ */
 	ret = gic_irq_domain_translate(d, fwspec, &ppi_intid, type);
 	if (WARN_ON_ONCE(ret))
 		return 0;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - ppi_descs에서 partition id를 얻어온다.
+ */
 	ppi_idx = __gic_get_ppi_index(ppi_intid);
 	ret = partition_translate_id(gic_data.ppi_descs[ppi_idx],
 				     of_node_to_fwnode(np));
@@ -2210,6 +2303,11 @@ static int partition_domain_translate(struct irq_domain *d,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - ppi의 경우 parititon을 만들시(partition_create_desc()) alloc, free ops에
+ *   partition_domain_alloc, partition_domain_free가 추가된다.
+ */
 static const struct irq_domain_ops partition_domain_ops = {
 	.translate = partition_domain_translate,
 	.select = gic_irq_domain_select,
@@ -2288,6 +2386,10 @@ static const struct gic_quirk gic_quirks[] = {
 	}
 };
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - ppi_nmi_refs를 생성하고 nmi를 enable한다.
+ */
 static void gic_enable_nmi_support(void)
 {
 	int i;
@@ -2307,6 +2409,14 @@ static void gic_enable_nmi_support(void)
 	 * set PMHE. The only reason to have it set is if EL3 requires it
 	 * (and we can't change it).
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - PMHE
+ *   Priority Mask Hint Enable. Controls whether the priority mask register is used
+ *   as a hint for interrupt distribution:
+ * - PMHE is set -> enable pmr -> sync(dsb(sy))가 필요하다는 뜻.
+ *   pmr_sync()참고
+ */
 	if (gic_read_ctlr() & ICC_CTLR_EL1_PMHE_MASK)
 		static_branch_enable(&gic_pmr_sync);
 
@@ -2340,11 +2450,57 @@ static void gic_enable_nmi_support(void)
 	 * be in the non-secure range, we use a different PMR value to mask IRQs
 	 * and the rest of the values that we use remain unchanged.
 	 */
+/*
+ * IAMROOT, 2022.10.29:
+ * - papago
+ *   GIC에서 우선 순위 값을 사용하는 방법은 다음 두 가지 사항에 따라 다릅니다.
+ *   GIC의 보안 상태(GICD_CTRL.DS 비트에 의해 제어됨) 및 그룹 0 인터럽트가
+ *   FIQ(SCR_EL3.FIQ 비트에 의해 제어됨)로 비보안 세계에서 Linux에 전달될 수 있는 경우.
+ *   이는 ICC_PMR_EL1 레지스터와 소프트웨어가 인터럽트에 할당하는 우선 순위에 영향을
+ *   줍니다.
+ *
+ *                  el3에서 FIQ를
+ *                  받는지의 여부
+ *   GICD_CTRL.DS | SCR_EL3.FIQ | ICC_PMR_EL1 | Group 1 priority
+ *   -----------------------------------------------------------
+ *        1       |      -      |  unchanged  |    unchanged     <- 모든 irq는 kernel이 제어.
+ *   -----------------------------------------------------------
+ *        0       |      1      |  non-secure |    non-secure    <- fiq는 모두 el3로.
+ *   -----------------------------------------------------------
+ *        0       |      0      |  unchanged  |    non-secure
+ *
+ *  여기서 비보안은 값이 1만큼 오른쪽으로 이동하고 MSB 비트가 설정되어 비보안 우선 순위
+ *  범위에 맞도록 하는 것을 의미합니다.
+ *
+ *  ICC_PMR_EL1과 인터럽트 우선 순위가 모두 수정되거나 변경되지 않은 처음 두 경우에는
+ *  동일한 우선 순위 집합을 사용할 수 있습니다. 
+ *
+ *  인터럽트 우선 순위만 비보안 범위로 수정되는 마지막 경우에는 다른 PMR 값을 사용하여
+ *  IRQ를 마스킹하고 나머지 값은 변경되지 않은 상태로 유지합니다.
+ *
+ *  - ICC_PMR_EL1 -> 
+ *
+ * - (gic_has_group0() && !gic_dist_security_disabled())
+ *   kernel이 group0 제어권이 있고. two security로 운영중이다.
+ *   kernel이 priorities에 대해서 반절만 제어를 하겠다는것.
+ *
+ *   group0     secure
+ *   true       single
+ *   true       two     <-- 이경우. two secure지만 fiq를 kernel이 제어할수있음.
+ *   false      two
+ *
+ *   (SCR_EL3.FIQ == 0 -> EL3가 fiq를 안받는다느것 -> kernel이 받는것 ->
+ *   group0는 kernel제어)
+ */
 	if (gic_has_group0() && !gic_dist_security_disabled())
 		static_branch_enable(&gic_nonsecure_priorities);
 
 	static_branch_enable(&supports_pseudo_nmis);
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - eoimode1동작이면 eoimo1에 IRQCHIP_SUPPORTS_NMI를 설정. 아닌 경우 eoimode0에 설정한다.
+ */
 	if (static_branch_likely(&supports_deactivate_key))
 		gic_eoimode1_chip.flags |= IRQCHIP_SUPPORTS_NMI;
 	else
@@ -2353,7 +2509,7 @@ static void gic_enable_nmi_support(void)
 
 /*
  * IAMROOT, 2022.10.01:
- * - 
+ * - git init.
  */
 static int __init gic_init_bases(void __iomem *dist_base,
 				 struct redist_region *rdist_regs,
@@ -2364,6 +2520,10 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	u32 typer;
 	int err;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - hyp가 아니면 딱히 eoimode1을 쓸필요없다. disable
+ */
 	if (!is_hyp_mode_available())
 		static_branch_disable(&supports_deactivate_key);
 
@@ -2444,6 +2604,10 @@ static int __init gic_init_bases(void __iomem *dist_base,
 	gic_smp_init();
 	gic_cpu_pm_init();
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - SKIP
+ */
 	if (gic_dist_supports_lpis()) {
 		its_init(handle, &gic_data.rdists, gic_data.domain);
 		its_cpu_init();
@@ -2452,6 +2616,10 @@ static int __init gic_init_bases(void __iomem *dist_base,
 			gicv2m_init(handle, gic_data.domain);
 	}
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - enable nmi
+ */
 	gic_enable_nmi_support();
 
 	return 0;
@@ -2478,6 +2646,21 @@ static int __init gic_validate_dist_version(void __iomem *dist_base)
 }
 
 /* Create all possible partitions at boot time */
+/*
+ * IAMROOT, 2022.10.29:
+ * - ex) dts
+ *
+ *   ppi-partitions {
+ *		ppi_cluster0: interrupt-partition-0 {
+ *			affinity = <&cpu_l0 &cpu_l1 &cpu_l2 &cpu_l3>;
+ *		};
+ *		ppi_cluster1: interrupt-partition-1 {
+ *			affinity = <&cpu_b0 &cpu_b1>;
+ *		};
+ *	 };
+ *
+ *	 이 예제로, nr_parts는 2개가 된다(ppi_cluster0, ppi_cluster1)
+ */
 static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 {
 	struct device_node *parts_node, *child_part;
@@ -2489,10 +2672,18 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 	if (!parts_node)
 		return;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - ppi_nr은 이전에 이미 설정되었을것이다. 해당 값을 기준으로 만든다.
+ */
 	gic_data.ppi_descs = kcalloc(gic_data.ppi_nr, sizeof(*gic_data.ppi_descs), GFP_KERNEL);
 	if (!gic_data.ppi_descs)
 		return;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - child node가 몇개 있는지
+ */
 	nr_parts = of_get_child_count(parts_node);
 
 	if (!nr_parts)
@@ -2513,6 +2704,12 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 		pr_info("GIC: PPI partition %pOFn[%d] { ",
 			child_part, part_idx);
 
+
+/*
+ * IAMROOT, 2022.10.29:
+ * - ex) affinity = <&cpu_l0 &cpu_l1 &cpu_l2 &cpu_l3>;
+ *   4개가 된다.
+ */
 		n = of_property_count_elems_of_size(child_part, "affinity",
 						    sizeof(u32));
 		WARN_ON(n <= 0);
@@ -2522,6 +2719,26 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 			u32 cpu_phandle;
 			struct device_node *cpu_node;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - ex) affinity = <&cpu_l0 &cpu_l1 &cpu_l2 &cpu_l3>;
+ *   에서 cpu_l0 의 예제
+ *   cpu_l0: cpu@0 {
+ *		device_type = "cpu";
+ *		compatible = "arm,cortex-a53";
+ *		reg = <0x0 0x0>;
+ *		enable-method = "psci";
+ *		capacity-dmips-mhz = <485>;
+ *		clocks = <&cru ARMCLKL>;
+ *		#cooling-cells = <2>; // min followed by max
+ *		dynamic-power-coefficient = <100>;
+ *		cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
+ *	};
+ *	이걸 cpu_node로 가져온다.(cpu_phandle은 cpu_l0에 대한 node및 arg값.)
+ *
+ *	affinity에서 index(cpu_l0, cpu_l1, ..)로 해당 cpu_phandle을 구해온다
+ *	-> 구해온 cpu_phandle로 실제 cpu_node(cpu_l0: cpu@0 {..})를 얻어온다.
+ */
 			err = of_property_read_u32_index(child_part, "affinity",
 							 i, &cpu_phandle);
 			if (WARN_ON(err))
@@ -2531,6 +2748,10 @@ static void __init gic_populate_ppi_partitions(struct device_node *gic_node)
 			if (WARN_ON(!cpu_node))
 				continue;
 
+/*
+ * IAMROOT, 2022.10.29:
+ * - cpu번호를 구해온다. 구해오고 해당 cpu로 part->mask에 set한다.
+ */
 			cpu = of_cpu_node_to_id(cpu_node);
 			if (WARN_ON(cpu < 0))
 				continue;
