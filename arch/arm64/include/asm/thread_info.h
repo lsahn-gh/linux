@@ -60,6 +60,13 @@ int arch_dup_task_struct(struct task_struct *dst,
 
 #endif
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * thread_info->flags에서 사용되는 플래그들
+ * 가장 대표적인 것인 
+ *  - TIF_SIGPENDING (태스크에 시그널이 pending 상태)
+ *  - TIF_NEED_RESCHED (리스케쥴링 요청)
+ */
 #define TIF_SIGPENDING		0	/* signal pending */
 #define TIF_NEED_RESCHED	1	/* rescheduling necessary */
 #define TIF_NOTIFY_RESUME	2	/* callback before returning to user */

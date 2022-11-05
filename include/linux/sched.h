@@ -721,6 +721,15 @@ struct kmap_ctrl {
 };
 
 struct task_struct {
+/*
+ * IAMROOT, 2022.11.05: 
+ * 아래 커널 옵션이 사용되는 경우 보안을 위해 task 구조체 내부의 가장 위에 
+ * thread_info 구조체를 가지고 있게 한다.
+ *
+ * 기존엔 스택의 가장 마지막에 thread_info 구조체를 가지고 있어서,
+ * 이를 통해 task_struct의 위치를 금방 찾는 단점이 있었다.
+ */
+
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * For reasons of header soup (see current_thread_info()), this

@@ -81,9 +81,18 @@ static void default_handle_fiq(struct pt_regs *regs)
 	panic("FIQ taken without a root FIQ handler\n");
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 대표 인터럽트 controller의 핸들러가 호출되는 콜백
+ * 예) GICv3: gic_handle_irq
+ */
 void (*handle_arch_irq)(struct pt_regs *) __ro_after_init = default_handle_irq;
 void (*handle_arch_fiq)(struct pt_regs *) __ro_after_init = default_handle_fiq;
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 이 함수에서 대표 인터럽트 컨트롤러의 핸들러를 지정한다.
+ */
 int __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
 {
 	if (handle_arch_irq != default_handle_irq)

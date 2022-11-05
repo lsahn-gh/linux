@@ -593,6 +593,10 @@ restart:
  */
 void irq_enter_rcu(void)
 {
+/*
+ * IAMROOT, 2022.11.05: 
+ * hardirq에 대한 preempt_count를 1 증가시킨다.
+ */
 	__irq_enter_raw();
 
 	if (is_idle_task(current) && (irq_count() == HARDIRQ_OFFSET))
@@ -631,6 +635,10 @@ static inline void __irq_exit_rcu(void)
 	lockdep_assert_irqs_disabled();
 #endif
 	account_hardirq_exit(current);
+/*
+ * IAMROOT, 2022.11.05: 
+ * 인터럽트를 빠져나갈때 HARDIRQ_OFFSET에 대한 preempt count를 1 감소 시킨다.
+ */
 	preempt_count_sub(HARDIRQ_OFFSET);
 	if (!in_interrupt() && local_softirq_pending())
 		invoke_softirq();
@@ -657,6 +665,11 @@ void irq_exit_rcu(void)
  */
 void irq_exit(void)
 {
+/*
+ * IAMROOT, 2022.11.05: 
+ * 아래 함수에서 hardirq에 대한 preempt_count 감소와,
+ * peinding 상태의 softirq 호출이 이루어진다.
+ */
 	__irq_exit_rcu();
 	rcu_irq_exit();
 	 /* must be last! */

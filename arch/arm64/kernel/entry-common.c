@@ -263,6 +263,12 @@ static void __sched arm64_preempt_schedule_irq(void)
 static void do_interrupt_handler(struct pt_regs *regs,
 				 void (*handler)(struct pt_regs *))
 {
+/*
+ * IAMROOT, 2022.11.05: 
+ * sp가 현재 태스크의 스택 포인터 범위안에 존재하는 경우
+ * call_on_irq_stack() 내부에서 전용 irq 스택에 LR, SP를 백업하고,
+ * handler(regs)를 호출한다.
+ */
 	if (on_thread_stack())
 		call_on_irq_stack(regs, handler);
 	else
@@ -660,22 +666,48 @@ asmlinkage void noinstr el0t_64_sync_handler(struct pt_regs *regs)
 static void noinstr el0_interrupt(struct pt_regs *regs,
 				  void (*handler)(struct pt_regs *))
 {
+/*
+ * IAMROOT, 2022.11.05: 
+ * 유저에서 진입하여 irq 처리가 시작 되기 전 trace 출력 등
+ */
 	enter_from_user_mode(regs);
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * PSTATE의 DAIF 중 IF에 해당하는 irq & fiq를 1로 mask하여 두 기능을 disable한다.
+ */
 	write_sysreg(DAIF_PROCCTX_NOIRQ, daif);
 
 	if (regs->pc & BIT(55))
 		arm64_apply_bp_hardening();
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 인터럽트 핸들러로 연동
+ */
 	do_interrupt_handler(regs, handler);
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * irq 처리가 끝난 후 유저로 빠져나갈때의 trace 출력 등
+ */
 	exit_to_user_mode(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 인터럽트가 진입하는 경우 대표 인터럽트 컨트롤러의 핸들러로 향한다.
+ * 예) GICv3: gic_handle_irq
+ */
 static void noinstr __el0_irq_handler_common(struct pt_regs *regs)
 {
 	el0_interrupt(regs, handle_arch_irq);
 }
+
+/*
+ * IAMROOT, 2022.11.05: 
+ * 64bit user appl ----(irq)-----> vectors -> 아래 핸들러 호출
+ */
 
 asmlinkage void noinstr el0t_64_irq_handler(struct pt_regs *regs)
 {

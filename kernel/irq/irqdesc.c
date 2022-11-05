@@ -748,8 +748,16 @@ int handle_domain_irq(struct irq_domain *domain,
 	struct irq_desc *desc;
 	int ret = 0;
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * hardirq에 대한 preempt_count를 1 증가시킨다.
+ */
 	irq_enter();
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * domain + hwirq로 irq 디스크립터를 검색해온다.
+ */
 	/* The irqdomain code provides boundary checks */
 	desc = irq_resolve_mapping(domain, hwirq);
 	if (likely(desc))
@@ -757,6 +765,10 @@ int handle_domain_irq(struct irq_domain *domain,
 	else
 		ret = -EINVAL;
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * hardirq에 대한 preempt_count를 1 감소시킨다.
+ */
 	irq_exit();
 	set_irq_regs(old_regs);
 	return ret;

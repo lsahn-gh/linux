@@ -74,7 +74,7 @@
  *                ..
  *  0b1110_0000   0xe0 enable (0b1110_0000)               0b1111_0000 0xf0
  *                             ^
- *                             | 이 부분을 dsiable
+ *                             | 이 부분을 disable
  *                             v
  *  0b1010_0000   0xa0 normal irq(GICD_INT_DEF_PRI)       0b1101_0000 0xd0
  *  0b1010_0000   0xa0 disable (__GIC_PRIO_IRQOFF_NS) 
@@ -254,6 +254,11 @@ struct pt_regs {
 	s32 syscallno;
 	u32 unused2;
 #endif
+/*
+ * IAMROOT, 2022.11.05: 
+ * Software_Delegated_Exception_Interface
+ */
+
 	u64 sdei_ttbr1;
 	/* Only valid when ARM64_HAS_IRQ_PRIO_MASKING is enabled. */
 	u64 pmr_save;
@@ -295,6 +300,10 @@ static inline void forget_syscall(struct pt_regs *regs)
 #define processor_mode(regs) \
 	((regs)->pstate & PSR_MODE_MASK)
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Pesudo-NMI를 사용할 때 irq가 unmask 상태인지 여부를 알아온다.
+ */
 #define irqs_priority_unmasked(regs)					\
 	(system_uses_irq_prio_masking() ?				\
 		(regs)->pmr_save == GIC_PRIO_IRQON :			\

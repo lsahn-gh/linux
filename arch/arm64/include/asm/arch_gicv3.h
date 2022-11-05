@@ -38,6 +38,11 @@ static __always_inline void gic_write_dir(u32 irq)
 	isb();
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Interrupt Controller Interrupt Acknowledge Register를 읽어
+ * 인터럽트 번호를 알아온다.
+ */
 static inline u64 gic_read_iar_common(void)
 {
 	u64 irqstat;
@@ -168,13 +173,17 @@ static inline u32 gic_read_rpr(void)
 
 /*
  * IAMROOT, 2022.10.08:
- * - priority masking 지원여부 확인.
+ * - GIC의 priority masking 지원여부 확인.
  */
 static inline bool gic_prio_masking_enabled(void)
 {
 	return system_uses_irq_prio_masking();
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Pesudo-NMI 지원하는 시스템에서 일반 인터럽트를 disable 한다.
+ */
 static inline void gic_pmr_mask_irqs(void)
 {
 	BUILD_BUG_ON(GICD_INT_DEF_PRI < (__GIC_PRIO_IRQOFF |
@@ -195,6 +204,10 @@ static inline void gic_pmr_mask_irqs(void)
 	gic_write_pmr(GIC_PRIO_IRQOFF);
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * DAIF중 I와 F를 클리어한다.
+ */
 static inline void gic_arch_enable_irqs(void)
 {
 	asm volatile ("msr daifclr, #3" : : : "memory");

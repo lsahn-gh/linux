@@ -56,6 +56,11 @@ alternative_else_nop_endif
 	.endif
 #endif
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * context save(모든 레지스터)를 위해 struct pt_regs 구조체 크기만 스택을 확보한다.
+ */
+
 	sub	sp, sp, #PT_REGS_SIZE
 #ifdef CONFIG_VMAP_STACK
 	/*
@@ -100,6 +105,11 @@ alternative_else_nop_endif
 	sub	sp, sp, x0
 	mrs	x0, tpidrro_el0
 #endif
+/*
+ * IAMROOT, 2022.11.05: 
+ * 예) el0 64bit user -----(irq)----> b el0t_64_irq
+ */
+
 	b	el\el\ht\()_\regsize\()_\label
 	.endm
 
@@ -195,7 +205,16 @@ alternative_else_nop_endif
 #endif
 	.endm
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * exception이 발생하여 context 를 백업한다. (전체 레지스터)
+ * 그 외 mte, ptr_auth, hw debuger 관련 동작 등을 체크한다.
+ */
 	.macro	kernel_entry, el, regsize = 64
+/*
+ * IAMROOT, 2022.11.05: 
+ * 32bit 유저에서 진입한 경우 x0의 상위 32비트를 클리어한다.
+ */
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
 	.endif
@@ -331,11 +350,23 @@ alternative_else_nop_endif
 	*/
 	.endm
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * exceptino 처리 후 커널 또는 유저로 복귀하기 전에 수행할 루틴
+ */
 	.macro	kernel_exit, el
+/*
+ * IAMROOT, 2022.11.05: 
+ * 커널로 북귀하는 경우 DAIF 플래그를 모두 disable 한다.
+ */
 	.if	\el != 0
 	disable_daif
 	.endif
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * backup해두었던 pmr을 다시 복구한다.
+ */
 	/* Restore pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	ldr	x20, [sp, #S_PMR_SAVE]
@@ -348,11 +379,22 @@ alternative_else_nop_endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * ttbr0를 조작하는 방법으로 즉, sw emulation 방법으로 커널에서 유저 영역의
+ * 가상 주소에 접근하지 못하게 한다.
+ * (최신 armv8에는 hardware 방식의 PAN 방식을 지원한다)
+ */
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 alternative_if_not ARM64_HAS_PAN
 	bl	__swpan_exit_el\el
 alternative_else_nop_endif
 #endif
+
+/*
+ * IAMROOT, 2022.11.05: 
+ * 유저용 sp를 복구한다.
+ */
 
 	.if	\el == 0
 	ldr	x23, [sp, #S_SP]		// load return stack pointer
@@ -360,6 +402,10 @@ alternative_else_nop_endif
 	tst	x22, #PSR_MODE32_BIT		// native task?
 	b.eq	3f
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 64bit 유저로 돌아가는 경우에만 workaround 코드를 수행한다.
+ */
 #ifdef CONFIG_ARM64_ERRATUM_845719
 alternative_if ARM64_WORKAROUND_845719
 #ifdef CONFIG_PID_IN_CONTEXTIDR
@@ -371,8 +417,16 @@ alternative_if ARM64_WORKAROUND_845719
 alternative_else_nop_endif
 #endif
 3:
+/*
+ * IAMROOT, 2022.11.05: 
+ * shadow call stack 커널 옵션을 사용하는 경우엔 관련 정보도 복구한다.
+ */
 	scs_save tsk
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * mte 관련
+ */
 	/* Ignore asynchronous tag check faults in the uaccess routines */
 	ldr	x0, [tsk, THREAD_SCTLR_USER]
 	clear_mte_async_tcf x0
@@ -402,6 +456,10 @@ alternative_else_nop_endif
 	apply_ssbd 0, x0, x1
 	.endif
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 나머지 레지스터들을 복구한다.
+ */
 	msr	elr_el1, x21			// set up the return data
 	msr	spsr_el1, x22
 	ldp	x0, x1, [sp, #16 * 0]
@@ -498,7 +556,7 @@ tsk	.req	x28		// current thread_info
 /*
  * IAMROOT, 2022.02.08:
  * - exception 함수들은 include/asm/exception.h에 위치
- *   ex) el1h_64_sync_handler
+ * 예) el0 64bit user -----(irq)----> b el0t_64_irq_handler
  */
 	.align	11
 SYM_CODE_START(vectors)
@@ -555,7 +613,12 @@ SYM_CODE_END(__bad_stack)
 
 /*
  * IAMROOT, 2022.02.08:
- * ex) el1h_64_sync_handler
+ *
+ * 1. kernel_entry에서 exception이 발생하여 context 를 백업한다. (전체 레지스터)
+ * 2. exception에 해당하는 핸들러를 호출한다.
+ *    ex) el1h_64_sync_handler
+ * 3. 유저 or 커널로 복귀하기 전에 context를 복구한다.
+ */
  */
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
@@ -572,6 +635,11 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 
 /*
  * Early exception handlers
+ */
+/*
+ * IAMROOT, 2022.11.05: 
+ * 부팅 후 곧바로 동작할 16개의 함수
+ * 예) el0t_64_irq
  */
 	entry_handler	1, t, 64, sync
 	entry_handler	1, t, 64, irq
@@ -597,6 +665,11 @@ SYM_CODE_START_LOCAL(ret_to_kernel)
 	kernel_exit 1
 SYM_CODE_END(ret_to_kernel)
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 유저로 복귀하기 전에 동작하는 루틴.
+ *  x19 <- tsk->thread_info.flags
+ */
 SYM_CODE_START_LOCAL(ret_to_user)
 	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
 	enable_step_tsk x19, x2

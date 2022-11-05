@@ -67,6 +67,11 @@ struct bp_hardening_data {
 
 DECLARE_PER_CPU_READ_MOSTLY(struct bp_hardening_data, bp_hardening_data);
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * SoC에 SPECTRE_V2 이슈가 있는 경우 
+ * Branch predict 관련 취약점을 숨길 수 있는 콜백함수를 호출한다. 
+ */
 static inline void arm64_apply_bp_hardening(void)
 {
 	struct bp_hardening_data *d;

@@ -73,7 +73,9 @@ static struct gic_chip_data gic_data __read_mostly;
 /*
  * IAMROOT, 2022.10.01:
  * - gic_init_bases에서 hyp_mode가 안켜져있으면 disable시킨다.
- *   eoi를 drop / deactivate의 두개의 기능으로 나누는 것에 대한 지원여부
+ *   EL2로 진입하여 hyp_mode가 사용되면 eoi를 drop 시켜 사용한다.
+ *   그리고, Guest OS가 EL1으로 진입하여 hyp_mode가 사용되지 않으면 eoi를 
+ *   deactivate 하여 사용하도록, eoi를 2개로 분리하여 처리한다.
  */
 static DEFINE_STATIC_KEY_TRUE(supports_deactivate_key);
 
@@ -837,10 +839,19 @@ static inline void gic_handle_nmi(u32 irqnr, struct pt_regs *regs)
 		nmi_exit();
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Interrupt Controller Interrupt Acknowledge Register를 읽어
+ * 인터럽트 번호를 알아온다.
+ */
 static u32 do_read_iar(struct pt_regs *regs)
 {
 	u32 iar;
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Pesudo-NMI를 사용하면서 일반 irq가 disable 상태라면 pmr이 설정된 상태인것이다.
+ */
 	if (gic_supports_nmi() && unlikely(!interrupts_enabled(regs))) {
 		u64 pmr;
 
@@ -857,6 +868,11 @@ static u32 do_read_iar(struct pt_regs *regs)
 		 * actually only allow NMIs before reading IAR, and then
 		 * restore it to what it was.
 		 */
+/*
+ * IAMROOT, 2022.11.05: 
+ * pmr을 사용하여 일반 인터럽트를 disable 한상태에서 iar을 통해 인터럽트 번호를
+ * 읽어온다. 그 후 pmr을 원래 값으로 복구한다.
+ */
 		pmr = gic_read_pmr();
 		gic_pmr_mask_irqs();
 		isb();
@@ -884,21 +900,46 @@ static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs
 
 	irqnr = do_read_iar(regs);
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 1020~1023번 인터럽트는 스페셜 인터럽트로 핸들러에 대한 호출을 할 필요 없다.
+ */
 	/* Check for special IDs first */
 	if ((irqnr >= 1020 && irqnr <= 1023))
 		return;
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Pesudo-NMI 인터럽트에 대한 핸들러 호출이다.
+ * 예) request_nmi() & request_percpu_nmi()
+ */
 	if (gic_supports_nmi() &&
 	    unlikely(gic_read_rpr() == GICD_INT_RPR_PRI(GICD_INT_NMI_PRI))) {
 		gic_handle_nmi(irqnr, regs);
 		return;
 	}
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * Pesudo-NMI를 지원하면서 GIC 역시 priority masking을 지원하는 경우 
+ * pmr을 사용하여 일반 인터럽트를 disable 하고, DAIF 중 IF를 clear한다.
+ *
+ * 중요) 이렇게 하면 인터럽트 처리 중에도 IF를 clear하여 NMI 인터럽트는 
+ * 진입이 가능하도록 허용한다.
+ */
 	if (gic_prio_masking_enabled()) {
 		gic_pmr_mask_irqs();
 		gic_arch_enable_irqs();
 	}
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * EL2 하이퍼 바이저를 지원하여 eoimode=1을 사용하는 경우에는
+ * 이 시점에서 eoi drop을 한다. 이러한 경우 해당 인터럽트 번호만
+ * drop 되기 때문에 다른 인터럽트들이 진입할 수 있게된다.
+ *
+ * 물론, Pesudo-NMI를 제외하면 아직 cpu의 irq가 enable(IF mask)상태는 아니다.
+ */
 	if (static_branch_likely(&supports_deactivate_key))
 		gic_write_eoir(irqnr);
 	else

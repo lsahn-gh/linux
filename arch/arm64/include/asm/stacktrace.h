@@ -69,6 +69,10 @@ extern void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk,
 
 DECLARE_PER_CPU(unsigned long *, irq_stack_ptr);
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 스택 포인터 + size가 low ~ high 범위에 있는지 여부를 알아온다.
+ */
 static inline bool on_stack(unsigned long sp, unsigned long size,
 			    unsigned long low, unsigned long high,
 			    enum stack_type type, struct stack_info *info)
@@ -87,6 +91,10 @@ static inline bool on_stack(unsigned long sp, unsigned long size,
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * irq 전용 스택 범위에 스택 포인터 @sp + @size가 포함되는지 여부를 알아온다.
+ */
 static inline bool on_irq_stack(unsigned long sp, unsigned long size,
 				struct stack_info *info)
 {
@@ -96,6 +104,11 @@ static inline bool on_irq_stack(unsigned long sp, unsigned long size,
 	return on_stack(sp, size, low, high, STACK_TYPE_IRQ, info);
 }
 
+/*
+ * IAMROOT, 2022.11.05: 
+ * 태스크가 가리키는 스택 범위에 스택 포인터 @sp + @size가 포함되는지 
+ * 여부를 알아온다.
+ */
 static inline bool on_task_stack(const struct task_struct *tsk,
 				 unsigned long sp, unsigned long size,
 				 struct stack_info *info)
