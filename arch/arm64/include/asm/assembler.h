@@ -336,6 +336,12 @@ alternative_endif
 	 * @sym: The name of the per-cpu variable
 	 * @tmp: scratch register
 	 */
+/*
+ * IAMROOT, 2022.11.07:
+ * - @sym에 대한 pcpu address를 가져온다.
+ * - @tmp 임시 변수. cpu offset을 저장해놓는다.
+ *   dst = adr_l(sym) + tmp
+ */
 	.macro ldr_this_cpu dst, sym, tmp
 	adr_l	\dst, \sym
 	get_this_cpu_offset \tmp

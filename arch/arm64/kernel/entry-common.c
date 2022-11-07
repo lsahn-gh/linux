@@ -96,6 +96,14 @@ static void noinstr exit_to_kernel_mode(struct pt_regs *regs)
  * Before this function is called it is not safe to call regular kernel code,
  * intrumentable code, or any code which may trigger an exception.
  */
+/*
+ * IAMROOT, 2022.11.07:
+ * - papago
+ *   사용자 모드에서 진입할 때 IRQ/컨텍스트 상태 관리를 처리합니다. 
+ *   이 함수가 호출되기 전에는 일반 커널 코드, 계측 가능 코드 또는 예외를
+ *   유발할 수 있는 모든 코드를 호출하는 것이 안전하지 않습니다.
+ * - dubug, context tracking 관련.
+ */
 static __always_inline void __enter_from_user_mode(void)
 {
 	lockdep_hardirqs_off(CALLER_ADDR0);
@@ -104,6 +112,10 @@ static __always_inline void __enter_from_user_mode(void)
 	trace_hardirqs_off_finish();
 }
 
+/*
+ * IAMROOT, 2022.11.07:
+ * - irq 진입시 debug, context tracking 관련 처리.
+ */
 static __always_inline void enter_from_user_mode(struct pt_regs *regs)
 {
 	__enter_from_user_mode();
@@ -114,6 +126,10 @@ static __always_inline void enter_from_user_mode(struct pt_regs *regs)
  * After this function returns it is not safe to call regular kernel code,
  * intrumentable code, or any code which may trigger an exception.
  */
+/*
+ * IAMROOT, 2022.11.07:
+ * - irq 퇴장시 debug, context tracking 관련 처리.
+ */
 static __always_inline void __exit_to_user_mode(void)
 {
 	trace_hardirqs_on_prepare();
@@ -121,7 +137,10 @@ static __always_inline void __exit_to_user_mode(void)
 	user_enter_irqoff();
 	lockdep_hardirqs_on(CALLER_ADDR0);
 }
-
+/*
+ * IAMROOT, 2022.11.07:
+ * - TODO
+ */
 static __always_inline void prepare_exit_to_user_mode(struct pt_regs *regs)
 {
 	unsigned long flags;
@@ -133,6 +152,10 @@ static __always_inline void prepare_exit_to_user_mode(struct pt_regs *regs)
 		do_notify_resume(regs, flags);
 }
 
+/*
+ * IAMROOT, 2022.11.07:
+ * - TODO
+ */
 static __always_inline void exit_to_user_mode(struct pt_regs *regs)
 {
 	prepare_exit_to_user_mode(regs);
@@ -663,6 +686,10 @@ asmlinkage void noinstr el0t_64_sync_handler(struct pt_regs *regs)
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.07:
+ * - irq, fiq disable후 @handler 수행
+ */
 static void noinstr el0_interrupt(struct pt_regs *regs,
 				  void (*handler)(struct pt_regs *))
 {
@@ -698,6 +725,9 @@ static void noinstr el0_interrupt(struct pt_regs *regs,
  * IAMROOT, 2022.11.05: 
  * 인터럽트가 진입하는 경우 대표 인터럽트 컨트롤러의 핸들러로 향한다.
  * 예) GICv3: gic_handle_irq
+ * - handle_arch_irq
+ *   arch/arm64/kernel/irq.c
+ *   gic의 경우 gic_init_bases-> set_handle_irq를 통해서 gic_handle_irq가 설정된다.
  */
 static void noinstr __el0_irq_handler_common(struct pt_regs *regs)
 {
@@ -825,6 +855,10 @@ UNHANDLED(el0t, 32, error)
 #endif /* CONFIG_COMPAT */
 
 #ifdef CONFIG_VMAP_STACK
+/*
+ * IAMROOT, 2022.11.07:
+ * - interrupt수행중 overflow_stack시 진입.  arm64_enter_nmi, regs print후 죽는다
+ */
 asmlinkage void noinstr handle_bad_stack(struct pt_regs *regs)
 {
 	unsigned int esr = read_sysreg(esr_el1);

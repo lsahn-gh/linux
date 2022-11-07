@@ -85,6 +85,7 @@ static void default_handle_fiq(struct pt_regs *regs)
  * IAMROOT, 2022.11.05: 
  * 대표 인터럽트 controller의 핸들러가 호출되는 콜백
  * 예) GICv3: gic_handle_irq
+ *  gic의 경우 gic_init_bases-> set_handle_irq를 통해서 gic_handle_irq가 설정된다.
  */
 void (*handle_arch_irq)(struct pt_regs *) __ro_after_init = default_handle_irq;
 void (*handle_arch_fiq)(struct pt_regs *) __ro_after_init = default_handle_fiq;

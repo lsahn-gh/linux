@@ -107,6 +107,10 @@ extern void __cpu_die(unsigned int cpu);
 extern void cpu_die(void);
 extern void cpu_die_early(void);
 
+/*
+ * IAMROOT, 2022.11.07:
+ * - cpu park.
+ */
 static inline void cpu_park_loop(void)
 {
 	for (;;) {

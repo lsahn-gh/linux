@@ -41,9 +41,87 @@
  * 함수들이며 결국 해당 함수에서 _handler가 붙은 함수를 호출한다.
  * ex) el1h_64_sync -> el1h_64_sync_handler
  */
+/*
+ * IAMROOT, 2022.11.07:
+ * - macro 정리
+ *   el ht regsize label
+ *   1  t  64      sync	
+ *   1  t  64      irq	
+ *   1  t  64      fiq	
+ *   1  t  64      error
+ *                
+ *   1  h  64      sync	
+ *   1  h  64      irq		
+ *   1  h  64      fiq		
+ *   1  h  64      error	
+ *                
+ *   0  t  64      sync
+ *   0  t  64      irq	
+ *   0  t  64      fiq	
+ *   0  t  64      error
+ *                
+ *   0  t  32      sync
+ *   0  t  32      irq		
+ *   0  t  32      fiq		
+ *   0  t  32      error		
+ * - ex) el1 64bit irq발생시 흐름
+ *   vectors
+ *     v
+ *   kernel_ventry 1, h, 64, irq  <--현재 여기
+ *     v
+ *   el1h_64_irq
+ *     v
+ *   kernel_entry 1, 64
+ *     v
+ *   el1h_64_irq_handler
+ *     v
+ *   ret_to_kernel
+ */
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
+/*
+ * IAMROOT, 2022.11.07:
+ * - UNMAP_KERNEL_AT_EL0
+ *   bool "Unmap kernel when running in userspace (aka \"KAISER\")" if EXPERT
+ *   default y
+ *   help
+ *   Speculation attacks against some high-performance processors can
+ *   be used to bypass MMU permission checks and leak kernel data to
+ *   userspace. This can be defended against by unmapping the kernel
+ *   when running in userspace, mapping it back in on exception entry
+ *   via a trampoline page in the vector table.  
+ *   -- papago
+ *   일부 고성능 프로세서에 대한 추측 공격은 MMU 권한 검사를 우회하고 커널
+ *   데이터를 사용자 공간으로 유출하는 데 사용할 수 있습니다. 이것은 사용자
+ *   공간에서 실행될 때 커널을 매핑 해제하고 벡터 테이블의 트램폴린 페이지를
+ *   통해 예외 항목에 다시 매핑하여 방어할 수 있습니다.
+ *
+ *   user 영역에서 kernel영역이 보이지 않게 unmap을 하겠다는것.
+ */
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
+/*
+ * IAMROOT, 2022.11.07:
+ * - el0 64bit이고 UNMAP_KERNEL_AT_EL0을 지원하는 경우
+ *   mrs	x30, tpidrro_el0
+ *   msr	tpidrro_el0, xzr
+ *   를 수행한다. tpidrro_el0의 값을backup해놓고 0로 초기화한다.
+ *   old = tpider_el0, tpider_el0 = 0 와 같은 개념.
+ * - TPIDRRO_EL0, EL0 Read-Only Software Thread ID Register
+ *   참고) https://developer.arm.com/documentation/ddi0601/2021-12/AArch64-Registers/TPIDRRO-EL0--EL0-Read-Only-Software-Thread-ID-Register
+ *   Provides a location where software executing at EL1 or higher can store
+ *   thread identifying information that is visible to software executing
+ *   at EL0, for OS management purposes.
+ *
+ *   The PE makes no use of this register.
+ *   -- papago
+ *   OS 관리 목적으로 EL1 이상에서 실행되는 소프트웨어가 EL0에서 실행하는
+ *   소프트웨어에 표시되는 스레드 식별 정보를 저장할 수 있는 위치를 제공합니다.
+ *   PE는 이 레지스터를 사용하지 않습니다.
+ *
+ *   -- Bits [63:0]
+ *   Thread ID. Thread identifying information stored by software running at
+ *   this Exception level.
+ */
 	.if	\el == 0
 alternative_if ARM64_UNMAP_KERNEL_AT_EL0
 	.if	\regsize == 64
@@ -60,7 +138,6 @@ alternative_else_nop_endif
  * IAMROOT, 2022.11.05: 
  * context save(모든 레지스터)를 위해 struct pt_regs 구조체 크기만 스택을 확보한다.
  */
-
 	sub	sp, sp, #PT_REGS_SIZE
 #ifdef CONFIG_VMAP_STACK
 	/*
@@ -68,11 +145,69 @@ alternative_else_nop_endif
 	 * Task and IRQ stacks are aligned so that SP & (1 << THREAD_SHIFT)
 	 * should always be zero.
 	 */
+/*
+ * IAMROOT, 2022.11.07:
+ * -papago
+ *  GPR을 손상시키지 않고 SP가 오버플로되었는지 테스트합니다.
+ *  Task 및 IRQ 스택은 SP & (1 << THREAD_SHIFT)가 항상 0이 되도록 정렬됩니다.
+ *
+ * - x0에 stack size를 구한다. stack size는 THREAD_SHIFT로 정렬되잇다.
+ *   THREAD_SHIFT bit가 깨지면 align이 깨졌다고 러프하게 판단한다.
+ *
+ * - sp <-> x0값을 교환해서 sp를 검사하는 방식으로 수행한다.
+ *   register끼리의 교환이므로 속도가 빠르다.
+ *
+ * - add sp, sp, x0 --> sp : sp(old) + x0(old)
+ *   sub x0, sp, x0 --> x0 : sp - x0(old) = sp(old) + x0(old) - x0(old) = sp(old).
+ *                      x0에 sp(old) 위치완료.
+ *   tbnz	x0, #THREAD_SHIFT, 0f --> x0(old sp) 의 THREAD_SHIFT bit 검사.
+ *                                    0가 아니면 깨진것으로 판단
+ *   sub x0, sp, x0 --> x0 : sp - x0 = (sp(old) + x0(old)) - sp(old) = x0(old)
+ *                      x0원복 완료
+ *   sub sp, sp, x0 --> sp : sp - x0(old) = sp(old) + x0(old) - x0(old)
+ *                      sp 원복 완료
+ */
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
 	tbnz	x0, #THREAD_SHIFT, 0f
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
+/*
+ * IAMROOT, 2022.11.07:
+ * - entry_handler 참고
+ *   el1t_64_sync	
+ *   el1t_64_irq	
+ *   el1t_64_fiq	
+ *   el1t_64_error
+ *  
+ *   el1h_64_sync	
+ *   el1h_64_irq		
+ *   el1h_64_fiq		
+ *   el1h_64_error	
+ *  
+ *   el0t_64_sync
+ *   el0t_64_irq	
+ *   el0t_64_fiq	
+ *   el0t_64_error
+ *  
+ *   el0t_32_sync
+ *   el0t_32_irq		
+ *   el0t_32_fiq		
+ *   el0t_32_error		
+ *
+ * - ex) el1 64bit irq발생시 flow
+ *   vectors 
+ *     v
+ *   kernel_ventry 1, h, 64, irq
+ *     v
+ *   el1h_64_irq <-- 여기로 이제 진입.
+ *     v
+ *   kernel_entry 1, 64
+ *     v
+ *   el1h_64_irq_handler
+ *     v
+ *   ret_to_kernel
+ */
 	b	el\el\ht\()_\regsize\()_\label
 
 0:
@@ -83,19 +218,52 @@ alternative_else_nop_endif
 	 */
 
 	/* Stash the original SP (minus PT_REGS_SIZE) in tpidr_el0. */
+/*
+ * IAMROOT, 2022.11.07:
+ * - papago
+ *   방금 오버플로를 감지했거나 오버플로 스택에서 예외가 발생했습니다.
+ *   어느 쪽이든, 우리는 사용자 공간으로 돌아가지 않을 것이며 GPR을 해제하기
+ *   위해 EL0 레지스터를 방해할 수 있습니다.
+ *
+ *   원래 SP(PT_REGS_SIZE 빼기)를 tpidr_el0에 숨깁니다.
+ * - 여기 라벨이 온시점에 x0엔 sp가 있을것이다. 그걸 tpidr_el0로 넣어놓는다.
+ */
 	msr	tpidr_el0, x0
 
 	/* Recover the original x0 value and stash it in tpidrro_el0 */
+/*
+ * IAMROOT, 2022.11.07:
+ * - x0도 원래의 x0값으로 원복해주고 tpidrro_el0에 넣어놓는다.
+ */
 	sub	x0, sp, x0
 	msr	tpidrro_el0, x0
 
 	/* Switch to the overflow stack */
+/*
+ * IAMROOT, 2022.11.07:
+ * - adr_this_cpu
+ *   arch/arm64/include/asm/stacktrace.h 에 pcpu로 overflow_stack이 정의되있다.
+ *   현재 cpu에 대한 pcpu address를 가져온다.
+ * - overflow_stack + OVERFLOW_STACK_SIZE 의 현재 cpu에 대한 pcpu address를
+ *   가져와 sp로 사용한다.
+ *   x0는 임시변수로 쓴다.
+ */
 	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0
 
 	/*
 	 * Check whether we were already on the overflow stack. This may happen
 	 * after panic() re-enables interrupts.
 	 */
+/*
+ * IAMROOT, 2022.11.07:
+ * - tpider_el0에 저장되있는 old sp를 가져와서 현재 sp와 비교한다
+ *   OVERFLOW_STACK_SIZE보다 차이가 안난다면 overflow stack처리과정에서 다시한번
+ *   overflow stack처리로 진입하게 된것이다.
+ *
+ * - tst is 0 => 이미 overflow_stack 진입한 상태. __bad_stack으로
+ *               안가고 entry_handler로 간다. 어짜피 곧 죽을거 적당히 처리하는듯.
+ *   not 0 => overflow_stack으로 진입하기 시작. __bad_stack으로 이동한다.
+ */
 	mrs	x0, tpidr_el0			// sp of interrupted context
 	sub	x0, sp, x0			// delta with top of overflow stack
 	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?
@@ -207,6 +375,7 @@ alternative_else_nop_endif
 
 /*
  * IAMROOT, 2022.11.05: 
+ * - @x0 pt_regs 저장할 주소
  * exception이 발생하여 context 를 백업한다. (전체 레지스터)
  * 그 외 mte, ptr_auth, hw debuger 관련 동작 등을 체크한다.
  */
@@ -557,24 +726,56 @@ tsk	.req	x28		// current thread_info
  * IAMROOT, 2022.02.08:
  * - exception 함수들은 include/asm/exception.h에 위치
  * 예) el0 64bit user -----(irq)----> b el0t_64_irq_handler
+ * - t(thread)
+ * - h(handler)
+ * - ex) el1 64bit irq발생시 flow
+ *   vectors 
+ *     v
+ *   kernel_ventry 1, h, 64, irq
+ *     v
+ *   el1h_64_irq
+ *     v
+ *   kernel_entry 1, 64
+ *     v
+ *   el1h_64_irq_handler
+ *     v
+ *   ret_to_kernel
  */
 	.align	11
 SYM_CODE_START(vectors)
+/*
+ * IAMROOT, 2022.11.07:
+ * - thread
+ * - sp가 sp_el0를 가리킬때 동작. user app용. kernel은 미사용.
+ */
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
 	kernel_ventry	1, t, 64, irq		// IRQ EL1t
 	kernel_ventry	1, t, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, t, 64, error		// Error EL1t
-
+/*
+ * IAMROOT, 2022.11.07:
+ * - handler
+ * - sp가 sp_el1을 가리킬때 동작.
+ *   kernel thread등의 동작중일때 진입.
+ */
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
 	kernel_ventry	1, h, 64, irq		// IRQ EL1h
 	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
-
+/*
+ * IAMROOT, 2022.11.07:
+ * - lower64
+ *   64bit app용
+ */
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
-
+/*
+ * IAMROOT, 2022.11.07:
+ * - lower32
+ *   32bit app용
+ */
 	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
 	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0
 	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
@@ -582,6 +783,10 @@ SYM_CODE_START(vectors)
 SYM_CODE_END(vectors)
 
 #ifdef CONFIG_VMAP_STACK
+/*
+ * IAMROOT, 2022.11.07:
+ * - overflow_stack진입시 들어간다.
+ */
 SYM_CODE_START_LOCAL(__bad_stack)
 	/*
 	 * We detected an overflow in kernel_ventry, which switched to the
@@ -590,6 +795,15 @@ SYM_CODE_START_LOCAL(__bad_stack)
 	 */
 
 	/* Restore the original x0 value */
+/*
+ * IAMROOT, 2022.11.07:
+ * - papago
+ *   오버플로 스택으로 전환된 kernel_ventry에서 오버플로를 감지했습니다.
+ *   예외 규정을 숨기고 오버플로 처리기로 이동합니다.
+ *
+ * - tpidrro_el0에 x0(pt_regs address)를 이 함수 진입전에 저장해놨었다.
+ *   x0에 복원한다.
+ */
 	mrs	x0, tpidrro_el0
 
 	/*
@@ -598,6 +812,12 @@ SYM_CODE_START_LOCAL(__bad_stack)
 	 */
 	sub	sp, sp, #PT_REGS_SIZE
 	kernel_entry 1
+/*
+ * IAMROOT, 2022.11.07:
+ * - overflow_stack진입전 sp를 tpidr_el0에 넣어놨었다. x0에 불러와서
+ *   sp + PT_REGS_SIZE의 주소를 overflow_stack의 sp에 저장한다.
+ *
+ */
 	mrs	x0, tpidr_el0
 	add	x0, x0, #PT_REGS_SIZE
 	str	x0, [sp, #S_SP]
@@ -619,8 +839,43 @@ SYM_CODE_END(__bad_stack)
  *    ex) el1h_64_sync_handler
  * 3. 유저 or 커널로 복귀하기 전에 context를 복구한다.
  */
- */
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
+/*
+ * IAMROOT, 2022.11.07:
+ * - 함수가 macro로 만들어진다. 내부에선 뒤에 _handler가 붙은 함수로 호출된다.
+ *   el1t_64_sync	
+ *   el1t_64_irq	
+ *   el1t_64_fiq	
+ *   el1t_64_error
+ *  
+ *   el1h_64_sync	
+ *   el1h_64_irq		
+ *   el1h_64_fiq		
+ *   el1h_64_error	
+ *  
+ *   el0t_64_sync
+ *   el0t_64_irq	
+ *   el0t_64_fiq	
+ *   el0t_64_error
+ *  
+ *   el0t_32_sync
+ *   el0t_32_irq		
+ *   el0t_32_fiq		
+ *   el0t_32_error		
+ *
+ * - ex) el1 64bit irq발생시 flow
+ *   vectors 
+ *     v
+ *   kernel_ventry 1, h, 64, irq
+ *     v
+ *   el1h_64_irq  <-- 시작
+ *     v
+ *   kernel_entry 1, 64
+ *     v
+ *   el1h_64_irq_handler
+ *     v
+ *   ret_to_kernel <-- 끝
+ */
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
 	mov	x0, sp
