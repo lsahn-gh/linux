@@ -910,7 +910,6 @@ const struct kmalloc_info_struct kmalloc_info[] __initconst = {
  *
  * - size_index를 초기화한다.
  */
-#include "kkr.h"
 void __init setup_kmalloc_cache_index_table(void)
 {
 	unsigned int i;
