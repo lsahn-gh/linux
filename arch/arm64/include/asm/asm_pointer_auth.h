@@ -9,6 +9,11 @@
 
 #ifdef CONFIG_ARM64_PTR_AUTH_KERNEL
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - @tsk에서 thread.keys_kernel.apia의 lo, hi를 를 가져와서
+ *   SYS_APIAKEYLO_EL1, SYS_APIAKEYHI_EL1에 넣는다.
+ */
 	.macro __ptrauth_keys_install_kernel_nosync tsk, tmp1, tmp2, tmp3
 	mov	\tmp1, #THREAD_KEYS_KERNEL
 	add	\tmp1, \tsk, \tmp1

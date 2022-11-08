@@ -283,6 +283,24 @@ static void __sched arm64_preempt_schedule_irq(void)
 		preempt_schedule_irq();
 }
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - @handler 실행
+ * - irq 흐름.
+ *   vectors(arch/arm64/kernel/entry.S)
+ *     |
+ *     |(kernel_ventry)
+ *     |(entry_handler)
+ *     |(el0_interrupt or el1_interrupt)
+ *     |(do_interrupt_handler) <---------- 현재
+ *     |(handler_arch_irq 실행) <----------/
+ *     v
+ *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq)
+ *     v
+ *   flow handler
+ *     v
+ *   irq_handler
+ */
 static void do_interrupt_handler(struct pt_regs *regs,
 				 void (*handler)(struct pt_regs *))
 {

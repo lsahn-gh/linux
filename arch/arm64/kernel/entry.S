@@ -29,6 +29,10 @@
 #include <asm/asm-uaccess.h>
 #include <asm/unistd.h>
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - x0 ~ x29까지 mov xN, xzr
+ */
 	.macro	clear_gp_regs
 	.irp	n,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
 	mov	x\n, xzr
@@ -75,7 +79,25 @@
  *     v
  *   el1h_64_irq_handler
  *     v
+ *   (chip -> flow -> irq handler 수행후 복귀)
+ *     v
  *   ret_to_kernel
+ *
+ * - irq 흐름.
+ *   vectors(arch/arm64/kernel/entry.S)
+ *     |
+ *     |(kernel_ventry) <--현재 여기
+ *     |(entry_handler)
+ *     |(el0_interrupt or el1_interrupt)
+ *     |(do_interrupt_handler) 
+ *     |(handler_arch_irq 실행) 
+ *     v
+ *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq)
+ *     v
+ *   flow handler(handle_fasteoi_nmi()등)
+ *     v
+ *   irq_handler(user isr)
+ * - TODO
  */
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
@@ -290,6 +312,11 @@ alternative_else_nop_endif
 	 * This macro corrupts x0-x3. It is the caller's duty  to save/restore
 	 * them if required.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - SSBD(Speculative Store Bypass Disabl)
+ * - SKIP
+ */
 	.macro	apply_ssbd, state, tmp1, tmp2
 alternative_cb	spectre_v4_patch_fw_mitigation_enable
 	b	.L__asm_ssbd_skip\@		// Patched to NOP
@@ -307,6 +334,17 @@ alternative_cb_end
 	.endm
 
 	/* Check for MTE asynchronous tag check faults */
+/*
+ * IAMROOT, 2022.11.08:
+ * - async tag check fault mode 인지 확인.
+ *   맞다면 SYS_TFSR_EL1_TF0_SHIFT를 검사했는지 확인하고 발생했으면
+ *   ti-flags에 _TIF_MTE_ASYNC_FAULT를 추가한다.
+ *
+ * - tcf(tag check fault)
+ *   Documentation/arm64/memory-tagging-extension.rst
+ * - SCTLR_EL1_TCF0_SHIFT + 1가 set됬으면
+ *   Tag Check Faults are asynchronously accumulated.
+ */
 	.macro check_mte_async_tcf, tmp, ti_flags, thread_sctlr
 #ifdef CONFIG_ARM64_MTE
 	.arch_extension lse
@@ -318,12 +356,31 @@ alternative_else_nop_endif
 	 * ASYM (3) modes. In each of these modes bit 1 of SCTLR_EL1.TCF0 is
 	 * set, so skip the check if it is unset.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   비동기식 태그 검사 오류는 ASYNC(2) 또는 ASYM(3) 모드에서만 가능합니다.
+ *   이러한 각 모드에서 SCTLR_EL1.TCF0의 비트 1이 설정되므로 설정되지 않은 경우
+ *   확인을 건너뜁니다.
+ * - async tcf mode인지 확인한다. 아니면 1f로 이동하고 종료
+ */
 	tbz	\thread_sctlr, #(SCTLR_EL1_TCF0_SHIFT + 1), 1f
 	mrs_s	\tmp, SYS_TFSRE0_EL1
+/*
+ * IAMROOT, 2022.11.08:
+ * - SYS_TFSR_EL1_TF0_SHIFT를 검사한다. set되있다면 async tcf가 발생한것이므로
+ *   ti_flags에 _TIF_MTE_ASYNC_FAULT flag bit를 추가해준다. 이는 추후 처리된다.
+ */
 	tbz	\tmp, #SYS_TFSR_EL1_TF0_SHIFT, 1f
 	/* Asynchronous TCF occurred for TTBR0 access, set the TI flag */
 	mov	\tmp, #_TIF_MTE_ASYNC_FAULT
 	add	\ti_flags, tsk, #TSK_TI_FLAGS
+/*
+ * IAMROOT, 2022.11.08:
+ * - stset
+ *  ti_flags |= tmp
+ *  https://developer.arm.com/documentation/dui0801/g/A64-Data-Transfer-Instructions/STSET--STSETL--STSETL
+ */
 	stset	\tmp, [\ti_flags]
 1:
 #endif
@@ -350,6 +407,10 @@ alternative_else_nop_endif
 #endif
 	.endm
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - kernel의 gcr 설정값을 hw에 적용한다.
+ */
 	.macro mte_set_kernel_gcr, tmp, tmp2
 #ifdef CONFIG_KASAN_HW_TAGS
 alternative_if_not ARM64_MTE
@@ -383,6 +444,9 @@ alternative_else_nop_endif
 /*
  * IAMROOT, 2022.11.05: 
  * 32bit 유저에서 진입한 경우 x0의 상위 32비트를 클리어한다.
+ * - pt_regs 상태
+ *   regs[0~28] = registers
+ *   regs[29]   =  x29(fp)
  */
 	.if	\regsize == 32
 	mov	w0, w0				// zero upper 32 bits of x0
@@ -403,7 +467,23 @@ alternative_else_nop_endif
 	stp	x26, x27, [sp, #16 * 13]
 	stp	x28, x29, [sp, #16 * 14]
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - el0
+ */
 	.if	\el == 0
+/*
+ * IAMROOT, 2022.11.08:
+ * 1. x0~x29 clear
+ * 2. sp_el0를 x21에 backup
+ * 3. tsk(x29), sp_el0 에 pcp __entry_task(armch/arm64/process.c) 를 가져온다.
+ *   (pcp task_struct *)
+ * - sp_el0
+ *   user에서 kernel mode를 진입할때 current task를 저장하고 kernel mode에서는
+ *   현재 thread_info를 빠르게 알아내는 용도로 사용한다.
+ * 4. ss(debug single step), MTE, PAC, SCS, SSBD 처리
+ *
+*/
 	clear_gp_regs
 	mrs	x21, sp_el0
 	ldr_this_cpu	tsk, __entry_task, x20
@@ -420,6 +500,16 @@ alternative_else_nop_endif
 	ldr	x0, [tsk, THREAD_SCTLR_USER]
 	check_mte_async_tcf x22, x23, x0
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - PAC(Pointer Authentication)
+ *   Documentation/arm64/pointer-authentication.rst
+ *   https://www.kernel.org/doc/html/latest/arm64/pointer-authentication.html
+ *   https://community.arm.com/arm-community-blogs/b/tools-software-ides-blog/posts/code-reuse-attacks-the-compiler-story
+ * - ENAI
+ *   Controls enabling of pointer authentication (using the APIAKey_EL1 key)
+ *   of instruction addresses in the EL1&0 translation regime.
+ */
 #ifdef CONFIG_ARM64_PTR_AUTH
 alternative_if ARM64_HAS_ADDRESS_AUTH
 	/*
@@ -431,6 +521,18 @@ alternative_if ARM64_HAS_ADDRESS_AUTH
 	 * was disabled on kernel exit then we would have left the kernel IA
 	 * installed so there is no need to install it again.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   task에서 비활성화된 경우 커널 내 PAC에 대해 IA를 활성화합니다. 이것은
+ *   부하를 피하는 무조건적인 MRS로 구현할 수 있지만 Cortex-A75 및
+ *   Cortex-A76에서 더 느린 것으로 측정되었습니다.
+ *
+ *   task에서 IA가 활성화된 경우에만 커널 IA 키를 설치합니다. kernel exit시
+ *   IA가 비활성화된 경우 커널 IA가 설치된 상태로남아 있으므로 다시 설치할
+ *   필요가 없습니다.
+ * - PAC IA가 disable되있다면 install한다. 
+ */
 	tbz	x0, SCTLR_ELx_ENIA_SHIFT, 1f
 	__ptrauth_keys_install_kernel_nosync tsk, x20, x22, x23
 	b	2f
@@ -450,6 +552,10 @@ alternative_else_nop_endif
 	 * Any non-self-synchronizing system register updates required for
 	 * kernel entry should be placed before this point.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - MTE, PAC 둘중하나라도 사용중이라면 isb를 한번 하겠다는것.
+ */
 alternative_if ARM64_MTE
 	isb
 	b	1f
@@ -460,10 +566,27 @@ alternative_else_nop_endif
 1:
 
 	scs_load tsk
+/*
+ * IAMROOT, 2022.11.08:
+ * - el1
+ *   1. el0와는 다르게 register clear를 안한다.
+ *   2. sp를 x21에 백업한다.
+ *   3. task를 current task로 그대로 사용한다.
+ */
 	.else
 	add	x21, sp, #PT_REGS_SIZE
 	get_current_task tsk
 	.endif /* \el == 0 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - elr_el1, spsr_el1을 x22, x23에 백업한다.
+ * - lr, x21(backup sp)를 sp(pt_regs.regs[30], pt_regs.sp)에 backup한다.
+ * - pt_regs 상태
+ *   regs[0~28] = registers
+ *   regs[29] =  x29(fp)
+ *   regs[30] = lr
+ *   sp = sp(before) + PT_REGS_SIZE
+ */
 	mrs	x22, elr_el1
 	mrs	x23, spsr_el1
 	stp	lr, x21, [sp, #S_LR]
@@ -473,6 +596,22 @@ alternative_else_nop_endif
 	 * For exceptions from EL1, create a synthetic frame record so the
 	 * interrupted code shows up in the backtrace.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   EL0의 예외에 대해 최종 프레임 레코드를 생성합니다. 
+ *   EL1 예외의 경우 중단된 코드가 역추적에 표시되도록 합성 프레임 레코드를
+ *   만듭니다.
+ *
+ * - el1인 경우 fp, elr_el1이 backup될것이다.
+ * - pt_regs 상태
+ *   regs[0~28]    = registers
+ *   regs[29]      = x29(fp)
+ *   regs[30]      = lr
+ *   sp            = sp(before) + PT_REGS_SIZE
+ *   stackframe[0] = el0: 0, el1: fp
+ *   stackframe[1] = el0: 0, el1: elr_el1
+ */
 	.if \el == 0
 	stp	xzr, xzr, [sp, #S_STACKFRAME]
 	.else
@@ -482,10 +621,26 @@ alternative_else_nop_endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 alternative_if_not ARM64_HAS_PAN
+/*
+ * IAMROOT, 2022.11.08:
+ * - el1인 경우 이미 disabled 됬을 경우 x23(backup spsr)에 PSR_PAN_BIT가
+ *   추가될 수 있다.
+ */
 	bl	__swpan_entry_el\el
 alternative_else_nop_endif
 #endif
-
+/*
+ * IAMROOT, 2022.11.08:
+ * - pt_regs 상태
+ *   regs[0~28]    = registers
+ *   regs[29]      = x29(fp)
+ *   regs[30]      = lr
+ *   sp            = sp(before) + PT_REGS_SIZE
+ *   stackframe[0] = el0: 0, el1: fp
+ *   stackframe[1] = el0: 0, el1: elr_el1
+ *   pc            = elr_el1
+ *   pstate        = spsr
+ */
 	stp	x22, x23, [sp, #S_PC]
 
 	/* Not in a syscall by default (el0_svc overwrites for real syscall) */
@@ -493,11 +648,43 @@ alternative_else_nop_endif
 	mov	w21, #NO_SYSCALL
 	str	w21, [sp, #S_SYSCALLNO]
 	.endif
+/*
+ * IAMROOT, 2022.11.08:
+ * - pt_regs 상태
+ *   regs[0~28]    = registers
+ *   regs[29]      = x29(fp)
+ *   regs[30]      = lr
+ *   sp            = sp + PT_REGS_SIZE
+ *   stackframe[0] = el0: 0, el1: fp
+ *   stackframe[1] = el0: 0, el1: elr_el1
+ *   pc            = elr_el1
+ *   pstate        = spsr
+ *   syscallno     = el0 : -1
+ */
 
 	/* Save pmr */
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	mrs_s	x20, SYS_ICC_PMR_EL1
+/*
+ * IAMROOT, 2022.11.08:
+ * - pt_regs 상태
+ *   regs[0~28]    = registers
+ *   regs[29]      = x29(fp)
+ *   regs[30]      = lr
+ *   sp            = sp + PT_REGS_SIZE
+ *   stackframe[0] = el0: 0, el1: fp
+ *   stackframe[1] = el0: 0, el1: elr_el1
+ *   pc            = elr_el1
+ *   pstate        = spsr
+ *   syscallno     = el0 : -1
+ *   pmr_save      = SYS_ICC_PMR_EL1(before)
+ */
 	str	x20, [sp, #S_PMR_SAVE]
+/*
+ * IAMROOT, 2022.11.08:
+ * - git blame 참고
+ *   debug시 경고문때문인듯 하며 local_daif_save와 일관성을 유지한다.
+ */
 	mov	x20, #GIC_PRIO_IRQON | GIC_PRIO_PSR_I_SET
 	msr_s	SYS_ICC_PMR_EL1, x20
 alternative_else_nop_endif
@@ -669,6 +856,10 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	sb
 	.endm
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - Emulate Privileged Access Never using TTBR0_EL1 switching
+ */
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*
 	 * Set the TTBR0 PAN bit in SPSR. When the exception is taken from
@@ -678,11 +869,29 @@ alternative_insn eret, nop, ARM64_UNMAP_KERNEL_AT_EL0
 	 * feature as all TTBR0_EL1 accesses are disabled, not just those to
 	 * user mappings.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   SPSR에서 TTBR0 PAN 비트를 설정합니다. EL0에서 예외가 발생하면 항상 액세스가
+ *   활성화되어 있으므로 TTBR0_EL1의 상태를 확인할 필요가 없습니다. 
+ *   사용자 매핑뿐만 아니라 모든 TTBR0_EL1 액세스가 비활성화되므로 이 비트의
+ *   의미는 ARMv8.1 PAN 기능과 다릅니다.
+ * - @x23 : register로 backup해놓은 spsr
+ * - ttbr0 user access disable을 수행한다.
+ */
 SYM_CODE_START_LOCAL(__swpan_entry_el1)
 	mrs	x21, ttbr0_el1
 	tst	x21, #TTBR_ASID_MASK		// Check for the reserved ASID
 	orr	x23, x23, #PSR_PAN_BIT		// Set the emulated PAN in the saved SPSR
+/*
+ * IAMROOT, 2022.11.08:
+ * - TTBR_ASID_MASK가 0이라는건 이미 꺼놧다는것. 1f로 점프
+ */
 	b.eq	1f				// TTBR0 access already disabled
+/*
+ * IAMROOT, 2022.11.08:
+ * - 다시 spsr을 복원하고 __uaccess_ttbr0_disable을 수행한다.
+ */
 	and	x23, x23, #~PSR_PAN_BIT		// Clear the emulated PAN in the saved SPSR
 SYM_INNER_LABEL(__swpan_entry_el0, SYM_L_LOCAL)
 	__uaccess_ttbr0_disable x21
@@ -724,6 +933,14 @@ tsk	.req	x28		// current thread_info
 
 /*
  * IAMROOT, 2022.02.08:
+ * - exception 발생시 발생하는 일들
+ *   1. pstate -> spsr_elx로 백업
+ *   2. pc -> elr_elx로 백업
+ *   3. pstate에서 i가 autu set.
+ *   참고
+ *   https://developer.arm.com/documentation/100933/0100/Exception-handling
+ *   aarch64_exception_and_interrupt_handling
+ *
  * - exception 함수들은 include/asm/exception.h에 위치
  * 예) el0 64bit user -----(irq)----> b el0t_64_irq_handler
  * - t(thread)
@@ -875,6 +1092,7 @@ SYM_CODE_END(__bad_stack)
  *   el1h_64_irq_handler
  *     v
  *   ret_to_kernel <-- 끝
+ * - TODO
  */
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
@@ -1109,27 +1327,52 @@ NOKPROBE(ret_from_fork)
  *
  * Calls func(regs) using this CPU's irq stack and shadow irq stack.
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - pcp irq_stack_ptr로 sp를 전환하여 @func(x1)을 실행한다.
+ * - @func실행 전후로 fp, lr 저장 / 원복 등이 이루어진다.
+ * - SCS(Shadow call stack)
+ *   https://clang.llvm.org/docs/ShadowCallStack.html
+ */
 SYM_FUNC_START(call_on_irq_stack)
 #ifdef CONFIG_SHADOW_CALL_STACK
 	stp	scs_sp, xzr, [sp, #-16]!
 	ldr_this_cpu scs_sp, irq_shadow_call_stack_ptr, x17
 #endif
 	/* Create a frame record to save our LR and SP (implicit in FP) */
+/*
+ * IAMROOT, 2022.11.08:
+ * - x30은 lr로 사용한다
+ *   https://developer.arm.com/documentation/100933/0100/Returning-from-an-exception
+ * - 기존 x29, x30(fp, lr)을 sp에 저장해놓고, 갱신된 sp를 x29에 저장해놓는다.
+ */
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
-
+/*
+ * IAMROOT, 2022.11.08:
+ * - pcp irq_stack_ptr을 구해와 sp를 대체한다.
+ */
 	ldr_this_cpu x16, irq_stack_ptr, x17
 	mov	x15, #IRQ_STACK_SIZE
 	add	x16, x16, x15
 
 	/* Move to the new stack and call the function there */
 	mov	sp, x16
+/*
+ * IAMROOT, 2022.11.08:
+ * - func실행. func(regs). 형태로 0번인자가 regs로 진입한다.
+ */
 	blr	x1
 
 	/*
 	 * Restore the SP from the FP, and restore the FP and LR from the frame
 	 * record.
 	 */
+/*
+ * IAMROOT, 2022.11.08:
+ * - func실행전 x29에 저장해놓은 sp를 복구하고, 저장해놓은 sp에서 기존 fp, lr을
+ *   x29, x30에 원복한다.
+ */
 	mov	sp, x29
 	ldp	x29, x30, [sp], #16
 #ifdef CONFIG_SHADOW_CALL_STACK

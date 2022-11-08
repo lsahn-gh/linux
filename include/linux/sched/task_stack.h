@@ -22,6 +22,13 @@
  * try_get_task_stack() instead.  task_stack_page will return a pointer
  * that could get freed out from under you.
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   종료될 수 있는 현재가 아닌 작업의 스택에 액세스할 때 대신
+ *   try_get_task_stack()을 사용하십시오. task_stack_page는 아래에서 해제될 수
+ *   있는 포인터를 반환합니다.
+ */
 static inline void *task_stack_page(const struct task_struct *task)
 {
 	return task->stack;

@@ -23,6 +23,14 @@
  *	[11-8]  : CRm
  *	[7-5]   : Op2
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - 주석에 적혀있다 ARMv8 Ref System instruction class encoding overview 참고
+ * |31 30 29 28|27 26 25 24|23 22 21 20|19 18 16|15 12| 11 8| 7 5 4| 0|
+ * |1  1  0  1 0   1  0  1  0  0 |L | Op0 | OP1 | CRn | CRm | op2| Rt |
+ *  __________ ___________
+ *  d          5 
+ */
 #define Op0_shift	19
 #define Op0_mask	0x3
 #define Op1_shift	16
@@ -90,14 +98,45 @@
  *	CRm = Imm4 for the instruction.
  *	Rt = 0x1f
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   PSTATE 필드 수정 지침. 
+ *   Arm v8-A용 ARM ARM, 섹션 C.5.1.3 op0 == 0b00, 아키텍처 힌트,
+ *   장벽 및 CLREX, PSTATE 액세스, ARM DDI 0487 C.a에 따라 PSTATE 필드에
+ *   액세스하기 위한 시스템 명령어에는 다음 인코딩이 있습니다.
+ *   Op0 = 0, CRn = 4Op1, Op2는 수정된 PSTATE 필드를 인코딩하고 제약 조건을
+ *   정의합니다.
+ *   명령의 경우 CRm = Imm4입니다.
+ *   Rt = 0x1f.
+ */
 #define pstate_field(op1, op2)		((op1) << Op1_shift | (op2) << Op2_shift)
 #define PSTATE_Imm_shift		CRm_shift
 
 #define PSTATE_PAN			pstate_field(0, 4)
 #define PSTATE_UAO			pstate_field(0, 3)
 #define PSTATE_SSBS			pstate_field(3, 1)
+/*
+ * IAMROOT, 2022.11.08:
+ * - TCO(Tag Check Override
+ *   https://developer.arm.com/documentation/ddi0601/2020-12/AArch64-Registers/TCO--Tag-Check-Override
+ *   https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/SPSR-EL1--Saved-Program-Status-Register--EL1-
+ *   Tag Check Override. Set to the value of PSTATE.TCO on taking an exception to
+ *   EL1, and copied to PSTATE.TCO on executing an exception return operation in EL1.
+ *   When FEAT_MTE2 is not implemented, it is CONSTRAINED UNPREDICTABLE whether
+ *   this field is RES0 or behaves as if FEAT_MTE is implemented.
+ */
 #define PSTATE_TCO			pstate_field(3, 4)
 
+/*
+ * IAMROOT, 2022.11.08:
+ * - ARMv8 Ref System instruction class encoding overview 참고
+ * |31 30 29 28|27 26 25 24|23 22 21 20|19 18 16|15 14 13 12| 11 8| 7 5 4|3 2 1 0|
+ * |1  1  0  1 0   1  0  1  0  0 |0 | 0 0 | OP1 | 0  1  0 0 | CRm | op2|1 1 1 1 1|
+ *                                    Op0         CRn        
+ *  __________ ___________ ____________ _________ __________ ______ _____ _______
+ *  d          5           0            0         4          0      1     f
+ */
 #define SET_PSTATE_PAN(x)		__emit_inst(0xd500401f | PSTATE_PAN | ((!!x) << PSTATE_Imm_shift))
 #define SET_PSTATE_UAO(x)		__emit_inst(0xd500401f | PSTATE_UAO | ((!!x) << PSTATE_Imm_shift))
 #define SET_PSTATE_SSBS(x)		__emit_inst(0xd500401f | PSTATE_SSBS | ((!!x) << PSTATE_Imm_shift))

@@ -350,6 +350,8 @@ long get_tagged_addr_ctrl(struct task_struct *task);
  * IAMROOT, 2022.11.05: 
  * 현재 태스크가 가리키는 스택 범위에 current_stack_pointer가 포함되는지 
  * 여부를 알아온다.
+ * - current_stack_pointer(arch/arm64/include/asm/stack_pointer.h)
+ *   asm("sp")
  */
 #define on_thread_stack()	(on_task_stack(current, current_stack_pointer, 1, NULL))
 

@@ -892,7 +892,14 @@ static u32 do_read_iar(struct pt_regs *regs)
  * - TODO
  * - gic control handler.
  *   interrupt가 vector table다음으로 받는 handler.
- * - vector table -> gic_handle_irq -> irq flow handler
+ * - irq 흐름
+ *   vectors(arch/arm64/kernel/entry.S)
+ *     v
+ *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq) <--- 현재
+ *     v
+ *   flow handler
+ *     v
+ *   irq_handler
  */
 static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
 {

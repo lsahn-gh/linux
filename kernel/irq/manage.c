@@ -1703,9 +1703,9 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
  *   7. /proc/에 생성된 irq번호로 자료구조 추가.
  *
  * - irq 흐름.
- *   vector
+ *   vectors(arch/arm64/kernel/entry.S)
  *     v
- *   chip handler
+ *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq)
  *     v
  *   flow handler
  *     v
@@ -3081,7 +3081,6 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
  *
  *   Dev_id는 전역적으로 고유해야 합니다. 이것은 CPU당 변수이며 핸들러는
  *   해당 변수의 인터럽트된 CPU 인스턴스와 함께 호출됩니다.
- *
  * - ex) ipi의 경우 ipi_handler()
  *
  * - irq 흐름.

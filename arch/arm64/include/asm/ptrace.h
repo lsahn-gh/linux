@@ -176,6 +176,14 @@
  *
  * This must have the value -1, for ABI compatibility with ptrace etc.
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   pt_regs.syscallno == NO_SYSCALL이면 스레드가 시스템 호출을 실행하지 않는
+ *   것입니다.
+ *
+ *   ptrace 등과의 ABI 호환성을 위해 이 값은 -1이어야 합니다.
+ */
 #define NO_SYSCALL (-1)
 
 #ifndef __ASSEMBLY__

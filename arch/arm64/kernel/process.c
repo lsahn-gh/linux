@@ -436,6 +436,15 @@ static void ssbs_thread_switch(struct task_struct *next)
  * This is *only* for exception entry from EL0, and is not valid until we
  * __switch_to() a user task.
  */
+/*
+ * IAMROOT, 2022.11.08:
+ * - papago
+ *   current task를 sp_el0에 저장합니다. 사용자 공간에서 입력할 때 이를 복원할 수
+ *   있도록 섀도 복사본을 유지합니다.
+ *
+ *   이것은 EL0의 예외 항목에 대한 *only*이며 사용자 작업을 __switch_to()할
+ *   때까지 유효하지 않습니다.
+ */
 DEFINE_PER_CPU(struct task_struct *, __entry_task);
 
 static void entry_task_switch(struct task_struct *next)

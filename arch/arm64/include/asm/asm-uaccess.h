@@ -12,6 +12,14 @@
  * User access enabling/disabling macros.
  */
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+/*
+ * IAMROOT, 2022.11.08:
+ * - uaccess(user access)
+ * 1. ttbr1_el1의 값을 가져와 asid를 지우고, reserved_pg_dir을 ttbr0_el1에 set한다.
+ * 2. ttbr1_e1에도 reserved asid(0 clear)로 set한다.
+ * ttbr0_el1에 asid가 0가된 reserved_pg_dir을 가리키게 함으로써 kernel이
+ * user space에 접근하는것을 막는다.
+ */
 	.macro	__uaccess_ttbr0_disable, tmp1
 	mrs	\tmp1, ttbr1_el1			// swapper_pg_dir
 	bic	\tmp1, \tmp1, #TTBR_ASID_MASK
