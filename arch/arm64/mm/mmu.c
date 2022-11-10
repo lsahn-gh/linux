@@ -811,6 +811,10 @@ static int __init parse_rodata(char *arg)
 early_param("rodata", parse_rodata);
 
 #ifdef CONFIG_UNMAP_KERNEL_AT_EL0
+/*
+ * IAMROOT, 2022.11.10:
+ * - fixmap에 tramp 관련 데이터들을 mapping한다.
+ */
 static int __init map_entry_trampoline(void)
 {
 	pgprot_t prot = rodata_enabled ? PAGE_KERNEL_ROX : PAGE_KERNEL_EXEC;
@@ -826,6 +830,23 @@ static int __init map_entry_trampoline(void)
 
 	/* Map both the text and data into the kernel page table */
 	__set_fixmap(FIX_ENTRY_TRAMP_TEXT, pa_start, prot);
+/*
+ * IAMROOT, 2022.11.10:
+ * - FIX_ENTRY_TRAMP_DATA는 FIX_ENTRY_TRAMP_TEXT + PAGE_SIZE 에 위치할것이다.
+ *   해당 fixmap으로 __entry_tramp_data_start를 mapping한다.
+ *   이걸 함으로써 가상주소적으로
+ *
+ *   -- high --
+ *   .quad vectors
+ *   __entry_tramp_data_start
+ *   (PAGE_SIZE)
+ *   tramp_vectors
+ *   -- low --
+ *
+ *   의 address 체계가 성립함으로서 tramp_vectors로 vectors address가 저장된
+ *   .quad로 접근이 가능하며, 이 값을 ldr X, [.quad vecors]함으로써 
+ *   vectors의 주소를 가져올수있다.
+ */
 	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE)) {
 		extern char __entry_tramp_data_start[];
 

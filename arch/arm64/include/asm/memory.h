@@ -354,11 +354,21 @@
  *  Open-coded (swapper_pg_dir - reserved_pg_dir) as this cannot be calculated
  *  until link time.
  */
+/*
+ * IAMROOT, 2022.11.10:
+ * - vmlinux.lds.S를 참고하면 reserved_이 swapper_pg_dir에서 PAGE_SIZE만큼
+ *   멀리있다.
+ */
 #define RESERVED_SWAPPER_OFFSET	(PAGE_SIZE)
 
 /*
  *  Open-coded (swapper_pg_dir - tramp_pg_dir) as this cannot be calculated
  *  until link time.
+ */
+/*
+ * IAMROOT, 2022.11.10:
+ * - vmlinux.lds.S를 참고하면 tramp_pg_dir이 swapper_pg_dir에서 2 PAGE_SIZE만큼
+ *   멀리있다.
  */
 #define TRAMP_SWAPPER_OFFSET	(2 * PAGE_SIZE)
 

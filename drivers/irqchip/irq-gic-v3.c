@@ -870,7 +870,28 @@ static u32 do_read_iar(struct pt_regs *regs)
 		 */
 /*
  * IAMROOT, 2022.11.05: 
- * pmr을 사용하여 일반 인터럽트를 disable 한상태에서 iar을 통해 인터럽트 번호를
+ * - papago
+ *   우리는 IRQ가 비활성화된 상황에 있었습니다. 그러나 입력 코드는
+ *   PMR을 NMI뿐만 아니라 모든 인터럽트를 승인할 수 있는 값으로 설정했습니다.
+ *   NMI가 그 사이에 폐기되고 IRQ가 보류 중인 경우 이는 놀라운 효과로 이어질
+ *   수 있습니다. 그런 다음 IRQ는 NMI 컨텍스트에서 수행되며 아무도 두 번
+ *   디버그하기를 원하지 않습니다.
+ *
+ *   이것을 정렬할 때까지 PMR을 IAR을 읽기 전에 실제로 NMI만 허용하는 수준으로
+ *   다시 떨어뜨린 다음 원래 상태로 복원합니다.
+ *
+ * - spurious interrupts
+ *   https://developer.arm.com/documentation/ihi0048/b/Introduction/Terminology/Spurious-interrupts
+ *   https://en.wikipedia.org/wiki/Interrupt
+ * - Git Blame
+ *   spurious interrupt(nmi)가 발생(iar을 읽기전에 retired)한 상황에서 irq가
+ *   pending중일때, nmi context에서 pending중인 irq에 대한 ack가 나갈수있다는것
+ *   같다.
+ *   그래서 spurious interrupt를 handle_bad_irq로 처리할려고
+ *   (core-api/generic.rst) 확실히 off시킨후 iar을 얻어올려는거 같다.
+ *   (부정확)
+ *
+ * - pmr을 사용하여 일반 인터럽트를 disable 한상태에서 iar을 통해 인터럽트 번호를
  * 읽어온다. 그 후 pmr을 원래 값으로 복구한다.
  */
 		pmr = gic_read_pmr();
@@ -889,7 +910,6 @@ static u32 do_read_iar(struct pt_regs *regs)
 
 /*
  * IAMROOT, 2022.10.08:
- * - TODO
  * - gic control handler.
  *   interrupt가 vector table다음으로 받는 handler.
  * - irq 흐름

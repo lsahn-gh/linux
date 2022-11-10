@@ -48,6 +48,10 @@ int stack_erasing_sysctl(struct ctl_table *table, int write,
 #define skip_erasing()	false
 #endif /* CONFIG_STACKLEAK_RUNTIME_DISABLE */
 
+/*
+ * IAMROOT, 2022.11.09:
+ * - PASS
+ */
 asmlinkage void notrace stackleak_erase(void)
 {
 	/* It would be nice not to have 'kstack_ptr' and 'boundary' on stack */

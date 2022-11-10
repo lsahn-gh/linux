@@ -54,6 +54,15 @@ alternative_else_nop_endif
  * so use the base value of ldp as thread.keys_user and offset as
  * thread.keys_user.ap*.
  */
+/*
+ * IAMROOT, 2022.11.09:
+ * - papago
+ *   thread.keys_user.ap*는 오프셋이 #imm 오프셋 범위를 초과하므로 ldp의 기본 값을
+ *   thread.keys_user로 사용하고 오프셋을 thread.keys_user.ap*으로 사용합니다.
+ *
+ * - @tsk에서 thread.keys_user.apia의 lo, hi를 를 가져와서
+ *   SYS_APIAKEYLO_EL1, SYS_APIAKEYHI_EL1에 넣는다.
+ */
 	.macro __ptrauth_keys_install_user tsk, tmp1, tmp2, tmp3
 	mov	\tmp1, #THREAD_KEYS_USER
 	add	\tmp1, \tsk, \tmp1

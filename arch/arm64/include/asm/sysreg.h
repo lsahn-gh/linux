@@ -118,13 +118,17 @@
 #define PSTATE_SSBS			pstate_field(3, 1)
 /*
  * IAMROOT, 2022.11.08:
- * - TCO(Tag Check Override
+ * - TCO(Tag Check Override)
  *   https://developer.arm.com/documentation/ddi0601/2020-12/AArch64-Registers/TCO--Tag-Check-Override
  *   https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/SPSR-EL1--Saved-Program-Status-Register--EL1-
+ *   ARM ref. Chapter D6 Memory Tagging Extension
  *   Tag Check Override. Set to the value of PSTATE.TCO on taking an exception to
  *   EL1, and copied to PSTATE.TCO on executing an exception return operation in EL1.
  *   When FEAT_MTE2 is not implemented, it is CONSTRAINED UNPREDICTABLE whether
  *   this field is RES0 or behaves as if FEAT_MTE is implemented.
+ * - When the value of PSTATE.TCO is 1, all loads and stores are Tag Unchecked.
+ * - When PSTATE.TCO is 1, all loads and stores generate Tag Unchecked accesses.
+ * - set 0 : enable, set 1 : disable
  */
 #define PSTATE_TCO			pstate_field(3, 4)
 

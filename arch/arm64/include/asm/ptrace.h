@@ -59,6 +59,12 @@
  *   명시적으로 요구합니다. 비트 GIC_PRIO_PSR_I_SET이 우선 순위 마스크에 포함되어 있으면
  *   PSR.I가 설정되어야 하고 일시적으로 인터럽트 비활성화가 IRQ 우선 순위에 의존하지
  *   않음을 나타냅니다.
+ * --------
+ *                 
+ *  GIC_PRIO_IRQON       0b1110_0000
+ *  __GIC_PRIO_IRQOFF    0b0110_0000   
+ *  __GIC_PRIO_IRQOFF_NS 0b1010_0000
+ *  GIC_PRIO_PSR_I_SET   0b0001_0000
  */
 #define GIC_PRIO_IRQON			0xe0
 #define __GIC_PRIO_IRQOFF		(GIC_PRIO_IRQON & ~0x80)
@@ -317,6 +323,14 @@ static inline void forget_syscall(struct pt_regs *regs)
 		(regs)->pmr_save == GIC_PRIO_IRQON :			\
 		true)
 
+/*
+ * IAMROOT, 2022.11.10:
+ * - !((regs)->pstate & PSR_I_BIT)
+ *   I가 없고, 즉 daif의 interrupt가 켜져있고,
+ * - irqs_priority_unmasked(regs)
+ *   PMR이 ON인 상태
+ * daif도 I가 꺼져있고 PMR도 ON이면 interrupt가 가능한 상태다.
+ */
 #define interrupts_enabled(regs)			\
 	(!((regs)->pstate & PSR_I_BIT) && irqs_priority_unmasked(regs))
 
