@@ -802,6 +802,10 @@ noinstr void rcu_nmi_exit(void)
  * If you add or remove a call to rcu_irq_exit(), be sure to test with
  * CONFIG_RCU_EQS_DEBUG=y.
  */
+/*
+ * IAMROOT, 2022.11.11:
+ * - TODO
+ */
 void noinstr rcu_irq_exit(void)
 {
 	lockdep_assert_irqs_disabled();
@@ -1064,6 +1068,10 @@ noinstr void rcu_nmi_enter(void)
  *
  * If you add or remove a call to rcu_irq_enter(), be sure to test with
  * CONFIG_RCU_EQS_DEBUG=y.
+ */
+/*
+ * IAMROOT, 2022.11.11:
+ * - TODO
  */
 noinstr void rcu_irq_enter(void)
 {

@@ -920,6 +920,29 @@ static u32 do_read_iar(struct pt_regs *regs)
  *   flow handler
  *     v
  *   irq_handler
+ *
+ * - gic 흐름
+ *   interrupt 발생
+ *    v
+ *   register backup
+ *    v 
+ *    gic_handle_irq(진입)
+ *                v
+ *               ack(iar)
+ *                v
+ *               interrupt enable(PSR의 IF clear 및 PMR-NMI 적용)
+ *              (NMI의 경우 PMR-NMI 우선순위보다 높은 interrupt만
+ *              들어올수있게 enable된다.)
+ *                v
+ *              (eoimode1: drop)
+ *                v
+ *              flow handler 실행
+ *                v
+ *              (eoimode:0 eoi + drop)
+ *                v
+ *    gic_handle_irq(완료)
+ *    v
+ *    register restore
  */
 static asmlinkage void __exception_irq_entry gic_handle_irq(struct pt_regs *regs)
 {
@@ -1539,7 +1562,7 @@ static void gic_cpu_sys_reg_init(void)
  * --- eoimode example,  guest os한테 int50이 들어오는 상황
  *  1. eoimode0
  *    guest os한테 넘겨줌. drop / inactivate 둘다 발생. 
- *    guest of가 다 처리할때까지 int50을 못받음.
+ *    guest os가 다 처리할때까지 int50을 못받음.
  *
  *  1. eoimode1
  *    guest os한테 넘겨줌. drop 발생. 
