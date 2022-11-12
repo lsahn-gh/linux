@@ -335,3 +335,7 @@
 - 2022.11.05, Zoom 온라인(5명 참석)
 - exception 부터 irq 처리 흐름 진행중
 
+### 77주차
+- 2022.11.12, Zoom 온라인(5명 참석)
+- sync exception(syscall, abort(page_fault), ...)
+
