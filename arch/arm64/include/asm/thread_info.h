@@ -110,6 +110,10 @@ int arch_dup_task_struct(struct task_struct *dst,
 				 _TIF_UPROBE | _TIF_MTE_ASYNC_FAULT | \
 				 _TIF_NOTIFY_SIGNAL)
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - debug / log용
+ */
 #define _TIF_SYSCALL_WORK	(_TIF_SYSCALL_TRACE | _TIF_SYSCALL_AUDIT | \
 				 _TIF_SYSCALL_TRACEPOINT | _TIF_SECCOMP | \
 				 _TIF_SYSCALL_EMU)

@@ -1000,6 +1000,10 @@ void do_sve_acc(unsigned int esr, struct pt_regs *regs)
 /*
  * Trapped FP/ASIMD access.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - warrning. arm64는 필요없다.
+ */
 void do_fpsimd_acc(unsigned int esr, struct pt_regs *regs)
 {
 	/* TODO: implement lazy context saving/restoring */

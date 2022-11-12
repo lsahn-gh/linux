@@ -96,6 +96,12 @@ asmlinkage long __arm64_sys_ni_syscall(const struct pt_regs *__unused)
 #undef __SYSCALL
 #define __SYSCALL(nr, sym)	[nr] = __arm64_##sym,
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - arch/arm64/include/asm/unistd.h
+ *   -> arch/arm64/include/uapi/asm/unistd.h
+ *   -> include/uapi/asm-generic/unistd.h
+ */
 const syscall_fn_t sys_call_table[__NR_syscalls] = {
 	[0 ... __NR_syscalls - 1] = __arm64_sys_ni_syscall,
 #include <asm/unistd.h>

@@ -139,7 +139,7 @@ static __always_inline void __exit_to_user_mode(void)
 }
 /*
  * IAMROOT, 2022.11.07:
- * - TODO
+ * - irq disable
  */
 static __always_inline void prepare_exit_to_user_mode(struct pt_regs *regs)
 {
@@ -154,7 +154,7 @@ static __always_inline void prepare_exit_to_user_mode(struct pt_regs *regs)
 
 /*
  * IAMROOT, 2022.11.07:
- * - TODO
+ * - irq disable
  */
 static __always_inline void exit_to_user_mode(struct pt_regs *regs)
 {
@@ -504,6 +504,10 @@ asmlinkage void noinstr el1h_64_irq_handler(struct pt_regs *regs)
 	el1_interrupt(regs, handle_arch_irq);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - handler_arch_fiq실행
+ */
 asmlinkage void noinstr el1h_64_fiq_handler(struct pt_regs *regs)
 {
 	el1_interrupt(regs, handle_arch_fiq);
@@ -519,8 +523,16 @@ asmlinkage void noinstr el1h_64_error_handler(struct pt_regs *regs)
 	arm64_exit_nmi(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - data fault
+ */
 static void noinstr el0_da(struct pt_regs *regs, unsigned long esr)
 {
+/*
+ * IAMROOT, 2022.11.12:
+ * - fault address register. fault 발생 주소를 가져온다.
+ */
 	unsigned long far = read_sysreg(far_el1);
 
 	enter_from_user_mode(regs);
@@ -529,6 +541,11 @@ static void noinstr el0_da(struct pt_regs *regs, unsigned long esr)
 	exit_to_user_mode(regs);
 }
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - inst fault
+ */
 static void noinstr el0_ia(struct pt_regs *regs, unsigned long esr)
 {
 	unsigned long far = read_sysreg(far_el1);
@@ -547,6 +564,10 @@ static void noinstr el0_ia(struct pt_regs *regs, unsigned long esr)
 	exit_to_user_mode(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - warnning을 띄운다.
+ */
 static void noinstr el0_fpsimd_acc(struct pt_regs *regs, unsigned long esr)
 {
 	enter_from_user_mode(regs);
@@ -600,6 +621,10 @@ static void noinstr el0_sp(struct pt_regs *regs, unsigned long esr)
 	exit_to_user_mode(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - undef 처리.
+ */
 static void noinstr el0_undef(struct pt_regs *regs)
 {
 	enter_from_user_mode(regs);
@@ -635,6 +660,10 @@ static void noinstr el0_dbg(struct pt_regs *regs, unsigned long esr)
 	exit_to_user_mode(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - syscall
+ */
 static void noinstr el0_svc(struct pt_regs *regs)
 {
 	enter_from_user_mode(regs);
@@ -651,51 +680,125 @@ static void noinstr el0_fpac(struct pt_regs *regs, unsigned long esr)
 	exit_to_user_mode(regs);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - 
+ */
 asmlinkage void noinstr el0t_64_sync_handler(struct pt_regs *regs)
 {
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - Exception Syndrome Register
+ */
 	unsigned long esr = read_sysreg(esr_el1);
 
 	switch (ESR_ELx_EC(esr)) {
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - systemcall
+ */
 	case ESR_ELx_EC_SVC64:
 		el0_svc(regs);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - data abort
+ */
 	case ESR_ELx_EC_DABT_LOW:
 		el0_da(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - inst abort
+ */
 	case ESR_ELx_EC_IABT_LOW:
 		el0_ia(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - advanced SIMD
+ */
 	case ESR_ELx_EC_FP_ASIMD:
 		el0_fpsimd_acc(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - SVE
+ */
 	case ESR_ELx_EC_SVE:
 		el0_sve_acc(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - float pointer
+ */
 	case ESR_ELx_EC_FP_EXC64:
 		el0_fpsimd_exc(regs, esr);
 		break;
+/*
+ * IAMROOT, 2022.11.12:
+ * - mrs/msr exception
+ */
 	case ESR_ELx_EC_SYS64:
+/*
+ * IAMROOT, 2022.11.12:
+ * - WFI,WFE exception
+ */
 	case ESR_ELx_EC_WFx:
 		el0_sys(regs, esr);
 		break;
+/*
+ * IAMROOT, 2022.11.12:
+ * - sp align
+ */
 	case ESR_ELx_EC_SP_ALIGN:
 		el0_sp(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - pc align
+ */
 	case ESR_ELx_EC_PC_ALIGN:
 		el0_pc(regs, esr);
 		break;
+/*
+ * IAMROOT, 2022.11.12:
+ * - undef inst
+ */
 	case ESR_ELx_EC_UNKNOWN:
 		el0_undef(regs);
 		break;
+/*
+ * IAMROOT, 2022.11.12:
+ * - byte top ignore
+ */
 	case ESR_ELx_EC_BTI:
 		el0_bti(regs);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - debug용
+ */
 	case ESR_ELx_EC_BREAKPT_LOW:
 	case ESR_ELx_EC_SOFTSTP_LOW:
 	case ESR_ELx_EC_WATCHPT_LOW:
 	case ESR_ELx_EC_BRK64:
 		el0_dbg(regs, esr);
 		break;
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - point authentication exception
+ */
 	case ESR_ELx_EC_FPAC:
 		el0_fpac(regs, esr);
 		break;

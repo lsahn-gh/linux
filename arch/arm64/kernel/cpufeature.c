@@ -3144,6 +3144,10 @@ static inline bool __attribute_const__ is_emulated(u32 id)
  * With CRm == 0, reg should be one of :
  * MIDR_EL1, MPIDR_EL1 or REVIDR_EL1.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - @id에 해당하는 value를 얻어온다.
+ */
 static inline int emulate_id_reg(u32 id, u64 *valp)
 {
 	switch (id) {
@@ -3164,6 +3168,10 @@ static inline int emulate_id_reg(u32 id, u64 *valp)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - @id에 해당하는 value를 찾아와서 @valp에 기록한다.
+ */
 static int emulate_sys_reg(u32 id, u64 *valp)
 {
 	struct arm64_ftr_reg *regp;
@@ -3186,6 +3194,10 @@ static int emulate_sys_reg(u32 id, u64 *valp)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - @sys_reg를 통해서 val을 얻어온후, regs에 기록한다.
+ */
 int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt)
 {
 	int rc;
@@ -3199,6 +3211,10 @@ int do_emulate_mrs(struct pt_regs *regs, u32 sys_reg, u32 rt)
 	return rc;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - mrs emulate.
+ */
 static int emulate_mrs(struct pt_regs *regs, u32 insn)
 {
 	u32 sys_reg, rt;

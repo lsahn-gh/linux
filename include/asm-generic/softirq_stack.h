@@ -5,6 +5,11 @@
 #ifdef CONFIG_HAVE_SOFTIRQ_ON_OWN_STACK
 void do_softirq_own_stack(void);
 #else
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - TODO
+ */
 static inline void do_softirq_own_stack(void)
 {
 	__do_softirq();

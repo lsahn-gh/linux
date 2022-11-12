@@ -8,6 +8,16 @@
  * @IRQ_HANDLED		interrupt was handled by this device
  * @IRQ_WAKE_THREAD	handler requests to wake the handler thread
  */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - IRQ_NONE
+ *   error 표시
+ * - IRQ_HANDLED
+ *   정상 처리
+ * - IRQ_WAKE_THREAD
+ *   정상 처리 + thread wakeup 요청
+ */
 enum irqreturn {
 	IRQ_NONE		= (0 << 0),
 	IRQ_HANDLED		= (1 << 0),

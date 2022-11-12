@@ -397,6 +397,11 @@ static inline unsigned long pt_regs_read_reg(const struct pt_regs *regs, int r)
  * Write a register given an architectural register index r.
  * This handles the common case where 31 means XZR, not SP.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - @r registe numbver(X0~X30)
+ *   @val register에 들어갈 값.
+ */
 static inline void pt_regs_write_reg(struct pt_regs *regs, int r,
 				     unsigned long val)
 {

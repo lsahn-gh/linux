@@ -53,6 +53,10 @@ struct fault_info {
 static const struct fault_info fault_info[];
 static struct fault_info debug_fault_info[];
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - ISS의 Data Fault Status Code.
+ */
 static inline const struct fault_info *esr_to_fault_info(unsigned int esr)
 {
 	return fault_info + (esr & ESR_ELx_FSC);
@@ -462,6 +466,10 @@ static void set_thread_esr(unsigned long address, unsigned int esr)
 	current->thread.fault_code = esr;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - user에서 발생했으면 send sig. kernel이면 fault.
+ */
 static void do_bad_area(unsigned long far, unsigned int esr,
 			struct pt_regs *regs)
 {
@@ -477,6 +485,10 @@ static void do_bad_area(unsigned long far, unsigned int esr,
 		set_thread_esr(addr, esr);
 		arm64_force_sig_fault(inf->sig, inf->code, far, inf->name);
 	} else {
+/*
+ * IAMROOT, 2022.11.12:
+ * - kernel fault.
+ */
 		__do_kernel_fault(addr, esr, regs);
 	}
 }
@@ -484,6 +496,10 @@ static void do_bad_area(unsigned long far, unsigned int esr,
 #define VM_FAULT_BADMAP		0x010000
 #define VM_FAULT_BADACCESS	0x020000
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - mm fault 수행
+ */
 static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 				  unsigned int mm_flags, unsigned long vm_flags,
 				  struct pt_regs *regs)
@@ -497,6 +513,10 @@ static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	 * Ok, we have a good vm_area for this memory access, so we can handle
 	 * it.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - 범위검사.
+ */
 	if (unlikely(vma->vm_start > addr)) {
 		if (!(vma->vm_flags & VM_GROWSDOWN))
 			return VM_FAULT_BADMAP;
@@ -527,6 +547,10 @@ static bool is_write_abort(unsigned int esr)
 	return (esr & ESR_ELx_WNR) && !(esr & ESR_ELx_CM);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - user page fault
+ */
 static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 				   struct pt_regs *regs)
 {
@@ -556,6 +580,12 @@ static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 	 * vma->vm_flags & vm_flags and returns an error if the
 	 * intersection is empty
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - inst fault -> VM_EXEC
+ *   write abort -> VM_WRITE
+ *   read abort(그외) -> VM_READ
+ */
 	if (is_el0_instruction_abort(esr)) {
 		/* It was exec fault */
 		vm_flags = VM_EXEC;
@@ -610,6 +640,10 @@ retry:
 #endif
 	}
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - page fualt 수행
+ */
 	fault = __do_page_fault(mm, addr, mm_flags, vm_flags, regs);
 
 	/* Quick path to respond to signals */
@@ -684,15 +718,27 @@ no_context:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - mapping이 없을때 fault.
+ */
 static int __kprobes do_translation_fault(unsigned long far,
 					  unsigned int esr,
 					  struct pt_regs *regs)
 {
 	unsigned long addr = untagged_addr(far);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - user라면 do page fault
+ */
 	if (is_ttbr0_addr(addr))
 		return do_page_fault(far, esr, regs);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - kernel은 전부 mapping이 되있는데 fault인건 말이안된다.
+ */
 	do_bad_area(far, esr, regs);
 	return 0;
 }
@@ -819,14 +865,27 @@ static const struct fault_info fault_info[] = {
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 63"			},
 };
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - 
+ */
 void do_mem_abort(unsigned long far, unsigned int esr, struct pt_regs *regs)
 {
 	const struct fault_info *inf = esr_to_fault_info(esr);
 	unsigned long addr = untagged_addr(far);
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 성공하면 빠져나간다.
+ */
 	if (!inf->fn(far, esr, regs))
 		return;
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - kernel에서 호출된경우면 alert.
+ */
 	if (!user_mode(regs)) {
 		pr_alert("Unhandled fault at 0x%016lx\n", addr);
 		mem_abort_decode(esr);

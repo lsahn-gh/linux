@@ -286,17 +286,29 @@ void arm64_force_sig_ptrace_errno_trap(int errno, unsigned long far,
 	force_sig_ptrace_errno_trap(errno, (void __user *)far);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - user / kernel 에 따라 kill / die를 동작한다.
+ */
 void arm64_notify_die(const char *str, struct pt_regs *regs,
 		      int signo, int sicode, unsigned long far,
 		      int err)
 {
 	if (user_mode(regs)) {
+/*
+ * IAMROOT, 2022.11.12:
+ * - user에서 발생한경우 해당 process kill
+ */
 		WARN_ON(regs != current_pt_regs());
 		current->thread.fault_address = 0;
 		current->thread.fault_code = err;
 
 		arm64_force_sig_fault(signo, sicode, far, str);
 	} else {
+/*
+ * IAMROOT, 2022.11.12:
+ * - 자살
+ */
 		die(str, regs, err);
 	}
 }
@@ -376,6 +388,11 @@ void arm64_skip_faulting_instruction(struct pt_regs *regs, unsigned long size)
 static LIST_HEAD(undef_hook);
 static DEFINE_RAW_SPINLOCK(undef_lock);
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - unref_hook에 @hook를 등록한다.
+ */
 void register_undef_hook(struct undef_hook *hook)
 {
 	unsigned long flags;
@@ -394,6 +411,10 @@ void unregister_undef_hook(struct undef_hook *hook)
 	raw_spin_unlock_irqrestore(&undef_lock, flags);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - 특정 inst에 hook를 걸수있다. 그것을 호출해준다.
+ */
 static int call_undef_hook(struct pt_regs *regs)
 {
 	struct undef_hook *hook;
@@ -429,6 +450,10 @@ static int call_undef_hook(struct pt_regs *regs)
 		instr = le32_to_cpu(instr_le);
 	}
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - undef_hook에서 찾아서 fn을 호출한다.
+ */
 	raw_spin_lock_irqsave(&undef_lock, flags);
 	list_for_each_entry(hook, &undef_hook, node)
 		if ((instr & hook->instr_mask) == hook->instr_val &&
@@ -486,6 +511,10 @@ void arm64_notify_segfault(unsigned long addr)
 	force_signal_inject(SIGSEGV, code, addr, 0);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - unref_hook 에 unref가 있는지 찾아본다.
+ */
 void do_undefinstr(struct pt_regs *regs)
 {
 	/* check for AArch32 breakpoint instructions */

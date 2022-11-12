@@ -498,6 +498,11 @@ void irq_percpu_enable(struct irq_desc *desc, unsigned int cpu)
 	cpumask_set_cpu(cpu, desc->percpu_enabled);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - disable이 있다면 disable. 아니면 mask.
+ * - irq disalbe한다(gic. gic_mask_irq)
+ */
 void irq_percpu_disable(struct irq_desc *desc, unsigned int cpu)
 {
 	if (desc->irq_data.chip->irq_disable)
@@ -618,6 +623,17 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(handle_nested_irq);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * @return false irq가 inprogress가 아님
+ *         irq가 inprogress일때
+ *				current cpu가 irq_poll_cpu라면. (예외처리 일종)
+*				inprogress가 기다림 -> 기다리고 난후 irq가 disable이거나
+*				                       action handler가 없다면.
+*		   true inprogress기다림 -> 기다리고 난 후 irq가 enable상태면서
+*		                            action handler가 존재.
+* - inprogress중이라면 기다린다.
+*/
 static bool irq_check_poll(struct irq_desc *desc)
 {
 	if (!(desc->istate & IRQS_POLL_INPROGRESS))
@@ -625,6 +641,14 @@ static bool irq_check_poll(struct irq_desc *desc)
 	return irq_wait_for_poll(desc);
 }
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - irq가 run 시킬수 있는지 확인한다. 필요하다면 wait까지 해본다.
+ * @return true.(running가능)
+ *          inprogress, wakeup armed상태가 아니라면, 혹은 wait후에도 irq가
+ *          enable 상태라면.
+ */
 static bool irq_may_run(struct irq_desc *desc)
 {
 	unsigned int mask = IRQD_IRQ_INPROGRESS | IRQD_WAKEUP_ARMED;
@@ -633,6 +657,11 @@ static bool irq_may_run(struct irq_desc *desc)
 	 * If the interrupt is not in progress and is not an armed
 	 * wakeup interrupt, proceed.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - 해당 interrupt가 진행중인지 확인한다. spi는 동시에 진입할수없다.
+ *   동시에 되는게 이상한상태.
+ */
 	if (!irqd_has_set(&desc->irq_data, mask))
 		return true;
 
@@ -641,6 +670,11 @@ static bool irq_may_run(struct irq_desc *desc)
 	 * and suspended, disable it and notify the pm core about the
 	 * event.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - wakeup업중인지 확인하고, wakeup이 아직 안되있으면
+ *   irq를 끄고 pending으로 한후 wakepup시킨다.
+ */
 	if (irq_pm_check_wakeup(desc))
 		return false;
 
@@ -782,8 +816,23 @@ out_unlock:
 }
 EXPORT_SYMBOL_GPL(handle_level_irq);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - irq_eoi + unmask를 상황에 따라 처리한다.
+ * - 다음과 같은 조건들을 판단한다.
+ *   IRQS_ONESHOT
+ *   desc->threads_oneshot
+ *   irqd_irq_masked
+ *   irqd_irq_disabled
+ *   IRQCHIP_EOI_THREADED
+ */
 static void cond_unmask_eoi_irq(struct irq_desc *desc, struct irq_chip *chip)
 {
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - oneshot이 아니면 irq_eoi만 처리.
+ */
 	if (!(desc->istate & IRQS_ONESHOT)) {
 		chip->irq_eoi(&desc->irq_data);
 		return;
@@ -794,6 +843,26 @@ static void cond_unmask_eoi_irq(struct irq_desc *desc, struct irq_chip *chip)
 	 *   spurious interrupt or a primary handler handling it
 	 *   completely).
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   다음과 같은 경우 마스크를 해제해야 합니다.
+ *   - 스레드를 깨우지 않은 Oneshot irq(spurious 인터럽트 또
+ *     이를 완전히 처리하는 기본 핸들러로 인해 발생).
+ *
+ * - thread인 경우 isr이 매우 짧다(thread만 생성하고 끝나기때문에)
+ *   이런 경우 만약 isr만 처리하고 eoi를 보낼경우 level 인경우 매우많은
+ *   thread가 생길 위험이 있다. 이 경우에 대한 처리등을 진행한다. 즉
+ *   1.!irqd_irq_disabled(&desc->irq_data) => irq가 enable상태
+ *     irqd_irq_masked(&desc->irq_data)    => mask되있는 상태.
+ *     !desc->threads_oneshot              => oneshot thread가 아닌 상태
+ *     이 경우 eoi를 하고 다시 unmask를 하여 irq를 받아도 되는 상태.
+ *   2. !(chip->flags & IRQCHIP_EOI_THREADED) => thread에서 eoi처리를 
+ *     안하는 상황. 즉 flow handler에서 처리한다.
+ *   3. thread에서 처리하거나, thread가 oneshot인 경우등은 eoi를
+ *      여기서 처리 안한다.
+ *
+ */
 	if (!irqd_irq_disabled(&desc->irq_data) &&
 	    irqd_irq_masked(&desc->irq_data) && !desc->threads_oneshot) {
 		chip->irq_eoi(&desc->irq_data);
@@ -812,6 +881,12 @@ static void cond_unmask_eoi_irq(struct irq_desc *desc, struct irq_chip *chip)
  *	for modern forms of interrupt handlers, which handle the flow
  *	details in hardware, transparently.
  */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 1. running 가능한지 확인한다.
+ *   2. oneshot인경우 masking.
+ */
 void handle_fasteoi_irq(struct irq_desc *desc)
 {
 	struct irq_chip *chip = desc->irq_data.chip;
@@ -827,6 +902,13 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 	 * If its disabled or no action available
 	 * then mask it and get out of here:
 	 */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - running할수있는 단계까지 왓는데 @desc가 action handler가 없거나
+ *   irq disable상태다. pending으로 표시 및 masking하고 out.
+ *   추후에 enable될때 edge trigger만 재전송한다.
+ */
 	if (unlikely(!desc->action || irqd_irq_disabled(&desc->irq_data))) {
 		desc->istate |= IRQS_PENDING;
 		mask_irq(desc);
@@ -834,11 +916,24 @@ void handle_fasteoi_irq(struct irq_desc *desc)
 	}
 
 	kstat_incr_irqs_this_cpu(desc);
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - oneshot이면 @desc를 masking한다.
+ */
 	if (desc->istate & IRQS_ONESHOT)
 		mask_irq(desc);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - action event handler 처리.
+ */
 	handle_irq_event(desc);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - eoi + unmask 처리 여부 판단
+ */
 	cond_unmask_eoi_irq(desc, chip);
 
 	raw_spin_unlock(&desc->lock);
@@ -1035,6 +1130,20 @@ void handle_percpu_irq(struct irq_desc *desc)
  * contain the real device id for the cpu on which this handler is
  * called
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   handle_percpu_devid_irq - per cpu dev ID가 있는 per cpu local irq handler
+ *   @desc: 이 irq에 대한 인터럽트 설명 구조.
+ *
+ *   잠금 요구 사항이 없는 SMP 시스템의 CPU당 인터럽트. 위의
+ *   handle_percpu_irq()와 동일하지만 다음과 같은 추가 사항이 있습니다. 
+ *
+ *   action->percpu_dev_id는 이 핸들러가 호출되는 CPU의 실제 장치 ID를
+ *   포함하는 percpu 변수에 대한 포인터입니다.
+ *
+ * - action handler를 실행한다. 실행전후로 ack 및 irq_eoi를 수행한다.
+ */
 void handle_percpu_devid_irq(struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
@@ -1048,9 +1157,18 @@ void handle_percpu_devid_irq(struct irq_desc *desc)
 	 */
 	__kstat_incr_irqs_this_cpu(desc);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - irq_ack가 있으면 여기서 보낸다. gic경우는 iar을 읽을시 자동으로 ack가
+ *   나가는 구조라 없다.
+ */
 	if (chip->irq_ack)
 		chip->irq_ack(&desc->irq_data);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - action이 없는데 들어왔다면 이상한 상황. irq disable한다.
+ */
 	if (likely(action)) {
 		trace_irq_handler_entry(irq, action);
 		res = action->handler(irq, raw_cpu_ptr(action->percpu_dev_id));

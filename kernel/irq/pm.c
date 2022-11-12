@@ -13,8 +13,20 @@
 
 #include "internals.h"
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - wakeup 중인지 확인한다.
+ */
 bool irq_pm_check_wakeup(struct irq_desc *desc)
 {
+/*
+ * IAMROOT, 2022.11.12:
+ * - 안깨어있다면.
+ *   suspend 상태로 표시.
+ *   pending으로 표시.
+ *   irq_disable후 wakeup 시도.
+ */
 	if (irqd_is_wakeup_armed(&desc->irq_data)) {
 		irqd_clear(&desc->irq_data, IRQD_WAKEUP_ARMED);
 		desc->istate |= IRQS_SUSPENDED | IRQS_PENDING;

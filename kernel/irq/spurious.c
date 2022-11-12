@@ -33,6 +33,23 @@ static atomic_t irq_poll_active;
  * action (about to be disabled). Only if it's still active, we return
  * true and let the handler run.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   우리는 poller가 끝날 때까지 여기서 기다립니다. 
+ *
+ *   이 CPU에서 poll이 실행되면 큰 소리로 외치고 false를 반환합니다.
+ *   그러면 최악의 경우 인터럽트 라인이 비활성화되지만 절대 발생해서는
+ *   안됩니다.
+ *
+ *   poller가 완료될 때까지 기다렸다가 비활성화 및 작업(비활성화될 예정)을
+ *   다시 확인합니다. 여전히 활성 상태인 경우에만 true를 반환하고 핸들러를
+ *   실행합니다.
+ *
+ * - poll하고 있는게 current cpu라면 false.
+ *   irq_data가 porgress끝날때가지 기다린다.
+ * - @desc가 enable상태고 action handler가 존재하면 return true;
+ */
 bool irq_wait_for_poll(struct irq_desc *desc)
 	__must_hold(&desc->lock)
 {
@@ -51,6 +68,11 @@ bool irq_wait_for_poll(struct irq_desc *desc)
 	/* Might have been disabled in meantime */
 	return !irqd_irq_disabled(&desc->irq_data) && desc->action;
 #else
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - single core면 polling이 불가능하다.
+ */
 	return false;
 #endif
 }

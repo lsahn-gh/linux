@@ -687,6 +687,10 @@ void irq_init_desc(unsigned int irq)
 
 #endif /* !CONFIG_SPARSE_IRQ */
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - @desc의 irq를 hadndle한다.
+ */
 int handle_irq_desc(struct irq_desc *desc)
 {
 	struct irq_data *data;
@@ -695,6 +699,12 @@ int handle_irq_desc(struct irq_desc *desc)
 		return -EINVAL;
 
 	data = irq_desc_get_irq_data(desc);
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - irq진입상태인데, preempt_count가 없는 상태면(혹은 없어도
+ *   IRQD_HANDLE_ENFORCE_IRQCTX 상태가 아니라면) 이상한 상황이다.
+ */
 	if (WARN_ON_ONCE(!in_irq() && handle_enforce_irqctx(data)))
 		return -EPERM;
 
@@ -740,6 +750,12 @@ EXPORT_SYMBOL_GPL(generic_handle_domain_irq);
  * @regs:	Register file coming from the low-level handling code
  *
  * Returns:	0 on success, or -EINVAL if conversion has failed
+ */
+/*
+ * IAMROOT, 2022.11.12:
+ * - 1.stack에 backup해두었던것을 전역 pcpu 에 저장.
+ *   원래 전역 pcpu에 있던 old_regs는 handler 완료후 원복한다.
+ *   2. @domain에서 @hwirq를 검색해와서 handler를 실행한다.
  */
 int handle_domain_irq(struct irq_domain *domain,
 		      unsigned int hwirq, struct pt_regs *regs)

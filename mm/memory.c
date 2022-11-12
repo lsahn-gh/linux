@@ -4702,6 +4702,10 @@ static vm_fault_t wp_huge_pud(struct vm_fault *vmf, pud_t orig_pud)
  * The mmap_lock may have been released depending on flags and our return value.
  * See filemap_fault() and __lock_page_or_retry().
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - pte entry에 memory를 할당받아서 연결한다.
+ */
 static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 {
 	pte_t entry;
@@ -4827,6 +4831,10 @@ unlock:
  *
  * The mmap_lock may have been released depending on flags and our
  * return value.  See filemap_fault() and __lock_page_or_retry().
+ */
+/*
+ * IAMROOT, 2022.11.12:
+ * - table 만든후 pte fault수행.
  */
 static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		unsigned long address, unsigned int flags)
@@ -4984,6 +4992,10 @@ static inline void mm_account_fault(struct pt_regs *regs,
  * The mmap_lock may have been released depending on flags and our
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - mm fault 수행
+ */
 vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 			   unsigned int flags, struct pt_regs *regs)
 {
@@ -5009,6 +5021,11 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	if (flags & FAULT_FLAG_USER)
 		mem_cgroup_enter_user_fault();
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - mm fault 수행
+ */
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
 	else
@@ -5059,6 +5076,11 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 /*
  * Allocate page upper directory.
  * We've already handled the fast-path in-line.
+ */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - p4d에 연결(populate)한다.
  */
 int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 {

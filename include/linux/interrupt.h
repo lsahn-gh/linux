@@ -554,8 +554,17 @@ DECLARE_STATIC_KEY_FALSE(force_irqthreads_key);
 #define local_softirq_pending_ref irq_stat.__softirq_pending
 #endif
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - __raise_softirq_irqoff()참고. pending중인 softirq가 있는지 확인한다.
+ */
 #define local_softirq_pending()	(__this_cpu_read(local_softirq_pending_ref))
 #define set_softirq_pending(x)	(__this_cpu_write(local_softirq_pending_ref, (x)))
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - @x로 current cpu에 or.
+ */
 #define or_softirq_pending(x)	(__this_cpu_or(local_softirq_pending_ref, (x)))
 
 #endif /* local_softirq_pending */

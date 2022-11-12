@@ -69,6 +69,13 @@
  * and 0 otherwise.
  */
 #define array_index_mask_nospec array_index_mask_nospec
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 0 <= idx < sz
+ *   범위내라면 ~0
+ * - sz보다 크면 0으로 고정시킨다.
+ */
 static inline unsigned long array_index_mask_nospec(unsigned long idx,
 						    unsigned long sz)
 {

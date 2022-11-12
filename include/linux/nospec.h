@@ -48,6 +48,13 @@ static inline unsigned long array_index_mask_nospec(unsigned long index,
  * array_index_nospec() will clamp the index within the range of [0,
  * size).
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - 범위 검사. 주석참고
+ *   array size보다 크면 0번으로 고정시킨다.
+ *   mask는 정상값이면 ~0이므로 결과값은 결국 _i가 될것이다.
+ *   비정상일 경우 mask = 0이므로 결과는 무조건 0.
+ */
 #define array_index_nospec(index, size)					\
 ({									\
 	typeof(index) _i = (index);					\

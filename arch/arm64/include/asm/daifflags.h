@@ -23,6 +23,11 @@
 
 
 /* mask/save/unmask/restore all exceptions, including interrupts. */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - irq disable
+ */
 static inline void local_daif_mask(void)
 {
 	WARN_ON(system_has_prio_mask_debugging() &&

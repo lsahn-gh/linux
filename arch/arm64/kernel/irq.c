@@ -104,6 +104,10 @@ int __init set_handle_irq(void (*handle_irq)(struct pt_regs *))
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - fiq handler set
+ */
 int __init set_handle_fiq(void (*handle_fiq)(struct pt_regs *))
 {
 	if (handle_arch_fiq != default_handle_fiq)

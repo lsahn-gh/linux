@@ -84,6 +84,12 @@
 #else
 # define softirq_count()	(preempt_count() & SOFTIRQ_MASK)
 #endif
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 해당 api가 interrupt context(nmi, hardirq, softirq)에서 실행됬는지
+ *   확인한다.
+ */
 #define irq_count()	(nmi_count() | hardirq_count() | softirq_count())
 
 /*
@@ -109,8 +115,24 @@
  * in_softirq()   - We have BH disabled, or are processing softirqs
  * in_interrupt() - We're in NMI,IRQ,SoftIRQ context or have BH disabled
  */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 해당 api가 interrupt context(hardirq)에서 실행됬는지 확인한다.
+ */
 #define in_irq()		(hardirq_count())
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 해당 api가 interrupt context(softirq)에서 실행됬는지 확인한다.
+ */
 #define in_softirq()		(softirq_count())
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - 해당 api가 interrupt context(nmi, hardirq, softirq)에서 실행됬는지
+ *   확인한다.
+ */
 #define in_interrupt()		(irq_count())
 
 /*

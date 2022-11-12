@@ -347,6 +347,10 @@ static int brk_handler(unsigned long unused, unsigned int esr,
 }
 NOKPROBE_SYMBOL(brk_handler);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - arm32 break 관련 inst인지 확인
+ */
 int aarch32_break_handler(struct pt_regs *regs)
 {
 	u32 arm_instr;

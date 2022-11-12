@@ -60,6 +60,10 @@ static void warn_no_thread(unsigned int irq, struct irqaction *action)
 	       "but no thread function available.", irq, action->name);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - flag를 정리하고 wake_up_process를 한다.
+ */
 void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 {
 	/*
@@ -67,6 +71,15 @@ void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 	 * we handled the interrupt. The hardirq handler has disabled the
 	 * device interrupt, so no irq storm is lurking.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   쓰레드가 크래시를 일으키고 죽으면 우리는 인터럽트를 처리한 척합니다.
+ *   hardirq 처리기가 장치 인터럽트를 비활성화했으므로 irq 스톰이 숨어 있지
+ *   않습니다.
+ *
+ * - @desc를 사용하는 thread가 종료중. 굳이 처리 할필요없다.
+ */
 	if (action->thread->flags & PF_EXITING)
 		return;
 
@@ -74,6 +87,15 @@ void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 	 * Wake up the handler thread for this action. If the
 	 * RUNTHREAD bit is already set, nothing to do.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   이 작업에 대한 핸들러 스레드를 깨우십시오. RUNTHREAD 비트가 이미
+ *   설정되어 있으면 아무 작업도 수행할 수 없습니다.
+ *
+ * - IRQTF_RUNTHREAD이게 있다면 이미 thread 깨웠다. 빠져나간다.
+ *   아니라면 set한다. (test and set)
+ */
 	if (test_and_set_bit(IRQTF_RUNTHREAD, &action->thread_flags))
 		return;
 
@@ -122,6 +144,34 @@ void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 	 * IRQTF_RUNTHREAD under desc->lock. If set it leaves
 	 * threads_oneshot untouched and runs the thread another time.
 	 */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   여기에서 마스크 잠금 장치를 사용하지 않는 것이 안전합니다.
+ *   thread_oneshot에 쓰는 곳은 두 곳뿐입니다: 이 코드와 irq 스레드.
+ *
+ *   이 코드는 하드 irq 컨텍스트이며 두 개의 CPU에서 병렬로 실행할 수
+ *   없습니다. 그렇다면 이 비트마스크보다 더 심각한 문제가 발생합니다
+ *
+ *   thread_oneshot에서 실행 비트를 지우는 이 irq의 irq 스레드는 서로에 대해
+ *   desc->lock을 통해 직렬화되고 IRQS_INPROGRESS에 의해 이 코드에 대해
+ *   직렬화됩니다.
+ *
+ *   ...
+ *
+ *   따라서 스레드는 우리가 IRQS_INPROGRESS를 지우기를 기다리거나 이 지점에
+ *   도달하기 전에 desc->lock이 해제되기 위해 flow handler에서 기다리고
+ *   있습니다. 스레드는 또한 desc->lock에서 IRQTF_RUNTHREAD를 확인합니다.
+ *   설정하면 thread_oneshot을 그대로 두고 스레드를 다시 실행합니다.
+ *
+ * - hard_irq
+ *   spin_lock은 flag제어 할때에만 사용하고, spin_lock안에서 flag로
+ *   직렬화 처리를 한다.(handle_irq_event() 참고)
+ *
+ *  - irq thread
+ *    spin_lock을 통해서 inprogress를 check한다.
+ */
 	desc->threads_oneshot |= action->thread_mask;
 
 	/*
@@ -133,11 +183,25 @@ void __irq_wake_thread(struct irq_desc *desc, struct irqaction *action)
 	 * against this code (hard irq handler) via IRQS_INPROGRESS
 	 * like the finalize_oneshot() code. See comment above.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   irq 스레드를 깨울 경우에 대비하여 thread_active 카운터를 증가시킵니다.
+ *   irq 스레드는 핸들러에서 또는 종료 경로로 돌아올 때 카운터를 감소시키고
+ *   활성 카운트가 0이 될 때 synchronized_irq()에 갇혀 있는 웨이터를
+ *   깨웁니다. synchronize_irq()는 finalize_oneshot() 코드와 같이
+ *   IRQS_INPROGRESS를 통해 이 코드(하드 irq 핸들러)에 대해 직렬화됩니다.
+ *   위의 주석을 참조하십시오.
+ */
 	atomic_inc(&desc->threads_active);
 
 	wake_up_process(action->thread);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - action handler를 수행후 필요하다면 thread도 생성한다.
+ */
 irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags)
 {
 	irqreturn_t retval = IRQ_NONE;
@@ -146,12 +210,23 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 
 	record_irq_time(desc);
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - spi이므로 여러개가 있을수있다.
+ */
 	for_each_action_of_desc(desc, action) {
 		irqreturn_t res;
 
 		/*
 		 * If this IRQ would be threaded under force_irqthreads, mark it so.
 		 */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - threaded irq 인지 확인한다.
+ *   irq_settings_can_thread(desc) : contoller에서 결정.
+ *   action->flags                 : user에서 결정.
+ */
 		if (irq_settings_can_thread(desc) &&
 		    !(action->flags & (IRQF_NO_THREAD | IRQF_PERCPU | IRQF_ONESHOT)))
 			lockdep_hardirq_threaded();
@@ -164,12 +239,21 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 			      irq, action->handler))
 			local_irq_disable();
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - result여부에 따라 thread를 wakeup한다.
+ */
 		switch (res) {
 		case IRQ_WAKE_THREAD:
 			/*
 			 * Catch drivers which return WAKE_THREAD but
 			 * did not set up a thread function
 			 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - thread fn이 등록이 안됬는데 thread wake 요청이 온경우 경고를 띄우고
+ *   break.
+ */
 			if (unlikely(!action->thread_fn)) {
 				warn_no_thread(irq, action);
 				break;
@@ -192,6 +276,10 @@ irqreturn_t __handle_irq_event_percpu(struct irq_desc *desc, unsigned int *flags
 	return retval;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - 
+ */
 irqreturn_t handle_irq_event_percpu(struct irq_desc *desc)
 {
 	irqreturn_t retval;
@@ -206,6 +294,14 @@ irqreturn_t handle_irq_event_percpu(struct irq_desc *desc)
 	return retval;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ *   pending flag가 여기서 지워지고, inprogress를 표시한다.
+ *                   V
+ *               handler 실행.
+ *                   V
+ *            inprogress clear.
+ */
 irqreturn_t handle_irq_event(struct irq_desc *desc)
 {
 	irqreturn_t ret;

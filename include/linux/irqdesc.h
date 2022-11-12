@@ -185,6 +185,30 @@ static inline void *irq_desc_get_handler_data(struct irq_desc *desc)
  * Architectures call this to let the generic IRQ layer
  * handle an interrupt.
  */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - vector -> chip handler -> flow handler ->  action handler..
+ *                             ^여기를 호출하는 상황.
+ * ex) (일반 irq) handle_fasteoi_irq, handle_percpu_devid_irq
+ *     (nmi)      handle_fasteoi_nmi, handle_percpu_devid_fasteoi_nmi
+ *                ^spi용              ^ppi, sgi용
+ *
+ * -
+ *             spi(handle_fasteoi_irq)     ppi(handle_percpu_devid_irq)
+ *  ---------+---------------------------------------------------------
+ *  oneshot, | 고려해서 처리여부 판단    고려없이 모든 인터럽트 처리.      
+ *  thread등 |
+ *  ---------+----------------------------------------------------
+ *  eoi,     | 상황에 따라 처리여부 판단.   무조건 eoi만 수행. 
+ *  unmask   |
+ *  ---------+---------------------------------------------------------
+ *  poll     | wait후 처리                  poll 없음
+ *  ---------+---------------------------------------------------------
+ *  
+ *
+ *
+ */
 static inline void generic_handle_irq_desc(struct irq_desc *desc)
 {
 	desc->handle_irq(desc);

@@ -71,6 +71,10 @@ const char * const softirq_to_name[NR_SOFTIRQS] = {
  * to the pending events, so lets the scheduler to balance
  * the softirq load for us.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - wakeup ksoftirqd
+ */
 static void wakeup_softirqd(void)
 {
 	/* Interrupts are disabled: no need to stop preemption */
@@ -130,6 +134,22 @@ EXPORT_PER_CPU_SYMBOL_GPL(hardirq_context);
  *
  * The per CPU counter prevents pointless wakeups of ksoftirqd in case that
  * the task which is in a softirq disabled section is preempted or blocks.
+ */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   RT는 task::softirqs_disabled_cnt 및 CPU softirq_ctrl::cnt별로 BH
+ *   비활성화 섹션을 설명합니다. 이것은 softirq 비활성화 섹션의 작업이
+ *   선점되도록 하는 데 필요합니다. 
+ *
+ *   작업당 카운터는 softirq_count(), in_softirq() 및
+ *   in_serving_softirqs()에 사용됩니다. 이러한 카운트는
+ *   softirq_ctrl::lock을 보유하는 작업이 실행 중일 때만 유효하기
+ *   때문입니다.
+ *
+ *   CPU당 카운터는 softirq 비활성화 섹션에 있는 작업이 선점되거나
+ *   차단되는 경우 ksoftirqd의 무의미한 깨우기를 방지합니다.
  */
 struct softirq_ctrl {
 	local_lock_t	lock;
@@ -266,6 +286,11 @@ EXPORT_SYMBOL(__local_bh_enable_ip);
  * Invoked from ksoftirqd_run() outside of the interrupt disabled section
  * to acquire the per CPU local lock for reentrancy protection.
  */
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - preempt.
+ */
 static inline void ksoftirqd_run_begin(void)
 {
 	__local_bh_disable_ip(_RET_IP_, SOFTIRQ_OFFSET);
@@ -283,11 +308,20 @@ static inline void ksoftirqd_run_end(void)
 static inline void softirq_handle_begin(void) { }
 static inline void softirq_handle_end(void) { }
 
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - cnt가 없으면 true.
+ */
 static inline bool should_wake_ksoftirqd(void)
 {
 	return !this_cpu_read(softirq_ctrl.cnt);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - softirq_ctrl::cnt == 0이면 softirq wakeup
+ */
 static inline void invoke_softirq(void)
 {
 	if (should_wake_ksoftirqd())
@@ -402,6 +436,10 @@ static inline void softirq_handle_end(void)
 	WARN_ON_ONCE(in_interrupt());
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - !preempt
+ */
 static inline void ksoftirqd_run_begin(void)
 {
 	local_irq_disable();
@@ -417,11 +455,20 @@ static inline bool should_wake_ksoftirqd(void)
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - !preempt
+ *   직접 처리하거나, ksoftirqd을 이용해서 처리하거나를 결정한다.
+ */
 static inline void invoke_softirq(void)
 {
 	if (ksoftirqd_running(local_softirq_pending()))
 		return;
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - 1. !preempt 이거나 ksoftirqd이 없으면 직접 처리한다.
+ */
 	if (!force_irqthreads() || !__this_cpu_read(ksoftirqd)) {
 #ifdef CONFIG_HAVE_IRQ_EXIT_ON_IRQ_STACK
 		/*
@@ -429,6 +476,10 @@ static inline void invoke_softirq(void)
 		 * it is the irq stack, because it should be near empty
 		 * at this stage.
 		 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - 직접 실행한다.
+ */
 		__do_softirq();
 #else
 		/*
@@ -443,6 +494,10 @@ static inline void invoke_softirq(void)
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - TODO
+ */
 asmlinkage __visible void do_softirq(void)
 {
 	__u32 pending;
@@ -512,6 +567,10 @@ static inline bool lockdep_softirq_start(void) { return false; }
 static inline void lockdep_softirq_end(bool in_hardirq) { }
 #endif
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - TODO
+ */
 asmlinkage __visible void __softirq_entry __do_softirq(void)
 {
 	unsigned long end = jiffies + MAX_SOFTIRQ_TIME;
@@ -627,6 +686,14 @@ static inline void tick_irq_exit(void)
 #endif
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - preempt count감소후 필요에따라 softirq실행
+ * - softirq가 실행되는 상황.
+ *   현재 irq가 중첩이 안됬다면 preempt_count_sub로 인해
+ *   !in_interrupt() 조건이 될수있다. 이 상황에서 pending softirq가 있다면
+ *   invoke_softirq()를 수행한다.
+ */
 static inline void __irq_exit_rcu(void)
 {
 #ifndef __ARCH_IRQ_EXIT_IRQS_DISABLED
@@ -640,6 +707,11 @@ static inline void __irq_exit_rcu(void)
  * 인터럽트를 빠져나갈때 HARDIRQ_OFFSET에 대한 preempt count를 1 감소 시킨다.
  */
 	preempt_count_sub(HARDIRQ_OFFSET);
+
+/*
+ * IAMROOT, 2022.11.12:
+ * - hardirq 처리후 softirq가 pending되있으면 softirq를 일으킨다.
+ */
 	if (!in_interrupt() && local_softirq_pending())
 		invoke_softirq();
 
@@ -663,6 +735,11 @@ void irq_exit_rcu(void)
  *
  * Also processes softirqs if needed and possible.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - hardirq preempt count 감소.
+ * - 경우에 따라 softirq 수행.
+ */
 void irq_exit(void)
 {
 /*
@@ -679,6 +756,10 @@ void irq_exit(void)
 /*
  * This function must run with irqs disabled!
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - pending을 일단하고 현재 context가 kernel thread인 경우는 바로 깨운다.
+ */
 inline void raise_softirq_irqoff(unsigned int nr)
 {
 	__raise_softirq_irqoff(nr);
@@ -692,6 +773,17 @@ inline void raise_softirq_irqoff(unsigned int nr)
 	 * Otherwise we wake up ksoftirqd to make sure we
 	 * schedule the softirq soon.
 	 */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   인터럽트 또는 softirq에 있으면 작업이 완료됩니다(softirq 비활성화
+ *   코드도 포착됨). irq 또는 softirq에서 돌아오면 실제로
+ *   softirq를 실행할 것입니다. 
+ *
+ *   그렇지 않으면 ksoftirqd를 깨워 softirq를 곧 예약하도록 합니다.
+ * - !in_interrupt()
+ *   현재 함수의 call이 irq context아니라면 수행한다.
+ */
 	if (!in_interrupt() && should_wake_ksoftirqd())
 		wakeup_softirqd();
 }
@@ -709,6 +801,11 @@ void raise_softirq(unsigned int nr)
 	local_irq_restore(flags);
 }
 
+/*
+ * IAMROOT, 2022.11.12:
+ * - softirq 요청 처리.
+ * - @nr에 해당하는 bitmask를 set한다.
+ */
 void __raise_softirq_irqoff(unsigned int nr)
 {
 	lockdep_assert_irqs_disabled();

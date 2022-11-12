@@ -426,6 +426,13 @@ static inline unsigned long kaslr_offset(void)
  * up with a tagged userland pointer. Clear the tag to get a sane pointer to
  * pass on to access_ok(), for instance.
  */
+/*
+ * IAMROOT, 2022.11.12:
+ * - papago
+ *   데이터 중단, 감시점 또는 명령 트랩을 처리할 때 태그가 지정된 사용자
+ *   영역 포인터로 끝날 수 있습니다. 예를 들어 access_ok()에 전달할 정상적인
+ *   포인터를 얻으려면 태그를 지우십시오.
+ */
 #define __untagged_addr(addr)	\
 	((__force __typeof__(addr))sign_extend64((__force u64)(addr), 55))
 

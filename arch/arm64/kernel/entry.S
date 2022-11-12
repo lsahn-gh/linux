@@ -738,6 +738,7 @@ alternative_else_nop_endif
 /*
  * IAMROOT, 2022.11.05: 
  * 커널로 북귀하는 경우 DAIF 플래그를 모두 disable 한다.
+ * el0의 경우 handler에서 이미 disable했었다.
  */
 	.if	\el != 0
 	disable_daif

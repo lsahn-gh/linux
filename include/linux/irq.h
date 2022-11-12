@@ -258,6 +258,10 @@ enum {
  * - IRQ_TYPE_SENSE_MASK
  * - IRQD_AFFINITY_MANAGED, IRQD_MANAGED_SHUTDOWN (alloc_descs() 참고)
  *   affinity->is_managed가 되있는경우 irq desc할당에서 flag로 사용한다.
+ * - IRQD_IRQ_INPROGRESS
+ *   irq 진행중
+ * - IRQD_WAKEUP_ARMED
+ *   mode armed 상태. interrupt가 뭔가 펼쳐진상태
  *
  */
 	IRQD_TRIGGER_MASK		= 0xf,
