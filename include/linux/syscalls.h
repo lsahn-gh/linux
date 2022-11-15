@@ -120,6 +120,10 @@ enum landlock_rule_type;
 #define __TYPE_IS_L(t)	(__TYPE_AS(t, 0L))
 #define __TYPE_IS_UL(t)	(__TYPE_AS(t, 0UL))
 #define __TYPE_IS_LL(t) (__TYPE_AS(t, 0LL) || __TYPE_AS(t, 0ULL))
+/*
+ * IAMROOT, 2022.11.15:
+ * - t가 long long or unsigned long long이면 long long, 아니면 long으로 변환다.
+ */
 #define __SC_LONG(t, a) __typeof(__builtin_choose_expr(__TYPE_IS_LL(t), 0LL, 0L)) a
 #define __SC_CAST(t, a)	(__force t) a
 #define __SC_ARGS(t, a)	a

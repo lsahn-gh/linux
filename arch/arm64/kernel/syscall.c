@@ -264,6 +264,8 @@ static inline void sve_user_discard(void)
 /*
  * IAMROOT, 2022.11.12:
  * - syscall
+ * - syscall conventions에 따라 x8에는 syscall nr이 위치한다.
+ * - x0는 syscall에서 cobber register로, 반환 값으로도 사용한다.
  */
 void do_el0_svc(struct pt_regs *regs)
 {

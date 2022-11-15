@@ -101,6 +101,8 @@ asmlinkage long __arm64_sys_ni_syscall(const struct pt_regs *__unused)
  * - arch/arm64/include/asm/unistd.h
  *   -> arch/arm64/include/uapi/asm/unistd.h
  *   -> include/uapi/asm-generic/unistd.h
+ * - SYSCALL_DEFINE0 ~ SYSCALL_DEFINE6 등으로 정의 된다.
+ *   (SYSCALL_DEFINE3(open ...)
  */
 const syscall_fn_t sys_call_table[__NR_syscalls] = {
 	[0 ... __NR_syscalls - 1] = __arm64_sys_ni_syscall,
