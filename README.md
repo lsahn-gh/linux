@@ -339,3 +339,7 @@
 - 2022.11.12, Zoom 온라인(5명 참석)
 - sync exception(syscall, abort(page_fault), ...)
 
+### 78주차
+- 2022.11.19, Zoom 온라인(6명 참석)
+- softirq, 스케줄러
+
