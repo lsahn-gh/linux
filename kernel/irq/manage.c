@@ -1698,7 +1698,7 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
  *   2. old action이 있는지 판단하여 shared irq인지 결정.
  *   3. shared 인지 아닌지 에 따라 flag검사 및, flag를  보며 irq_activate, enable_irq 결정
  *   4. thread_mask set 처리.
- *   5. onshot 관련 flag 처리.
+ *   5. oneshot 관련 flag 처리.
  *   6. irqt_stat에 생성된 irq번호로 자료구조 추가.
  *   7. /proc/에 생성된 irq번호로 자료구조 추가.
  *

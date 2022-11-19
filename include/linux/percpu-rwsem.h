@@ -44,6 +44,10 @@ is_static struct percpu_rw_semaphore name = {				\
 
 extern bool __percpu_down_read(struct percpu_rw_semaphore *, bool);
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - cpu on/off시 동기화 하기 위한 lock
+ */
 static inline void percpu_down_read(struct percpu_rw_semaphore *sem)
 {
 	might_sleep();

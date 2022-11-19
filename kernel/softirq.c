@@ -34,6 +34,19 @@
 #include <trace/events/irq.h>
 
 /*
+ * IAMROOT, 2022.11.19:
+ * - open_softirq
+ * - spawn_ksoftirqd
+ * - raise_softirq
+ * - invoke_softirq
+ *		 __do_softirq or run_ksoftirqd
+ * - __irq_exit_rcu
+ *		 __do_softirq
+ * - run_ksoftirqd
+ *		 __do_softirq
+ */
+
+/*
    - No shared variables, all the data are CPU local.
    - If a softirq needs serialization, let it serialize itself
      by its own spinlocks.
@@ -58,6 +71,10 @@ EXPORT_PER_CPU_SYMBOL(irq_stat);
 
 static struct softirq_action softirq_vec[NR_SOFTIRQS] __cacheline_aligned_in_smp;
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - 
+ */
 DEFINE_PER_CPU(struct task_struct *, ksoftirqd);
 
 const char * const softirq_to_name[NR_SOFTIRQS] = {
@@ -175,6 +192,10 @@ bool local_bh_blocked(void)
 	return __this_cpu_read(softirq_ctrl.cnt) != 0;
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - PREEMPT_RT
+ */
 void __local_bh_disable_ip(unsigned long ip, unsigned int cnt)
 {
 	unsigned long flags;
@@ -290,6 +311,7 @@ EXPORT_SYMBOL(__local_bh_enable_ip);
 /*
  * IAMROOT, 2022.11.12:
  * - preempt.
+ *   irq disable.
  */
 static inline void ksoftirqd_run_begin(void)
 {
@@ -298,6 +320,10 @@ static inline void ksoftirqd_run_begin(void)
 }
 
 /* Counterpart to ksoftirqd_run_begin() */
+/*
+ * IAMROOT, 2022.11.19:
+ * - irq enable
+ */
 static inline void ksoftirqd_run_end(void)
 {
 	__local_bh_enable(SOFTIRQ_OFFSET, true);
@@ -305,6 +331,10 @@ static inline void ksoftirqd_run_end(void)
 	local_irq_enable();
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - PREEMPT_RT
+ */
 static inline void softirq_handle_begin(void) { }
 static inline void softirq_handle_end(void) { }
 
@@ -425,6 +455,10 @@ void __local_bh_enable_ip(unsigned long ip, unsigned int cnt)
 }
 EXPORT_SYMBOL(__local_bh_enable_ip);
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - !PREEMPT
+ */
 static inline void softirq_handle_begin(void)
 {
 	__local_bh_disable_ip(_RET_IP_, SOFTIRQ_OFFSET);
@@ -569,7 +603,10 @@ static inline void lockdep_softirq_end(bool in_hardirq) { }
 
 /*
  * IAMROOT, 2022.11.12:
- * - TODO
+ * - pending softirq를 처리한다.
+ *   pending 처리후 2ms가 초과하면 ksoftirqd를 깨운다.
+ * - softirq는 저런 시간 처리때문에 sleep을 쓰면안된다. 메모리할당도 빠르게 하기 위해
+ *   GFP_ATOMIC등을 사용한다.
  */
 asmlinkage __visible void __softirq_entry __do_softirq(void)
 {
@@ -586,10 +623,24 @@ asmlinkage __visible void __softirq_entry __do_softirq(void)
 	 * softirq. A softirq handled, such as network RX, might set PF_MEMALLOC
 	 * again if the socket is related to swapping.
 	 */
+/*
+ * IAMROOT, 2022.11.19:
+ * - papago
+ *   현재 작업 컨텍스트가 softirq에 대해 차용되므로 PF_MEMALLOC를 마스킹합니다. 네트워크 RX와
+ *   같이 처리된 softirq는 소켓이 스와핑과 관련된 경우 PF_MEMALLOC를 다시 설정할 수 있습니다.
+ */
 	current->flags &= ~PF_MEMALLOC;
 
 	pending = local_softirq_pending();
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - PREEMPT
+ *   이미 bh disable이 되있다.
+ *
+ * - !PREEMPT
+ *   이 시점에서 bh disable 수행
+ */
 	softirq_handle_begin();
 	in_hardirq = lockdep_softirq_start();
 	account_softirq_enter(current);
@@ -598,6 +649,11 @@ restart:
 	/* Reset the pending bitmask before enabling irqs */
 	set_softirq_pending(0);
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - irq enable.
+ *   pending bit를 가져온후 reset을 정확히 하기위해 잠시동안만 off를 했었다.
+ */
 	local_irq_enable();
 
 	h = softirq_vec;
@@ -614,6 +670,11 @@ restart:
 		kstat_incr_softirqs_this_cpu(vec_nr);
 
 		trace_softirq_entry(vec_nr);
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - open_softirq에서 등록된 action handler 처리
+ */
 		h->action(h);
 		trace_softirq_exit(vec_nr);
 		if (unlikely(prev_count != preempt_count())) {
@@ -630,8 +691,19 @@ restart:
 	    __this_cpu_read(ksoftirqd) == current)
 		rcu_softirq_qs();
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - irq disable.
+ */
 	local_irq_disable();
 
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - hard irq에서 동작하다가 시간이 너무 길어진 경우 동작한다.
+ *   (MAX_SOFTIRQ_TIME. 2ms)이내인 경우 restart로 처리하고
+ *   그게 아니면 ksoftirqd 에서 처리한다.
+ */
 	pending = local_softirq_pending();
 	if (pending) {
 		if (time_before(jiffies, end) && !need_resched() &&
@@ -759,6 +831,7 @@ void irq_exit(void)
 /*
  * IAMROOT, 2022.11.12:
  * - pending을 일단하고 현재 context가 kernel thread인 경우는 바로 깨운다.
+ *   interrupt context에 있을때에는 irq가 끝낫을시에 처리한다. (__irq_exit_rcu())
  */
 inline void raise_softirq_irqoff(unsigned int nr)
 {
@@ -816,6 +889,20 @@ void __raise_softirq_irqoff(unsigned int nr)
 /*
  * IAMROOT, 2022.09.03:
  * - softirq @nr에 대한 @action함수를 등록한다.
+ * - 우선순위에 따라 동작한다.
+ *   --- 우선순위 높음---
+ *   open_softirq(HI_SOFTIRQ, tasklet_hi_action);
+ *   open_softirq(TIMER_SOFTIRQ, run_timer_softirq);
+ *   open_softirq(NET_TX_SOFTIRQ, net_tx_action);
+ *   open_softirq(NET_RX_SOFTIRQ, net_rx_action);
+ *   open_softirq(BLOCK_SOFTIRQ, blk_done_softirq);
+ *   open_softirq(IRQ_POLL_SOFTIRQ, irq_poll_softirq);
+ *   open_softirq(TASKLET_SOFTIRQ, tasklet_action);
+ *   open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
+ *   open_softirq(HRTIMER_SOFTIRQ, hrtimer_run_softirq);
+ *   open_softirq(RCU_SOFTIRQ, rcu_process_callbacks); open_softirq(RCU_SOFTIRQ, rcu_core_si);
+ *   (RCU_SOFTIRQ는 조건에따라서 동작이 다르다)
+ *   --- 우선순위 낮음---
  */
 void open_softirq(int nr, void (*action)(struct softirq_action *))
 {
@@ -1027,6 +1114,10 @@ static int ksoftirqd_should_run(unsigned int cpu)
 	return local_softirq_pending();
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - irq disable. 후 softirq 처리.
+ */
 static void run_ksoftirqd(unsigned int cpu)
 {
 	ksoftirqd_run_begin();
@@ -1044,6 +1135,11 @@ static void run_ksoftirqd(unsigned int cpu)
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
+/*
+ * IAMROOT, 2022.11.19:
+ * - TODO
+ * - head -> tail을 연결한다.
+ */
 static int takeover_tasklets(unsigned int cpu)
 {
 	/* CPU is dead, so no lock needed. */
@@ -1074,12 +1170,26 @@ static int takeover_tasklets(unsigned int cpu)
 #endif /* CONFIG_HOTPLUG_CPU */
 
 static struct smp_hotplug_thread softirq_threads = {
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - DEFINE_PER_CPU(struct task_struct *, ksoftirqd);
+ */
 	.store			= &ksoftirqd,
 	.thread_should_run	= ksoftirqd_should_run,
 	.thread_fn		= run_ksoftirqd,
+/*
+ * IAMROOT, 2022.11.19:
+ * - %u : cpu number
+ */
 	.thread_comm		= "ksoftirqd/%u",
 };
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - takeover_tasklets를 CPUHP_SOFTIRQ_DEAD에 등록한다.
+ *   cpu가 offline으로 동작할때 실행될것이다.
+ */
 static __init int spawn_ksoftirqd(void)
 {
 	cpuhp_setup_state_nocalls(CPUHP_SOFTIRQ_DEAD, "softirq:dead", NULL,

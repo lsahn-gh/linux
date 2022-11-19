@@ -307,6 +307,10 @@ static int cpu_hotplug_disabled;
 
 DEFINE_STATIC_PERCPU_RWSEM(cpu_hotplug_lock);
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - cpu on / off시 사용하는 lock
+ */
 void cpus_read_lock(void)
 {
 	percpu_down_read(&cpu_hotplug_lock);

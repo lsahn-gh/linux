@@ -90,6 +90,12 @@ struct task_group;
 #define EXIT_ZOMBIE			0x0020
 #define EXIT_TRACE			(EXIT_ZOMBIE | EXIT_DEAD)
 /* Used in tsk->state again: */
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - kthread에만 있는 개념.
+ * - wakeup업시 unpark할때까지 잠깐 멈추는 기능.
+ */
 #define TASK_PARKED			0x0040
 #define TASK_DEAD			0x0080
 #define TASK_WAKEKILL			0x0100
@@ -1694,8 +1700,9 @@ extern struct pid *cad_pid;
 #define PF_SIGNALED		0x00000400	/* Killed by a signal */
 /*
  * IAMROOT, 2022.04.16:
- * - task가 memory 회수 mode이면 set된다. memory 제한없이 사용할수있는 권한을 가질 수 있다.
- * - memory 회수 재귀등을 확인하는 flag로도 사용한다.
+ * - PF_MEMALLOC
+ *   task가 memory 회수 mode이면 set된다. memory 제한없이 사용할수있는 권한을 가질 수 있다.
+ *   memory 회수 재귀등을 확인하는 flag로도 사용한다.
  */
 #define PF_MEMALLOC		0x00000800	/* Allocating memory */
 #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */

@@ -233,6 +233,11 @@ void *kthread_probe_data(struct task_struct *task)
 	return data;
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - KTHREAD_SHOULD_PARK로 왔던걸 TASK_PARKED(schedule()) 한다.
+ *   unpark할때까지 깨어나도 계속 park상태로 잠들것이다.
+ */
 static void __kthread_parkme(struct kthread *self)
 {
 	for (;;) {
@@ -353,6 +358,14 @@ static void create_kthread(struct kthread_create_info *create)
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - TODO
+ *  - thread 생성을위해 kthreadd를 wakeup해준다.
+ *  kthreadd에서 thread 생성이 완료 될때까지 wait한다.
+ *  thread는 동작중이 아니다. 후에 wakeup을 따로 해줘야한다.
+ *  (생성과 동시에 wakeup까지 하는건 kthread_run())
+ */
 static __printf(4, 0)
 struct task_struct *__kthread_create_on_node(int (*threadfn)(void *data),
 						    void *data, int node,
@@ -375,12 +388,31 @@ struct task_struct *__kthread_create_on_node(int (*threadfn)(void *data),
 	list_add_tail(&create->list, &kthread_create_list);
 	spin_unlock(&kthread_create_lock);
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - kthreadd wakeup -> create_kthread()
+ *   -> int kthreads(void *_create)에서 생성 완료되면 done complete.
+ *
+ * - spawn_ksoftirqd 동작시 예
+ *  1. kthreadd에서 thread 생성 <-- 이부분
+ *  2. kthreadd에서 thread 생성완료 wait
+ *  3. set TASK_PARKED
+ *  4. wakeup smpboot_thread_fn()실행
+ */
 	wake_up_process(kthreadd_task);
 	/*
 	 * Wait for completion in killable state, for I might be chosen by
 	 * the OOM killer while kthreadd is trying to allocate memory for
 	 * new kernel thread.
 	 */
+/*
+ * IAMROOT, 2022.11.19:
+ * - spawn_ksoftirqd 동작시 예
+ *  1. kthreadd에서 thread 생성 
+ *  2. kthreadd에서 thread 생성완료 wait <-- 이부분
+ *  3. set TASK_PARKED
+ *  4. wakeup smpboot_thread_fn()실행
+ */
 	if (unlikely(wait_for_completion_killable(&done))) {
 		/*
 		 * If I was SIGKILLed before kthreadd (or new kernel thread)
@@ -440,6 +472,11 @@ struct task_struct *__kthread_create_on_node(int (*threadfn)(void *data),
  * or a negative error number; it will be passed to kthread_stop().
  *
  * Returns a task_struct or ERR_PTR(-ENOMEM) or ERR_PTR(-EINTR).
+ */
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - thread 생성
  */
 struct task_struct *kthread_create_on_node(int (*threadfn)(void *data),
 					   void *data, int node,
@@ -508,6 +545,10 @@ EXPORT_SYMBOL(kthread_bind);
  *
  * Description: This helper function creates and names a kernel thread
  */
+/*
+ * IAMROOT, 2022.11.19:
+ * - thread 생성
+ */
 struct task_struct *kthread_create_on_cpu(int (*threadfn)(void *data),
 					  void *data, unsigned int cpu,
 					  const char *namefmt)
@@ -524,6 +565,10 @@ struct task_struct *kthread_create_on_cpu(int (*threadfn)(void *data),
 	return p;
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - @k에 @cpu id를 넣어주고 percpu thread라는걸 marking해준다.
+ */
 void kthread_set_per_cpu(struct task_struct *k, int cpu)
 {
 	struct kthread *kthread = to_kthread(k);
@@ -558,6 +603,11 @@ bool kthread_is_per_cpu(struct task_struct *p)
  * waits for it to return. If the thread is marked percpu then its
  * bound to the cpu again.
  */
+/*
+ * IAMROOT, 2022.11.19:
+ * - unpark. smpboot_thread_fn()의 park측 참고.
+ *   park 상태에 있는것을 unpark후 깨운다.
+ */
 void kthread_unpark(struct task_struct *k)
 {
 	struct kthread *kthread = to_kthread(k);
@@ -573,6 +623,11 @@ void kthread_unpark(struct task_struct *k)
 	/*
 	 * __kthread_parkme() will either see !SHOULD_PARK or get the wakeup.
 	 */
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - parked상태였으면 깨운다.
+ */
 	wake_up_state(k, TASK_PARKED);
 }
 EXPORT_SYMBOL_GPL(kthread_unpark);
@@ -588,6 +643,11 @@ EXPORT_SYMBOL_GPL(kthread_unpark);
  *
  * Returns 0 if the thread is parked, -ENOSYS if the thread exited.
  * If called by the kthread itself just the park bit is set.
+ */
+/*
+ * IAMROOT, 2022.11.19:
+ * - TODO
+ *   @k를 park로 하고 wakeup한후 parked가 완료될때까지 기다린다.
  */
 int kthread_park(struct task_struct *k)
 {

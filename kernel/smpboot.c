@@ -103,6 +103,10 @@ enum {
  *
  * Returns 1 when the thread should exit, 0 otherwise.
  */
+/*
+ * IAMROOT, 2022.11.19:
+ * - thread가 run으로 되기전 동작하는 최초의 함수. park등의 state를 처리한다.
+ */
 static int smpboot_thread_fn(void *data)
 {
 	struct smpboot_thread_data *td = data;
@@ -161,11 +165,20 @@ static int smpboot_thread_fn(void *data)
 		} else {
 			__set_current_state(TASK_RUNNING);
 			preempt_enable();
+
+/*
+ * IAMROOT, 2022.11.19:
+ * - 실제 등록된 thread_fn
+ */
 			ht->thread_fn(td->cpu);
 		}
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - thread 생성 및 park.
+ */
 static int
 __smpboot_create_thread(struct smp_hotplug_thread *ht, unsigned int cpu)
 {
@@ -175,12 +188,24 @@ __smpboot_create_thread(struct smp_hotplug_thread *ht, unsigned int cpu)
 	if (tsk)
 		return 0;
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - 자료구조를 만들어서 기본정보를 넣어준다.
+ */
 	td = kzalloc_node(sizeof(*td), GFP_KERNEL, cpu_to_node(cpu));
 	if (!td)
 		return -ENOMEM;
 	td->cpu = cpu;
 	td->ht = ht;
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - 해당 함수에서 1 ~ 2번까지 진행한다.
+ *  1. kthreadd에서 thread 생성
+ *  2. kthreadd에서 thread 생성완료 wait
+ *  3. set TASK_PARKED
+ *  4. wakeup smpboot_thread_fn()실행
+ */
 	tsk = kthread_create_on_cpu(smpboot_thread_fn, td, cpu,
 				    ht->thread_comm);
 	if (IS_ERR(tsk)) {
@@ -192,6 +217,16 @@ __smpboot_create_thread(struct smp_hotplug_thread *ht, unsigned int cpu)
 	 * Park the thread so that it could start right on the CPU
 	 * when it is available.
 	 */
+/*
+ * IAMROOT, 2022.11.19:
+ * - spawn_ksoftirqd 동작시 예
+ *  1. kthreadd에서 thread 생성 
+ *  2. kthreadd에서 thread 생성완료 wait 
+ *  3 ~ 4번이 해당함수에서 실행. 5번은 sch이 알아서 실행.
+ *  3. set TASK_PARKED 
+ *  4. wakeup smpboot_thread_fn
+ *  5. smpboot_thread_fn()실행 -> park 상태로 schedule(). 
+ */
 	kthread_park(tsk);
 	get_task_struct(tsk);
 	*per_cpu_ptr(ht->store, cpu) = tsk;
@@ -225,6 +260,10 @@ int smpboot_create_threads(unsigned int cpu)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.11.19:
+ * - unpark후 깨운다.
+ */
 static void smpboot_unpark_thread(struct smp_hotplug_thread *ht, unsigned int cpu)
 {
 	struct task_struct *tsk = *per_cpu_ptr(ht->store, cpu);
@@ -286,6 +325,11 @@ static void smpboot_destroy_threads(struct smp_hotplug_thread *ht)
  *
  * Creates and starts the threads on all online cpus.
  */
+/*
+ * IAMROOT, 2022.11.19:
+ * - cpu마다 @plug_thread의 thread를 생성하고 hotplug_threads를 @plug_thread에 넣어준다.
+ * - thread 생성 -> parked -> unparked -> thread_fn실행
+ */
 int smpboot_register_percpu_thread(struct smp_hotplug_thread *plug_thread)
 {
 	unsigned int cpu;
@@ -293,6 +337,7 @@ int smpboot_register_percpu_thread(struct smp_hotplug_thread *plug_thread)
 
 	cpus_read_lock();
 	mutex_lock(&smpboot_threads_lock);
+
 	for_each_online_cpu(cpu) {
 		ret = __smpboot_create_thread(plug_thread, cpu);
 		if (ret) {
