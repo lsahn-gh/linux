@@ -40,6 +40,10 @@ static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
 	return idle ? HRTIMER_NORESTART : HRTIMER_RESTART;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 초기화.
+ */
 void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime)
 {
 	rt_b->rt_period = ns_to_ktime(period);
@@ -75,12 +79,21 @@ static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
 	raw_spin_unlock(&rt_b->rt_runtime_lock);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - rt rq 초기화.
+ */
 void init_rt_rq(struct rt_rq *rt_rq)
 {
 	struct rt_prio_array *array;
 	int i;
 
 	array = &rt_rq->active;
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - delimiter 방식을 채용. MAX_RT_PRIO로 101번째 end bit를 설정한다.
+ */
 	for (i = 0; i < MAX_RT_PRIO; i++) {
 		INIT_LIST_HEAD(array->queue + i);
 		__clear_bit(i, array->bitmap);
@@ -155,6 +168,10 @@ void free_rt_sched_group(struct task_group *tg)
 	kfree(tg->rt_se);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - @cpu에 해당하는 rq를 @rt_rq에 등록한다.
+ */
 void init_tg_rt_entry(struct task_group *tg, struct rt_rq *rt_rq,
 		struct sched_rt_entity *rt_se, int cpu,
 		struct sched_rt_entity *parent)

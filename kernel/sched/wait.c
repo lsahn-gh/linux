@@ -6,6 +6,10 @@
  */
 #include "sched.h"
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - @key는 lockdep용.
+ */
 void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name, struct lock_class_key *key)
 {
 	spin_lock_init(&wq_head->lock);

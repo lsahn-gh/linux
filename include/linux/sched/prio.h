@@ -12,9 +12,20 @@
  * tasks are in the range MAX_RT_PRIO..MAX_PRIO-1. Priority
  * values are inverted: lower p->prio value means higher priority.
  */
-
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   프로세스의 우선 순위는 0..MAX_PRIO-1이고 유효한 RT 우선 순위는
+ *   0..MAX_RT_PRIO-1이며 SCHED_NORMAL/SCHED_BATCH 작업은
+ *   MAX_RT_PRIO..MAX_PRIO-1 범위에 있습니다. 우선 순위 값은 반전됩니다.
+ *   낮은 p->prio 값은 높은 우선 순위를 의미합니다.
+ */
 #define MAX_RT_PRIO		100
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 140
+ */
 #define MAX_PRIO		(MAX_RT_PRIO + NICE_WIDTH)
 #define DEFAULT_PRIO		(MAX_RT_PRIO + NICE_WIDTH / 2)
 

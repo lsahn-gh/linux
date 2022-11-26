@@ -275,6 +275,10 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
  *
  * Return: -ENOMEM on memory allocation failure.
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - cpu priority 초기화.
+ */
 int cpupri_init(struct cpupri *cp)
 {
 	int i;

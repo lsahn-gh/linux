@@ -63,6 +63,10 @@ struct task_struct;
 
 extern void __init_waitqueue_head(struct wait_queue_head *wq_head, const char *name, struct lock_class_key *);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - __key는 lockdep용
+ */
 #define init_waitqueue_head(wq_head)						\
 	do {									\
 		static struct lock_class_key __key;				\

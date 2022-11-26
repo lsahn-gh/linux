@@ -120,7 +120,27 @@ extern void call_trace_sched_update_nr_running(struct rq *rq, int count);
  * Really only required when CONFIG_FAIR_GROUP_SCHED=y is also set, but to
  * increase coverage and consistency always enable it on 64-bit platforms.
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   64비트 아키텍처에 대한 좋은 수준의 계산 해상도를 높입니다.
+ *   추가 해상도는 특히 더 큰 시스템에서 낮은 가중치 작업 그룹(예:
+ *   자동 그룹의 nice +19), 더 깊은 작업 그룹 계층의 공유 배포 및
+ *   로드 밸런싱을 개선합니다. 이는 사용자가 볼 수 있는 변경 사항이
+ *   아니며 공유/가중치 설정을 위한 사용자 인터페이스를 변경하지 않습니다.
+ *
+ *   이 증가된 해상도(예: 64비트)를 허용하기에 충분한 비트가 있는
+ *   경우에만 해상도를 높입니다. 32비트에서 해상도를 높이는 데 드는
+ *   비용은 상당히 높고 수익은 증가된 비용을 정당화하지 못합니다.
+ *
+ *   CONFIG_FAIR_GROUP_SCHED=y도 설정된 경우에만 실제로 필요하지만 적용
+ *   범위와 일관성을 높이기 위해 항상 64비트 플랫폼에서 활성화합니다.
+ */
 #ifdef CONFIG_64BIT
+/*
+ * IAMROOT, 2022.11.26:
+ * - 20
+ */
 # define NICE_0_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
 # define scale_load(w)		((w) << SCHED_FIXEDPOINT_SHIFT)
 # define scale_load_down(w) \
@@ -144,6 +164,16 @@ extern void call_trace_sched_update_nr_running(struct rq *rq, int count);
  *
  *  scale_load(sched_prio_to_weight[NICE_TO_PRIO(0)-MAX_RT_PRIO]) == NICE_0_LOAD
  *
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   Task weight(사용자에게 표시됨)와 그 load(사용자에게 표시되지 않음)는
+ *   독립적인 해상도를 갖지만 잘 조정되어야 합니다. scale_load() 및
+ *   scale_load_down(w)를 사용하여 변환합니다. 다음 사항이 참이어야 합니다.
+ *
+ *   scale_load(sched_prio_to_weight[NICE_TO_PRIO(0)-MAX_RT_PRIO]) == NICE_0_LOAD
+ * - 32bit인경우 1024, 64bit인경우 1024 * 1024
  */
 #define NICE_0_LOAD		(1L << NICE_0_LOAD_SHIFT)
 
@@ -296,6 +326,10 @@ static inline int dl_bandwidth_enabled(void)
  *  - bw (< 100%) is the deadline bandwidth of each CPU;
  *  - total_bw is the currently allocated bandwidth in each root domain;
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ */
 struct dl_bw {
 	raw_spinlock_t		lock;
 	u64			bw;
@@ -441,6 +475,10 @@ struct task_group {
 };
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
+/*
+ * IAMROOT, 2022.11.26:
+ * - 32bit인경우 1024, 64bit인경우 1024 * 1024
+ */
 #define ROOT_TASK_GROUP_LOAD	NICE_0_LOAD
 
 /*
@@ -602,6 +640,17 @@ struct cfs_rq {
 	 * leaf_cfs_rq_list ties together list of leaf cfs_rq's in a CPU.
 	 * This list is used during load balance.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *  leaf cfs_rqs는 task(계층 구조에서 가장 낮은 스케줄 가능한 엔터티)을
+ *  보유하는 것입니다. non-leaf lrqs는 사용자, 컨테이너 등과 같은 다른
+ *  더 높은 스케줄 가능한 엔터티를 보유합니다. leaf_cfs_rq_list는 CPU에서
+ *  리프 cfs_rq의 목록을 함께 묶습니다. 
+ *  이 목록은 load balance 중에 사용됩니다.
+ * - leaf cfs.
+ *   가장 마지막에 있는 cfs group.
+ */
 	int			on_list;
 	struct list_head	leaf_cfs_rq_list;
 	struct task_group	*tg;	/* group that "owns" this runqueue */
@@ -935,8 +984,18 @@ struct rq {
 #endif
 #ifdef CONFIG_NO_HZ_COMMON
 #ifdef CONFIG_SMP
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - 잠들기전 tick을 저장.
+ */
 	unsigned long		last_blocked_load_update_tick;
 	unsigned int		has_blocked_load;
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - call single data
+ */
 	call_single_data_t	nohz_csd;
 #endif /* CONFIG_SMP */
 	unsigned int		nohz_tick_stopped;
@@ -1920,6 +1979,10 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 #endif /* CONFIG_CGROUP_SCHED */
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 
+ */
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
 	set_task_rq(p, cpu);
@@ -1929,6 +1992,13 @@ static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 	 * successfully executed on another CPU. We must ensure that updates of
 	 * per-task data have been completed by this moment.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   After ->cpu 이 새로운 값으로 설정되면 task_rq_lock(p, ...)이 다른
+ *   CPU에서 성공적으로 실행될 수 있습니다. 이 시점까지 작업별 데이터
+ *   업데이트가 완료되었는지 확인해야 합니다.
+ */
 	smp_wmb();
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	WRITE_ONCE(p->cpu, cpu);
@@ -2007,11 +2077,24 @@ static const_debug __maybe_unused unsigned int sysctl_sched_features =
 extern struct static_key_false sched_numa_balancing;
 extern struct static_key_false sched_schedstats;
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - ns단위 return. 1초 ( 1000 * 1000 * 1000) return.
+ */
 static inline u64 global_rt_period(void)
 {
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - us단위를 ns로 변경하기위해 1000을 곱한다.
+ */
 	return (u64)sysctl_sched_rt_period * NSEC_PER_USEC;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - ns단위 return. 0.95초(950 * 1000 * 1000)
+ */
 static inline u64 global_rt_runtime(void)
 {
 	if (sysctl_sched_rt_runtime < 0)

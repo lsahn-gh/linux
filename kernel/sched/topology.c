@@ -462,6 +462,10 @@ static void free_rootdomain(struct rcu_head *rcu)
 	kfree(rd);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - @rq에 @rd를 등록한다.
+ */
 void rq_attach_root(struct rq *rq, struct root_domain *rd)
 {
 	struct root_domain *old_rd = NULL;
@@ -512,6 +516,11 @@ void sched_put_rd(struct root_domain *rd)
 	call_rcu(&rd->rcu, free_rootdomain);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - rootdomain은 load_balance에 사용한다.
+ *   dl, cpudl, cpupri를 초기화한다.
+ */
 static int init_rootdomain(struct root_domain *rd)
 {
 	if (!zalloc_cpumask_var(&rd->span, GFP_KERNEL))
@@ -558,6 +567,11 @@ out:
  */
 struct root_domain def_root_domain;
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - rootdomain은 load_balance에 사용한다.
+ *   dl, cpudl, cpupri를 초기화한다.
+ */
 void init_defrootdomain(void)
 {
 	init_rootdomain(&def_root_domain);

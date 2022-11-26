@@ -5,6 +5,11 @@
 #include "sched.h"
 
 #define WAIT_TABLE_BITS 8
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - 256개
+ */
 #define WAIT_TABLE_SIZE (1 << WAIT_TABLE_BITS)
 
 static wait_queue_head_t bit_wait_table[WAIT_TABLE_SIZE] __cacheline_aligned;
@@ -242,6 +247,10 @@ __sched int bit_wait_io_timeout(struct wait_bit_key *word, int mode)
 }
 EXPORT_SYMBOL_GPL(bit_wait_io_timeout);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - WAIT_TABLE_SIZE(256개)만큼 초기화
+ */
 void __init wait_bit_init(void)
 {
 	int i;

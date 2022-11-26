@@ -29,6 +29,12 @@ struct thread_info {
 	union {
 		u64		preempt_count;	/* 0 => preemptible, <0 => bug */
 		struct {
+/*
+ * IAMROOT, 2022.11.26:
+ * - PREEMPT_NEED_RECHED 참고
+ *   need_resched == 1 resched 요청없음.
+ *   need_resched == 0 resched 요청있음.
+ */
 #ifdef CONFIG_CPU_BIG_ENDIAN
 			u32	need_resched;
 			u32	count;

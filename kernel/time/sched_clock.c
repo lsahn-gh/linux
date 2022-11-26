@@ -79,6 +79,10 @@ static struct clock_data cd ____cacheline_aligned = {
 	.actual_read_sched_clock = jiffy_sched_clock_read,
 };
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - mult shift
+ */
 static inline u64 notrace cyc_to_ns(u64 cyc, u32 mult, u32 shift)
 {
 	return (cyc * mult) >> shift;
@@ -95,6 +99,10 @@ notrace int sched_clock_read_retry(unsigned int seq)
 	return read_seqcount_latch_retry(&cd.seq, seq);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 얼마나 시간이 지났는지에 대한 ns값을 측정한다.
+ */
 unsigned long long notrace sched_clock(void)
 {
 	u64 cyc, res;
@@ -104,8 +112,16 @@ unsigned long long notrace sched_clock(void)
 	do {
 		rd = sched_clock_read_begin(&seq);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - cyc = 현재 clock - 마지막 읽은 clock = 지난 clock 개수
+ */
 		cyc = (rd->read_sched_clock() - rd->epoch_cyc) &
 		      rd->sched_clock_mask;
+/*
+ * IAMROOT, 2022.11.26:
+ * - epoch_ns + cyc
+ */
 		res = rd->epoch_ns + cyc_to_ns(cyc, rd->mult, rd->shift);
 	} while (sched_clock_read_retry(seq));
 

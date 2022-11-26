@@ -413,6 +413,10 @@ static inline int is_leftmost(struct task_struct *p, struct dl_rq *dl_rq)
 
 static void init_dl_rq_bw_ratio(struct dl_rq *dl_rq);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 초기화.
+ */
 void init_dl_bandwidth(struct dl_bandwidth *dl_b, u64 period, u64 runtime)
 {
 	raw_spin_lock_init(&dl_b->dl_runtime_lock);
@@ -420,6 +424,10 @@ void init_dl_bandwidth(struct dl_bandwidth *dl_b, u64 period, u64 runtime)
 	dl_b->dl_runtime = runtime;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - load_balance에 사용할 자료구조. 초기화.
+ */
 void init_dl_bw(struct dl_bw *dl_b)
 {
 	raw_spin_lock_init(&dl_b->lock);
@@ -432,10 +440,18 @@ void init_dl_bw(struct dl_bw *dl_b)
 	dl_b->total_bw = 0;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - dl rq초기화.
+ */
 void init_dl_rq(struct dl_rq *dl_rq)
 {
 	dl_rq->root = RB_ROOT_CACHED;
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - SMP일경우 이미 init_dl_bw가 이전에 진행됫을것이다.
+ */
 #ifdef CONFIG_SMP
 	/* zero means no -deadline tasks */
 	dl_rq->earliest_dl.curr = dl_rq->earliest_dl.next = 0;
@@ -2615,12 +2631,25 @@ next:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - throttle 여부에 따라서 초기화.
+ */
 static void init_dl_rq_bw_ratio(struct dl_rq *dl_rq)
 {
 	if (global_rt_runtime() == RUNTIME_INF) {
+/*
+ * IAMROOT, 2022.11.26:
+ * - throttle을 안하는경우
+ */
 		dl_rq->bw_ratio = 1 << RATIO_SHIFT;
 		dl_rq->extra_bw = 1 << BW_SHIFT;
 	} else {
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - throttle을 하는 경우.
+ */
 		dl_rq->bw_ratio = to_ratio(global_rt_runtime(),
 			  global_rt_period()) >> (BW_SHIFT - RATIO_SHIFT);
 		dl_rq->extra_bw = to_ratio(global_rt_period(),

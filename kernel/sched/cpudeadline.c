@@ -261,6 +261,10 @@ void cpudl_clear_freecpu(struct cpudl *cp, int cpu)
  * cpudl_init - initialize the cpudl structure
  * @cp: the cpudl max-heap context
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - cpudl 초기화.
+ */
 int cpudl_init(struct cpudl *cp)
 {
 	int i;

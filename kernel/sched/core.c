@@ -80,6 +80,10 @@ const_debug unsigned int sysctl_sched_nr_migrate = 32;
  * period over which we measure -rt task CPU usage in us.
  * default: 1s
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - us 단위. 1000 * 1000
+ */
 unsigned int sysctl_sched_rt_period = 1000000;
 
 __read_mostly int scheduler_running;
@@ -367,6 +371,10 @@ static inline void sched_core_dequeue(struct rq *rq, struct task_struct *p) { }
 /*
  * part of the period that we allow rt tasks to run in us.
  * default: 0.95s
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * - us단위
  */
 int sysctl_sched_rt_runtime = 950000;
 
@@ -1241,6 +1249,11 @@ int tg_nop(struct task_group *tg, void *data)
 }
 #endif
 
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - 
+ */
 static void set_load_weight(struct task_struct *p, bool update_load)
 {
 	int prio = p->static_prio - MAX_RT_PRIO;
@@ -1945,6 +1958,11 @@ static void uclamp_post_fork(struct task_struct *p)
 	uclamp_update_util_min_rt_default(p);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - uclamp
+ *   Dcoumentation/scheduler/sched-capacity.rst
+ */
 static void __init init_uclamp_rq(struct rq *rq)
 {
 	enum uclamp_id clamp_id;
@@ -2477,6 +2495,10 @@ out_unlock:
 /*
  * sched_class::set_cpus_allowed must do the below, but is not required to
  * actually call this function.
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * - 
  */
 void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask, u32 flags)
 {
@@ -4219,6 +4241,10 @@ int wake_up_state(struct task_struct *p, unsigned int state)
  * p is forked by current.
  *
  * __sched_fork() is basic setup used by init_idle() too:
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * - 새로 생성된 @p를 초기화한다.
  */
 static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 {
@@ -6204,6 +6230,46 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  *
  * WARNING: must be called with preemption disabled!
  */
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   __schedule()은 주요 스케줄러 함수입니다.
+ *   스케줄러를 구동하여 이 기능에 들어가는 주요 수단은 다음과 같습니다.
+ *
+ *   1. 명시적 차단: mutex, semaphore, waitqueue 등
+ *
+ *   2. TIF_NEED_RESCHED 플래그는 인터럽트 및 사용자 공간 반환
+ *   경로에서 확인됩니다. 예를 들어 arch/x86/entry_64.S를 참조하세요.
+ *
+ *   작업 간의 선점을 유도하기 위해 스케줄러는 타이머 인터럽트 핸들러
+ *   scheduler_tick()에 플래그를 설정합니다.
+ *
+ *   3. 깨우기는 실제로 schedule()에 진입하지 않습니다. 그들은 실행
+ *   대기열에 작업을 추가하고 그게 다입니다.
+ *
+ *   이제 run-queue에 추가된 새 작업이 현재 작업을 선점하면 wakeup은
+ *   TIF_NEED_RESCHED를 설정하고 schedule()은 가장 가까운 가능한
+ *   경우에 호출됩니다. 
+ *
+ *   - 커널이 선점형인 경우(CONFIG_PREEMPTION=y):
+ *
+ *   - syscall 또는 예외 컨텍스트에서 다음으로 가장 바깥쪽의
+ *   preempt_enable()에서. (이는 wake_up()의 spin_unlock()이 실행되는
+ *   즉시 가능합니다!)
+ *
+ *   - IRQ 컨텍스트에서 인터럽트 핸들러에서 선점형 컨텍스트로 반환
+ *   - 커널이 선점형이 아닌 경우(CONFIG_PREEMPTION이 설정되지 않음)
+ *   다음에서:
+ *
+ *   - cond_resched() 호출
+ *   - 명시적인 schedule() 호출
+ *   - 시스템 호출 또는 예외에서 사용자 공간으로 반환
+ *   - 인터럽트 핸들러에서 사용자 공간으로 복귀
+ *
+ *   경고: 선점을 비활성화한 상태로 호출해야 합니다!.
+ * - TODO
+ */
 static void __sched notrace __schedule(unsigned int sched_mode)
 {
 	struct task_struct *prev, *next;
@@ -6240,6 +6306,25 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	 * Also, the membarrier system call requires a full memory barrier
 	 * after coming from user-space, before storing to rq->curr.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   signal_wake_up()과의 경합을 피하기 위해 호출자가 수행한
+ *   __set_current_state(TASK_INTERRUPTIBLE)로 아래의
+ *   signal_pending_state()->signal_pending()을 재정렬할 수 없는지
+ *   확인하십시오.
+ *
+ * __set_current_state(@state)		signal_wake_up()
+ * schedule()				  set_tsk_thread_flag(p, TIF_SIGPENDING)
+ *					  wake_up_state(p, state)
+ *   LOCK rq->lock			    LOCK p->pi_state
+ *   smp_mb__after_spinlock()		    smp_mb__after_spinlock()
+ *     if (signal_pending_state())	    if (p->state & @state)
+ *
+ *
+ *   또한 membarrier 시스템 호출은 사용자 공간에서 온 후 rq->curr에
+ *   저장하기 전에 전체 메모리 장벽이 필요합니다.
+ */
 	rq_lock(rq, &rf);
 	smp_mb__after_spinlock();
 
@@ -6256,6 +6341,15 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	 *  - we form a control dependency vs deactivate_task() below.
 	 *  - ptrace_{,un}freeze_traced() can change ->state underneath us.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   다음과 같이 prev->state를 한 번 로드해야 합니다
+ *   (task_struct::state는 휘발성임).
+ *   - 아래에서 제어 종속성 대 deactivate_task()를 형성합니다.
+ *   - ptrace_{,un}freeze_traced()는 우리 밑에서 ->상태를 변경할
+ *   수 있습니다.
+ */
 	prev_state = READ_ONCE(prev->__state);
 	if (!(sched_mode & SM_MASK_PREEMPT) && prev_state) {
 		if (signal_pending_state(prev_state, prev)) {
@@ -6352,6 +6446,10 @@ void __noreturn do_task_dead(void)
 		cpu_relax();
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - TODO
+ */
 static inline void sched_submit_work(struct task_struct *tsk)
 {
 	unsigned int task_flags;
@@ -6368,6 +6466,16 @@ static inline void sched_submit_work(struct task_struct *tsk)
 	 * in the possible wakeup of a kworker and because wq_worker_sleeping()
 	 * requires it.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   작업자가 잠들면 동시성을 유지하기 위해 작업을 깨울 것인지 작업
+ *   대기열에 알리고 요청합니다.
+ *   이 함수는 schedule() 컨텍스트 내에서 호출되므로 kworker의 가능한
+ *   웨이크업에서 schedule()을 다시 호출하는 것을 방지하고
+ *   wq_worker_sleeping()이 이를 필요로 하기 때문에 선점을
+ *   비활성화합니다.
+ */
 	if (task_flags & (PF_WQ_WORKER | PF_IO_WORKER)) {
 		preempt_disable();
 		if (task_flags & PF_WQ_WORKER)
@@ -6384,6 +6492,12 @@ static inline void sched_submit_work(struct task_struct *tsk)
 	 * If we are going to sleep and we have plugged IO queued,
 	 * make sure to submit it to avoid deadlocks.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   잠을 자려고 하고 대기 중인 IO를 연결한 경우 교착 상태를 피하기
+ *   위해 제출해야 합니다.
+ */
 	if (blk_needs_flush_plug(tsk))
 		blk_schedule_flush_plug(tsk);
 }
@@ -6398,6 +6512,10 @@ static void sched_update_worker(struct task_struct *tsk)
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - TODO
+ */
 asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *tsk = current;
@@ -8658,11 +8776,19 @@ void show_state_filter(unsigned int state_filter)
  * NOTE: this function does not set the idle thread's NEED_RESCHED
  * flag, to make booting more robust.
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - @cpu에대한 @idle 초기화.
+ */
 void __init init_idle(struct task_struct *idle, int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - @idle task를 초기화한다.
+ */
 	__sched_fork(0, idle);
 
 	/*
@@ -8671,6 +8797,13 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	 * if we want to avoid special-casing it in code that deals with per-CPU
 	 * kthreads.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   idle 작업은 작동하기 위해 kthread 구조체가 필요하지 않지만 CPU당
+ *   kthread로 차려입고 따라서 CPU당 kthread를 처리하는 코드에서 특수
+ *   케이스 처리를 피하려면 역할을 수행해야 합니다.
+ */
 	set_kthread_struct(idle);
 
 	raw_spin_lock_irqsave(&idle->pi_lock, flags);
@@ -8695,6 +8828,14 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	 *
 	 * And since this is boot we can forgo the serialization.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   init_idle()이 작업에서 여러 번 호출될 가능성이 있습니다. 이 경우
+ *   do_set_cpus_allowed()는 올바른 작업을 수행하지 않습니다.
+ *
+ *   그리고 이것은 부팅이므로 직렬화를 생략할 수 있습니다.
+ */
 	set_cpus_allowed_common(idle, cpumask_of(cpu), 0);
 #endif
 	/*
@@ -8941,6 +9082,12 @@ static void balance_push(struct rq *rq)
 	raw_spin_rq_lock(rq);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - on이면 balance_push_callback으로 callback을 설정,
+ *   false면 이미 setting되있는게 balance_push_callback인 경우에만
+ *   NULL로 설정한다.
+ */
 static void balance_push_set(int cpu, bool on)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -9329,12 +9476,21 @@ static struct kmem_cache *task_group_cache __read_mostly;
 DECLARE_PER_CPU(cpumask_var_t, load_balance_mask);
 DECLARE_PER_CPU(cpumask_var_t, select_idle_mask);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - 
+ */
 void __init sched_init(void)
 {
 	unsigned long ptr = 0;
 	int i;
 
 	/* Make sure the linker didn't screw up */
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - vmlinux.lds 에서 순서가 제대로 되있는지에 대한 검사. 
+ */
 	BUG_ON(&idle_sched_class + 1 != &fair_sched_class ||
 	       &fair_sched_class + 1 != &rt_sched_class ||
 	       &rt_sched_class + 1   != &dl_sched_class);
@@ -9344,6 +9500,15 @@ void __init sched_init(void)
 
 	wait_bit_init();
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - Group scheduling for SCHED_OTHER.
+ * - SCHED_OTHER
+ *   Documentation/scheduler/sched-design-CFS.rst 참고
+ *   cfs의 SCHED_NORMAL.
+ * - 2개의 의미는 아래에서 fair, rt를 초기화할때 각각 se, cfs_rq와
+ *   rt_set, rt_rq를 할당하기 위함이다.
+ */
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	ptr += 2 * nr_cpu_ids * sizeof(void **);
 #endif
@@ -9435,6 +9600,27 @@ void __init sched_init(void)
 		 * We achieve this by letting root_task_group's tasks sit
 		 * directly in rq->cfs (i.e root_task_group->se[] = NULL).
 		 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   root_task_group은 얼마나 많은 CPU 대역폭을 얻습니까? cgroup 파일
+ *   시스템을 통해 구성된 작업 그룹의 경우 시스템에서 CPU 리소스의 100%를
+ *   가져옵니다. 이 전체 시스템 CPU 리소스는 각 엔티티(태스크 또는
+ *   태스크 그룹)의 가중치(se->load.weight)를 기반으로 공정한 방식으로
+ *   root_task_group의 태스크와 하위 태스크 그룹으로 나뉩니다.
+ *
+ *   즉, root_task_group에 가중치가 1024인 10개의 task와 두 개의 하위
+ *   group A0 및 A1(각각 가중치가 1024)이 있는 경우 A0의 CPU 리소스
+ *   공유는 다음과 같습니다.
+ *
+ *	 A0's bandwidth = 1024 / (10*1024 + 1024 + 1024) = 8.33%
+ *
+ *   우리는 root_task_group의 작업을 rq->cfs에 직접 배치함으로써 이를
+ *   달성합니다(즉, root_task_group->se[] = NULL).
+ *
+ * - root_task_group의 sched_entity는 NULL이다. 상위가 없어 가져올게없기
+ *   때문이다.
+ */
 		init_tg_cfs_entry(&root_task_group, &rq->cfs, NULL, i, NULL);
 #endif /* CONFIG_FAIR_GROUP_SCHED */
 
@@ -9499,8 +9685,26 @@ void __init sched_init(void)
 	 * but because we are the idle thread, we just pick up running again
 	 * when this runqueue becomes "idle".
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   우리를 idle 스레드로 만드십시오. 기술적으로 schedule()은 이
+ *   스레드에서 호출되지 않아야 하지만 그 아래 어딘가에 있을 수 있지만
+ *   우리는 idle 스레드이기 때문에 이 실행 대기열이 idle 상태가 되면 다시 
+ *   실행을 시작합니다.
+ *
+ * - init후 init task는 할일이 없기 때문에 init task를 idle task로
+ *   활용한다.
+ * - idle task는 모든 thread에서 사용가능하다.
+ * - 최초의 init_task설정이다. 마치 fork를 하고난 task처럼 초기화를
+ *   수행하는 코드가 있다.
+ */
 	init_idle(current, smp_processor_id());
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - kernel/sched/loadavg.c
+ */
 	calc_load_update = jiffies + LOAD_FREQ;
 
 #ifdef CONFIG_SMP
@@ -10875,6 +11079,14 @@ const int sched_prio_to_weight[40] = {
  * In cases where the weight does not change often, we can use the
  * precalculated inverse to speed up arithmetics by turning divisions
  * into multiplications:
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   미리 계산된 sched_prio_to_weight[] 배열의 역(2^32/x) 값입니다.
+ *
+ *   가중치가 자주 변경되지 않는 경우 미리 계산된 역함수를 사용하여
+ *   나눗셈을 곱셈으로 전환하여 산술 속도를 높일 수 있습니다.
  */
 const u32 sched_prio_to_wmult[40] = {
  /* -20 */     48388,     59856,     76040,     92818,    118348,

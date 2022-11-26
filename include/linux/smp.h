@@ -26,6 +26,10 @@ struct __call_single_data {
 	void *info;
 };
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - CSD는 IPI에서 사용한다.
+ */
 #define CSD_INIT(_func, _info) \
 	(struct __call_single_data){ .func = (_func), .info = (_info), }
 

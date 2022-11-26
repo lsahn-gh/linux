@@ -389,6 +389,16 @@ struct sched_info {
  * We define a basic fixed point arithmetic range, and then formalize
  * all these metrics based on that basic range.
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   정수 메트릭에는 고정 소수점 산술이 필요합니다. 예를 들어
+ *   sched/fair에는 몇 가지가 있습니다.
+ *   load, load_avg, util_avg, freq 및 용량.
+ *
+ *   기본 고정 소수점 산술 범위를 정의한 다음 해당 기본 범위를
+ *   기반으로 이러한 모든 메트릭을 형식화합니다.
+ */
 # define SCHED_FIXEDPOINT_SHIFT		10
 # define SCHED_FIXEDPOINT_SCALE		(1L << SCHED_FIXEDPOINT_SHIFT)
 

@@ -85,6 +85,21 @@ static inline struct kthread *to_kthread(struct task_struct *k)
  * PF_KTHREAD on it's own is not, kernel_thread() can exec() (See umh.c and
  * begin_new_exec()).
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   @p가 kthread라고 가정하지 않는 to_kthread()의 변형입니다.
+ *
+ *   Per construction; when:
+ *
+ *   (p->flags & PF_KTHREAD) && p->set_child_tid
+ *
+ *   작업은 kthread이고 struct kthread는 영구적입니다. 그러나 PF_KTHREAD
+ *   자체는 그렇지 않습니다. kernel_thread()는 exec()를 수행할 수
+ *   있습니다(umh.c 및 begin_new_exec() 참조).*
+ *
+ * - kthread가 있어도 PF_KTHREAD가 없다면 NULL return.
+ */
 static inline struct kthread *__to_kthread(struct task_struct *p)
 {
 	void *kthread = (__force void *)p->set_child_tid;
@@ -93,6 +108,10 @@ static inline struct kthread *__to_kthread(struct task_struct *p)
 	return kthread;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - kthread가 없다면 자료구조를 할당한다.
+ */
 void set_kthread_struct(struct task_struct *p)
 {
 	struct kthread *kthread;
@@ -106,6 +125,13 @@ void set_kthread_struct(struct task_struct *p)
 	 * can't be wrongly copied by copy_process(). We also rely on fact
 	 * that the caller can't exec, so PF_KTHREAD can't be cleared.
 	 */
+/*
+ * IAMROOT, 2022.11.26:
+ * - papago
+ *   우리는 ->set_child_tid를 남용하여 새 멤버를 피하고 copy_process()로
+ *   잘못 복사할 수 없기 때문입니다. 또한 호출자가 실행할 수 없다는
+ *   사실에 의존하므로 PF_KTHREAD를 지울 수 없습니다.
+ */
 	p->set_child_tid = (__force void __user *)kthread;
 }
 

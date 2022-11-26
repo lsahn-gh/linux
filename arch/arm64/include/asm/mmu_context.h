@@ -236,6 +236,11 @@ init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 }
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - sw기능 사용할때만 동작한다.
+ */
 static inline void update_saved_ttbr0(struct task_struct *tsk,
 				      struct mm_struct *mm)
 {
@@ -260,6 +265,10 @@ static inline void update_saved_ttbr0(struct task_struct *tsk,
 
 #define enter_lazy_tlb enter_lazy_tlb
 static inline void
+/*
+ * IAMROOT, 2022.11.26:
+ * - update만 하고 나중에 갱신
+ */
 enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 {
 	/*

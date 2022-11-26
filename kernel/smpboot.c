@@ -36,6 +36,10 @@ struct task_struct *idle_thread_get(unsigned int cpu)
 	return tsk;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - pcpu idle_threads에 현재 cpu번호로 current를 넣어준다.
+ */
 void __init idle_thread_set_boot_cpu(void)
 {
 	per_cpu(idle_threads, smp_processor_id()) = current;

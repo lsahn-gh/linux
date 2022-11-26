@@ -4668,6 +4668,10 @@ void cfs_bandwidth_usage_dec(void) {}
  * default period for cfs group bandwidth.
  * default: 0.1s, units: nanoseconds
  */
+/*
+ * IAMROOT, 2022.11.26:
+ * - ns단위 return. 0.1
+ */
 static inline u64 default_cfs_period(void)
 {
 	return 100000000ULL;
@@ -5353,6 +5357,29 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 	return idle ? HRTIMER_NORESTART : HRTIMER_RESTART;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - CONFIG_CFS_BANDWIDTH
+ *   Documentation/scheduler/sched-bwc.rst
+ * - Kconfig papago
+ *   이 옵션을 사용하면 fair 그룹 스케줄러 내에서 실행되는 작업에 대한
+ *   CPU 대역폭 속도(제한)를 정의할 수 있습니다. 제한이 설정되지 않은
+ *   그룹은 제한이 없는 것으로 간주되며 제한 없이 실행됩니다.
+ * - quota
+ *   period를 쓰는 정도.
+ *   ex) period = 1, quota = -1인 경우 (편의상 ns를 sec로 하여 1로 표현)
+ *   cfs process A, B가 있는 경우 각각 50%씩 사용. (합쳐서 100%)
+ *   
+ *   ex) perioid = 1, quota = 0.3인 경우,
+ *   cfs process A, B가 있는 경우 각각 16.66%씩 사용. (33%)
+ *
+ * - shares
+ *   group이 A,B,C 3개있고, 각각 shares가 6*1024, 3*1024, 1*1024라고 할때
+ *   shares 비율대로 60%, 30%, 10%의 점유율을 가져간다.
+ *
+ * ex) shares가 60%, period = 1, quota = 0.1인 경우
+ *   6%의 점유율을 가져간다.
+ */
 void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 {
 	raw_spin_lock_init(&cfs_b->lock);
@@ -11308,6 +11335,13 @@ static void set_next_task_fair(struct rq *rq, struct task_struct *p, bool first)
 	}
 }
 
+
+/*
+ * IAMROOT, 2022.11.26:
+ * - min_vruntime(scheduler/sched-design-CFS.rst)
+ *  that value is used to place newly activated entities on the left
+ *  side of the tree as much as possible.
+ */
 void init_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	cfs_rq->tasks_timeline = RB_ROOT_CACHED;
@@ -11455,6 +11489,10 @@ void unregister_fair_sched_group(struct task_group *tg)
 	}
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * - @cpu에 해당하는 rq를 @cfs_rq에 초기화한다.
+ */
 void init_tg_cfs_entry(struct task_group *tg, struct cfs_rq *cfs_rq,
 			struct sched_entity *se, int cpu,
 			struct sched_entity *parent)
