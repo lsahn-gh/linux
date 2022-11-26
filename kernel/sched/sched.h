@@ -89,8 +89,8 @@ struct rq;
 struct cpuidle_state;
 
 /* task_struct::on_rq states: */
-#define TASK_ON_RQ_QUEUED	1
-#define TASK_ON_RQ_MIGRATING	2
+#define TASK_ON_RQ_QUEUED	1 /* in */
+#define TASK_ON_RQ_MIGRATING	2 /* moving to another cpu */
 
 extern __read_mostly int scheduler_running;
 
@@ -183,6 +183,10 @@ static inline bool valid_policy(int policy)
 		rt_policy(policy) || dl_policy(policy);
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * policy == SCHED_IDLE ?
+ */
 static inline int task_has_idle_policy(struct task_struct *p)
 {
 	return idle_policy(p->policy);
@@ -394,6 +398,10 @@ struct task_group {
 	struct sched_entity	**se;
 	/* runqueue "owned" by this group on each CPU */
 	struct cfs_rq		**cfs_rq;
+	/*
+	 * IAMROOT, 2022.11.26:
+	 * group의 shares 값. 초기값은 nice 0 weight 값과 동일
+	 */
 	unsigned long		shares;
 
 	/* A positive value indicates that this is a SCHED_IDLE group. */
@@ -601,6 +609,14 @@ struct cfs_rq {
 	 *
 	 * leaf_cfs_rq_list ties together list of leaf cfs_rq's in a CPU.
 	 * This list is used during load balance.
+	 */
+	/*
+	 * IAMROOT, 2022.11.26:
+	 * 리프 cfs_rqs는 작업(계층 구조에서 가장 낮은 스케줄 가능한 엔터티)을
+	 * 보유하는 것입니다. 리프가 아닌 lrq는 사용자, 컨테이너 등과 같은 다른
+	 * 더 높은 스케줄 가능한 엔터티를 보유합니다. leaf_cfs_rq_list는 CPU에서
+	 * 리프 cfs_rq의 목록을 함께 묶습니다. 이 목록은 부하 분산 중에
+	 * 사용됩니다.
 	 */
 	int			on_list;
 	struct list_head	leaf_cfs_rq_list;
@@ -1363,6 +1379,10 @@ static inline void update_idle_core(struct rq *rq) { }
 
 DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 
+/*
+ * IAMROOT, 2022.11.26:
+ * cpu 에 해당하는 per_cpu rq를 가져온다.
+ */
 #define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
 #define this_rq()		this_cpu_ptr(&runqueues)
 #define task_rq(p)		cpu_rq(task_cpu(p))
@@ -1892,6 +1912,10 @@ static inline struct task_group *task_group(struct task_struct *p)
 }
 
 /* Change a task's cfs_rq and parent entity if it moves across CPUs/groups */
+/*
+ * IAMROOT, 2022.11.26:
+ * TODO.
+ */
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
 {
 #if defined(CONFIG_FAIR_GROUP_SCHED) || defined(CONFIG_RT_GROUP_SCHED)

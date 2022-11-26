@@ -9,6 +9,10 @@ unsigned int __read_mostly sysctl_sched_autogroup_enabled = 1;
 static struct autogroup autogroup_default;
 static atomic_t autogroup_seq_nr;
 
+/*
+ * IAMROOT, 2022.11.26:
+ * 유저 로그인시 자동 그룹 할당
+ */
 void __init autogroup_init(struct task_struct *init_task)
 {
 	autogroup_default.tg = &root_task_group;

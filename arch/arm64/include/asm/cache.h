@@ -101,6 +101,10 @@ static inline u32 cache_type_cwg(void)
 	return (read_cpuid_cachetype() >> CTR_CWG_SHIFT) & CTR_CWG_MASK;
 }
 
+/*
+ * IAMROOT, 2022.11.26:
+ * read가 주로 많은 변수를 대상으로 한 section
+ */
 #define __read_mostly __section(".data..read_mostly")
 
 /*

@@ -4,6 +4,10 @@
 
 #include <linux/thread_info.h>
 
+/*
+ * IAMROOT, 2022.11.26:
+ * PREEMPT_NEED_RESCHED -> 요청이 있을 때 0으로 설정. clear는 반대로 1.
+ */
 #define PREEMPT_NEED_RESCHED	BIT(32)
 #define PREEMPT_ENABLED	(PREEMPT_NEED_RESCHED)
 
