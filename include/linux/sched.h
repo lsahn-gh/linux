@@ -1915,19 +1915,19 @@ void yield(void);
  *
  * - on / on : stack에 task가 존재하며 task에 thread_info가 존재한다.
  *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +-- task_struct(task_info 포함) --->| stack end         | stack start
+ *       +-- task_struct(thread_info 포함) --->| stack end       | stack start
  *  
  * - on / off : stack에는 task, thread_info가 순서대로 존재한다.(사용안함)
  *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +- task_struct ----->| -task_info ->| stack end         | stack start
+ *       +- task_struct ----->| -thread_info ->| stack end       | stack start
  *
  * - off / on : stack은 stack 용도로만 사용한다.
  *       +--------- stack ---------------------------------------> TASK_SIZE
  *       + stack end                                             | stack start
  *
- * - off / off : stack에 thread_info가 존재한다.(사용안함)
+ * - off / off : stack에 thread_info가 존재한다.
  *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +--task_info ->| stack end                              | stack start
+ *       +--thread_info ->| stack end                            | stack start
  *
  * current_thread_info()의 주석을 살펴보면 CONFIG_THREAD_INFO_IN_TASK == off
  * 에 대한것은 플랫폼 개발자가 정의해야되는거 같다.
@@ -1948,6 +1948,16 @@ void yield(void);
  *
  *   결국에 default는 task와 stack만 union으로 공유하고 있는 상황이다.
  *
+ * 히스토리:
+ * =========
+ * 다음과 같은 순서대로 발전하였다.
+ *
+ * 1) 스택에 task 및 thread_info 구조체 존재
+ *    - 현재 ia64 아키텍처만 사용
+ * 2) 스택에서 task 구조체 분리하고, thread_info만 존재
+ *    - 현재 arm, mips, ... 아키텍처에서 사용
+ * 3) 스택에서 모든 구조체 분리
+ *    - 현재 arm64, x86, powerpc, s390, riscv, ndis32 아키텍처에서 사용
  * ====================================================================
  */
 union thread_union {
