@@ -102,6 +102,9 @@ notrace int sched_clock_read_retry(unsigned int seq)
 /*
  * IAMROOT, 2022.11.26:
  * - 얼마나 시간이 지났는지에 대한 ns값을 측정한다.
+ * - 바뀐 클락으로 계산한 시간(ns) 반환
+ * sched_clock_suspend - 기존 clock 정지 시킬 때 호출
+ * update_sched_clock - epoch_ns, epoch_cyc 갱신
  */
 unsigned long long notrace sched_clock(void)
 {

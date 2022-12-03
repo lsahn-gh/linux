@@ -786,6 +786,10 @@ void hrtick_start(struct rq *rq, u64 delay)
 
 #endif /* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2022.11.26:
+ * hrtick - task 런타임 소진시에도 추가틱 발생 -> 다음 테스크로 스케쥴을 넘긴다
+ */
 static void hrtick_rq_init(struct rq *rq)
 {
 #ifdef CONFIG_SMP
@@ -1256,6 +1260,10 @@ int tg_nop(struct task_group *tg, void *data)
  */
 static void set_load_weight(struct task_struct *p, bool update_load)
 {
+/*
+ * IAMROOT, 2022.11.26:
+ * 0 ~ 139 중 100 ~ 139 까지  cfs prio 가 사용된다.
+ */
 	int prio = p->static_prio - MAX_RT_PRIO;
 	struct load_weight *load = &p->se.load;
 
@@ -1290,6 +1298,15 @@ static void set_load_weight(struct task_struct *p, bool update_load)
  * While the per-CPU rq lock protects fast-path update operations, user-space
  * requests are serialized using a mutex to reduce the risk of conflicting
  * updates or API abuses.
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * 사용률 클램프 값의 업데이트를 직렬화합니다. (느린 경로) 사용자 공간은
+ * 대기열에 넣기/대기열에서 빼기 작업을 지원하는 데 사용되는 (빠른 경로)
+ * 스케줄러의 데이터 구조에 대한 업데이트가 필요할 수 있는 사용률 클램프
+ * 값 업데이트를 트리거합니다. CPU당 rq 잠금이 빠른 경로 업데이트 작업을
+ * 보호하는 동안 사용자 공간 요청은 뮤텍스를 사용하여 직렬화되어 업데이트
+ * 충돌이나 API 남용의 위험을 줄입니다.
  */
 static DEFINE_MUTEX(uclamp_mutex);
 
@@ -8848,6 +8865,14 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	 *
 	 * Silence PROVE_RCU
 	 */
+	/*
+	 * IAMROOT, 2022.11.26:
+	 * 닭과 달걀 문제가 있습니다. rq->lock을 유지하고 있지만 CPU가 아직 이
+	 * CPU로 설정되지 않았으므로 task_group()의 lockdep 검사가
+	 * 실패합니다. sched_fork()와 비슷한 경우입니다. / 또는 여기에서
+	 * task_rq_lock()을 사용하고 다른 rq->lock을 얻을 수 있습니다.
+	 * Silence PROVE_RCU
+	 */
 	rcu_read_lock();
 	__set_task_cpu(idle, cpu);
 	rcu_read_unlock();
@@ -8871,7 +8896,7 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	ftrace_graph_init_idle_task(idle, cpu);
 	vtime_init_idle(idle, cpu);
 #ifdef CONFIG_SMP
-	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu);
+	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu); /* swapper/0 */
 #endif
 }
 
@@ -9550,6 +9575,10 @@ void __init sched_init(void)
 	init_dl_bandwidth(&def_dl_bandwidth, global_rt_period(), global_rt_runtime());
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2022.11.26:
+ * load balancing 에 사용
+ */
 	init_defrootdomain();
 #endif
 
@@ -9574,6 +9603,10 @@ void __init sched_init(void)
 		raw_spin_lock_init(&rq->__lock);
 		rq->nr_running = 0;
 		rq->calc_load_active = 0;
+/*
+ * IAMROOT, 2022.11.26:
+ * 5초+ 1틱. 5초를 보장하고 다음 틱에서 무엇을 한다.
+ */
 		rq->calc_load_update = jiffies + LOAD_FREQ;
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt);
@@ -11087,6 +11120,7 @@ const int sched_prio_to_weight[40] = {
  *
  *   가중치가 자주 변경되지 않는 경우 미리 계산된 역함수를 사용하여
  *   나눗셈을 곱셈으로 전환하여 산술 속도를 높일 수 있습니다.
+ * - 0 일 경우 2^32/1024 = 4194304
  */
 const u32 sched_prio_to_wmult[40] = {
  /* -20 */     48388,     59856,     76040,     92818,    118348,

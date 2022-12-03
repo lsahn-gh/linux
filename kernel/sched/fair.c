@@ -5379,13 +5379,14 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
  *
  * ex) shares가 60%, period = 1, quota = 0.1인 경우
  *   6%의 점유율을 가져간다.
+ * - group 에서 cfs bw 를 초기화 한다.
  */
 void init_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 {
 	raw_spin_lock_init(&cfs_b->lock);
 	cfs_b->runtime = 0;
 	cfs_b->quota = RUNTIME_INF;
-	cfs_b->period = ns_to_ktime(default_cfs_period());
+	cfs_b->period = ns_to_ktime(default_cfs_period()); //0.1초
 	cfs_b->burst = 0;
 
 	INIT_LIST_HEAD(&cfs_b->throttled_cfs_rq);
@@ -10909,6 +10910,10 @@ out:
 /*
  * run_rebalance_domains is triggered when needed from the scheduler tick.
  * Also triggered for nohz idle balancing (with nohz_balancing_kick set).
+ */
+/*
+ * IAMROOT, 2022.11.26:
+ * TODO.
  */
 static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
 {
