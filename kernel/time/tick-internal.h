@@ -138,6 +138,11 @@ extern struct cpumask *tick_get_broadcast_oneshot_mask(void);
 static inline void tick_broadcast_switch_to_oneshot(void) { }
 static inline int tick_broadcast_oneshot_active(void) { return 0; }
 static inline void tick_check_oneshot_broadcast_this_cpu(void) { }
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - oneshot이 가능한지 확인.
+ */
 static inline bool tick_broadcast_oneshot_available(void) { return tick_oneshot_possible(); }
 #endif /* !(BROADCAST && ONESHOT) */
 

@@ -18,6 +18,10 @@ void prandom_reseed_late(void);
 
 DECLARE_PER_CPU(unsigned long, net_rand_noise);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 
+ */
 #define PRANDOM_ADD_NOISE(a, b, c, d) \
 	prandom_u32_add_noise((unsigned long)(a), (unsigned long)(b), \
 			      (unsigned long)(c), (unsigned long)(d))
@@ -56,6 +60,10 @@ DECLARE_PER_CPU(unsigned long, net_rand_noise);
 #error Unsupported BITS_PER_LONG
 #endif
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 인자를 가지고 pcpu net_rand_noise에 랜덤값을 구해놓는다.
+ */
 static inline void prandom_u32_add_noise(unsigned long a, unsigned long b,
 					 unsigned long c, unsigned long d)
 {

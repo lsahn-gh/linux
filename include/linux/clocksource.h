@@ -150,6 +150,10 @@ struct clocksource {
 #define CLOCK_SOURCE_MUST_VERIFY		0x02
 
 #define CLOCK_SOURCE_WATCHDOG			0x10
+/*
+ * IAMROOT, 2022.12.03:
+ * - HIGH Resolution timer 
+ */
 #define CLOCK_SOURCE_VALID_FOR_HRES		0x20
 #define CLOCK_SOURCE_UNSTABLE			0x40
 #define CLOCK_SOURCE_SUSPEND_NONSTOP		0x80

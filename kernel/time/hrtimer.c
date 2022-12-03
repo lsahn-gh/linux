@@ -946,6 +946,10 @@ static void retrigger_next_event(void *arg);
 /*
  * Switch to high resolution mode
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer로 전환.
+ */
 static void hrtimer_switch_to_hres(void)
 {
 	struct hrtimer_cpu_base *base = this_cpu_ptr(&hrtimer_bases);
@@ -955,6 +959,11 @@ static void hrtimer_switch_to_hres(void)
 			base->cpu);
 		return;
 	}
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer로 설정에 성공.
+ */
 	base->hres_active = 1;
 	hrtimer_resolution = HIGH_RES_NSEC;
 
@@ -982,6 +991,19 @@ static inline void hrtimer_switch_to_hres(void) { }
  * are optimized out it vanishes as well, i.e. no need for lots of
  * #ifdeffery.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   Retrigger 다음 이벤트는 SMP 함수 호출을 통해 또는 낮은 수준의 재개
+ *   코드에서 직접 인터럽트가 비활성화된 상태에서 시계가 설정된 후 호출됩니다.
+ *
+ *   다음과 같은 경우에만 호출됩니다.
+ *   - CONFIG_HIGH_RES_TIMERS가 활성화되었습니다.
+ *   - CONFIG_NOHZ_COMMON이 활성화됨
+ *
+ *   다른 경우에는 이 함수가 비어 있고 호출 사이트가 최적화되었기 때문에
+ *   사라집니다. 즉, 많은 #ifdeffery가 필요하지 않습니다.
+ */
 static void retrigger_next_event(void *arg)
 {
 	struct hrtimer_cpu_base *base = this_cpu_ptr(&hrtimer_bases);
@@ -1000,6 +1022,21 @@ static void retrigger_next_event(void *arg)
 	 * function call will take care of the reprogramming in case the
 	 * CPU was in a NOHZ idle sleep.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   고해상도 모드 또는 nohz가 활성화되면 CLOCK_REALTIME/TAI/BOOTTIME의
+ *   오프셋을 업데이트해야 합니다. 그렇지 않으면 다음 틱이 처리합니다.
+ *
+ *   고해상도 모드가 활성화되면 다음 만료 타이머를 재평가해야 하며
+ *   필요한 경우 클록 이벤트 장치를 다시 프로그래밍해야 합니다. 
+ *
+ *   NOHZ의 경우 오프셋 업데이트 및 다음 만료 타이머의 재평가로 충분합니다.
+ *   SMP 함수 호출로부터의 반환은 CPU가 NOHZ 유휴 수면 상태인 경우 재프로그래밍을 처리합니다.
+ *
+ * - hres mode active or nohz active가 되면 clock의 offset을 update 및
+ *   reprogram을 한다.
+ */
 	if (!__hrtimer_hres_active(base) && !tick_nohz_active)
 		return;
 
@@ -2500,6 +2537,13 @@ static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
  * High resolution timer interrupt
  * Called with interrupts disabled
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - schedule tick
+ *   hrtimer가 활성화된후 timer interrupt가 이함수로 진입해서
+ *   schedule tick에 대한것은 tick_sched_timer가 호출된다.
+ *   그 전까지는 tick_handle_periodic으로 진입한다.
+ */
 void hrtimer_interrupt(struct clock_event_device *dev)
 {
 	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
@@ -2613,12 +2657,22 @@ static inline void __hrtimer_peek_ahead_timers(void) { }
 /*
  * Called from run_local_timers in hardirq context every jiffy
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - periodic tick에서 hrtimer가 아직 활성화안될경우 hrtimer를 직접 가동한다.
+ *   hrtimer switch가 가능한 상태가 되면 switch를 수행하고, 이미 hrtimer가
+ *   전환됬으면 아무도일도 안할것이다.
+ */
 void hrtimer_run_queues(void)
 {
 	struct hrtimer_cpu_base *cpu_base = this_cpu_ptr(&hrtimer_bases);
 	unsigned long flags;
 	ktime_t now;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer가 이미동작 하고있으므로 return.
+ */
 	if (__hrtimer_hres_active(cpu_base))
 		return;
 
@@ -2629,17 +2683,38 @@ void hrtimer_run_queues(void)
 	 * there only sets the check bit in the tick_oneshot code,
 	 * otherwise we might deadlock vs. xtime_lock.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   This _is_ ugly: highres 및/또는 nohz 모드로 전환할 수 있는지 주기적으로 확인해야 합니다.
+ *   clocksource 스위치는 xtime_lock이 유지된 상태에서 발생합니다. 그곳으로부터의 알림은
+ *   tick_oneshot 코드의 확인 비트만 설정합니다. 그렇지 않으면 xtime_lock과 교착
+ *   상태에 빠질 수 있습니다.*
+ */
 	if (tick_check_oneshot_change(!hrtimer_is_hres_enabled())) {
+/*
+ * IAMROOT, 2022.12.03:
+ * - hres전환. 
+ */
 		hrtimer_switch_to_hres();
 		return;
 	}
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer로 아직전환이 안된경우 아래 로직이 동작한다.
+ *   hrtimer의 invoke 함수를 호출한다.
+ */
 	raw_spin_lock_irqsave(&cpu_base->lock, flags);
 	now = hrtimer_update_base(cpu_base);
 
 	if (!ktime_before(now, cpu_base->softirq_expires_next)) {
 		cpu_base->softirq_expires_next = KTIME_MAX;
 		cpu_base->softirq_activated = 1;
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer 동작.
+ */
 		raise_softirq_irqoff(HRTIMER_SOFTIRQ);
 	}
 

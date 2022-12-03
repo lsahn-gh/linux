@@ -35,6 +35,14 @@ DEFINE_PER_CPU(struct tick_device, tick_cpu_device);
  * CPU which handles the tick and protected by jiffies_lock. There is
  * no requirement to write hold the jiffies seqcount for it.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   다음 이벤트 선택: 틱 시간을 추적합니다. 틱을 처리하는 CPU에 의해 업데이트되고
+ *   jiffies_lock에 의해 보호됩니다. 그것에 대한 jiffies seqcount를 보류할 필요는 없습니다.
+ *
+ * - 1tick이 더해진 next period를 저장해놓는다.
+ */
 ktime_t tick_next_period;
 
 /*
@@ -50,6 +58,21 @@ ktime_t tick_next_period;
  *    TICK_DO_TIMER_NONE, i.e. a non existing CPU. So the next cpu which looks
  *    at it will take over and keep the time keeping alive.  The handover
  *    procedure also covers cpu hotplug.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   tick_do_timer_cpu는 do_timer() 호출을 담당하는 CPU NR을 보유하는 타이머 코어 내부
+ *   변수입니다. 이 변수에는 두 가지 기능이 있습니다.
+ *
+ *   1) 시간 기록 잠금을 한 번에 모두 잡으려고 시도하는 수많은 CPU의 천둥 무리 문제를
+ *   방지합니다. 업데이트를 수행하도록 할당된 CPU만 업데이트를 처리합니다.
+ *
+ *   2) 값을 TICK_DO_TIMER_NONE(즉, 존재하지 않는 CPU)으로 설정하여 NOHZ 유휴 상태에서 작업을
+ *   해제합니다. 따라서 그것을 보는 다음 CPU가 시간을 이어받아 계속 살아있게 합니다. 핸드오버
+ *   절차에는 CPU 핫플러그도 포함됩니다.
+ *
+ * - 시간 갱신을 하는 cpu가 저장된다. 결정되기 전에는 TICK_DO_TIMER_BOOT가 저장되있다.
  */
 int tick_do_timer_cpu __read_mostly = TICK_DO_TIMER_BOOT;
 #ifdef CONFIG_NO_HZ_FULL
@@ -72,12 +95,23 @@ struct tick_device *tick_get_device(int cpu)
 /**
  * tick_is_oneshot_available - check for a oneshot capable event device
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - oneshot이 enable되있는지 확인한다.
+ */
 int tick_is_oneshot_available(void)
 {
 	struct clock_event_device *dev = __this_cpu_read(tick_cpu_device.evtdev);
 
 	if (!dev || !(dev->features & CLOCK_EVT_FEAT_ONESHOT))
 		return 0;
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - clock 절전기능이 없으면 return 1.
+ *   이 기능이 없는경우 전원을 아에 껏다가 켜야되는데, 짧은 시간을 껏다 켜야되는경우
+ *   성능이 오히려 느려져 시스템에 영향이 있다.
+ */
 	if (!(dev->features & CLOCK_EVT_FEAT_C3STOP))
 		return 1;
 	return tick_broadcast_oneshot_available();
@@ -86,13 +120,25 @@ int tick_is_oneshot_available(void)
 /*
  * Periodic tick
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - periodic tick 작업 수행.
+ */
 static void tick_periodic(int cpu)
 {
+/*
+ * IAMROOT, 2022.12.03:
+ * - @cpu가 jiffies을 계산하는 cpu가 맞다면 시간갱신을한다.
+ */
 	if (tick_do_timer_cpu == cpu) {
 		raw_spin_lock(&jiffies_lock);
 		write_seqcount_begin(&jiffies_seq);
 
 		/* Keep track of the next tick event */
+/*
+ * IAMROOT, 2022.12.03:
+ * - +1 tick
+ */
 		tick_next_period = ktime_add_ns(tick_next_period, TICK_NSEC);
 
 		do_timer(1);
@@ -107,6 +153,13 @@ static void tick_periodic(int cpu)
 
 /*
  * Event handler for periodic ticks
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - event_handler에 등록되서 사용된다. timer interrupt
+ *   hrtimer가 활성화 되기 전에 timer interrupt가 이 함수로 진입한다.
+ * - schedule tick의 경우
+ *   활성화가 된후에는 hrtimer_interrupt를 통해서 tick_sched_timer가 호출된다.
  */
 void tick_handle_periodic(struct clock_event_device *dev)
 {
@@ -206,6 +259,10 @@ static void tick_take_do_timer_from_boot(void)
 /*
  * Setup the tick device
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - 최초의 진입이라면(tick device setup) @cpu를 tick_do_timer_cpu로 정한다.
+ */
 static void tick_setup_device(struct tick_device *td,
 			      struct clock_event_device *newdev, int cpu,
 			      const struct cpumask *cpumask)
@@ -221,6 +278,10 @@ static void tick_setup_device(struct tick_device *td,
 		 * If no cpu took the do_timer update, assign it to
 		 * this cpu:
 		 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - @cpu로 tick_next_period를 정한다.
+ */
 		if (tick_do_timer_cpu == TICK_DO_TIMER_BOOT) {
 			tick_do_timer_cpu = cpu;
 
@@ -344,7 +405,7 @@ bool tick_check_replacement(struct clock_event_device *curdev,
  */
 /*
  * IAMROOT, 2022.08.27:
- * - TODO
+ * - @newdev를 검사하여 tick_do_timer_cpu등을 결정한다.
  */
 void tick_check_new_device(struct clock_event_device *newdev)
 {

@@ -20,6 +20,18 @@
 /**
  * tick_program_event
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - @expire == KTIME_MAX
+ *   stop
+ * - tick_cpu_device가 stop상태였다면.
+ *   oneshot mode로 변경후 program.
+ * - @expires로 program한다.
+ *
+ * - @force == 1인 경우
+ *   expires가 현재시각 이전이여도 prgram을 시도하고,
+ *   program을 실패해도 min_delta_ns * 10의 시간까지 최대 10번을 재시도한다.
+ */
 int tick_program_event(ktime_t expires, int force)
 {
 	struct clock_event_device *dev = __this_cpu_read(tick_cpu_device.evtdev);
@@ -69,6 +81,10 @@ void tick_setup_oneshot(struct clock_event_device *newdev,
 
 /**
  * tick_switch_to_oneshot - switch to oneshot mode
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - oneshot 모드로 동작되면 return 0
  */
 int tick_switch_to_oneshot(void (*handler)(struct clock_event_device *))
 {
@@ -120,6 +136,10 @@ int tick_oneshot_mode_active(void)
  * tick_init_highres - switch to high resolution mode
  *
  * Called with interrupts disabled.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer_interrupt oneshot event_handler를 사용한다.
  */
 int tick_init_highres(void)
 {

@@ -135,6 +135,10 @@ u64 clockevent_delta2ns(unsigned long latch, struct clock_event_device *evt)
 }
 EXPORT_SYMBOL_GPL(clockevent_delta2ns);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - @state에따라 필요한 callback 함수를 실행한다.
+ */
 static int __clockevents_switch_state(struct clock_event_device *dev,
 				      enum clock_event_state state)
 {
@@ -190,6 +194,10 @@ static int __clockevents_switch_state(struct clock_event_device *dev,
  * @state:	new state
  *
  * Must be called with interrupts disabled !
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - @state에 따른 callback을 수행하고 @dev의 state을 @state로 변경한다.
  */
 void clockevents_switch_state(struct clock_event_device *dev,
 			      enum clock_event_state state)
@@ -316,12 +324,22 @@ static int clockevents_program_min_delta(struct clock_event_device *dev)
  *
  * Returns 0 on success, -ETIME when the retry loop failed.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - @set_next_event callback을 실행한다.
+ */
 static int clockevents_program_min_delta(struct clock_event_device *dev)
 {
 	unsigned long long clc;
 	int64_t delta = 0;
 	int i;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - retry 10.
+ *   programming이 불가능할 정도로 term이 짧은경우가 있을수있기 때문에 조금씩 늘려서
+ *   재시도를 한다. 즉 최대 min_delta_ns * 10이후에 실행될수도 있게 된다.
+ */
 	for (i = 0; i < 10; i++) {
 		delta += dev->min_delta_ns;
 		dev->next_event = ktime_add_ns(ktime_get(), delta);
@@ -330,6 +348,10 @@ static int clockevents_program_min_delta(struct clock_event_device *dev)
 			return 0;
 
 		dev->retries++;
+/*
+ * IAMROOT, 2022.12.03:
+ * - mult shift로 ns -> cycle화 한다.
+ */
 		clc = ((unsigned long long) delta * dev->mult) >> dev->shift;
 		if (dev->set_next_event((unsigned long) clc, dev) == 0)
 			return 0;
@@ -346,6 +368,10 @@ static int clockevents_program_min_delta(struct clock_event_device *dev)
  * @force:	program minimum delay if expires can not be set
  *
  * Returns 0 on success, -ETIME when the event is in the past.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - exipires시간으로 program한다.
  */
 int clockevents_program_event(struct clock_event_device *dev, ktime_t expires,
 			      bool force)
@@ -367,19 +393,42 @@ int clockevents_program_event(struct clock_event_device *dev, ktime_t expires,
 		  clockevent_get_state(dev));
 
 	/* Shortcut for clockevent devices that can deal with ktime. */
+/*
+ * IAMROOT, 2022.12.03:
+ * - ktime으로 timer로 설정이가능한경우.
+ */
 	if (dev->features & CLOCK_EVT_FEAT_KTIME)
 		return dev->set_next_ktime(expires, dev);
 
 	delta = ktime_to_ns(ktime_sub(expires, ktime_get()));
+/*
+ * IAMROOT, 2022.12.03:
+ * - 이전시간이면 force가 있는경우에 한해서만 시도한다.
+ */
 	if (delta <= 0)
 		return force ? clockevents_program_min_delta(dev) : -ETIME;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 요청한 expires값을 clamp하여 program을 시도한다.
+ */
 	delta = min(delta, (int64_t) dev->max_delta_ns);
 	delta = max(delta, (int64_t) dev->min_delta_ns);
 
 	clc = ((unsigned long long) delta * dev->mult) >> dev->shift;
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - prgram 시도.
+ */
 	rc = dev->set_next_event((unsigned long) clc, dev);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - rc != 0 실패.
+ *   force가 있다면 가능한한 시도해야되므로 clockevents_program_min_delta()를 수행한다.
+ *   그게 아니거나(rc == 0) 성공했으면 return rc.
+ */
 	return (rc && force) ? clockevents_program_min_delta(dev) : rc;
 }
 

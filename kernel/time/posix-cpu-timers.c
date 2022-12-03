@@ -1361,6 +1361,11 @@ static void handle_posix_cpu_timers(struct task_struct *tsk)
  * already updated our counts.  We need to check if any timers fire now.
  * Interrupts are disabled.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - PASS
+ *   user task의 수행시간을 누적 or timer 하기 위한용도.
+ */
 void run_posix_cpu_timers(void)
 {
 	struct task_struct *tsk = current;

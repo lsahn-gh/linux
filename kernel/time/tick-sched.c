@@ -49,10 +49,23 @@ struct tick_sched *tick_get_tick_sched(int cpu)
  * jiffies_lock and jiffies_seq. tick_nohz_next_event() needs to get a
  * consistent view of jiffies and last_jiffies_update.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   마지막 jiffy 업데이트가 발생한 시간입니다. 쓰기 액세스는 jiffies_lock 및 jiffies_seq를
+ *   보유해야 합니다. tick_nohz_next_event()는 jiffies 및 last_jiffies_update의 일관된 보기를
+ *   가져와야 합니다.
+ */
 static ktime_t last_jiffies_update;
 
 /*
  * Must be called with interrupts disabled !
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - @now를 기준으로 jiffies_64를 갱신한다.
+ * - tick_next_period는 acquire-release barrier를 통해서 동기화를 한다.
+ *   jiffies_64는 spinlock + seqlock으로 동기화한다.
  */
 static void tick_do_update_jiffies64(ktime_t now)
 {
@@ -68,6 +81,19 @@ static void tick_do_update_jiffies64(ktime_t now)
 	 * consists of two 32bit stores and the first store could move it
 	 * to a random point in the future.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   64비트는 jiffies 잠금을 유지하지 않고 시퀀스 카운트를 보지 않고
+ *   빠른 검사를 수행할 수 있습니다. smp_load_acquire()는 이 함수에서
+ *   나중에 수행되는 업데이트와 쌍을 이룹니다.
+ *
+ *   tick_next_period의 저장소는 두 개의 32비트 저장소로 구성되어 있고
+ *   첫 번째 저장소는 향후 임의의 지점으로 이동할 수 있기 때문에
+ *   32비트는 그렇게 할 수 없습니다.
+ *
+ * - smp_store_release와 쌍으로 barrier.
+ */
 	if (IS_ENABLED(CONFIG_64BIT)) {
 		if (ktime_before(now, smp_load_acquire(&tick_next_period)))
 			return;
@@ -101,6 +127,11 @@ static void tick_do_update_jiffies64(ktime_t now)
 	write_seqcount_begin(&jiffies_seq);
 
 	delta = ktime_sub(now, tick_next_period);
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - TICK_NSEC보다 많이 지났으면 단위개수만큼 ticks를 더 고려해준다.
+ */
 	if (unlikely(delta >= TICK_NSEC)) {
 		/* Slow path for long idle sleep times */
 		s64 incr = TICK_NSEC;
@@ -115,6 +146,10 @@ static void tick_do_update_jiffies64(ktime_t now)
 	}
 
 	/* Advance jiffies to complete the jiffies_seq protected job */
+/*
+ * IAMROOT, 2022.12.03:
+ * - 계산된 ticks을 더해준다.
+ */
 	jiffies_64 += ticks;
 
 	/*
@@ -129,6 +164,13 @@ static void tick_do_update_jiffies64(ktime_t now)
 		 * not reordered vs. the store to tick_next_period, neither
 		 * by the compiler nor by the CPU.
 		 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   위의 잠금 없는 빠른 검사에서 smp_load_acquire()와 쌍을 이루고
+ *   jiffies_64에 대한 업데이트가 컴파일러나 CPU에 의해 tick_next_period에
+ *   대한 저장에 대해 재정렬되지 않도록 합니다.
+ */
 		smp_store_release(&tick_next_period, nextp);
 	} else {
 		/*
@@ -145,6 +187,10 @@ static void tick_do_update_jiffies64(ktime_t now)
 	 */
 	write_seqcount_end(&jiffies_seq);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - jiffies_64가 변경됬으므로 global load계산을 재수행한다.
+ */
 	calc_global_load();
 
 	raw_spin_unlock(&jiffies_lock);
@@ -154,6 +200,10 @@ static void tick_do_update_jiffies64(ktime_t now)
 /*
  * Initialize and return retrieve the jiffies update.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - lock을 통해서 last_jiffies_update를 가져온다.
+ */
 static ktime_t tick_init_jiffy_update(void)
 {
 	ktime_t period;
@@ -161,6 +211,10 @@ static ktime_t tick_init_jiffy_update(void)
 	raw_spin_lock(&jiffies_lock);
 	write_seqcount_begin(&jiffies_seq);
 	/* Did we start the jiffies update yet ? */
+/*
+ * IAMROOT, 2022.12.03:
+ * - 업데이트한적이 없는경우 tick_next_period로 last_jiffies_update를 갱신한다.
+ */
 	if (last_jiffies_update == 0)
 		last_jiffies_update = tick_next_period;
 	period = last_jiffies_update;
@@ -169,6 +223,10 @@ static ktime_t tick_init_jiffy_update(void)
 	return period;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - jiffies update
+ */
 static void tick_sched_do_timer(struct tick_sched *ts, ktime_t now)
 {
 	int cpu = smp_processor_id();
@@ -184,6 +242,20 @@ static void tick_sched_do_timer(struct tick_sched *ts, ktime_t now)
 	 * If nohz_full is enabled, this should not happen because the
 	 * tick_do_timer_cpu never relinquishes.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   do_timer duty가 drop되었는지 확인합니다. 우리는 동시성에 대해
+ *   신경 쓰지 않습니다. 이것은 담당 CPU가 긴 수면에 들어간
+ *   경우에만 발생합니다. 두 개의 CPU가 이 작업에 자신을 할당하는
+ *   경우 jiffies 업데이트는 여전히 jiffies_lock에 의해 직렬화됩니다.
+ *
+ *   nohz_full이 활성화된 경우 tick_do_timer_cpu가 절대 포기하지 않기
+ *   때문에 이런 일이 발생하지 않아야 합니다.
+ *
+ * - 동시성에 신경쓰지 않아 경쟁상황인 경우도 있다. 별로 상관없지만
+ *   검사는 수행한다.
+ */
 	if (unlikely(tick_do_timer_cpu == TICK_DO_TIMER_NONE)) {
 #ifdef CONFIG_NO_HZ_FULL
 		WARN_ON(tick_nohz_full_running);
@@ -200,6 +272,11 @@ static void tick_sched_do_timer(struct tick_sched *ts, ktime_t now)
 		ts->got_idle_tick = 1;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - update_process_times수행
+ *   (tick이 증가하면서 수행해야될 작업들)
+ */
 static void tick_sched_handle(struct tick_sched *ts, struct pt_regs *regs)
 {
 #ifdef CONFIG_NO_HZ_COMMON
@@ -211,6 +288,14 @@ static void tick_sched_handle(struct tick_sched *ts, struct pt_regs *regs)
 	 * idle" jiffy stamp so the idle accounting adjustment we do
 	 * when we go busy again does not account too much ticks.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   idle 상태이고 틱이 중지되면 정말 오랜 시간 동안 일정을 잡지 않을 수 있으므로
+ *   워치독을 터치해야 합니다. 이것은 로그인 프롬프트를 기다리는 동안 완전한 idle
+ *   SMP 시스템에서 발생합니다. 또한 idle jiffy 스탬프의 시작을 증가시켜 다시 바쁠
+ *   때 수행하는 idle accounting 조정이 너무 많은 틱을 고려하지 않도록 합니다.
+ */
 	if (ts->tick_stopped) {
 		touch_softlockup_watchdog_sched();
 		if (is_idle_task(current))
@@ -220,6 +305,12 @@ static void tick_sched_handle(struct tick_sched *ts, struct pt_regs *regs)
 		 * expiration, make sure we don't bypass the next clock reprogramming
 		 * to the same deadline.
 		 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   현재 틱이 예상 만료 시간보다 너무 일찍 실행되는 경우 동일한 데드라인으로
+ *   재프로그래밍되는 다음 클록을 우회하지 않도록 합니다.
+ */
 		ts->next_tick = 0;
 	}
 #endif
@@ -571,6 +662,10 @@ void __init tick_nohz_init(void)
 #ifdef CONFIG_NO_HZ_COMMON
 /*
  * NO HZ enabled ?
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - nohz= 로 설정한다. default true.
  */
 bool tick_nohz_enabled __read_mostly  = true;
 unsigned long tick_nohz_active  __read_mostly;
@@ -1327,18 +1422,31 @@ static void tick_nohz_handler(struct clock_event_device *dev)
 	tick_program_event(hrtimer_get_expires(&ts->sched_timer), 1);
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - @mode를 nohz_mode로 설정한다. schedule에 nohz enable을 예약한다.
+ */
 static inline void tick_nohz_activate(struct tick_sched *ts, int mode)
 {
 	if (!tick_nohz_enabled)
 		return;
 	ts->nohz_mode = mode;
 	/* One update is enough */
+/*
+ * IAMROOT, 2022.12.03:
+ * - active == 0인 경우 bit0 set을 하면서 timers_update_nohz()를 수행한다.
+ *   즉 최초에 수행.
+ */
 	if (!test_and_set_bit(0, &tick_nohz_active))
 		timers_update_nohz();
 }
 
 /**
  * tick_nohz_switch_to_nohz - switch to nohz mode
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - nohz로 switch한다. schedule동작할때 nohz가 active되도록 예약한다.
  */
 static void tick_nohz_switch_to_nohz(void)
 {
@@ -1348,6 +1456,10 @@ static void tick_nohz_switch_to_nohz(void)
 	if (!tick_nohz_enabled)
 		return;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - oneshot이 아니면 경우 return.
+ */
 	if (tick_switch_to_oneshot(tick_nohz_handler))
 		return;
 
@@ -1360,6 +1472,10 @@ static void tick_nohz_switch_to_nohz(void)
 	next = tick_init_jiffy_update();
 
 	hrtimer_set_expires(&ts->sched_timer, next);
+/*
+ * IAMROOT, 2022.12.03:
+ * - hrtimer최초 시작. 1tick 시작.
+ */
 	hrtimer_forward_now(&ts->sched_timer, TICK_NSEC);
 	tick_program_event(hrtimer_get_expires(&ts->sched_timer), 1);
 	tick_nohz_activate(ts, NOHZ_MODE_LOWRES);
@@ -1404,6 +1520,10 @@ void tick_irq_enter(void)
  * We rearm the timer until we get disabled by the idle code.
  * Called with interrupts disabled.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - jiffies갱신 및 tick 작업 수행 및 hrtimer tick 생성.
+ */
 static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 {
 	struct tick_sched *ts =
@@ -1423,14 +1543,28 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		ts->next_tick = 0;
 
 	/* No need to reprogram if we are in idle or full dynticks mode */
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - stop상태인 경우 여기서 return.
+ */
 	if (unlikely(ts->tick_stopped))
 		return HRTIMER_NORESTART;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - tick 생성.
+ */
 	hrtimer_forward(timer, now, TICK_NSEC);
 
 	return HRTIMER_RESTART;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 0 or 1
+ *   TICK / 2 의 시간을 cpu개수로 나눠서 어긋나게 schedule을 수행한다.
+ */
 static int sched_skew_tick;
 
 static int __init skew_tick(char *str)
@@ -1443,6 +1577,11 @@ early_param("skew_tick", skew_tick);
 
 /**
  * tick_setup_sched_timer - setup the tick emulation timer
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - sched timer를 tick_sched_timer로 설정한다.
+ *   nohz를 NOHZ_MODE_HIGHRES로 설정한다.(arm계열이 자주사용한다)
  */
 void tick_setup_sched_timer(void)
 {
@@ -1459,6 +1598,11 @@ void tick_setup_sched_timer(void)
 	hrtimer_set_expires(&ts->sched_timer, tick_init_jiffy_update());
 
 	/* Offset the tick to avert jiffies_lock contention. */
+/*
+ * IAMROOT, 2022.12.03:
+ * - sched_skew_tick option이 켜져있으면 반틱을 cpu개수로 나눠서 어긋나게 schedule이
+ *   수행하도록 보정한다.
+ */
 	if (sched_skew_tick) {
 		u64 offset = TICK_NSEC >> 1;
 		do_div(offset, num_possible_cpus());
@@ -1466,6 +1610,10 @@ void tick_setup_sched_timer(void)
 		hrtimer_add_expires_ns(&ts->sched_timer, offset);
 	}
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 실제 hrtimer 첫 틱 생성 시작.
+ */
 	hrtimer_forward(&ts->sched_timer, now, TICK_NSEC);
 	hrtimer_start_expires(&ts->sched_timer, HRTIMER_MODE_ABS_PINNED_HARD);
 	tick_nohz_activate(ts, NOHZ_MODE_HIGHRES);
@@ -1515,16 +1663,42 @@ void tick_oneshot_notify(void)
  * mode, because high resolution timers are disabled (either compile
  * or runtime). Called with interrupts disabled.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   원샷이 가능한 변화가 있는지 확인합니다.
+ *
+ *   hrtimer softirq(타이머 softirq에 의해 구동됨) allow_nohz 신호에서 주기적으로
+ *   호출되며 고해상도 타이머가 비활성화되기 때문에(컴파일 또는 런타임) 저해상도
+ *   nohz 모드로 전환할 수 있습니다. 인터럽트가 비활성화된 상태에서 호출됩니다.
+ *
+ * - oneshot nohz enable.
+ *   return 0. 이미되있거나 switch 성공.
+ *   return 1. 수행안함.
+ */
 int tick_check_oneshot_change(int allow_nohz)
 {
 	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - clocksource가 바뀌지 않았으면 return.
+ */
 	if (!test_and_clear_bit(0, &ts->check_clocks))
 		return 0;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - NOHZ_MODE_HIGHRES 인경우 return.
+ *   inactive만 아니면 이미 전환됬다고 판단한다.
+ */
 	if (ts->nohz_mode != NOHZ_MODE_INACTIVE)
 		return 0;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - hres가 아니거나 oneshot이 안켜져있으면 return.
+ */
 	if (!timekeeping_valid_for_hres() || !tick_is_oneshot_available())
 		return 0;
 

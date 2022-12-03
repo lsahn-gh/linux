@@ -45,6 +45,10 @@ enum clock_event_state {
  */
 # define CLOCK_EVT_FEAT_PERIODIC	0x000001
 # define CLOCK_EVT_FEAT_ONESHOT		0x000002
+/*
+ * IAMROOT, 2022.12.03:
+ * - ktime_t로 설정이 가능하다는것.
+ */
 # define CLOCK_EVT_FEAT_KTIME		0x000004
 
 /*
@@ -52,6 +56,11 @@ enum clock_event_state {
  *
  * - Clockevent source stops in C3 State and needs broadcast support.
  * - Local APIC timer is used as a dummy device.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - C3
+ *   clock 절전기능. 전원은 끄지 않고 clock만 멈추는 기능.
  */
 # define CLOCK_EVT_FEAT_C3STOP		0x000008
 # define CLOCK_EVT_FEAT_DUMMY		0x000010

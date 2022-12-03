@@ -295,6 +295,12 @@ static void timer_update_keys(struct work_struct *work)
 	mutex_unlock(&timer_keys_mutex);
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - timers_nohz_active,timers_migration_enabled enable.
+ *   schedule이 동작하고나서부터 돌라는 사전 예약의 의미가 있다.
+ *   (schedule이 동작안하고 있을때에는 nohz가 필요없기때문)
+ */
 void timers_update_nohz(void)
 {
 	schedule_work(&timer_update_work);
@@ -2349,12 +2355,22 @@ static __latent_entropy void run_timer_softirq(struct softirq_action *h)
 /*
  * Called by the local, per-CPU timer interrupt on SMP.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - expiry time을 확인하여 lowres timer를 동작시킨다.
+ *   hrtimer가 아직 활성화가 안된경우 hrtimer까지 수행한다.
+ */
 static void run_local_timers(void)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
 
 	hrtimer_run_queues();
 	/* Raise the softirq only if required. */
+/*
+ * IAMROOT, 2022.12.03:
+ * - expiry 시간 전이면 return.
+ *   nohz가 켜져있으면 deferred 까지 검사한다.
+ */
 	if (time_before(jiffies, base->next_expiry)) {
 		if (!IS_ENABLED(CONFIG_NO_HZ_COMMON))
 			return;
@@ -2363,12 +2379,24 @@ static void run_local_timers(void)
 		if (time_before(jiffies, base->next_expiry))
 			return;
 	}
+/*
+ * IAMROOT, 2022.12.03:
+ * - lowres timer 동작.
+ */
 	raise_softirq(TIMER_SOFTIRQ);
 }
 
 /*
  * Called from the timer interrupt handler to charge one tick to the current
  * process.  user_tick is 1 if the tick is user time, 0 for system.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - user상태인경우 @user_tick == 1.
+ *   kernel인경우 @user_tick == 0
+ *
+ * - tick이 update될시 수행할 모든일을 수행한다.
+ *   수행하는 일이 많으므로 내부 api각각 참조.
  */
 void update_process_times(int user_tick)
 {

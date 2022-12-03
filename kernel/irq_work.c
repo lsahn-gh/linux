@@ -162,6 +162,10 @@ void irq_work_single(void *arg)
 	(void)atomic_cmpxchg(&work->node.a_flags, flags, flags & ~IRQ_WORK_BUSY);
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - @list에 있는걸 즉시 수행한다.
+ */
 static void irq_work_run_list(struct llist_head *list)
 {
 	struct irq_work *work, *tmp;
@@ -188,12 +192,27 @@ void irq_work_run(void)
 }
 EXPORT_SYMBOL_GPL(irq_work_run);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - irq 내부일경우 irq tick수행.
+ *   arm64의 경우 lazy만 여기서 수행한다.
+ */
 void irq_work_tick(void)
 {
 	struct llist_head *raised = this_cpu_ptr(&raised_list);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 조건에 맞으면 이 로직에서 즉시 수행한다.
+ *   arm64는 arch_irq_work_has_interrupt가 true이므로 수행된진않는다.
+ */
 	if (!llist_empty(raised) && !arch_irq_work_has_interrupt())
 		irq_work_run_list(raised);
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - lazy_list에 있는것만 호출한다.
+ */
 	irq_work_run_list(this_cpu_ptr(&lazy_list));
 }
 

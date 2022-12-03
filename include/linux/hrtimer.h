@@ -270,6 +270,10 @@ struct hrtimer_cpu_base {
 	struct hrtimer_clock_base	clock_base[HRTIMER_MAX_CLOCK_BASES];
 } ____cacheline_aligned;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - @timer에 @time을 set한다.
+ */
 static inline void hrtimer_set_expires(struct hrtimer *timer, ktime_t time)
 {
 	timer->node.expires = time;
@@ -548,6 +552,10 @@ hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval);
  *
  * Note: This only updates the timer expiry value and does not requeue
  * the timer.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - 현재 시각을 기준으로 interval후에 expire된다.
  */
 static inline u64 hrtimer_forward_now(struct hrtimer *timer,
 				      ktime_t interval)

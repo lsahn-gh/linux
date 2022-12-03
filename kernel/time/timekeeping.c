@@ -1538,6 +1538,10 @@ EXPORT_SYMBOL(ktime_get_raw_ts64);
 /**
  * timekeeping_valid_for_hres - Check if timekeeping is suitable for hres
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - CLOCK_SOURCE_VALID_FOR_HRES가 set되있는지 확인.
+ */
 int timekeeping_valid_for_hres(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
@@ -2228,6 +2232,10 @@ out:
  * update_wall_time - Uses the current clocksource to increment the wall time
  *
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - TODO
+ */
 void update_wall_time(void)
 {
 	if (timekeeping_advance(TK_ADV_TICK))
@@ -2287,6 +2295,11 @@ EXPORT_SYMBOL(ktime_get_coarse_ts64);
 
 /*
  * Must hold jiffies_lock
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - jiffies_64에 ticks증가.
+ *   cpu global load.
  */
 void do_timer(unsigned long ticks)
 {

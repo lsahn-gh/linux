@@ -1123,6 +1123,11 @@ struct rq {
 
 	/* calc_load related fields */
 	unsigned long		calc_load_update;
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - runing + nr_uninterruptible. calc_load_fold_active() 참고
+ */
 	long			calc_load_active;
 
 #ifdef CONFIG_SCHED_HRTICK

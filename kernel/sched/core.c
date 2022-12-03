@@ -5276,6 +5276,10 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
  * This function gets called by the timer code, with HZ frequency.
  * We call it with interrupts disabled.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - TODO
+ */
 void scheduler_tick(void)
 {
 	int cpu = smp_processor_id();
@@ -5293,6 +5297,10 @@ void scheduler_tick(void)
 	update_rq_clock(rq);
 	thermal_pressure = arch_scale_thermal_pressure(cpu_of(rq));
 	update_thermal_load_avg(rq_clock_thermal(rq), rq, thermal_pressure);
+/*
+ * IAMROOT, 2022.12.03:
+ * - 현재 진행중인 current task의 scheduler한테 tick공급.
+ */
 	curr->sched_class->task_tick(rq, curr, 0);
 	if (sched_feat(LATENCY_WARN))
 		resched_latency = cpu_resched_latency(rq);

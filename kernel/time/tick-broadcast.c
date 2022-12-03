@@ -159,6 +159,10 @@ static bool tick_set_oneshot_wakeup_device(struct clock_event_device *newdev,
 /*
  * Conditionally install/replace broadcast device
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - broadcast 인경우에만 동작한다.
+ */
 void tick_install_broadcast_device(struct clock_event_device *dev, int cpu)
 {
 	struct clock_event_device *cur = tick_broadcast_device.evtdev;
@@ -1063,6 +1067,11 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
 /*
  * Select oneshot operating mode for the broadcast device
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - broadcast 설정을 한다. 설정만 할뿐 고성능 arm계열에서는
+ *   거의 사용하지 않는다. 
+ */
 void tick_broadcast_switch_to_oneshot(void)
 {
 	struct clock_event_device *bc;
@@ -1071,6 +1080,10 @@ void tick_broadcast_switch_to_oneshot(void)
 	raw_spin_lock_irqsave(&tick_broadcast_lock, flags);
 
 	tick_broadcast_device.mode = TICKDEV_MODE_ONESHOT;
+/*
+ * IAMROOT, 2022.12.03:
+ * - 설정되있는경우에만 setup.
+ */
 	bc = tick_broadcast_device.evtdev;
 	if (bc)
 		tick_broadcast_setup_oneshot(bc);
@@ -1122,6 +1135,10 @@ int tick_broadcast_oneshot_active(void)
 
 /*
  * Check whether the broadcast device supports oneshot.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - CLOCK_EVT_FEAT_ONESHOT 이 있는지 확인.
  */
 bool tick_broadcast_oneshot_available(void)
 {

@@ -57,6 +57,11 @@
 
 /* Variables and functions for calc_load */
 atomic_long_t calc_load_tasks;
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - calc_global_load에서 load를 계산해야될 시각.(jiffies)
+ */
 unsigned long calc_load_update;
 unsigned long avenrun[3];
 EXPORT_SYMBOL(avenrun); /* should be removed */
@@ -76,6 +81,10 @@ void get_avenrun(unsigned long *loads, unsigned long offset, int shift)
 	loads[2] = (avenrun[2] + offset) << shift;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - running + uninterruptible의 변화된값을 return한다.
+ */
 long calc_load_fold_active(struct rq *this_rq, long adjust)
 {
 	long nr_active, delta = 0;
@@ -105,6 +114,10 @@ long calc_load_fold_active(struct rq *this_rq, long adjust)
  * we find: x^n := x^(\Sum n_i * 2^i) := \Prod x^(n_i * 2^i), which is
  * of course trivially computable in O(log_2 n), the length of our binary
  * vector.
+ */
+/*
+ * IAMROOT, 2022.12.03:
+ * - e^N의 이진화정수 계산.
  */
 static unsigned long
 fixed_power_int(unsigned long x, unsigned int frac_bits, unsigned int n)
@@ -152,6 +165,17 @@ fixed_power_int(unsigned long x, unsigned int frac_bits, unsigned int n)
  *              n         1 - x^(n+1)
  *     S_n := \Sum x^i = -------------
  *             i=0          1 - x
+ */
+
+/*
+ * IAMROOT, 2022.12.03:
+ * n = 1 ) x1 = old * e + new * (1 - e)
+ * n = 2 ) x2 = x1 * e + new * (1 - e)
+ * n = 3 ) x3 = x2 * e + new * (1 - e)
+ *
+ * n = N ) x1 = old * e^(N) + new * (1 - e^(N))
+ *
+ * - old * e^n + new * (1 - e^n)
  */
 unsigned long
 calc_load_n(unsigned long load, unsigned long exp,
@@ -203,9 +227,33 @@ calc_load_n(unsigned long load, unsigned long exp,
  *
  * When making the ILB scale, we should try to pull this in as well.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - 이전 task개수(running + uninterruptible)와 현재 task개수의 변화값.
+ *   사용되면 0으로 초기화된다.
+ */
 static atomic_long_t calc_load_nohz[2];
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - calc_load_nohz의 lock
+ */
 static int calc_load_idx;
 
+/*
+ * IAMROOT, 2022.12.03:
+ *                 0s            5s            10s           15s
+ *                   +10           +10           +10           +10
+ *                 |-|-----------|-|-----------|-|-----------|-|
+ *             r:0 0 1           1 0           0 1           1 0
+ *             w:0 1 1           0 0           1 1           0 0
+ *                   ^             ^             ^             ^
+ * calc_load_idx   0 1             2             3             4
+ *
+ * - idx == 0 이였던경우 reader는 idx == 0을 계속 읽을것이고
+ *   writer는 idx = 1에 write를한다. write를 다했으면 idx++ 하여
+ *   reader가 완전히 write된 idx = 1에 접근할수있게 할것이다.
+ */
 static inline int calc_load_write_idx(void)
 {
 	int idx = calc_load_idx;
@@ -226,11 +274,19 @@ static inline int calc_load_write_idx(void)
 	return idx & 1;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - calc_global_nohz()에 의해 증가된 calc_load_idx의 홀/짝여부를 가져온다.
+ */
 static inline int calc_load_read_idx(void)
 {
 	return calc_load_idx & 1;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - task개수 변동이 생겼으면 변동값을 calc_load_nohz에 저장한다.
+ */
 static void calc_load_nohz_fold(struct rq *rq)
 {
 	long delta;
@@ -243,6 +299,11 @@ static void calc_load_nohz_fold(struct rq *rq)
 	}
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - nohz가 시작될시 진입한다.
+ *   task개수 변화를 감지하여 calc_load_nohz에 갱신한다.
+ */
 void calc_load_nohz_start(void)
 {
 	/*
@@ -281,11 +342,23 @@ void calc_load_nohz_stop(void)
 		this_rq->calc_load_update += LOAD_FREQ;
 }
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - calc_load_idx의 홀짝에 따른 delta값을 가져온다. 없다면 return 0.
+ */
 static long calc_load_nohz_read(void)
 {
+/*
+ * IAMROOT, 2022.12.03:
+ * - idx는 0 or 1
+ */
 	int idx = calc_load_read_idx();
 	long delta = 0;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - read를 해서 0이 아니라면 어떤 값(delta)이 있다는것. 0와 xchg를 하여 가져와서 return한다.
+ */
 	if (atomic_long_read(&calc_load_nohz[idx]))
 		delta = atomic_long_xchg(&calc_load_nohz[idx], 0);
 
@@ -301,11 +374,38 @@ static long calc_load_nohz_read(void)
  * Once we've updated the global active value, we need to apply the exponential
  * weights adjusted to the number of cycles missed.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   NO_HZ는 calc_load_fold_active()를 호출하는 모든 CPU당 틱을 놓치게 할 수 있지만,
+ *   NO_HZ CPU는 calc_load_nohz_start()마다 델타를 calc_load_nohz로 접기 때문에 NO_HZ 기간이
+ *   로드 사이클을 넘으면 보류 중인 NO_HZ 델타를 접기만 하면 됩니다. 경계.
+ *
+ *   전역 활성 값을 업데이트한 후에는 놓친 주기 수에 맞게 조정된 지수 가중치를 적용해야
+ *   합니다.
+ *
+ * - nohz구간이 존재한다면 해당구간의 시간을 보정해준다.
+ * - calc_load_idx를 증가시켜 write가 완료됫음을 알린다.
+ */
 static void calc_global_nohz(void)
 {
 	unsigned long sample_window;
 	long delta, active, n;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - calc_global_load()에서 이함수를 진입한경우 calc_global_load가 old에서 LOAD_FREQ만큼
+ *   증가됫을것이다. 증가 됬음에도 불구하고 현재시간 + 10보다 이전이라면 calc_load를 다시
+ *   수행한다.
+ * - 결국 sleep으로 인해서 고려가 안된 시간만큼 n회를 더 수행하기 위함
+ *
+ * - ex)
+ *   |    sleep  |   sleep  | wakeup |
+ *   ^last갱신                       ^new갱신
+ *               ^miss      ^miss
+ *   miss가 2번 발생했다.
+ *   new갱신은 calc_global_load()에서 했지만 2번을 못해줬다. 2번에 대해서 여기서 처리한다.
+ */
 	sample_window = READ_ONCE(calc_load_update);
 	if (!time_before(jiffies, sample_window + 10)) {
 		/*
@@ -317,6 +417,10 @@ static void calc_global_nohz(void)
 		active = atomic_long_read(&calc_load_tasks);
 		active = active > 0 ? active * FIXED_1 : 0;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - n회를 구하여 n만큼 load를 구한다.
+ */
 		avenrun[0] = calc_load_n(avenrun[0], EXP_1, active, n);
 		avenrun[1] = calc_load_n(avenrun[1], EXP_5, active, n);
 		avenrun[2] = calc_load_n(avenrun[2], EXP_15, active, n);
@@ -331,6 +435,13 @@ static void calc_global_nohz(void)
 	 * calc_load_write_idx() will see the new time when it reads the new
 	 * index, this avoids a double flip messing things up.
 	 */
+/*
+ * IAMROOT, 2022.12.03:
+ * - papago
+ *   NO_HZ 인덱스 뒤집기...
+ *   먼저 새 시간을 쓴 다음 색인을 뒤집어 calc_load_write_idx()가 새 색인을 읽을 때 새 시간을
+ *   볼 수 있도록 해야 합니다. 이렇게 하면 이중 뒤집기가 일을 망치는 것을 방지할 수 있습니다.
+ */
 	smp_wmb();
 	calc_load_idx++;
 }
@@ -347,11 +458,22 @@ static inline void calc_global_nohz(void) { }
  *
  * Called from the global timer code.
  */
+/*
+ * IAMROOT, 2022.12.03:
+ * - sample_window이후의 시간(5초마다)일때 avenrun, load를 갱신한다.
+ *   또한 nohz 구간이 있었을경우 해당 구간을 고려한다.
+ */
 void calc_global_load(void)
 {
 	unsigned long sample_window;
 	long active, delta;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - sample_window + 10 전이라면 return.
+ * - 10의 의미.
+ *   task들이 동작을할때 calc_load_tasks를 갱신해줘야되는데 이 시간을 조금 고려한거 같다.
+ */
 	sample_window = READ_ONCE(calc_load_update);
 	if (time_before(jiffies, sample_window + 10))
 		return;
@@ -360,16 +482,41 @@ void calc_global_load(void)
 	 * Fold the 'old' NO_HZ-delta to include all NO_HZ CPUs.
 	 */
 	delta = calc_load_nohz_read();
+/*
+ * IAMROOT, 2022.12.03:
+ * - nohz때 계산된 delta값을 calc_load_tasks에 더해준다.
+ */
 	if (delta)
 		atomic_long_add(delta, &calc_load_tasks);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - active는 task숫자라고 생각하면된다.
+ */
 	active = atomic_long_read(&calc_load_tasks);
+
+/*
+ * IAMROOT, 2022.12.03:
+ * - active * 2048
+ */
 	active = active > 0 ? active * FIXED_1 : 0;
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - /proc/loadavg
+ *   ex) 1.33 0.63 0.40 1/712 40301
+ *       ^0   ^1   ^2
+ *      1분  5분  15분
+ */
 	avenrun[0] = calc_load(avenrun[0], EXP_1, active);
 	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
 	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
 
+/*
+ * IAMROOT, 2022.12.03:
+ * - 이전 update시각 + LOAD_FREQ(5초 + 1tck)이후로 next update시각을 정한다.
+ *   최종적으로 next update시각은 sample_window + LOAD_FREQ + 10tick이 될것이다.
+ */
 	WRITE_ONCE(calc_load_update, sample_window + LOAD_FREQ);
 
 	/*
