@@ -35,9 +35,9 @@ void topology_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 bool topology_scale_freq_invariant(void);
 
 enum scale_freq_source {
-	SCALE_FREQ_SOURCE_CPUFREQ = 0,
+	SCALE_FREQ_SOURCE_CPUFREQ = 0, /* driver */
 	SCALE_FREQ_SOURCE_ARCH,
-	SCALE_FREQ_SOURCE_CPPC,
+	SCALE_FREQ_SOURCE_CPPC,	/* powerpc */
 };
 
 struct scale_freq_data {

@@ -212,6 +212,16 @@ EXPORT_SYMBOL_GPL(cpufreq_generic_get);
  * The policy returned by this function has to be released with the help of
  * cpufreq_cpu_put() to balance its kobject reference counter properly.
  */
+/*
+ * IAMROOT. 2022.12.10:
+ * - google-translate
+ *   cpufreq_cpu_get - CPU에 대한 정책을 반환하고 사용 중인 것으로 표시합니다. @cpu:
+ *   정책을 찾을 CPU. cpufreq_cpu_get_raw()를 호출하여 @cpu에 대한 cpufreq 정책을
+ *   얻고 해당 정책의 kobject 참조 카운터를 증가시킵니다. 성공 시 유효한 정책을
+ *   반환하거나 실패 시 NULL을 반환합니다. 이 함수에 의해 반환된 정책은 kobject 참조
+ *   카운터의 균형을 적절히 맞추기 위해 cpufreq_cpu_put()의 도움으로 해제되어야
+ *   합니다.
+ */
 struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
 {
 	struct cpufreq_policy *policy = NULL;
@@ -1768,6 +1778,29 @@ EXPORT_SYMBOL(cpufreq_quick_get_max);
  * @cpu: CPU number
  *
  * The default return value is the max_freq field of cpuinfo.
+ */
+/*
+ * IAMROOT, 2022.12.10:
+ * - 	cpu0_opp_table: cpu0_opp_table {
+ *		compatible = "operating-points-v2";
+ *		opp-shared;
+ *
+ *		cpu0_opp1: opp-300000000 {
+ *			opp-hz = /bits/ 64 <300000000>;
+ *			opp-peak-kBps = <800000 9600000>;
+ *		};
+ *
+ *		cpu0_opp2: opp-403200000 {
+ *			opp-hz = /bits/ 64 <403200000>;
+ *			opp-peak-kBps = <800000 9600000>;
+ *		};
+ *		...
+ *		cpu0_opp18: opp-1785600000 {
+ *			opp-hz = /bits/ 64 <1785600000>;
+ *			opp-peak-kBps = <3072000 43008000>;
+ *		};
+ *	};
+ *
  */
 __weak unsigned int cpufreq_get_hw_max_freq(unsigned int cpu)
 {

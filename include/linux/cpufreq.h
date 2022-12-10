@@ -49,6 +49,10 @@ struct cpufreq_cpuinfo {
 	unsigned int		min_freq;
 
 	/* in 10^(-9) s = nanoseconds */
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - transition_latency - 주파수 변경에 소요되는 시간.
+	 */
 	unsigned int		transition_latency;
 };
 

@@ -211,6 +211,10 @@ unsigned int sysctl_sched_energy_aware = 1;
 DEFINE_MUTEX(sched_energy_mutex);
 bool sched_energy_update;
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - TODO
+ */
 void rebuild_sched_domains_energy(void)
 {
 	mutex_lock(&sched_energy_mutex);

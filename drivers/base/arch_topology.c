@@ -37,6 +37,10 @@ bool topology_scale_freq_invariant(void)
 	       supports_scale_freq_counters(cpu_online_mask);
 }
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - TODO
+ */
 static void update_scale_freq_invariant(bool status)
 {
 	if (scale_freq_invariant == status)
@@ -48,12 +52,24 @@ static void update_scale_freq_invariant(bool status)
 	 * a result of counter initialisation and use, retrigger the build of
 	 * scheduling domains to ensure the information is propagated properly.
 	 */
+	/*
+	 * IAMROOT. 2022.12.10:
+	 * - google-translate
+	 *   작업 스케줄러 동작은 주파수 불변 지원(cpufreq 또는 카운터 기반)에 따라
+	 *   달라집니다. 카운터 초기화 및 사용으로 인해 지원 상태가 변경되면 예약 도메인의
+	 *   빌드를 다시 트리거하여 정보가 올바르게 전파되도록 합니다.
+	 */
 	if (topology_scale_freq_invariant() == status) {
 		scale_freq_invariant = status;
 		rebuild_sched_domains_energy();
 	}
 }
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - sft_data에 data를 저장한다.
+ *   scale_freq_counters_mask 에 해당 cpus가 추가된다.
+ */
 void topology_set_scale_freq_source(struct scale_freq_data *data,
 				    const struct cpumask *cpus)
 {
@@ -118,6 +134,10 @@ void topology_scale_freq_tick(void)
 {
 	struct scale_freq_data *sfd = rcu_dereference_sched(*this_cpu_ptr(&sft_data));
 
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - arm64 - amu_scale_freq_tick 호출
+	 */
 	if (sfd)
 		sfd->set_freq_scale();
 }
@@ -221,6 +241,13 @@ static void update_topology_flags_workfn(struct work_struct *work)
 }
 
 static DEFINE_PER_CPU(u32, freq_factor) = 1;
+/*
+ * IAMROOT, 2022.12.10:
+ * - raw_capacity 의 cpu 배열에는 device tree에서 읽은 값이 들어간다
+ *   ex. msm8998.dtsi
+ *   Little CPU. capacity-dmips-mhz = <1024>
+ *   BIG CPU. capacity-dmips-mhz = <1536>;
+ */
 static u32 *raw_capacity;
 
 static int free_raw_capacity(void)
@@ -231,6 +258,15 @@ static int free_raw_capacity(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.12.10:
+ * -  Little CPU. capacity-dmips-mhz = <1024>, 1.8G
+ *    BIG CPU. capacity-dmips-mhz = <1536>, 2.8 G
+ *    (1024 * 1.8)/(1536 * 2.8) * 1024 = 438.85714285714295 = 438 <- Little
+ *    (1536 * 2.8)/(1536 * 2.8) * 1024 = 1024 <- Big
+ *    cat /sys/devices/system/cpu/cpu0/cpu_capacity
+ *    가장 성능이 높은 cpu를 1024로 설정하고 이를 기준으로 나머지 cpu를 계산한다.
+ */
 void topology_normalize_cpu_scale(void)
 {
 	u64 capacity;
@@ -256,7 +292,35 @@ void topology_normalize_cpu_scale(void)
 			cpu, topology_get_cpu_scale(cpu));
 	}
 }
-
+/*
+ * IAMROOT, 2022.12.10:
+ * - rk3399.dtsi
+ *              cpu_l1: cpu@1 {
+ *			compatible = "arm,cortex-a53";
+ *			capacity-dmips-mhz = <485>;
+ *			...
+ *			dynamic-power-coefficient = <100>;
+ *		};
+ *
+ *		cpu_b0: cpu@100 {
+ *			compatible = "arm,cortex-a72";
+ *			capacity-dmips-mhz = <1024>;
+ *			...
+ *			dynamic-power-coefficient = <436>;
+ *		};
+ * - msm8993.dtsi
+ *		CPU0: cpu@0 {
+ *			compatible = "qcom,kryo280";
+ *			capacity-dmips-mhz = <1024>;
+ *			...
+ *		};
+ *		CPU4: cpu@100 {
+ *			compatible = "qcom,kryo280";
+ *			capacity-dmips-mhz = <1536>;
+ *			...
+ *		};
+ *
+ */
 bool __init topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu)
 {
 	struct clk *cpu_clk;
@@ -288,6 +352,14 @@ bool __init topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu)
 		 * For non-clk CPU DVFS mechanism, there's no way to get the
 		 * frequency value now, assuming they are running at the same
 		 * frequency (by keeping the initial freq_factor value).
+		 */
+		/*
+		 * IAMROOT. 2022.12.10:
+		 * - google-translate
+		 *   초기 부팅 CPU 용량을 계산하기 위해 freq_factor를 업데이트합니다.
+		 *   non-clk CPU DVFS 메커니즘의 경우, 동일한  주파수에서 실행한다고
+		 *   가정하면(초기 freq_factor 값을 유지하여) 주파수 값을 얻을 수 있는
+		 *   방법이 없습니다.
 		 */
 		cpu_clk = of_clk_get(cpu_node, 0);
 		if (!PTR_ERR_OR_ZERO(cpu_clk)) {
@@ -534,7 +606,39 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
 
 	return 0;
 }
-
+/*
+ * IAMROOT, 2022.12.10:
+ * - 	cpus {
+ *		#address-cells = <2>;
+ *		#size-cells = <0>;
+ *
+ *		cpu-map {
+ *			cluster0 {
+ *				core0 {
+ *					cpu = <&A53_0>;
+ *				};
+ *				core1 {
+ *					cpu = <&A53_1>;
+ *				};
+ *				core2 {
+ *					cpu = <&A53_2>;
+ *				};
+ *				core3 {
+ *					cpu = <&A53_3>;
+ *				};
+ *			};
+ *
+ *			cluster1 {
+ *				core0 {
+ *					cpu = <&A72_0>;
+ *				};
+ *				core1 {
+ *					cpu = <&A72_1>;
+ *				};
+ *			};
+ *		};
+ *
+ */
 static int __init parse_dt_topology(void)
 {
 	struct device_node *cn, *map;

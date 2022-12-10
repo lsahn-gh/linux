@@ -134,6 +134,10 @@ int __init parse_acpi_topology(void)
 #undef pr_fmt
 #define pr_fmt(fmt) "AMU: " fmt
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - freq_inv_set_max_ratio 에서 설정
+ */
 static DEFINE_PER_CPU_READ_MOSTLY(unsigned long, arch_max_freq_scale);
 static DEFINE_PER_CPU(u64, arch_const_cycles_prev);
 static DEFINE_PER_CPU(u64, arch_core_cycles_prev);
@@ -187,6 +191,24 @@ static int freq_inv_set_max_ratio(int cpu, u64 max_rate, u64 ref_rate)
 	 * very low reference frequencies (down to the KHz range which should
 	 * be unlikely).
 	 */
+	/*
+	 * IAMROOT. 2022.12.10:
+	 * - google-translate
+	 *   상수 참조 카운터의 주파수와 CPU의 최대 주파수 사이의 고정 비율을 미리
+	 *   계산합니다.
+	 *
+	 *			    ref_rate
+	 *   arch_max_freq_scale =   ---------- * SCHED_CAPACITY_SCALE²
+	 *			    max_rate
+	 *
+	 *   우리는 매우 낮은 기준 주파수에 대해 arch_max_freq_scale에 대한 우수한
+	 *   해상도를 보장하기 위해 2 * SCHED_CAPACITY_SHIFT -> SCHED_CAPACITY_SCALE²의
+	 *   계수를 사용합니다 (아래로 KHz 범위는 할 것 같지 않은).
+	 *   Ex.
+	 *   19.2M * 1024*1024 / 2.8G =
+	 *   19200000 * 1048576 / 2800000000 = 7190.235428571428 = 7190
+	 *   orig value = 19.2M / 2.8G = 0.000685
+	 */
 	ratio = ref_rate << (2 * SCHED_CAPACITY_SHIFT);
 	ratio = div64_u64(ratio, max_rate);
 	if (!ratio) {
@@ -199,6 +221,10 @@ static int freq_inv_set_max_ratio(int cpu, u64 max_rate, u64 ref_rate)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - 매 tick 마다 amu 레지스터를 읽어 arch_freq_scale을 업데이트 한다.
+ */
 static void amu_scale_freq_tick(void)
 {
 	u64 prev_core_cnt, prev_const_cnt;

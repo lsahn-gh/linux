@@ -518,6 +518,18 @@ static inline bool cpumask_intersects(const struct cpumask *src1p,
  *
  * Returns 1 if *@src1p is a subset of *@src2p, else returns 0
  */
+/*
+ * IAMROOT. 2022.12.10:
+ * - google-translate
+ *   cpumask_subset - (*src1p & ~*src2p) == 0
+ *   @src1p: 첫 번째 입력
+ *   @src2p: 두 번째 입력
+ *   @src1p가 *@src2p의 하위 집합이면 1을 반환하고 그렇지 않으면 0을 반환합니다.
+ *
+ * - src1p=0b0011, scr2p=0b1111 return 1
+ *   src1p=0b0011, scr2p=0b0011 return 1
+ *   src1p=0b0111, scr2p=0b0011 return 0
+ */
 static inline int cpumask_subset(const struct cpumask *src1p,
 				 const struct cpumask *src2p)
 {

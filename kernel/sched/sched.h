@@ -1526,6 +1526,32 @@ static inline u64 __rq_clock_broken(struct rq *rq)
  * one position though, because the next rq_unpin_lock() will shift it
  * back.
  */
+/*
+ * IAMROOT. 2022.12.10:
+ * - google-translate
+ *   rq::clock_update_flags 비트
+ *
+ *   %RQCF_REQ_SKIP - __schedule()에 대한 다음 호출에서
+ *   클록 업데이트 건너뛰기를 요청합니다. 이는 인접한 rq 클럭 업데이트를 피하기 위한
+ *   최적화입니다.
+ *
+ *   %RQCF_ACT_SKIP - 건너뛰기가 적용되고 update_rq_clock()에 대한
+ *   호출이 무시될 때 __schedule() 내부에서 설정됩니다.
+ *
+ *   %RQCF_UPDATED - rq::lock이
+ *   마지막으로 고정된 이후 update_rq_clock()에 대한 호출이 이루어졌는지 여부를
+ *   나타내는 디버그 플래그입니다.
+ *
+ *   __schedule() 내부에서 clock_update_flags가
+ *   왼쪽으로 이동된 경우(왼쪽 이동은 빠른 경로에서 %RQCF_REQ_SKIP를 %RQCF_ACT_SKIP로
+ *   승격하는 저렴한 작업임)
+ *
+ *   if (rq-clock_update_flags >= RQCF_UPDATED)
+ *
+ *   를 사용하여
+ *   확인해야 합니다. %RQCF_UPDATED가 설정된 경우. 다음 rq_unpin_lock()이 그것을 다시
+ *   이동시킬 것이기 때문에 그것은 결코 한 위치 이상 이동하지 않을 것입니다.
+ */
 #define RQCF_REQ_SKIP		0x01
 #define RQCF_ACT_SKIP		0x02
 #define RQCF_UPDATED		0x04

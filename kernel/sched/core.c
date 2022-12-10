@@ -614,7 +614,12 @@ struct rq *task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 /*
  * RQ-clock updating methods:
  */
-
+/*
+ * IAMROOT, 2022.12.10:
+ * - 1. rq->clock_task 업데이트 - 현재 변경된 tick의 delta(ns) 만큼 업데이트 한다
+ *      irq_delta나 PARAVIRT 용 steal 값이 있으면 그만큼 빼준다
+ *   2. rq->clock_pelt 업데이트 진행
+ */
 static void update_rq_clock_task(struct rq *rq, s64 delta)
 {
 /*
@@ -641,6 +646,20 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 	 * the current rq->clock timestamp, except that would require using
 	 * atomic ops.
 	 */
+	/*
+	 * IAMROOT. 2022.12.10:
+	 * - google-translate
+	 *   irq_time은 {soft,}irq_exit에서만 업데이트되기 때문에 {soft,}irq 영역
+	 *   내에서 이전 update_rq_clock()이 발생한 경우 이 경우가 발생할 수 있습니다.
+	 *
+	 *   이런 일이 발생하면 ->clock_task를 중지하고 맞는 부분을 설명하기 위해
+	 *   prev_irq_time 스탬프만 업데이트하므로 다음 업데이트가 나머지를 소비합니다.
+	 *   이것은 ->clock_task가 단조롭다는 것을 보장합니다.
+	 *
+	 *   그러나 그것은 {soft,}irq 시간의 약간의 잘못된 속성을
+	 *   야기합니다. 더 정확한 해결책은 원자 작업을 사용해야 하는 것을 제외하고 현재
+	 *   rq->clock 타임스탬프를 사용하여 irq_time을 업데이트하는 것입니다.
+	 */
 	if (irq_delta > delta)
 		irq_delta = delta;
 
@@ -659,7 +678,10 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 		delta -= steal;
 	}
 #endif
-
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - clock_task는 irq_delta를 뺀 delta를 누적시킨다.
+	 */
 	rq->clock_task += delta;
 
 #ifdef CONFIG_HAVE_SCHED_AVG_IRQ
@@ -669,6 +691,11 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 	update_rq_clock_pelt(rq, delta);
 }
 
+/*
+ * IAMROOT, 2022.12.10:
+ * - rq->clock 를 현재 shched_clock() 값(ns)으로 업데이트
+ *   rq->clock_task 업데이트 진행
+ */
 void update_rq_clock(struct rq *rq)
 {
 	s64 delta;
@@ -5278,7 +5305,7 @@ static inline u64 cpu_resched_latency(struct rq *rq) { return 0; }
  */
 /*
  * IAMROOT, 2022.12.03:
- * - TODO
+ * -
  */
 void scheduler_tick(void)
 {
@@ -5289,7 +5316,15 @@ void scheduler_tick(void)
 	unsigned long thermal_pressure;
 	u64 resched_latency;
 
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - 매 tick마다 amu 레지스터를 읽어 arch_freq_scale 을 업데이트 한다.
+	 */
 	arch_scale_freq_tick();
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - 불안정클럭에서 동작하므로 arm64에서는 아무것도 하지 않는다.
+	 */
 	sched_clock_tick();
 
 	rq_lock(rq, &rf);

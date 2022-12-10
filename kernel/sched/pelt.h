@@ -71,8 +71,24 @@ static inline void cfs_se_util_change(struct sched_avg *avg)
  * clock pelt      | 1| 2|    3|    4| 7| 8| 9|   10|   11|14|15|16
  *
  */
+/*
+ * IAMROOT. 2022.12.10:
+ * - google-translate
+ *   clock_pelt는 실행 중인 델타 시간 동안 수행된 계산의 유효량을 반영하도록 시간을
+ *   조정하지만 rq가 유휴 상태일 때 다시 clock_task와 동기화합니다.
+ *
+ *   absolute time   | 1| 2| 3| 4| 5| 6| 7| 8| 9|10|11|12|13|14|15|16
+ *   @ max capacity  ------******---------------******---------------
+ *   @ half capacity ------************---------************---------
+ *   clock pelt      | 1| 2|    3|    4| 7| 8| 9|   10|   11|14|15|16
+ *
+ */
 static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
 {
+	/*
+	 * IAMROOT, 2022.12.10:
+	 * - 1,2,7,8,9는 idle 중이라 동기화 됨
+	 */
 	if (unlikely(is_idle_task(rq->curr))) {
 		/* The rq is idle, we can sync to clock_task */
 		rq->clock_pelt  = rq_clock_task(rq);
@@ -90,11 +106,27 @@ static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
 	 * rq will be idle and the clock will be synced with
 	 * rq_clock_task.
 	 */
+	/*
+	 * IAMROOT. 2022.12.10:
+	 * - google-translate
+	 *   rq가 더 낮은 컴퓨팅 용량에서 실행되면 최대 용량에서보다 동일한 양의 작업을
+	 *   수행하는 데 더 많은 시간이 필요합니다. 불변성을 유지하기 위해 실제로 수행된
+	 *   작업의 양을 반영하도록 델타의 크기를 조정합니다. 더 오래 실행하면 최대 용량에
+	 *   비해 부하 신호를 방해하는 유휴 시간을 훔칩니다. 이 훔친 유휴 시간은 rq가 유휴
+	 *   상태가 되고 시계가 rq_clock_task와 동기화될 때 자동으로 반영됩니다.
+	 */
 
 	/*
 	 * Scale the elapsed time to reflect the real amount of
 	 * computation
 	 */
+	 /*
+	  * IAMROOT, 2022.12.10:
+	  * - 1000Hz 1tick - 1ms기준 = 1000000(delta)
+	  *   big cpu_scale = 1024, little cpu_scale = 438
+	  *   1000000 * 1024 / 1024 = 1000000 <= big
+	  *   1000000 * 438 / 1024 = 427734 <= little
+	  */
 	delta = cap_scale(delta, arch_scale_cpu_capacity(cpu_of(rq)));
 	delta = cap_scale(delta, arch_scale_freq_capacity(cpu_of(rq)));
 
@@ -109,6 +141,15 @@ static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
  * For optimization and computing rounding purpose, we don't take into account
  * the position in the current window (period_contrib) and we use the higher
  * bound of util_sum to decide.
+ */
+/*
+ * IAMROOT. 2022.12.10:
+ * - google-translate
+ *   rq가 유휴 상태가 되면 완전히 바빠서 유휴 시간을 잃었는지 확인해야 합니다. /Sum
+ *   util_sum이 다음보다 크거나 같을 때 rq가 완전히 사용됩니다. (LOAD_AVG_MAX - 1024
+ *   + rq->cfs.avg.period_contrib) << SCHED_CAPACITY_SHIFT; 최적화 및 계산 반올림을
+ *   위해 현재 창(period_contrib)의 위치를 ​​고려하지 않고 util_sum의 상한을 사용하여
+ *   결정합니다.
  */
 static inline void update_idle_rq_clock_pelt(struct rq *rq)
 {

@@ -63,6 +63,10 @@ struct arch_timer {
 
 #define to_arch_timer(e) container_of(e, struct arch_timer, evt)
 
+/*
+ * IAMROOT, 2022.12.10:
+ * -  타이머에 사용된 주파수 값. ex)19.2M
+ */
 static u32 arch_timer_rate __ro_after_init;
 static int arch_timer_ppi[ARCH_TIMER_MAX_TIMER_PPI] __ro_after_init;
 
