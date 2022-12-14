@@ -24,13 +24,27 @@
 
 static DEFINE_PER_CPU(struct scale_freq_data __rcu *, sft_data);
 static struct cpumask scale_freq_counters_mask;
+/*
+ * IAMROOT, 2022.12.14:
+ * - 현재 freq invariance가 지원가능 상태를 저장한다.
+ */
 static bool scale_freq_invariant;
 
+/*
+ * prifri, 2022.12.14:
+ * - scale_freq_counters_mask에 @cpus들이 전부 포함되는지 확인한다.
+ */
 static bool supports_scale_freq_counters(const struct cpumask *cpus)
 {
 	return cpumask_subset(cpus, &scale_freq_counters_mask);
 }
 
+/*
+ * IAMROOT, 2022.12.14:
+ * - freq invariance를 지원하거나, online cpu들이 scale_freq_counters에
+ *   포함이 전부 된다면 true.
+ * - freq invariance 지원가능하면 return true.
+ */
 bool topology_scale_freq_invariant(void)
 {
 	return cpufreq_supports_freq_invariance() ||
@@ -40,6 +54,11 @@ bool topology_scale_freq_invariant(void)
 /*
  * IAMROOT, 2022.12.10:
  * - TODO
+ * - 현재 system freq invariance상태와 @status가 일치하다면 아무일도 안한다.
+ * - 그게 아니라면 다시한번 topology_scale_freq_invariant()으로 
+ *   현재 system freq invariance상태를 읽어 요청 @status와 일치한다면
+ *   scale_freq_invariant를 @status로 갱신하고 rebuild_sched_domains_energy
+ *   를 수행한다.
  */
 static void update_scale_freq_invariant(bool status)
 {
@@ -67,7 +86,107 @@ static void update_scale_freq_invariant(bool status)
 
 /*
  * IAMROOT, 2022.12.10:
- * - sft_data에 data를 저장한다.
+ * -----------------
+ *  - AMU, PMU(openai)
+ *  In the context of ARM64 (also known as AArch64), PMU and AMU refer to 
+ *  two different types of hardware performance counters that are used to 
+ *  measure and monitor the performance of the system.
+ *
+ *  PMU stands for Performance Monitoring Unit, and it is a hardware 
+ *  component that is used to count and measure various events and 
+ *  activities on the system. For example, a PMU might be used to count 
+ *  the number of instructions executed by the CPU, the number of cache 
+ *  misses, or the number of memory accesses.
+ *
+ *  AMU stands for Architectural Monitoring Unit, and it is a similar 
+ *  type of hardware performance counter. Like a PMU, an AMU can be used 
+ *  to count and measure various events and activities on the system. 
+ *  However, an AMU is typically more focused on measuring the performance 
+ *  of specific instructions or operations, rather than general events.  
+ *
+ *  Both PMU and AMU are commonly used in ARM64 systems to monitor and 
+ *  measure the performance of the system and its components. They can 
+ *  provide valuable information to software developers and system 
+ *  administrators, who can use this data to optimize the performance of 
+ *  the system and diagnose any performance issues.
+ *  -- papago
+ *  ARM64(AArch64라고도 함)와 관련하여 PMU와 AMU는 시스템 성능을 측정하고 
+ *  모니터링하는 데 사용되는 두 가지 유형의 하드웨어 성능 카운터를 나타냅니다.  
+ *  PMU는 Performance Monitoring Unit의 약자로 시스템의 다양한 이벤트 및 
+ *  활동을 계산하고 측정하는 데 사용되는 하드웨어 구성 요소입니다. 
+ *  예를 들어, PMU는 CPU가 실행한 명령어 수, 캐시 미스 수 또는 메모리 
+ *  액세스 수를 계산하는 데 사용될 수 있습니다. 
+ *
+ *  AMU는 Architectural Monitoring Unit의 약자이며 유사한 유형의 하드웨어 
+ *  성능 카운터입니다. PMU와 마찬가지로 AMU를 사용하여 시스템의 다양한 
+ *  이벤트와 활동을 계산하고 측정할 수 있습니다. 그러나 AMU는 일반적으로 
+ *  일반적인 이벤트보다는 특정 명령 또는 작업의 성능을 측정하는 데 더 
+ *  중점을 둡니다.  
+ *
+ *  PMU와 AMU는 일반적으로 ARM64 시스템에서 시스템과 해당 구성 요소의 
+ *  성능을 모니터링하고 측정하는 데 사용됩니다. 그들은 이 데이터를 사용하여 
+ *  시스템 성능을 최적화하고 성능 문제를 진단할 수 있는 소프트웨어 개발자 
+ *  및 시스템 관리자에게 귀중한 정보를 제공할 수 있습니다.
+ *
+ * ------------------
+ * - CPPC
+ *   Documentation/admin-guide/acpi/cppc_sysfs.rst 참고.
+ * - CPPC(openai)
+ *  Collaborative Processor Performance Control (CPPC) is a power management 
+ *  technology that allows multiple processors in a computer system to 
+ *  coordinate their performance in order to optimize power usage. 
+ *  It was developed by the Processor Power and Efficiency Working Group 
+ *  (PPEWG), a consortium of leading computer and electronics companies, 
+ *  including Intel, AMD, and ARM.  
+ *
+ *  CPPC works by allowing each processor in the system to communicate with 
+ *  the others, sharing information about their current workloads and power 
+ *  usage. This allows the processors to coordinate their performance 
+ *  in order to balance the workload across the system and reduce overall 
+ *  power consumption.
+ *
+ *  For example, if one processor is heavily loaded and using a lot of 
+ *  power, while another processor is idle, CPPC can allow the idle 
+ *  processor to power down or reduce its clock speed, while the busy 
+ *  processor continues to run at full speed. This can save energy and 
+ *  improve the overall power efficiency of the system. 
+ *
+ *  CPPC is designed to be transparent to the operating system and 
+ *  applications, so it can work with any software that is designed to 
+ *  run on multiple processors. It is supported by many modern processors, 
+ *  and is often used in laptops, tablets, and other devices to improve 
+ *  their battery life and power efficiency. 
+ *
+ * -- papago 
+ *  CPPC(Collaborative Processor Performance Control)는 전원 사용을 
+ *  최적화하기 위해 컴퓨터 시스템의 여러 프로세서가 성능을 조정할 수 있도록 
+ *  하는 전원 관리 기술입니다. Intel, AMD 및 ARM을 포함한 주요 컴퓨터 및 
+ *  전자 제품 회사의 컨소시엄인 PPEWG(Processor Power and Efficiency Working 
+ *  Group)에서 개발했습니다.
+ *
+ *  CPPC는 시스템의 각 프로세서가 다른 프로세서와 통신할 수 있도록 하여 
+ *  현재 워크로드 및 전력 사용량에 대한 정보를 공유합니다. 이를 통해 
+ *  프로세서는 시스템 전체에서 워크로드의 균형을 유지하고 전체 전력 소비를 
+ *  줄이기 위해 성능을 조정할 수 있습니다.
+ *
+ *  예를 들어, 한 프로세서가 과도하게 로드되어 많은 전력을 사용하고 
+ *  다른 프로세서가 유휴 상태인 경우 CPPC는 유휴 프로세서의 전원을 끄거나 
+ *  클록 속도를 낮추고 바쁜 프로세서는 계속 최고 속도로 실행되도록 할 수 
+ *  있습니다. 이를 통해 에너지를 절약하고 시스템의 전체 전력 효율성을 
+ *  향상시킬 수 있습니다.
+ *
+ *  CPPC는 운영 체제 및 응용 프로그램에 투명하도록 설계되었으므로 여러 
+ *  프로세서에서 실행되도록 설계된 모든 소프트웨어에서 작동할 수 있습니다. 
+ *  많은 최신 프로세서에서 지원되며 노트북, 태블릿 및 기타 장치에서 배터리 
+ *  수명과 전력 효율성을 개선하기 위해 자주 사용됩니다.
+ * ------------
+ *
+ * - arm64 amu fie driver나 Collaborative Processor Performance Control
+ *   (CPPC) driver에 의해서 FIE(Frequency Invariant Engine) init이
+ *   필요할경우 call된다.
+ *
+ * - 모든 cpu들의 pcpu sft_data가 SCALE_FREQ_SOURCE_ARCH로 등록이
+ *   안되있다면 @data로 갱신한다.
  *   scale_freq_counters_mask 에 해당 cpus가 추가된다.
  */
 void topology_set_scale_freq_source(struct scale_freq_data *data,
@@ -80,11 +199,24 @@ void topology_set_scale_freq_source(struct scale_freq_data *data,
 	 * Avoid calling rebuild_sched_domains() unnecessarily if FIE is
 	 * supported by cpufreq.
 	 */
+/*
+ * IAMROOT, 2022.12.14:
+ * - scale_freq_counters_mask가 비어있다면 system상에서의 
+ *   freq invariance를 지원하는지만 결국 검사할것이다.
+ * - scale_freq_invariant는 update_scale_freq_invariant에서도 갱신을 
+ *   하는데, 이때에는 rebuild까지 수행을 한다. 최초의 수행에서는
+ *   rebuild가 필요없으므로 이렇게 scale_freq_invariant만 update한다.
+ */
 	if (cpumask_empty(&scale_freq_counters_mask))
 		scale_freq_invariant = topology_scale_freq_invariant();
 
 	rcu_read_lock();
 
+/*
+ * prifri, 2022.12.14:
+ * - @cpus들에 대해서 sfd가 등록이 안됬다면 data로 등록하면서 
+ *   scale_freq_counters에 추가한다.
+ */
 	for_each_cpu(cpu, cpus) {
 		sfd = rcu_dereference(*per_cpu_ptr(&sft_data, cpu));
 
@@ -130,6 +262,11 @@ void topology_clear_scale_freq_source(enum scale_freq_source source,
 }
 EXPORT_SYMBOL_GPL(topology_clear_scale_freq_source);
 
+/*
+ * IAMROOT, 2022.12.14:
+ * - pcpu sft_data를 가져와 null이 아니라면,
+ *   즉 scale freq invariant를 지원하는 cpu라면 set_freq_scale을 호출한다.
+ */
 void topology_scale_freq_tick(void)
 {
 	struct scale_freq_data *sfd = rcu_dereference_sched(*this_cpu_ptr(&sft_data));
@@ -171,6 +308,10 @@ void topology_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 DEFINE_PER_CPU(unsigned long, cpu_scale) = SCHED_CAPACITY_SCALE;
 EXPORT_PER_CPU_SYMBOL_GPL(cpu_scale);
 
+/*
+ * prifri, 2022.12.14:
+ * - pcp cpu_scale에 @cpu자리로 @capacity를 설정한다.
+ */
 void topology_set_cpu_scale(unsigned int cpu, unsigned long capacity)
 {
 	per_cpu(cpu_scale, cpu) = capacity;
@@ -240,6 +381,10 @@ static void update_topology_flags_workfn(struct work_struct *work)
 	update_topology = 0;
 }
 
+/*
+ * prifri, 2022.12.14:
+ * - khz단위 cpu clock. topology_parse_cpu_capacity()에서 초기화된다.
+ */
 static DEFINE_PER_CPU(u32, freq_factor) = 1;
 /*
  * IAMROOT, 2022.12.10:
@@ -277,6 +422,10 @@ void topology_normalize_cpu_scale(void)
 		return;
 
 	capacity_scale = 1;
+/*
+ * prifri, 2022.12.14:
+ * - raw_capacity * freq_factor의 값이 제일 큰것을 한개 고른다 .
+ */
 	for_each_possible_cpu(cpu) {
 		capacity = raw_capacity[cpu] * per_cpu(freq_factor, cpu);
 		capacity_scale = max(capacity, capacity_scale);
@@ -285,6 +434,11 @@ void topology_normalize_cpu_scale(void)
 	pr_debug("cpu_capacity: capacity_scale=%llu\n", capacity_scale);
 	for_each_possible_cpu(cpu) {
 		capacity = raw_capacity[cpu] * per_cpu(freq_factor, cpu);
+/*
+ * prifri, 2022.12.14:
+ * - value = (x * 1024) / max)의 연산을 수행한다.
+ *   즉 max값을 기준으로 모든값들이 1024로 정규화된다.
+ */
 		capacity = div64_u64(capacity << SCHED_CAPACITY_SHIFT,
 			capacity_scale);
 		topology_set_cpu_scale(cpu, capacity);
@@ -320,6 +474,7 @@ void topology_normalize_cpu_scale(void)
  *			...
  *		};
  *
+ * - raw_capacity, pcpu freq_factor를 초기화한다.
  */
 bool __init topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu)
 {
@@ -472,6 +627,13 @@ core_initcall(free_raw_capacity);
  * CPU nodes in DT. We need to just ignore this case.
  * (3) -1 if the node does not exist in the device tree
  */
+/*
+ * prifri, 2022.12.14:
+ * - ex) cpu = <&A53_0>; 의 형식으로 되있을것이다.
+ *   &A53_0에 대한 cpu_node를 가져오고 해당 cpu번호를 가져와서 
+ *   topology_parse_cpu_capacity()에서 raw_capacity, pcp freq_factor를
+ *   설정한다.
+ */
 static int __init get_cpu_for_node(struct device_node *node)
 {
 	struct device_node *cpu_node;
@@ -492,6 +654,32 @@ static int __init get_cpu_for_node(struct device_node *node)
 	return cpu;
 }
 
+/*
+ * IAMROOT, 2022.12.14:
+ * - 	cpus {
+ *		#address-cells = <2>;
+ *		#size-cells = <0>;
+ *
+ *		cpu-map {
+ *			cluster0 {
+ *				core0 {
+ *					cpu = <&A53_0>;
+ *				};
+ *				..
+ *			};
+ *
+ *			cluster1 {
+ *				core0 {
+ *					cpu = <&A72_0>;
+ *				};
+ *				..
+ *			};
+ *		};
+ *
+ * 의 구조에서 cluster를 iterate하면서 coreX, cpu에 대한 phandle을 parsing
+ * 하는 get_cpu_for_node()에서 raw_capacity, pcp freq_factor를 초기화
+ * 하면서 cpu_topology를 초기화한다.
+ */
 static int __init parse_core(struct device_node *core, int package_id,
 			     int core_id)
 {
@@ -539,6 +727,30 @@ static int __init parse_core(struct device_node *core, int package_id,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.12.14:
+ * - ex) parse_dt_topology에서 불러진경우
+ *   	cpus {
+ *		#address-cells = <2>;
+ *		#size-cells = <0>;
+ *
+ *		cpu-map {
+ *			cluster0 {
+ *				core0 {
+ *					cpu = <&A53_0>;
+ *				};
+ *				..
+ *			};
+ *
+ *			cluster1 {
+ *			..
+ *			};
+ *		};
+ *	  };
+ *	의 구조로 되있을거고, cluster0, core0, cpu을 이함수를 통해 parsing
+ *	할것이다.
+ *	- raw_capacity, pcp freq_factor cpu_topology를 초기화한다.
+ */
 static int __init parse_cluster(struct device_node *cluster, int depth)
 {
 	char name[20];
@@ -555,6 +767,10 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
 	 * scheduler with a flat list of them.
 	 */
 	i = 0;
+/*
+ * prifri, 2022.12.14:
+ * - clusterX에 대한 자료구조를 만든다.
+ */
 	do {
 		snprintf(name, sizeof(name), "cluster%d", i);
 		c = of_get_child_by_name(cluster, name);
@@ -570,6 +786,10 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
 
 	/* Now check for cores */
 	i = 0;
+/*
+ * prifri, 2022.12.14:
+ * - coreX를 parsing한다. 
+ */
 	do {
 		snprintf(name, sizeof(name), "core%d", i);
 		c = of_get_child_by_name(cluster, name);
@@ -638,6 +858,10 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
  *			};
  *		};
  *
+ * 1. cpu별 cpu_topology를 초기화한다.
+ * 2. cpu별 raw_capacity, pcp freq_factor를 설정한다.
+ * 3. 초기화한 raw_capacity를 가지고 kenrel 에서 사용하는 scale로
+ *    normalize하여 cpu_scale 을 초기화한다.
  */
 static int __init parse_dt_topology(void)
 {
@@ -645,6 +869,10 @@ static int __init parse_dt_topology(void)
 	int ret = 0;
 	int cpu;
 
+/*
+ * IAMROOT, 2022.12.14:
+ * - cpus {...} 를 찾는다.
+ */
 	cn = of_find_node_by_path("/cpus");
 	if (!cn) {
 		pr_err("No CPU information found in DT\n");
@@ -655,10 +883,27 @@ static int __init parse_dt_topology(void)
 	 * When topology is provided cpu-map is essentially a root
 	 * cluster with restricted subnodes.
 	 */
+/*
+ * prifri, 2022.12.14:
+ * - cpus {
+ *     cpu-map { ... } < -- 찾는다.
+ *  }
+ */
 	map = of_get_child_by_name(cn, "cpu-map");
 	if (!map)
 		goto out;
 
+/*
+ * prifri, 2022.12.14:
+ * - cpus {
+ *     cpu-map {
+ *			cluster0 { ..} < -- 이부분을 찾아서 안에 내용을 parsing한다.
+ *     }
+ *	} 
+ *
+ *	parsing하면서 coreN의 cpu = <..> 내용을 cpu_topology 전역변수에 옮긴다.
+ *	(parse_core)참고
+ */
 	ret = parse_cluster(map, 0);
 	if (ret != 0)
 		goto out_map;

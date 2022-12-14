@@ -26,7 +26,7 @@
  *	};
  *
  * - &((char *)key)[branch]
- *   struct4 jump_entry의 key member에 위 값을 넣는것을 볼수있다.
+ *   struct jump_entry의 key member에 위 값을 넣는것을 볼수있다.
  *   결국엔 key의 주소를 그대로 넣냐 + 1을 해서의 넣냐의 차이가 된다.
  *   static_key is branch 이면 즉 0번 bit를 set하기 위한 용법이다.
  *   주소야 무조건 4byte정렬이 되있을테니 쓰지 않은 bit들을 마치 flag처럼

@@ -42,6 +42,8 @@ asm_ops "\n"								\
 
 /*
  * IAMROOT, 2021.09.18:
+ * - 참고
+ *   https://developer.arm.com/documentation/100748/0616/Using-Assembly-and-Intrinsics-in-C-or-C---Code/Writing-inline-assembly-code
  *   ------------
  *   인자들에 대한 설명.
  *
@@ -60,6 +62,7 @@ asm_ops "\n"								\
  *   ------------
  *   asm 보충설명
  *
+ * - http://www.ethernut.de/en/documents/arm-inline-asm.html
  * - r : 일반 register 사용
  * - = : write only
  * - & : output register를 먼저 할당(가능하면 가장 앞번호로 할당)

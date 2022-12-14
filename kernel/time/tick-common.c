@@ -122,7 +122,11 @@ int tick_is_oneshot_available(void)
  */
 /*
  * IAMROOT, 2022.12.03:
- * - periodic tick 작업 수행.
+ * - @cpu가 jiffies을 담당한다면 시간 갱신을 한다.
+ * - timer event가 발생할 예정인지 확인하고 그럴 경우 해당 타이머 기능이
+ *   실행되도록 예약한다.
+ * - user_mode에서 실행중인 process에 대한 런타임 통계를 업데이트.
+ * - @cpu에 대한 profile update.
  */
 static void tick_periodic(int cpu)
 {

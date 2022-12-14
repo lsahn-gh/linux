@@ -229,8 +229,8 @@ calc_load_n(unsigned long load, unsigned long exp,
  */
 /*
  * IAMROOT, 2022.12.03:
- * - 이전 task개수(running + uninterruptible)와 현재 task개수의 변화값.
- *   사용되면 0으로 초기화된다.
+ * - cpu가 nohz상태일때 이전 task개수(running + uninterruptible)와 현재
+ *   task개수의 변화값. 사용되면 0으로 초기화된다.
  */
 static atomic_long_t calc_load_nohz[2];
 
@@ -344,7 +344,10 @@ void calc_load_nohz_stop(void)
 
 /*
  * IAMROOT, 2022.12.03:
- * - calc_load_idx의 홀짝에 따른 delta값을 가져온다. 없다면 return 0.
+ * - calc_load_idx의 홀짝에 따른 delta값을 가져온다 
+ *   (seqcount latch와 비슷한 원리의 lock.). 없다면 return 0.
+ * - delta
+ *   cpu가 nohz상태일때 cpu에서 runnable tasks의 수.
  */
 static long calc_load_nohz_read(void)
 {
@@ -473,6 +476,7 @@ void calc_global_load(void)
  * - sample_window + 10 전이라면 return.
  * - 10의 의미.
  *   task들이 동작을할때 calc_load_tasks를 갱신해줘야되는데 이 시간을 조금 고려한거 같다.
+ *   calc_global_load함수는 상대적으로 비용이 많이드는 작업이라 필요할때만 한다.
  */
 	sample_window = READ_ONCE(calc_load_update);
 	if (time_before(jiffies, sample_window + 10))
