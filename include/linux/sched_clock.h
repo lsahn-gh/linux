@@ -22,6 +22,11 @@
  * with the seqcount used to synchronize access, comfortably fits into
  * a 64 byte cache line.
  */
+/*
+ * IAMROOT, 2022.12.16:
+ * - mult : tick <-> ns 변환 계수
+ * - read_sched_clock : cd의 경우 jiffy_sched_clock_read 가 기본.
+ */
 struct clock_read_data {
 	u64 epoch_ns;
 	u64 epoch_cyc;

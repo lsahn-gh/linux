@@ -124,6 +124,22 @@ int __init parse_acpi_topology(void)
 #endif
 
 #ifdef CONFIG_ARM64_AMU_EXTN
+/*
+ * IAMROOT, 2022.12.15:
+ * - read_corecnt 
+ *   cpu frequency counting을 읽는다.
+ * - read_constcnt
+ *   fixed frequency of the system clock counting을 읽는다.
+ *
+ * - fixed frequency of the system clock
+ *   정확하진 않지만 다음과 같은 글귀가 있다.
+ *   The system clock in Linux is a system-wide clock that keeps 
+ *   track of the current time and date.
+ *
+ * ---
+ *  단위시간당 증가한 core count로 현재 clock의 scale 짐작하는데 사용한다.
+ *  (amu_scale_freq_tick() 참고)
+ */
 #define read_corecnt()	read_sysreg_s(SYS_AMEVCNTR0_CORE_EL0)
 #define read_constcnt()	read_sysreg_s(SYS_AMEVCNTR0_CONST_EL0)
 #else
@@ -136,13 +152,20 @@ int __init parse_acpi_topology(void)
 
 /*
  * IAMROOT, 2022.12.10:
- * - freq_inv_set_max_ratio 에서 설정
+ * - freq_inv_set_max_ratio 에서 설정된다. scale단위을 높이기 위해
+ *   SCHED_CAPACITY_SHIFT가 곱해진상태.
+ *   이 곱해진 SCHED_CAPACITY_SHIFT은 amu_scale_freq_tick()에서 
+ *   pcp arch_freq_scale을 계산할때 고려된다.
  */
 static DEFINE_PER_CPU_READ_MOSTLY(unsigned long, arch_max_freq_scale);
 static DEFINE_PER_CPU(u64, arch_const_cycles_prev);
 static DEFINE_PER_CPU(u64, arch_core_cycles_prev);
 static cpumask_var_t amu_fie_cpus;
 
+/*
+ * IAMROOT, 2022.12.15:
+ * - update
+ */
 void update_freq_counters_refs(void)
 {
 	this_cpu_write(arch_core_cycles_prev, read_corecnt());
@@ -223,7 +246,11 @@ static int freq_inv_set_max_ratio(int cpu, u64 max_rate, u64 ref_rate)
 
 /*
  * IAMROOT, 2022.12.10:
- * - 매 tick 마다 amu 레지스터를 읽어 arch_freq_scale을 업데이트 한다.
+ * - 매 tick 마다 amu 레지스터를 읽어 pcp arch_freq_scale을 업데이트 한다.
+ * - const는 단위시간, core는 clock count 개념이되며, 단위시간당 동작한
+ *   clock counting이 되는데 이를 arch_max_freq_scale, SCHED_CAPACITY_SCALE 
+ *   를 사용하여 최종적으로 scale로 정규화한다.
+ *   정규화된 scale은 pcp arch_freq_scale에 저장된다.
  */
 static void amu_scale_freq_tick(void)
 {
@@ -305,6 +332,15 @@ static int init_amu_fie_callback(struct notifier_block *nb, unsigned long val,
 	 * value of arch_freq_scale will remain valid as that is the frequency
 	 * those CPUs are running at.
 	 */
+/*
+ * IAMROOT, 2022.12.15:
+ * - papago
+ *   AMU 지원을 초기화하고 불변성을 활성화하면 AMU 카운터가 cpufreq 드라이버에 
+ *   종속되지 않으므로 CPUFREQ_REMOVE_POLICY 이벤트를 처리할 필요가 없습니다. 
+ *   AMU 카운터는 cpufreq 드라이버가 없는 경우에도 계속 정상적으로 작동하며 
+ *   카운터가 없는 CPU의 경우 arch_freq_scale의 마지막 설정 값이 해당 CPU가 
+ *   실행되는 주파수이므로 유효한 상태로 유지됩니다.
+ */
 
 	return 0;
 }
@@ -313,6 +349,13 @@ static struct notifier_block init_amu_fie_notifier = {
 	.notifier_call = init_amu_fie_callback,
 };
 
+/*
+ * IAMROOT, 2022.12.15:
+ * - amu_fie_cpus를 할당하고 init_amu_fie_notifier를 등록한다.
+ * - cpufreq_register_notifier
+ *   driver등을 통해서 cpu 주파수가 변경될때마다 알림을 받을 콜백 함수를 
+ *   등록하는 함수.
+ */
 static int __init init_amu_fie(void)
 {
 	int ret;

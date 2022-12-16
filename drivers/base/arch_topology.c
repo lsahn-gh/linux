@@ -279,6 +279,12 @@ void topology_scale_freq_tick(void)
 		sfd->set_freq_scale();
 }
 
+/*
+ * IAMROOT, 2022.12.15:
+ * - 현재 core의 freq scale을 나타낸다. 높을수록 빠르게 동작하고 있는것이며
+ *   최고 arch_max_freq_scale 값이 된다.
+ *   amu_scale_freq_tick()을 통해 특정 주기에 따라 update된다.
+ */
 DEFINE_PER_CPU(unsigned long, arch_freq_scale) = SCHED_CAPACITY_SCALE;
 EXPORT_PER_CPU_SYMBOL_GPL(arch_freq_scale);
 
