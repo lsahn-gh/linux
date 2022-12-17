@@ -14,6 +14,13 @@ int topology_update_cpu_topology(void);
 struct device_node;
 bool topology_parse_cpu_capacity(struct device_node *cpu_node, int cpu);
 
+/*
+ * IAMROOT, 2022.12.17: 
+ * 1) cpu_scale
+ * HMP에 따른 성능을 cpu_scale에 저장한다.
+ * 가장 고성능의 cpu=1024(1.0)을 기준으로 사용한다.
+ * 이 값은 cpu가 online될 때 한 번 저장된다.
+ */
 DECLARE_PER_CPU(unsigned long, cpu_scale);
 
 static inline unsigned long topology_get_cpu_scale(int cpu)
@@ -23,6 +30,13 @@ static inline unsigned long topology_get_cpu_scale(int cpu)
 
 void topology_set_cpu_scale(unsigned int cpu, unsigned long capacity);
 
+/*
+ * IAMROOT, 2022.12.17: 
+ * 2) arch_freq_scale
+ * cpu의 freq 운용에 따른 성능을 arch_freq_scale에 저장한다.
+ * 가장 높은 freq로 운영할 때 1024(1.0)을 기준으로 사용한다.
+ * 이 값은 cpu의 freq가 변경될 때 마다 저장된다.
+ */
 DECLARE_PER_CPU(unsigned long, arch_freq_scale);
 
 static inline unsigned long topology_get_freq_scale(int cpu)

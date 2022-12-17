@@ -315,6 +315,11 @@ static void dt_cpufreq_release(void)
 	}
 }
 
+/*
+ * IAMROOT, 2022.12.17: 
+ * cpu freq 드라이버.
+ * compatible="operating-points-v2" 드라이버에 있는 값들을 읽어와서 구성한다.
+ */
 static int dt_cpufreq_probe(struct platform_device *pdev)
 {
 	struct cpufreq_dt_platform_data *data = dev_get_platdata(&pdev->dev);

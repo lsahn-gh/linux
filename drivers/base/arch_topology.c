@@ -302,6 +302,11 @@ void topology_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 	 * want to update the scale factor with information from CPUFREQ.
 	 * Instead the scale factor will be updated from arch_scale_freq_tick.
 	 */
+/*
+ * IAMROOT, 2022.12.17: 
+ * 최근 cpu들은 절전 기능을 위해 freq를 변화시킨다.
+ * 이러한 기능이 없는 cpu들은 그냥 return한다.
+ */
 	if (supports_scale_freq_counters(cpus))
 		return;
 

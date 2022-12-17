@@ -128,6 +128,12 @@ static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
 	  *   1000000 * 438 / 1024 = 427734 <= little
 	  */
 	delta = cap_scale(delta, arch_scale_cpu_capacity(cpu_of(rq)));
+/*
+ * IAMROOT, 2022.12.17: 
+ * 최근 cpu에는 freq 조절 기능이 있는 cpu가 있다.
+ * 이러한 경우 최대 freq 대비하여 운영 중인 cpu freq 비율에 맞춰 delta를 
+ * 줄여준다. (최대 freq로 동작하는 경우는 delta 값에 변화가 없다.)
+ */
 	delta = cap_scale(delta, arch_scale_freq_capacity(cpu_of(rq)));
 
 	rq->clock_pelt += delta;

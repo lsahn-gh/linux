@@ -688,6 +688,10 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 	if ((irq_delta + steal) && sched_feat(NONTASK_CAPACITY))
 		update_irq_load_avg(rq, irq_delta + steal);
 #endif
+/*
+ * IAMROOT, 2022.12.17: 
+ * rq->clock_pelt를 갱신한다.
+ */
 	update_rq_clock_pelt(rq, delta);
 }
 
@@ -711,10 +715,18 @@ void update_rq_clock(struct rq *rq)
 	rq->clock_update_flags |= RQCF_UPDATED;
 #endif
 
+/*
+ * IAMROOT, 2022.12.17: 
+ * 지난 tick과 이번 tick의 차이 시간을 delta(ns)에 담는다.
+ */
 	delta = sched_clock_cpu(cpu_of(rq)) - rq->clock;
 	if (delta < 0)
 		return;
 	rq->clock += delta;
+/*
+ * IAMROOT, 2022.12.17: 
+ * rq->clock_task, rq->clock_pelt를 갱신한다.
+ */
 	update_rq_clock_task(rq, delta);
 }
 
@@ -5335,6 +5347,11 @@ void scheduler_tick(void)
 /*
  * IAMROOT, 2022.12.03:
  * - 현재 진행중인 current task의 scheduler한테 tick공급.
+ * 예) cfs 스케줄러: task_tick_fair
+ *     rt 스케줄러: task_tick_rt
+ *     deadline 스케줄러: task_tick_dl
+ *     idle 스케줄러: task_tick_idle <- empty code
+ *     stop 스케줄러: task_tick_stop <- empty code
  */
 	curr->sched_class->task_tick(rq, curr, 0);
 	if (sched_feat(LATENCY_WARN))
