@@ -790,6 +790,10 @@ struct dl_rq {
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 /* An entity is a task if it doesn't "own" a runqueue */
+/*
+ * IAMROOT, 2022.12.17:
+ * - schedule entity의 my_q가 null 이면 task에 포함된 entity 이다.
+ */
 #define entity_is_task(se)	(!se->my_q)
 
 static inline void se_update_runnable(struct sched_entity *se)

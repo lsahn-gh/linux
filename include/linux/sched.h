@@ -492,6 +492,52 @@ struct util_est {
  * Then it is the load_weight's responsibility to consider overflow
  * issues.
  */
+/*
+ * IAMROOT. 2022.12.17:
+ * - google-translate
+ *   load/runnable/util_avg는 무한 기하학적 계열을 누적합니다
+ *   (kernel/sched/pelt.c의 __update_load_avg_cfs_rq() 참조).
+ *
+ *   [load_avg 정의]
+ *
+ *     load_avg = runnable% * scale_load_down(load)
+ *
+ *   [runnable_avg 정의]
+ *
+ *     runnable_avg = runnable% * SCHED_CAPACITY_SCALE
+ *
+ *   [util_avg 정의]
+ *
+ *     util_avg = running% * SCHED_CAPACITY_SCALE
+ *
+ *   여기서 runnable%는 sched_entity가 실행 가능하고 실행 중인 시간의
+ *   비율입니다. sched_entity가 실행 중인 비율입니다.
+ *
+ *   cfs_rq의 경우 실행 가능하고
+ *   차단된 모든 sched_entities의 집계된 값입니다.
+ *
+ *   load/runnable/util_avg는 주파수
+ *   조정 및 CPU 용량 조정을 직접 고려하지 않습니다. 스케일링은 이러한 신호를
+ *   계산하는 데 사용되는 rq_clock_pelt를 통해 수행됩니다
+ *   (update_rq_clock_pelt() 참조).
+ *
+ *   고정 소수점 산술을 수행하기 위해 필요에 따라 큰 범위로 크기를
+ *   조정합니다. 예를 들어 이것은 util_avg의 SCHED_CAPACITY_SCALE에
+ *   반영됩니다.
+ *
+ *   [오버플로 문제]
+ *
+ *   64비트 load_sum은 가장 높은 로드(=88761)를 가진
+ *   4353082796(=2^64/47742/88761) 엔티티를 가질 수 있으며 항상 단일 cfs_rq에서 실행
+ *   가능하며 숫자가 이미 PID_MAX_LIMIT에 도달하므로 오버플로되어서는 안 됩니다.
+ *
+ *   다른 모든 경우(32비트 커널 포함)의 경우 다음과 같은 이유로 struct load_weight의
+ *   가중치가 우리보다 먼저 오버플로됩니다.
+ *
+ *   Max(load_avg) <= Max(load.weight)
+ *
+ *   그런 다음 오버플로 문제를 고려하는 것은 load_weight의 책임입니다.
+ */
 struct sched_avg {
 	u64				last_update_time;
 	u64				load_sum;
@@ -545,8 +591,16 @@ struct sched_entity {
 	struct load_weight		load;
 	struct rb_node			run_node;
 	struct list_head		group_node;
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - sched_entity 가 cfs_rq에 동작하는 경우 1
+	 */
 	unsigned int			on_rq;
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - update_curr 에서 시간을 갱신(ns)
+	 */
 	u64				exec_start;
 	u64				sum_exec_runtime;
 	u64				vruntime;

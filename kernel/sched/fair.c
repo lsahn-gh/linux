@@ -204,6 +204,10 @@ void __init sched_init_granularity(void)
 #define WMULT_CONST	(~0U)
 #define WMULT_SHIFT	32
 
+/*
+ * IAMROOT, 2022.12.17:
+ * - lw의 weight 에 대한 inv_weight 값을 갱신.
+ */
 static void __update_inv_weight(struct load_weight *lw)
 {
 	unsigned long w;
@@ -213,6 +217,12 @@ static void __update_inv_weight(struct load_weight *lw)
 
 	w = scale_load_down(lw->weight);
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - inv_weight = (1/weight) * 2^32 = 2^32/weight
+	 *   w 가 최대값을 초과하면 inv_weight는 최소값 1
+	 *   w 가 최소값 0이면 inv_weight는 최대값 사용
+	 */
 	if (BITS_PER_LONG > 32 && unlikely(w >= WMULT_CONST))
 		lw->inv_weight = 1;
 	else if (unlikely(!w))
@@ -233,6 +243,29 @@ static void __update_inv_weight(struct load_weight *lw)
  * Or, weight =< lw.weight (because lw.weight is the runqueue weight), thus
  * weight/lw.weight <= 1, and therefore our shift will also be positive.
  */
+/*
+ * IAMROOT, 2022.12.17:
+ * - ex. delta_exec=1000000, weight=1024, lw.weight=1277
+ *   1. fact=1024, lw.inv_weight=3363326
+ *   2. fact_hi = (fact >> 32) = 0 -> pass
+ *   3. fact = fact*inv_weight = 1024*3363323 = 3,444,042,752 = 0xCD47,EC00 =
+ *      0b1100,1101,0100,0111,1110,1100,0000,0000 (총32bit)
+ *   4. fact_hi = (fact >> 32) = 0 -> pass
+ *   5. (delta_exec * fact) >> 32
+ *      (1000000 * 3,444,042,752) >> 32 = 801,878
+ *
+ * - ex. delta_exec=1000000, weight=1024, lw.weight=1024
+ *   1. fact=1024, lw.inv_weight=4194304
+ *   2. fact_hi = (fact >> 32) = 0 -> pass
+ *   3. fact = fact*inv_weight = 1024*4194304 = 0x1,0000,0000 = 4,294,967,296 =
+ *      0b1,0000,0000,0000,0000,0000,0000,0000,0000(총33bit)
+ *   4. fact_hi = (fact >> 32) = 1
+ *      fs = 1, shift = 31
+ *      fact = (fact >> 1) = 0b1000,0000,0000,0000,0000,0000,0000,0000 =
+ *      2,147,483,648
+ *   5. (delta_exec * fact) >> 31
+ *      (1000000 * 2,147,483,648) >> 31 = 1,000,000
+ */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
 	u64 fact = scale_load_down(weight);
@@ -242,6 +275,11 @@ static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight
 
 	__update_inv_weight(lw);
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - shift를 32bit 정밀도로 사용하여야 하는데 weight가 32bit를 초과 하였으므로
+	 *   그만큼 shift값에서 빼준다.
+	 */
 	if (unlikely(fact_hi)) {
 		fs = fls(fact_hi);
 		shift -= fs;
@@ -250,6 +288,10 @@ static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight
 
 	fact = mul_u32_u32(fact, lw->inv_weight);
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - inv_weight 값을 곱하고 32bit를 초과하면 그만틈 shift값을 또 빼줌
+	 */
 	fact_hi = (u32)(fact >> 32);
 	if (fact_hi) {
 		fs = fls(fact_hi);
@@ -270,6 +312,22 @@ const struct sched_class fair_sched_class;
 #ifdef CONFIG_FAIR_GROUP_SCHED
 
 /* Walk up scheduling entities hierarchy */
+/*
+ * IAMROOT, 2022.12.17:
+ * - A1 그룹에 task x용 se 가 있고 B1 그룹에 task y용 se가 있다.
+ *   A 그룹에 A1그룹용 se가 있고 B 그룹에는 B1 그룹용 se가 있다.
+ *   root 그룹에 A그룹용 se와 B그룹용 se가 있다.
+ *                  null
+ *                 /     \
+ *         Root:(se)A    (se)B
+ *               /         \
+ *           A:(se)A1    B:(se)B1
+ *              /            \
+ *         A1:[se]x       B1:[se]y
+ *
+ *   se가 task x 일 경우 loop 순서
+ *   [se]x -> (se)A1 -> (se)A -> null
+ */
 #define for_each_sched_entity(se) \
 		for (; se; se = se->parent)
 
@@ -536,6 +594,10 @@ static inline bool entity_before(struct sched_entity *a,
 #define __node_2_se(node) \
 	rb_entry((node), struct sched_entity, run_node)
 
+/*
+ * IAMROOT, 2022.12.17:
+ * - min_vruntime 값을 현재 cfs_rq 의 entity들 중 가장 작은 vruntime 값으로 업데이트한다.
+ */
 static void update_min_vruntime(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
@@ -643,6 +705,10 @@ int sched_update_scaling(void)
  */
 static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 {
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - nice 값이 0 이 아닌 경우에만 vruntime 계산
+	 */
 	if (unlikely(se->load.weight != NICE_0_LOAD))
 		delta = __calc_delta(delta, NICE_0_LOAD, &se->load);
 
@@ -822,6 +888,12 @@ static void update_tg_load_avg(struct cfs_rq *cfs_rq)
 /*
  * Update the current task's runtime statistics.
  */
+ /*
+  * IAMROOT, 2022.12.17:
+  * - 1. 실행시간 누적.
+  *   2. vruntime 누적
+  *   3. min_vruntime 갱신
+  */
 static void update_curr(struct cfs_rq *cfs_rq)
 {
 	struct sched_entity *curr = cfs_rq->curr;
@@ -840,12 +912,25 @@ static void update_curr(struct cfs_rq *cfs_rq)
 	schedstat_set(curr->statistics.exec_max,
 		      max(delta_exec, curr->statistics.exec_max));
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - entity 실행한 시간 누적
+	 */
 	curr->sum_exec_runtime += delta_exec;
 	schedstat_add(cfs_rq->exec_clock, delta_exec);
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - delta_exec를 가지고 curr entity의 load_weight 를 적용해서
+	 *   vruntime을 구해와서 누적시킨다.
+	 */
 	curr->vruntime += calc_delta_fair(delta_exec, curr);
 	update_min_vruntime(cfs_rq);
 
+	/*
+	 * IAMROOT, 2022.12.17:
+	 * - loop 의 처음(task가 entity인 경우)만 호출
+	 */
 	if (entity_is_task(curr)) {
 		struct task_struct *curtask = task_of(curr);
 
@@ -3848,6 +3933,12 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 	/*
 	 * Track task load average for carrying it to new CPU after migrated, and
 	 * track group sched_entity load average for task_h_load calc in migration
+	 */
+	/*
+	 * IAMROOT. 2022.12.17:
+	 * - google-translate
+	 *   마이그레이션 후 새 CPU로 옮기기 위한 작업 로드 평균 추적 및 마이그레이션에서
+	 *   task_h_load calc에 대한 그룹 sched_entity 로드 평균 추적
 	 */
 	if (se->avg.last_update_time && !(flags & SKIP_AGE_LOAD))
 		__update_load_avg_se(now, cfs_rq, se);
@@ -11092,6 +11183,17 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
  * goes along full dynticks. Therefore no local assumption can be made
  * and everything must be accessed through the @rq and @curr passed in
  * parameters.
+ */
+/*
+ * IAMROOT. 2022.12.17:
+ * - google-translate
+ *   스케줄링 클래스의 작업을 치는 스케줄러 틱.
+ *
+ *   참고: 이 함수는 완전한 dynticks를 따라가는 틱 오프로드에 의해 원격으로 호출될 수
+ *   있습니다. 따라서 로컬 가정을 할 수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해
+ *   모든 항목에 액세스해야 합니다.
+ *
+ * - scheduler_tick 에서 호출할 때 매개변수 queued = 0
  */
 static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 {

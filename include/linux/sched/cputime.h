@@ -166,6 +166,18 @@ static inline void account_group_system_time(struct task_struct *tsk,
  * If thread group time is being maintained, get the structure for the
  * running CPU and update the sum_exec_runtime field there.
  */
+/*
+ * IAMROOT. 2022.12.17:
+ * - google-translate
+ *   account_group_exec_runtime - 스레드 그룹에 대한 exec 런타임을 유지합니다.
+ *
+ *   @tsk: 태스크 구조에 대한 포인터.
+ *   @ns: thread_group_cputime 구조체의 sum_exec_runtime
+ *        필드를 증가시킬 시간 값.
+ *
+ *   스레드 그룹 시간이 유지되는 경우 실행 중인 CPU의 구조를
+ *   가져오고 거기에서 sum_exec_runtime 필드를 업데이트합니다.
+ */
 static inline void account_group_exec_runtime(struct task_struct *tsk,
 					      unsigned long long ns)
 {
