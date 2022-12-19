@@ -318,9 +318,9 @@ const struct sched_class fair_sched_class;
  *   A 그룹에 A1그룹용 se가 있고 B 그룹에는 B1 그룹용 se가 있다.
  *   root 그룹에 A그룹용 se와 B그룹용 se가 있다.
  *                  null
- *                 /     \
- *         Root:(se)A    (se)B
- *               /         \
+ *             +--/------\----+
+ *         Root|(se)A    (se)B|
+ *             +--/-------\---+
  *           A:(se)A1    B:(se)B1
  *              /            \
  *         A1:[se]x       B1:[se]y
