@@ -2098,7 +2098,7 @@ static inline int hrtimer_clockid_to_base(clockid_t clock_id)
 			return base;
 	}
 /*
- * prifri, 2022.09.17:
+ * IAMROOT, 2022.09.17:
  * - 할당이 안된 clock_id. monotonic으로 고정시켜버린다.
  */
 	WARN(1, "Invalid clockid %d. Using MONOTONIC\n", clock_id);
@@ -2169,7 +2169,7 @@ static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 		clock_id = CLOCK_MONOTONIC;
 
 /*
- * prifri, 2022.09.17:
+ * IAMROOT, 2022.09.17:
  * - softimer 요청이면 HRTIMER_BASE_MONOTONIC_SOFT(4)를 base로, 아니면
  *   HRTIMER_BASE_MONOTONIC(0)를 base로 시작한다.
  */

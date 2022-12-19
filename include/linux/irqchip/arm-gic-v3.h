@@ -108,7 +108,7 @@
 #define GICD_CTLR_nASSGIreq		(1U << 8)
 
 /*
- * prifri, 2022.10.08:
+ * IAMROOT, 2022.10.08:
  * - GICD_CTLR_DS(Disable Security)
  *   Disable Security.
  *   0b0 Non-secure accesses are not permitted to access and modify registers that

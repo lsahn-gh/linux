@@ -11194,6 +11194,9 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
  *   모든 항목에 액세스해야 합니다.
  *
  * - scheduler_tick 에서 호출할 때 매개변수 queued = 0
+ *
+ * @rq: running task의 runqueue
+ * @queued : task가 queued에 있는지, 제거되고있는지에 대한 여부.
  */
 static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 {

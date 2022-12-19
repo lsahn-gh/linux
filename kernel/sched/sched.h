@@ -2247,6 +2247,90 @@ extern const u32		sched_prio_to_wmult[40];
 
 #define RETRY_TASK		((void *)-1UL)
 
+/*
+ * IAMROOT, 2022.12.19:
+ * - chat openai
+ *   "enqueue_task" is a pointer to a function that is used to add a task to 
+ *   the runqueue of a CPU.
+ *
+ *   "dequeue_task" is a pointer to a function that is used to remove a task 
+ *   from the runqueue of a CPU.
+ *
+ *   "yield_task" is a pointer to a function that is called when a task 
+ *   yields the CPU to allow other tasks to run.
+ *
+ *   "yield_to_task" is a pointer to a function that is called when a task 
+ *   attempts to yield the CPU to a specific task. The function returns a 
+ *   boolean value indicating whether the yield was successful. 
+ *
+ *   "check_preempt_curr" is a pointer to a function that is called to check 
+ *   whether the current task should be preempted by a higher-priority task.
+ *
+ *   "pick_next_task" is a pointer to a function that is used to select 
+ *   the next task to run on a CPU. 
+ *
+ *   "put_prev_task" is a pointer to a function that is called when a task 
+ *   is no longer the current task on a CPU.  
+ *
+ *   "set_next_task" is a pointer to a function that is called to set the 
+ *   next task to run on a CPU. 
+ *
+ *   "balance" is a pointer to a function that is used to balance the load 
+ *   across different CPUs in a system. 
+ *
+ *   "select_task_rq" is a pointer to a function that is used to select the 
+ *   runqueue on which a task should be queued. 
+ *
+ *   "pick_task" is a pointer to a function that is used to select a task 
+ *   for migration to another CPU.
+ *
+ *   "migrate_task_rq" is a pointer to a function that is called when a task 
+ *   is migrated to another CPU.
+ *
+ *   "task_woken" is a pointer to a function that is called when a task is 
+ *   woken up from sleep.
+ *
+ *   "set_cpus_allowed" is a pointer to a function that is called to set the 
+ *   CPUs on which a task is allowed to run.
+ *
+ *   "rq_online" is a pointer to a function that is called when a runqueue 
+ *   becomes available for scheduling.
+ *
+ *   "rq_offline" is a pointer to a function that is called when a runqueue 
+ *   becomes unavailable for scheduling.
+ *
+ *   "find_lock_rq" is a pointer to a function that is used to find and lock 
+ *   the runqueue on which a task is queued.
+ *
+ *   "task_tick" is a pointer to a function that is called when a task is 
+ *   selected to run on a CPU.
+ *
+ *   "task_fork" is a pointer to a function that is called when a new task 
+ *   is forked. 
+ *
+ *   "task_dead" is a pointer to a function that is called when a task exits.
+ *
+ *   "switched_from" is a pointer to a function that is called when a task 
+ *   is switched from one CPU to another.
+ *
+ *   "switched_to" is a pointer to a function that is called when a task is 
+ *   switched to a new CPU. 
+ *
+ *   "prio_changed" is a pointer to a function that is called when the 
+ *   priority of a task changes.
+*
+*   "get_rr_interval" is a pointer to a function that is used to calculate 
+*   the time slice (in nanoseconds) for a round-robin task. 
+*
+*   "update_curr" is a pointer to a function that is called to update the 
+*   current task on a CPU.
+*
+*   "task_change_group" is a pointer to a function that is called when a 
+*   task is moved to a new cgroup or when the cgroup of a task is changed.
+*
+*   "uclamp_enabled" is a field that indicates whether uclamp 
+*   (user-level clamping) is enabled for this scheduling class.
+*/
 struct sched_class {
 
 #ifdef CONFIG_UCLAMP_TASK

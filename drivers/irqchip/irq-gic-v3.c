@@ -1502,7 +1502,7 @@ static void gic_cpu_sys_reg_init(void)
 	/* Set priority mask register */
 	if (!gic_prio_masking_enabled()) {
 /*
- * prifri, 2022.10.08:
+ * IAMROOT, 2022.10.08:
  * - masking을 지원안하는경우 pmr을 통해서 막는건 지원안한다.
  */
 		write_gicreg(DEFAULT_PMR_VALUE, ICC_PMR_EL1);

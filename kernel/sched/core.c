@@ -5331,6 +5331,7 @@ void scheduler_tick(void)
 	/*
 	 * IAMROOT, 2022.12.10:
 	 * - 매 tick마다 amu 레지스터를 읽어 arch_freq_scale 을 업데이트 한다.
+	 *  - amu지원시 this cpu에 대한 실시간 freq 계산.
 	 */
 	arch_scale_freq_tick();
 	/*
@@ -5341,7 +5342,15 @@ void scheduler_tick(void)
 
 	rq_lock(rq, &rf);
 
+/*
+ * IAMROOT, 2022.12.19:
+ * - clock 갱신.
+ */
 	update_rq_clock(rq);
+/*
+ * IAMROOT, 2022.12.19:
+ * - cpu 온도에 대한 throttled 고려 
+ */
 	thermal_pressure = arch_scale_thermal_pressure(cpu_of(rq));
 	update_thermal_load_avg(rq_clock_thermal(rq), rq, thermal_pressure);
 /*
@@ -5367,6 +5376,10 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_SMP
 	rq->idle_balance = idle_cpu(cpu);
+/*
+ * IAMROOT, 2022.12.19:
+ * - load balance 수행
+ */
 	trigger_load_balance(rq);
 #endif
 }

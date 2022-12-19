@@ -215,7 +215,7 @@ __irq_startup_managed(struct irq_desc *desc, struct cpumask *aff, bool force)
 	irqd_clr_managed_shutdown(d);
 
 /*
- * prifri, 2022.10.01:
+ * IAMROOT, 2022.10.01:
  * - online cpu중에 aff와 겹치는게 없다면 return IRQ_STARTUP_ABORT.
  *   @force 요청이 있다면 warning print를 해준다.
  */
@@ -1290,7 +1290,7 @@ __irq_do_set_handler(struct irq_desc *desc, irq_flow_handler_t handle,
 		}
 
 /*
- * prifri, 2022.10.01:
+ * IAMROOT, 2022.10.01:
  * - bit flag set.
  */
 		irq_settings_set_noprobe(desc);

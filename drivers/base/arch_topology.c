@@ -31,7 +31,7 @@ static struct cpumask scale_freq_counters_mask;
 static bool scale_freq_invariant;
 
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - scale_freq_counters_mask에 @cpus들이 전부 포함되는지 확인한다.
  */
 static bool supports_scale_freq_counters(const struct cpumask *cpus)
@@ -213,7 +213,7 @@ void topology_set_scale_freq_source(struct scale_freq_data *data,
 	rcu_read_lock();
 
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - @cpus들에 대해서 sfd가 등록이 안됬다면 data로 등록하면서 
  *   scale_freq_counters에 추가한다.
  */
@@ -282,7 +282,8 @@ void topology_scale_freq_tick(void)
 /*
  * IAMROOT, 2022.12.15:
  * - 현재 core의 freq scale을 나타낸다. 높을수록 빠르게 동작하고 있는것이며
- *   최고 arch_max_freq_scale 값이 된다.
+ *   최고 1024 값이 된다.
+ * - 최초에 dt를 통해 설정되며 후에는 runtime시
  *   amu_scale_freq_tick()을 통해 특정 주기에 따라 update된다.
  */
 DEFINE_PER_CPU(unsigned long, arch_freq_scale) = SCHED_CAPACITY_SCALE;
@@ -310,6 +311,10 @@ void topology_set_freq_scale(const struct cpumask *cpus, unsigned long cur_freq,
 	if (supports_scale_freq_counters(cpus))
 		return;
 
+/*
+ * IAMROOT, 2022.12.19:
+ * - max_freq를 기준으로 1024로 정규화 
+ */
 	scale = (cur_freq << SCHED_CAPACITY_SHIFT) / max_freq;
 
 	for_each_cpu(i, cpus)
@@ -320,7 +325,7 @@ DEFINE_PER_CPU(unsigned long, cpu_scale) = SCHED_CAPACITY_SCALE;
 EXPORT_PER_CPU_SYMBOL_GPL(cpu_scale);
 
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - pcp cpu_scale에 @cpu자리로 @capacity를 설정한다.
  */
 void topology_set_cpu_scale(unsigned int cpu, unsigned long capacity)
@@ -393,7 +398,7 @@ static void update_topology_flags_workfn(struct work_struct *work)
 }
 
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - khz단위 cpu clock. topology_parse_cpu_capacity()에서 초기화된다.
  */
 static DEFINE_PER_CPU(u32, freq_factor) = 1;
@@ -434,7 +439,7 @@ void topology_normalize_cpu_scale(void)
 
 	capacity_scale = 1;
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - raw_capacity * freq_factor의 값이 제일 큰것을 한개 고른다 .
  */
 	for_each_possible_cpu(cpu) {
@@ -446,7 +451,7 @@ void topology_normalize_cpu_scale(void)
 	for_each_possible_cpu(cpu) {
 		capacity = raw_capacity[cpu] * per_cpu(freq_factor, cpu);
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - value = (x * 1024) / max)의 연산을 수행한다.
  *   즉 max값을 기준으로 모든값들이 1024로 정규화된다.
  */
@@ -639,7 +644,7 @@ core_initcall(free_raw_capacity);
  * (3) -1 if the node does not exist in the device tree
  */
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - ex) cpu = <&A53_0>; 의 형식으로 되있을것이다.
  *   &A53_0에 대한 cpu_node를 가져오고 해당 cpu번호를 가져와서 
  *   topology_parse_cpu_capacity()에서 raw_capacity, pcp freq_factor를
@@ -779,7 +784,7 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
 	 */
 	i = 0;
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - clusterX에 대한 자료구조를 만든다.
  */
 	do {
@@ -798,7 +803,7 @@ static int __init parse_cluster(struct device_node *cluster, int depth)
 	/* Now check for cores */
 	i = 0;
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - coreX를 parsing한다. 
  */
 	do {
@@ -895,7 +900,7 @@ static int __init parse_dt_topology(void)
 	 * cluster with restricted subnodes.
 	 */
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - cpus {
  *     cpu-map { ... } < -- 찾는다.
  *  }
@@ -905,7 +910,7 @@ static int __init parse_dt_topology(void)
 		goto out;
 
 /*
- * prifri, 2022.12.14:
+ * IAMROOT, 2022.12.14:
  * - cpus {
  *     cpu-map {
  *			cluster0 { ..} < -- 이부분을 찾아서 안에 내용을 parsing한다.

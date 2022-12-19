@@ -82,6 +82,25 @@ static inline void cfs_se_util_change(struct sched_avg *avg)
  *   @ half capacity ------************---------************---------
  *   clock pelt      | 1| 2|    3|    4| 7| 8| 9|   10|   11|14|15|16
  *
+ * - HMP(Heterogeneous Multi-Processing, 이기종 CPU) 에 대한 성능 차이 + 
+ *   freq 차이를 @rq->clock_pelt에 적용한다.
+ *
+ * - 성능, freq가 다른 cpu는, delta시간이 흘럿더라도 실제 수행한
+ *   작업량은 다를것이다. 
+ *
+ *   highest perf cpu와 highest freq cpu대비의 작업량은 다음과 같이 
+ *   산출한다.
+ *
+ *   work = delta * (highest performance %) * (highest freq %)
+ *   ex) 대상 cpu가 highest perf cpu, highest freq cpu라면 
+ *
+ *   work = delta * 1 * 1
+ *
+ *   ex) 대상 cpu가 highest perf cpu의 50%, highest freq cpu 50%라면 
+ *   work = delta  * 0.5 * 0.5
+ *
+ * - 이런 식이며, 정확도를 높이기 위해 SCHED_CAPACITY_SCALE로 이진화정수
+ *   변환후 계산한다.
  */
 static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
 {
@@ -154,7 +173,7 @@ static inline void update_rq_clock_pelt(struct rq *rq, s64 delta)
  *   rq가 유휴 상태가 되면 완전히 바빠서 유휴 시간을 잃었는지 확인해야 합니다. /Sum
  *   util_sum이 다음보다 크거나 같을 때 rq가 완전히 사용됩니다. (LOAD_AVG_MAX - 1024
  *   + rq->cfs.avg.period_contrib) << SCHED_CAPACITY_SHIFT; 최적화 및 계산 반올림을
- *   위해 현재 창(period_contrib)의 위치를 ​​고려하지 않고 util_sum의 상한을 사용하여
+ *   위해 현재 창(period_contrib)의 위치를 고려하지 않고 util_sum의 상한을 사용하여
  *   결정합니다.
  */
 static inline void update_idle_rq_clock_pelt(struct rq *rq)

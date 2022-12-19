@@ -586,6 +586,23 @@ struct sched_statistics {
 #endif
 };
 
+/*
+ * IAMROOT, 2022.12.19:
+ * --- chat open ai 
+ *  - scheduling entity
+ *  A scheduling entity (struct sched_entity) is a data structure that 
+ *  represents a task or a group of tasks in the Linux kernel's scheduler. 
+ *  A scheduling entity can represent a single task, or it can represent a 
+ *  group of tasks that are organized into a hierarchy.
+ *
+ * 스케줄링 엔터티(struct sched_entity)는 Linux 커널의 스케줄러에서 task 
+ * 또는 task group 을 나타내는 데이터 구조입니다. 일정 엔터티는 단일 task을 
+ * 나타내거나 계층 구조로 구성된 task group을 나타낼 수 있습니다. 
+ *
+ * ----------------------------------------------------------------------
+ *
+ * - se 구성에 대해선 for_each_sched_entity 주석 참고
+ */
 struct sched_entity {
 	/* For load-balancing: */
 	struct load_weight		load;
