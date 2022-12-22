@@ -406,6 +406,13 @@ struct sched_info {
 # define SCHED_CAPACITY_SHIFT		SCHED_FIXEDPOINT_SHIFT
 # define SCHED_CAPACITY_SCALE		(1L << SCHED_CAPACITY_SHIFT)
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - nice값에 따른 weight, inv_weight 참고
+ *   sched_prio_to_weight, sched_prio_to_wmult
+ * - inv_weight : WMULT_SHIFT로 1 / weight를 이진화정수한 값.
+ * - x / weight를 실제 계산시 (x * inv_weight) >> WMULT_SHIFT로 수행한다.
+ */
 struct load_weight {
 	unsigned long			weight;
 	u32				inv_weight;
@@ -610,7 +617,7 @@ struct sched_entity {
 	struct list_head		group_node;
 	/*
 	 * IAMROOT, 2022.12.17:
-	 * - sched_entity 가 cfs_rq에 동작하는 경우 1
+	 * - sched_entity 가 rq에 들어가 있는 경우 1
 	 */
 	unsigned int			on_rq;
 
@@ -620,6 +627,12 @@ struct sched_entity {
 	 */
 	u64				exec_start;
 	u64				sum_exec_runtime;
+/*
+ * IAMROOT, 2022.12.21:
+ * - cfs의 경우 update_curr에서 갱신된다.
+ *   nice-0 대비 load.weight의 비율이 적용된 delta값이 누적된다.
+ *   weight클수록 적게 누적된다.
+ */
 	u64				vruntime;
 	u64				prev_sum_exec_runtime;
 
@@ -630,6 +643,31 @@ struct sched_entity {
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	int				depth;
 	struct sched_entity		*parent;
+/*
+ * IAMROOT, 2022.12.21:
+ * - cfs_rq
+ *   소속되잇는 cfs_rq
+ * - my_q
+ *   자신의 cfs_rq
+ *
+ *
+ * -ex) A에 소속되있는 A1에 대한e의 구조. A1의 A의 cfs_rq에 들어가있느 상태
+ *
+ *    +--------+
+ *  A | cfs_rq |
+ * se | A1:se  |
+ *    +---|----+
+ *        |
+ *      (my_q)
+ *        |
+ *    +--------+
+ *  A1| A1의   |
+ *  se| task들 |
+ *    +--------+
+ *
+ *    A1의 cfs_rq는 A의 cfs_rq를 가리킨다. A1은 A의 cfs_rq에 들어가있다.
+ *    A1의 my_q에는 자신의 cfs_rq를 가리킨다.
+ */
 	/* rq on which this entity is (to be) queued: */
 	struct cfs_rq			*cfs_rq;
 	/* rq "owned" by this entity/group: */

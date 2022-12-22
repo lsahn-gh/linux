@@ -307,6 +307,10 @@ int __update_load_avg_blocked_se(u64 now, struct sched_entity *se)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - TODO 
+ */
 int __update_load_avg_se(u64 now, struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	if (___update_load_sum(now, &se->avg, !!se->on_rq, se_runnable(se),

@@ -1009,6 +1009,10 @@ void wake_up_q(struct wake_q_head *head)
  * might also involve a cross-CPU call to trigger the scheduler on
  * the target CPU.
  */
+/*
+ * IAMROOT, 2022.12.22:
+ * - TODO
+ */
 void resched_curr(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;

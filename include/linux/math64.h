@@ -157,6 +157,10 @@ static inline u64 mul_u32_u32(u32 a, u32 b)
 #if defined(CONFIG_ARCH_SUPPORTS_INT128) && defined(__SIZEOF_INT128__)
 
 #ifndef mul_u64_u32_shr
+/*
+ * IAMROOT, 2022.12.21:
+ * - @shift정밀도를 가진 @mul 이진화정수값으로 a를 나눗셈연산한다.
+ */
 static inline u64 mul_u64_u32_shr(u64 a, u32 mul, unsigned int shift)
 {
 	return (u64)(((unsigned __int128)a * mul) >> shift);

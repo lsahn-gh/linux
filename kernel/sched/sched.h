@@ -400,10 +400,76 @@ struct rt_rq;
 
 extern struct list_head task_groups;
 
+/*
+ * IAMROOT, 2022.12.22:
+ * --- chat open ai ---
+ * - lock: A spin lock that is used to protect the data structure from 
+ *   concurrent access.
+ *
+ * - period: The time interval over which the CPU usage rate is measured.
+ *   cpu 사용률이 측정되는 시간 간격.
+ *
+ * - quota: The maximum amount of CPU time (in nanoseconds) that is allowed 
+ *   to be used by the tasks on the runqueue over a single period.
+ *   RUNTIME_INF - runqueue가 스로틀링되지 않음을 나타내기 위해 CFS 대역폭 
+ *   컨트롤러에서 특수 값으로 사용됩니다. 이는 관리자가 실행 대기열의 
+ *   작업이 제한 없이 필요한 만큼의 CPU 시간을 사용하도록 허용하려는 
+ *   시나리오에서 유용할 수 있습니다. 
+ *   __assign_cfs_rq_runtime 함수에서 해당 시점에 period_timer를 시작을
+ *   안한다.(5ms time 뒤로 미룬다.)
+ *
+ * - runtime: The amount of CPU time (in nanoseconds) that is currently 
+ *   available for use by the tasks on the runqueue.
+ *
+ * - burst: The maximum amount of CPU time (in nanoseconds) that can be used 
+ *   by a single task on the runqueue in a single burst.
+ *
+ * - hierarchical_quota: The maximum amount of CPU time (in nanoseconds) 
+ *   that is allowed to be used by the tasks in the active hierarchy 
+ *   (i.e., the set of tasks that are eligible to run on the CPU) 
+ *   over a single period.
+ *
+ * - idle: A flag that indicates whether the runqueue is currently idle.
+ *   유휴 필드는 CFS 대역폭 컨트롤러의 상태를 추적하는 데 사용됩니다. 
+ *   컨트롤러가 유휴 상태이면 사용 가능한 런타임이 없으며 더 많은 런타임이 
+ *   할당될 때까지 작업을 예약할 수 없음을 의미합니다. 컨트롤러가 유휴 
+ *   상태가 아닌 경우 사용 가능한 런타임이 있고 필요에 따라 작업을 예약할 
+ *   수 있음을 의미합니다.
+ *
+ * - period_active: A flag that indicates whether the current period is 
+ *   active.
+ *   cpu usage를 측정하고 있는 상황인지 확인한다. 측정하고 있으면 set.
+ *   아니면 unset. (start_cfs_bandwidth() 참고)
+ *
+ * - slack_started: A flag that indicates whether the runqueue's slack 
+ *   timer has been started.
+ *
+ * - period_timer: A timer that is used to track the progress of the 
+ *   current period.
+ *
+ * - slack_timer: A timer that is used to track the runqueue's slack time.
+ *
+ * - throttled_cfs_rq: A list of runqueues that are currently being 
+ *   throttled.
+ *
+ * - nr_periods: The number of periods that have elapsed since the CFS 
+ *   bandwidth controller was enabled.
+ *
+ * - nr_throttled: The number of times the runqueue has been throttled 
+ *   since the CFS bandwidth controller was enabled.
+ *
+ * - throttled_time: The total amount of time (in nanoseconds) that the 
+ *   runqueue has been throttled since the CFS bandwidth controller was 
+ *   enabled.
+ */
 struct cfs_bandwidth {
 #ifdef CONFIG_CFS_BANDWIDTH
 	raw_spinlock_t		lock;
 	ktime_t			period;
+/*
+ * IAMROOT, 2022.12.22:
+ * - quota
+ */
 	u64			quota;
 	u64			runtime;
 	u64			burst;
@@ -589,6 +655,11 @@ struct cfs_rq {
 	u64			min_vruntime_copy;
 #endif
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - sched_entity의 vruntime을 기준으로 leftmost cache된다.
+ *   (__entity_less 참고)
+ */
 	struct rb_root_cached	tasks_timeline;
 
 	/*
@@ -668,6 +739,25 @@ struct cfs_rq {
 
 #ifdef CONFIG_CFS_BANDWIDTH
 	int			runtime_enabled;
+/*
+ * IAMROOT, 2022.12.22:
+ * - runtime_remaining
+ *   task가 runqueue에 있는 cpu시간을 제한하는데 사용.
+ *   1. 실행시간 만큼 감소한다 (__account_cfs_rq_runtime())
+ *   2. assign전 bandwidth에 대한 제한이 없으면 5ms로 다시 갱신된다.
+ *      (__assign_cfs_rq_runtime())
+ *   3. assign전 cfs_bandwidth runtime 이 감소될경우 그만큼 
+ *   runtime_remain에 추가된다.
+ *
+ * - throttled_clock_task
+ *   throttle이 시작됬을때의 시간 clock_task
+ *
+ * - throttled_clock_task_time
+ *   unthrottle가 됬을때 update. throttle됬던 시간.
+ *
+ * - throttled
+ *   쓰로틀중이면 set.
+ */
 	s64			runtime_remaining;
 
 	u64			throttled_clock;
@@ -1051,10 +1141,26 @@ struct rq {
 	struct mm_struct	*prev_mm;
 
 	unsigned int		clock_update_flags;
+/*
+ * IAMROOT, 2022.12.22:
+ * - clock
+ *   rq에 대한 system clock의 현재 값.
+ *
+ * - clock_task
+ *   interrupt등의 시간이 빠진 실제 task clock값.
+ *
+ * - clock_pelt
+ *   rq에 대한 pelt clock의 현재값. cpu성능이 고려된 clock값.
+ *   (update_rq_clock_pelt()참고)
+ */
 	u64			clock;
 	/* Ensure that all clocks are in the same cache line */
 	u64			clock_task ____cacheline_aligned;
 	u64			clock_pelt;
+/*
+ * IAMROOT, 2022.12.22:
+ * - cpu가 idle였을때 task를 실행하지 않은 시간.
+ */
 	unsigned long		lost_idle_time;
 
 	atomic_t		nr_iowait;
@@ -1462,12 +1568,20 @@ static inline struct cfs_rq *task_cfs_rq(struct task_struct *p)
 }
 
 /* runqueue on which this entity is (to be) queued */
+/*
+ * IAMROOT, 2022.12.21:
+ * - @se가 소속된 cfs_rq를 가져온다.
+ */
 static inline struct cfs_rq *cfs_rq_of(struct sched_entity *se)
 {
 	return se->cfs_rq;
 }
 
 /* runqueue "owned" by this group */
+/*
+ * IAMROOT, 2022.12.21:
+ * - 자신의 cfs_rq를 가져온다.
+ */
 static inline struct cfs_rq *group_cfs_rq(struct sched_entity *grp)
 {
 	return grp->my_q;

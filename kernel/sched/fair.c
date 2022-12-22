@@ -133,6 +133,10 @@ int __weak arch_asym_cpu_priority(int cpu)
  *
  * (default: 5 msec, units: microseconds)
  */
+/*
+ * IAMROOT, 2022.12.22:
+ * - usec단위. 5ms
+ */
 unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
 #endif
 
@@ -245,6 +249,14 @@ static void __update_inv_weight(struct load_weight *lw)
  */
 /*
  * IAMROOT, 2022.12.17:
+ * - @weight와 @lw->weight의 비율에 따른 @delta_exec의 계산값을 return한다.
+ *   (@delta_exec : @return = @weight : @lw->weight)
+ *
+ * - 실제론 이미 계산된 1 / lw.weight값을 사용해서 이진화 정수계산으로
+ *   구한다 (위 주석 참고)
+ * - 계산을 수행하면서 발생할수있는 32bit overflow에 대한 처리와, 
+ *   그에 따른 정밀도 감소처리가 있다.
+ *
  * - ex. delta_exec=1000000, weight=1024, lw.weight=1277
  *   1. fact=1024, lw.inv_weight=3363326
  *   2. fact_hi = (fact >> 32) = 0 -> pass
@@ -268,11 +280,20 @@ static void __update_inv_weight(struct load_weight *lw)
  */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
+/*
+ * IAMROOT, 2022.12.21:
+ * - delta_exec * weight * lw->inv_weight를 구하기전에 먼제
+ *   weight * lw->inv_weight 값을 구하기 위한 준비를 한다.
+ */
 	u64 fact = scale_load_down(weight);
 	u32 fact_hi = (u32)(fact >> 32);
 	int shift = WMULT_SHIFT;
 	int fs;
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - lw->inv_weigh가계산이 안되어있으면 계산.
+ */
 	__update_inv_weight(lw);
 
 	/*
@@ -286,6 +307,12 @@ static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight
 		fact >>= fs;
 	}
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - weight * lw->inv_weight 계산을 수행한다. 계산값이 u64가 될수있으므로
+ *   그에 대한 처리가 있는 api사용.
+ *   (실제 계산. weight * ( 1 / lw->weight))
+ */
 	fact = mul_u32_u32(fact, lw->inv_weight);
 
 	/*
@@ -299,6 +326,10 @@ static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight
 		fact >>= fs;
 	}
 
+/*
+ * IAMROOT, 2022.12.21:
+ *   ret = (delta_exec * (weight * lw->inv_weight)) >> WMULT_CONST
+ */
 	return mul_u64_u32_shr(delta_exec, fact, shift);
 }
 
@@ -597,6 +628,25 @@ static inline bool entity_before(struct sched_entity *a,
 /*
  * IAMROOT, 2022.12.17:
  * - min_vruntime 값을 현재 cfs_rq 의 entity들 중 가장 작은 vruntime 값으로 업데이트한다.
+ * - 1. 보통은 curr->vruntime으로 갱신.
+ *   2. curr가 없거나 on_rq가 아닌 상태면 leftmost_se->vruntime으로 처리
+ *   3. 그게 아니면 min_vruntime유지
+ *
+ * - 보통은 curr->vruntime이 가장 빠른 시간으로 설정되고, 그에따라 
+ *   아래 조건들로 해서도 왠간해선 curr->vruntime이 선택 될것이다.
+ *   그러나 어찌됫든 혹시나 모를 상황에 대비해 min, max비교등을 수행해서
+ *   min_vruntime이 갱신된다.
+ *
+ * --- vruntime이 min_vruntime보다 클경우(chat open ai. 검증필요. 참고만)
+ *  1. task이 이전에 선점되었고 나중에 재개된 경우입니다. task가 선점되면 
+ *  해당 vruntime이 일시적으로 중지될 수 있으며 다시 시작되면 해당 
+ *  vruntime이 현재 시간으로 업데이트될 수 있습니다. task가 min_vruntime 
+ *  값보다 나중에 재개되면 해당 vruntime이 min_vruntime보다 클 수 있습니다.
+ *
+ *  2. 현재 실행 중인 task이 cfs_rq의 다른 task보다 높은 우선 순위를 
+ *  가지고 있어 더 많은 CPU 시간을 받은 경우입니다. 이 경우 현재 실행 중인 
+ *  task의 vruntime이 아직 실행되지 않은 task의 vruntime보다 클 수 
+ *  있으므로 min_vruntime 값보다 클 수 있습니다.
  */
 static void update_min_vruntime(struct cfs_rq *cfs_rq)
 {
@@ -605,7 +655,39 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 
 	u64 vruntime = cfs_rq->min_vruntime;
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - min_vruntime과 비교될 vruntime을 결정한다.
+ *
+ * 1. curr가 rq에 들어있다. leftmost 
+ * 1. curr가 rq에 들어있고, leftmost가 존재.
+ *   vruntime = min_vruntime(curr->vruntime, leftmost_se->vruntime)
+ * 2. leftmost가 있고 curr가 없는 상태.
+ *   vruntime = leftmost_se->vruntime
+ *
+ * curr on_rq leftmost (compare max_vruntime cfs_rq->min_vruntime)
+ * X    -     X        -                   
+ * X    -     O        leftmost_se->vruntime
+ * O    X     X        -
+ * O    X     O        leftmost_se->vruntime
+ * O    O     X        curr->vruntime
+ * O    O     O        min_vruntime(curr->vruntime, leftmost_se->vruntime)
+ *
+ * - 현재 시점에서 curr가 가장 빠른 vruntime을 가진다.
+ *   그래서 curr = O, on_rq = O, leftmost = O인 상황에서의 min_vruntime
+ *   비교는 사실 의미는 없지만 혹시나 모르는 상황에 대비해서 min비교를
+ *   한번 해준것이다.
+ *
+ * - leftmost가 없는 상황이면 curr->vruntime이 min_vruntime과 비교되서
+ *   들어가는데 보통은 같다.
+ *
+ * - 
+ */
 	if (curr) {
+/*
+ * IAMROOT, 2022.12.21:
+ * - curr가 on_rq가 없으면 없는걸로 취급.
+ */
 		if (curr->on_rq)
 			vruntime = curr->vruntime;
 		else
@@ -622,6 +704,11 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
 	}
 
 	/* ensure we never gain time by being placed backwards. */
+/*
+ * IAMROOT, 2022.12.21:
+ * - 보통의 경우에 선택된 vruntime이 무조건 클것이지만 혹시나 모를 상황에
+ *   대비해 max처리 해준것.
+ */
 	cfs_rq->min_vruntime = max_vruntime(cfs_rq->min_vruntime, vruntime);
 #ifndef CONFIG_64BIT
 	smp_wmb();
@@ -703,6 +790,14 @@ int sched_update_scaling(void)
 /*
  * delta /= w
  */
+/*
+ * IAMROOT, 2022.12.21:
+ * - @se->load.weight에 따른 delta /= w값을 return 한다.
+ *   ex)@se->load.weight가 nice 0의 1.1배이면 dalta /= 1.1
+ *
+ * - nice 0일 경우 __calc_delta계산 결과가 입력값 @delta와 변함이 없고
+ *   어짜피 대부분의 task가 nice0이므로 계산을 안한다.
+ */
 static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
 {
 	/*
@@ -741,7 +836,7 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	unsigned int nr_running = cfs_rq->nr_running;
 	u64 slice;
-
+	
 	if (sched_feat(ALT_PERIOD))
 		nr_running = rq_of(cfs_rq)->cfs.h_nr_running;
 
@@ -762,7 +857,7 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 		}
 		slice = __calc_delta(slice, se->load.weight, load);
 	}
-
+		
 	if (sched_feat(BASE_SLICE))
 		slice = max(slice, (u64)sysctl_sched_min_granularity);
 
@@ -893,6 +988,7 @@ static void update_tg_load_avg(struct cfs_rq *cfs_rq)
   * - 1. 실행시간 누적.
   *   2. vruntime 누적
   *   3. min_vruntime 갱신
+  *   4. cfs bandwidth 처리(cfs bandwidth enable 시에만)
   */
 static void update_curr(struct cfs_rq *cfs_rq)
 {
@@ -939,6 +1035,10 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		account_group_exec_runtime(curtask, delta_exec);
 	}
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - cfs bandwidth 처리
+ */
 	account_cfs_rq_runtime(cfs_rq, delta_exec);
 }
 
@@ -3920,11 +4020,19 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 /*
  * Optional action to be done while updating the load average
  */
+/*
+ * IAMROOT, 2022.12.22:
+ * - taskgroup을 update하라는 의미.
+ */
 #define UPDATE_TG	0x1
 #define SKIP_AGE_LOAD	0x2
 #define DO_ATTACH	0x4
 
 /* Update task and its cfs_rq load average */
+/*
+ * IAMROOT, 2022.12.22:
+ * - TODO 
+ */
 static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
 	u64 now = cfs_rq_clock_pelt(cfs_rq);
@@ -4686,6 +4794,12 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 	cfs_rq->curr = NULL;
 }
 
+/*
+ * IAMROOT, 2022.12.21:
+ * - @curr 
+ *   ex) A:33%, B:33%, C:34%
+ *   A가 33%에 대한 분배 시간을 다 마치고 이함수에 진입했을때 curr는 B가 된다.
+ */
 static void
 entity_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr, int queued)
 {
@@ -4768,6 +4882,10 @@ static inline u64 default_cfs_period(void)
 	return 100000000ULL;
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - nsec 단위로 return. 기본값 5ms 
+ */
 static inline u64 sched_cfs_bandwidth_slice(void)
 {
 	return (u64)sysctl_sched_cfs_bandwidth_slice * NSEC_PER_USEC;
@@ -4795,6 +4913,24 @@ static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
 }
 
 /* returns 0 on failure to allocate runtime */
+/*
+ * IAMROOT, 2022.12.22:
+ * - @target_runtime 기본값 5ms.
+ * - bandwidth runtime, runtime 둘중 하나라도 이 남아있으면 runtime_remain이
+ *   갱신된다.
+ * - runtime_remaining == 0이면 runtime도 0이므로 runtime이 전부 소진됬다는
+ *   개념으로 봐도 될듯하다.
+ *
+ *  cfs_b | runtime_  | cfs_b   || timer | runtime_  |
+ *  qouta | remaining | runtime || 예약  | remaining | runtime 
+ *  +-----+-----------+---------++-------+-----------+--------
+ *  | ~0  | -         | -       || X     | 5ms       | 유지     
+ *  | -   | 0ms       | 0ms     || O     | 0ms       | 0ms
+ *  | -   | 0ms       | 1ms     || O     | 4ms       | 0ms
+ *  | -   | 1ms       | 0ms     || O     | 1ms       | 0ms
+ *  | -   | 2ms       | 1ms     || O     | 4ms       | 0ms
+ *  | -   | 1ms       | 2ms     || O     | 5ms       | 1ms
+ */
 static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 				   struct cfs_rq *cfs_rq, u64 target_runtime)
 {
@@ -4803,13 +4939,33 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 	lockdep_assert_held(&cfs_b->lock);
 
 	/* note: this is a positive sum as runtime_remaining <= 0 */
+/*
+ * IAMROOT, 2022.12.22:
+ * - runtime_remaining만큼을 5ms에서 빼준다.
+ * - account_cfs_rq_runtime를 통해서 진입했을때 runtime_remaining은
+ *   이미 0이긴했을것이다.
+ */
 	min_amount = target_runtime - cfs_rq->runtime_remaining;
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - quota가 RUNTIME_INF면 이 함수진입상황에서는 period_timer 추적을 안한다
+ *   는것. cfs_rq->runtime_remaining은 5ms로 유지될것이다.
+ */
 	if (cfs_b->quota == RUNTIME_INF)
 		amount = min_amount;
 	else {
+/*
+ * IAMROOT, 2022.12.22:
+ * - 5ms후 period_timer 시작 예약.
+ */
 		start_cfs_bandwidth(cfs_b);
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - runtime 이미 남아있다면 amount만큼 빼준다. 그리고 뺀만큼을 
+ *   runtime_remaining에 추가한다.
+ */
 		if (cfs_b->runtime > 0) {
 			amount = min(cfs_b->runtime, min_amount);
 			cfs_b->runtime -= amount;
@@ -4817,12 +4973,25 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 		}
 	}
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - quota == RUNTIME_INF인 경우 5ms 
+ * - bandwidth runtime == 0
+ *   amount == 0이므로 유지
+ * - 그게 아니면 runtime, min_amount중에 작은걸 기준으로 runtime에서 빼고
+ *   뺀 만큼 runtime_remaining에 추가.
+ */
 	cfs_rq->runtime_remaining += amount;
 
 	return cfs_rq->runtime_remaining > 0;
 }
 
 /* returns 0 on failure to allocate runtime */
+/*
+ * IAMROOT, 2022.12.22:
+ * - runtime_remaining을 얻어온경우(0이 아닌 경우) return 1.
+ *   period_timer가 실행됫을수도 있다.
+ */
 static int assign_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 {
 	struct cfs_bandwidth *cfs_b = tg_cfs_bandwidth(cfs_rq->tg);
@@ -4835,9 +5004,21 @@ static int assign_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - runtime_remain을 delta_exec로 감산한다.
+ *   runtime_remain이 안남앗다면 얻어오는길 시도한다.
+ *   얻어오는걸 실패했는데, curr가 있다면(실행중이라는 뜻) resched_curr를
+ *   요청한다.
+ * - runtime_remain을 얻어오면서 period_timer가 실행될수있다.
+ */
 static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
 {
 	/* dock delta_exec before expiring quota (as it could span periods) */
+/*
+ * IAMROOT, 2022.12.22:
+ * - delta_exec만큼 실행이 됬으니 runtime_remaining에서 그만큼 빼준다.
+ */
 	cfs_rq->runtime_remaining -= delta_exec;
 
 	if (likely(cfs_rq->runtime_remaining > 0))
@@ -4845,6 +5026,14 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
 
 	if (cfs_rq->throttled)
 		return;
+/*
+ * IAMROOT, 2022.12.22:
+ * - likely(cfs_rq->curr)
+ *   현재 실행중
+ * - assign_cfs_rq_runtime(cfs_rq)
+ *   runtime_remain을 얻어오고 period_timer 예약 
+ * - runtime_remain을 얻어오는데 실패했는데 실행중이면 resched_curr 요청.
+ */
 	/*
 	 * if we're unable to extend our runtime we resched so that the active
 	 * hierarchy can be throttled
@@ -4853,6 +5042,15 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
 		resched_curr(rq_of(cfs_rq));
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - cfs bandwidth 처리를 수행한다.
+ * - runtime_remain을 delta_exec로 감산한다.
+ *   runtime_remain이 안남앗다면 얻어오는길 시도한다.
+ *   얻어오는걸 실패했는데, curr가 있다면(실행중이라는 뜻) resched_curr를
+ *   요청한다.
+ * - runtime_remain을 얻어오면서 period_timer가 실행될수있다.
+ */
 static __always_inline
 void account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
 {
@@ -5494,14 +5692,27 @@ static void init_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 	INIT_LIST_HEAD(&cfs_rq->throttled_list);
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - perioid_timer(sched_cfs_period_timer)를 cfs_b->period후에 
+ *   시작하도록한다.
+ */
 void start_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
 {
 	lockdep_assert_held(&cfs_b->lock);
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - 이미 누군가 start했다면 return.
+ */
 	if (cfs_b->period_active)
 		return;
 
 	cfs_b->period_active = 1;
+/*
+ * IAMROOT, 2022.12.22:
+ * - cfs_b->period후에 period_timer(sched_cfs_period_timer)시작.
+ */
 	hrtimer_forward_now(&cfs_b->period_timer, cfs_b->period);
 	hrtimer_start_expires(&cfs_b->period_timer, HRTIMER_MODE_ABS_PINNED);
 }
@@ -11196,7 +11407,7 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
  * - scheduler_tick 에서 호출할 때 매개변수 queued = 0
  *
  * @rq: running task의 runqueue
- * @queued : task가 queued에 있는지, 제거되고있는지에 대한 여부.
+ * @queued : task가 아직 처리되지 않은 보류중인 tick이 있는지 있는지.
  */
 static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 {

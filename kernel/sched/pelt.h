@@ -196,6 +196,11 @@ static inline void update_idle_rq_clock_pelt(struct rq *rq)
 		rq->lost_idle_time += rq_clock_task(rq) - rq->clock_pelt;
 }
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - clock_pelt의 실제 실행시간을 가져온다.
+ *   (cpu가 idle이엿을대의 시간을뺌)
+ */
 static inline u64 rq_clock_pelt(struct rq *rq)
 {
 	lockdep_assert_rq_held(rq);
@@ -206,11 +211,24 @@ static inline u64 rq_clock_pelt(struct rq *rq)
 
 #ifdef CONFIG_CFS_BANDWIDTH
 /* rq->task_clock normalized against any time this cfs_rq has spent throttled */
+/*
+ * IAMROOT, 2022.12.22:
+ * - pelt clock을 가져온다.
+ */
 static inline u64 cfs_rq_clock_pelt(struct cfs_rq *cfs_rq)
 {
+/*
+ * IAMROOT, 2022.12.22:
+ * - 현재 throttle 상태라면 throttle clock으로 사용한다.
+ *   throttle중인 시간을 return. (throttle시작시간 - 가장마지막에 throttle 끝난시간)
+ */
 	if (unlikely(cfs_rq->throttle_count))
 		return cfs_rq->throttled_clock_task - cfs_rq->throttled_clock_task_time;
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - throttle 됬던 시간을 뺀 pelt clock
+ */
 	return rq_clock_pelt(rq_of(cfs_rq)) - cfs_rq->throttled_clock_task_time;
 }
 #else

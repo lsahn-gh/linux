@@ -792,6 +792,10 @@ void __cgroup_account_cputime(struct cgroup *cgrp, u64 delta_exec);
 void __cgroup_account_cputime_field(struct cgroup *cgrp,
 				    enum cpu_usage_stat index, u64 delta_exec);
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - account용 
+ */
 static inline void cgroup_account_cputime(struct task_struct *task,
 					  u64 delta_exec)
 {
