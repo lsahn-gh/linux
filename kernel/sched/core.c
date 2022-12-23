@@ -1259,6 +1259,10 @@ bool sched_can_stop_tick(struct rq *rq)
  *
  * Caller must hold rcu_lock or sufficient equivalent.
  */
+/*
+ * IAMROOT, 2022.12.23:
+ * - TODO
+ */
 int walk_tg_tree_from(struct task_group *from,
 			     tg_visitor down, tg_visitor up, void *data)
 {
@@ -10525,6 +10529,10 @@ static u64 cpu_shares_read_u64(struct cgroup_subsys_state *css,
 #ifdef CONFIG_CFS_BANDWIDTH
 static DEFINE_MUTEX(cfs_constraints_mutex);
 
+/*
+ * IAMROOT, 2022.12.23:
+ * - 1 초
+ */
 const u64 max_cfs_quota_period = 1 * NSEC_PER_SEC; /* 1s */
 static const u64 min_cfs_quota_period = 1 * NSEC_PER_MSEC; /* 1ms */
 /* More than 203 days if BW_SHIFT equals 20. */

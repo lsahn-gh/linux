@@ -4898,6 +4898,17 @@ static inline u64 sched_cfs_bandwidth_slice(void)
  *
  * requires cfs_b->lock
  */
+/*
+ * IAMROOT, 2022.12.23:
+ * - papago
+ *   할당량에 따라 런타임을 보충합니다. rq->lock 주변에 추가 동기화를 추가하지 
+ *   않도록 rq->clock 대신 sched_clock_cpu를 직접 사용합니다.
+ *
+ *   cfs_b->잠금이 필요합니다.
+ *
+ * - 한번에 qouta만큼 추가한다.
+ * - cfs_b->quota + cfs_b->burst이상을 초과시키진 않는다.
+ */
 void __refill_cfs_bandwidth_runtime(struct cfs_bandwidth *cfs_b)
 {
 	if (unlikely(cfs_b->quota == RUNTIME_INF))
@@ -4916,20 +4927,44 @@ static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
 /*
  * IAMROOT, 2022.12.22:
  * - @target_runtime 기본값 5ms.
- * - bandwidth runtime, runtime 둘중 하나라도 이 남아있으면 runtime_remain이
- *   갱신된다.
- * - runtime_remaining == 0이면 runtime도 0이므로 runtime이 전부 소진됬다는
- *   개념으로 봐도 될듯하다.
+ * - bandwidth runtime에서 최대 runtime_remain이 @target_runtime이 될때까지
+ *   가져온다.
  *
+ *  ex) target_runtime == 5ms
+ *
+ *  1) quota == RUNTIME_INF. bandwidth 사용안하는 경우
  *  cfs_b | runtime_  | cfs_b   || timer | runtime_  |
  *  qouta | remaining | runtime || 예약  | remaining | runtime 
  *  +-----+-----------+---------++-------+-----------+--------
  *  | ~0  | -         | -       || X     | 5ms       | 유지     
- *  | -   | 0ms       | 0ms     || O     | 0ms       | 0ms
- *  | -   | 0ms       | 1ms     || O     | 4ms       | 0ms
- *  | -   | 1ms       | 0ms     || O     | 1ms       | 0ms
- *  | -   | 2ms       | 1ms     || O     | 4ms       | 0ms
- *  | -   | 1ms       | 2ms     || O     | 5ms       | 1ms
+ *
+ *  2) runtime_remain 이 target_runtime이 될때까지 불충분한 경우
+ *     남아있는 runtime만큼 runtime_remain이 충전된다.
+ *
+ *  | runtime_  | cfs_b   || timer | runtime_  |
+ *  | remaining | runtime || 예약  | remaining | runtime 
+ *  +-----------+---------++-------+-----------+--------
+ *  | 0ms       | 0ms     || O     | 0ms       | 0ms
+ *  | 0ms       | 1ms     || O     | 1ms       | 0ms
+ *  | 1ms       | 0ms     || O     | 1ms       | 0ms
+ *  | 2ms       | 1ms     || O     | 3ms       | 0ms
+ *  | 1ms       | 2ms     || O     | 3ms       | 0ms
+ *  | -1ms      | 0ms     || O     | -1ms      | 0ms
+ *  | -1ms      | 1ms     || O     | 0ms       | 0ms
+ *  | -1ms      | 2ms     || O     | 1ms       | 0ms
+ *
+ *  3) runtime_remain이 target_runtime이 될때까지 충분한 경우
+ *
+ *  | runtime_  | cfs_b   || timer | runtime_  |
+ *  | remaining | runtime || 예약  | remaining | runtime 
+ *  +-----------+---------++-------+-----------+--------
+ *  | 0ms       | 5ms     || O     | 5ms       | 0ms
+ *  | 5ms       | 0ms     || O     | 5ms       | 0ms
+ *  | 2ms       | 3ms     || O     | 5ms       | 0ms
+ *  | 2ms       | 3ms     || O     | 5ms       | 0ms
+ *  | -1ms      | 6ms     || O     | 5ms       | 0ms
+ *  | 5ms       | 1ms     || O     | 5ms       | 1ms
+ *  | 10ms      | 1ms     || O     | 5ms       | 6ms
  */
 static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 				   struct cfs_rq *cfs_rq, u64 target_runtime)
@@ -4942,15 +4977,17 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 /*
  * IAMROOT, 2022.12.22:
  * - runtime_remaining만큼을 5ms에서 빼준다.
- * - account_cfs_rq_runtime를 통해서 진입했을때 runtime_remaining은
- *   이미 0이긴했을것이다.
+ *   runtime이 아무리 많아도 최고 target_runtime만큼 증가하게 하는 장치가 되는 동시에
+ *   -를 runtime에서 보정하는 양의 역할을 수행한다.
+ *   ex) runtime_remain = -10ms, target_runtime = 5ms, runtime = 100ms
+ *     min_amount = 15 => amount = 15 => new runtime_remain = -10 + 15 = 5ms
  */
 	min_amount = target_runtime - cfs_rq->runtime_remaining;
 
 /*
  * IAMROOT, 2022.12.22:
  * - quota가 RUNTIME_INF면 이 함수진입상황에서는 period_timer 추적을 안한다
- *   는것. cfs_rq->runtime_remaining은 5ms로 유지될것이다.
+ *   는것. cfs_rq->runtime_remaining은 그대로 유지.
  */
 	if (cfs_b->quota == RUNTIME_INF)
 		amount = min_amount;
@@ -4975,11 +5012,8 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 
 /*
  * IAMROOT, 2022.12.22:
- * - quota == RUNTIME_INF인 경우 5ms 
- * - bandwidth runtime == 0
- *   amount == 0이므로 유지
- * - 그게 아니면 runtime, min_amount중에 작은걸 기준으로 runtime에서 빼고
- *   뺀 만큼 runtime_remaining에 추가.
+ * - quota == RUNTIME_INF인 경우 유지
+ * - runtime에서 차출이 됬다면 차출된 양이 amount가 된다.
  */
 	cfs_rq->runtime_remaining += amount;
 
@@ -5208,6 +5242,10 @@ done:
 	return true;
 }
 
+/*
+ * IAMROOT, 2022.12.23:
+ * - 
+ */
 void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
@@ -5222,6 +5260,10 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 	update_rq_clock(rq);
 
 	raw_spin_lock(&cfs_b->lock);
+/*
+ * IAMROOT, 2022.12.23:
+ * - throttled 됫떤 시간을 기록해놓는다.
+ */
 	cfs_b->throttled_time += rq_clock(rq) - cfs_rq->throttled_clock;
 	list_del_rcu(&cfs_rq->throttled_list);
 	raw_spin_unlock(&cfs_b->lock);
@@ -5303,6 +5345,10 @@ unthrottle_throttle:
 		resched_curr(rq);
 }
 
+/*
+ * IAMROOT, 2022.12.23:
+ * - 
+ */
 static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 {
 	struct cfs_rq *cfs_rq;
@@ -5315,13 +5361,27 @@ static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 		struct rq_flags rf;
 
 		rq_lock_irqsave(rq, &rf);
+/*
+ * IAMROOT, 2022.12.23:
+ * - bandwidth 사용중인지, throttle이 남아있는지 확인 
+ */
 		if (!cfs_rq_throttled(cfs_rq))
 			goto next;
 
 		/* By the above check, this should never be true */
+/*
+ * IAMROOT, 2022.12.23:
+ * - 소속된 throttled rq의 runtime_remain이 <=0 이 아니고선
+ *   이 함수에 진입할수 없는 구조이다.
+ */
 		SCHED_WARN_ON(cfs_rq->runtime_remaining > 0);
 
 		raw_spin_lock(&cfs_b->lock);
+/*
+ * IAMROOT, 2022.12.23:
+ * - rq에서 + 값이 될때까지 필요한 runtime을 bandwidth에서 차감 후
+ *   rq에 가져온다.
+ */
 		runtime = -cfs_rq->runtime_remaining + 1;
 		if (runtime > cfs_b->runtime)
 			runtime = cfs_b->runtime;
@@ -5332,12 +5392,19 @@ static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 		cfs_rq->runtime_remaining += runtime;
 
 		/* we check whether we're throttled above */
+/*
+ * IAMROOT, 2022.12.23:
+ * - runtime을 제대로 얻엇더면 unthrottle을 시킨다.
+ */
 		if (cfs_rq->runtime_remaining > 0)
 			unthrottle_cfs_rq(cfs_rq);
 
 next:
 		rq_unlock_irqrestore(rq, &rf);
-
+/*
+ * IAMROOT, 2022.12.23:
+ * - bandwidth runtime이 더이상 없다. break. 후 종료
+ */
 		if (!remaining)
 			break;
 	}
@@ -5349,6 +5416,15 @@ next:
  * cfs_rqs as appropriate. If there has been no activity within the last
  * period the timer is deactivated until scheduling resumes; cfs_b->idle is
  * used to track this state.
+ */
+/*
+ * IAMROOT, 2022.12.23:
+ * - papago
+ *   task_group의 대역폭을 다시 채우고 cfs_rqs를 적절하게 조절 해제하는 일을 담당합니다. 마지막 기간 
+ *   내에 활동이 없으면 예약이 재개될 때까지 타이머가 비활성화됩니다. cfs_b->idle은 이 상태를 추적하는 
+ *   데 사용됩니다. 
+ *
+ * 1. runtime refill
  */
 static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, unsigned long flags)
 {
@@ -5368,9 +5444,19 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 	 * idle depends on !throttled (for the case of a large deficit), and if
 	 * we're going inactive then everything else can be deferred
 	 */
+/*
+ * IAMROOT, 2022.12.23:
+ * - papago 
+ *  유휴는 !throttled(적자가 큰 경우)에 따라 달라지며 비활성 상태가 되면 다른 
+ *  모든 작업을 연기할 수 있습니다. 
+ */
 	if (cfs_b->idle && !throttled)
 		goto out_deactivate;
 
+/*
+ * IAMROOT, 2022.12.23:
+ * - throttled_cfs_rq에 아무것도 없다면 bandwidth를 idle시키고 return 0.
+ */
 	if (!throttled) {
 		/* mark as potentially idle for the upcoming period */
 		cfs_b->idle = 1;
@@ -5383,6 +5469,10 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 	/*
 	 * This check is repeated as we release cfs_b->lock while we unthrottle.
 	 */
+/*
+ * IAMROOT, 2022.12.23:
+ * - runtime 이 남아있고, throttled가 있다면 계속 distribute_cfs_runtime 수행
+ */
 	while (throttled && cfs_b->runtime > 0) {
 		raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 		/* we can't nest cfs_b->lock while distributing bandwidth */
@@ -5591,6 +5681,9 @@ static enum hrtimer_restart sched_cfs_slack_timer(struct hrtimer *timer)
 
 extern const u64 max_cfs_quota_period;
 
+/*
+ * IAMROOT, 2022.12.22:
+ * - */
 static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 {
 	struct cfs_bandwidth *cfs_b =
@@ -5601,6 +5694,21 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 	int count = 0;
 
 	raw_spin_lock_irqsave(&cfs_b->lock, flags);
+/*
+ * IAMROOT, 2022.12.22:
+ * ex) timer 진입시 orverrun = hrtimer_forward_now(timer, cfs_b->period) 동작 원리
+ * 1. 최초 loop 진입
+ *   orverrun = hrtimer_forward_now(timer, cfs_b->period) 수행
+ *   expire로 인한 timer동작이므로 overrun은 1이상으로 return될것이다.
+ *   next expire시간은 cfs_b->period 이후로 설정될것이다.
+ * 2. loop 동작후 두번째 loop 진입.
+ *   orverrun = hrtimer_forward_now(timer, cfs_b->period) 수행
+ *   직전 loop에서 cfs_b->period이후로 expire가 재설정됬고, 이 시간은 충분히 길것이므로
+ *   아직 expire가 안된상태. overrun == 0 return. break.
+ * 3. loop 종료후
+ *   idle == 0 이라면 설정했던 cfs_b->period 이후 시간에 timer가 재수행을 할 것이다. 그게 아니면
+ *   timer는 종료된 상태로 유지
+ */
 	for (;;) {
 		overrun = hrtimer_forward_now(timer, cfs_b->period);
 		if (!overrun)
@@ -5608,6 +5716,14 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 
 		idle = do_sched_cfs_period_timer(cfs_b, overrun, flags);
 
+/*
+ * IAMROOT, 2022.12.23:
+ * --- loop가 3번이상 (hrtimer_forward_now()에서 2연속 overrun이 양수 return) 발생하는 경우. ---
+ *     (chat open ai)
+ * 1. period가 너무 짧게 설정.
+ * 2. expire전에 너무 빠른 timer 갱신.
+ * 3. cpu 부하, interrupt등의 이유
+ */
 		if (++count > 3) {
 			u64 new, old = ktime_to_ns(cfs_b->period);
 
@@ -5616,6 +5732,13 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 			 * Precision loss in the quota/period ratio can cause __cfs_schedulable
 			 * to fail.
 			 */
+/*
+ * IAMROOT, 2022.12.23:
+ * - 너무 자주 발생한다. 
+ *   1. period를 2배로 늘리는걸 시도 한다.
+ *   2. period동안 사용할 수있는 cpu 작업양 2배로 늘린다.
+ *   3. period동안 single burst를 수행하는 cpu 수행 양을 늘린다.
+ */
 			new = old * 2;
 			if (new < max_cfs_quota_period) {
 				cfs_b->period = ns_to_ktime(new);
@@ -5643,6 +5766,10 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 		cfs_b->period_active = 0;
 	raw_spin_unlock_irqrestore(&cfs_b->lock, flags);
 
+/*
+ * IAMROOT, 2022.12.23:
+ * - idle == 0 라면 hrtimer_forward에서 설정한 cfs_b->period이후에 다시한번 timer가 동작할것이다.
+ */
 	return idle ? HRTIMER_NORESTART : HRTIMER_RESTART;
 }
 

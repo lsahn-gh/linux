@@ -411,12 +411,14 @@ extern struct list_head task_groups;
  *
  * - quota: The maximum amount of CPU time (in nanoseconds) that is allowed 
  *   to be used by the tasks on the runqueue over a single period.
- *   RUNTIME_INF - runqueue가 스로틀링되지 않음을 나타내기 위해 CFS 대역폭 
- *   컨트롤러에서 특수 값으로 사용됩니다. 이는 관리자가 실행 대기열의 
- *   작업이 제한 없이 필요한 만큼의 CPU 시간을 사용하도록 허용하려는 
- *   시나리오에서 유용할 수 있습니다. 
- *   __assign_cfs_rq_runtime 함수에서 해당 시점에 period_timer를 시작을
- *   안한다.(5ms time 뒤로 미룬다.)
+ *   -- RUNTIME_INF - runqueue가 스로틀링되지 않음을 나타내기 위해 CFS 대역폭
+ *     컨트롤러에서 특수 값으로 사용됩니다. 이는 관리자가 실행 대기열의 
+ *     작업이 제한 없이 필요한 만큼의 CPU 시간을 사용하도록 허용하려는 
+ *     시나리오에서 유용할 수 있습니다. 
+ *     __assign_cfs_rq_runtime() 에서 해당 시점에 period_timer를 시작을
+ *     안한다.(5ms time 뒤로 미룬다.)
+ *    do_sched_cfs_period_timer() 에서 period_timer는 deactivate 한다.
+ *    (timer 동작을 했어도 기능동작을 안한다.)
  *
  * - runtime: The amount of CPU time (in nanoseconds) that is currently 
  *   available for use by the tasks on the runqueue.
@@ -467,8 +469,9 @@ struct cfs_bandwidth {
 	raw_spinlock_t		lock;
 	ktime_t			period;
 /*
- * IAMROOT, 2022.12.22:
- * - quota
+ * IAMROOT, 2022.12.23:
+ * -  runtime, quota, burst의 관계는 
+ *    __refill_cfs_bandwidth_runtime() 참고
  */
 	u64			quota;
 	u64			runtime;

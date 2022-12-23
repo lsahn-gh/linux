@@ -1337,6 +1337,10 @@ void unlock_hrtimer_base(const struct hrtimer *timer, unsigned long *flags)
  */
 /*
  * IAMROOT, 2022.09.24:
+ * - @return 0 : expire 시간이 아직 안지낫으면.
+ *               이미 실행 대기중
+ *           + : timer 만료 횟수
+ *
  * - ex) orun = 0 (old time ----------> new time)
  *
  *   1. 만료시각이 now보다 뒤에 이미 설정되있다.
@@ -1395,6 +1399,19 @@ u64 hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval)
 /*
  * IAMROOT, 2022.09.24:
  * - 실행되야될 timer가 internal보다 지낫다면.
+ * - timer init후 최초의 설정을 할때나 cpu 부하, interrupt
+ *   등으로 timer가 지연되서 동작한 경우에 진입한다.
+ * - interval의 배수를 시점으로 동작한다.
+ *
+ * ex) 최초 hrtimer_forward동작, interval = 5ms, now = 499ms라고 가정
+ *  1. timer->node.expires == 0 이였으므로 delta = 499. 
+ *  2. hrtimer_add_expires_ns(timer, incr * orun);
+ *    여기서 expires는 495가 될것이다.
+ *  3. hrtimer_add_expires(timer, interval);
+ *    여기서 expires는 최종적으로 500이 될것이다.
+ *
+ *  timer->node.expires == 500 이 되고 이후 즉시 start를 했다면 
+ *  1ms이후에 동작할것이다.
  */
 	if (unlikely(delta >= interval)) {
 		s64 incr = ktime_to_ns(interval);
