@@ -1261,7 +1261,40 @@ bool sched_can_stop_tick(struct rq *rq)
  */
 /*
  * IAMROOT, 2022.12.23:
- * - TODO
+ * - 각 node를 subtree 개념으로 생각
+ * - subtree에 down할게 없으면 자신이 up이 되고 parent로 돌아가면서 up
+ *   이 되는 식으로 된다.
+ *
+ * 1) child까지 내려가면서 down을 호출한다.
+ * 2) child이 없으면 sibling로 이동하면서 down을 호출한다.
+ * 3) down할 sibling이 없으면 up을 한다.
+ *
+ * - ex)
+ * - P
+ *   |
+ *   A1 -> A2 -> A3
+ *   |           |
+ *   B1 -> B2    C1
+ *         |
+ *        D1 - D2
+ *
+ *                     A1 traverse 시작 ================>
+ *  P down -> A1 down -> (B1 down -> B1 up) -> B2 down -> 
+ *                          child가 없어
+ *                          즉시 up
+ *
+ *  ============ A1 traverse =============================================>  
+ *  (D1 down -> D1 up) -> (D2 down -> D2 up) -> (A1 종점 D2. A1으로 복귀) ->
+ *      child가 없어          child가 없어
+ *      즉시 up               즉시 up
+ *
+ *  == A1으로 복귀 ==>                         A3 travser 시작 ===========>
+ *  B2 up -> A1 up ----> (A2 down -> A2 up) -> A3 down -> (C1 down -> C2 up)
+ *                          child가 없어                    child가 없어 
+ *                          즉시 up                         즉시 up       
+ *
+ * =======>
+ * -> A3 up -> (P종점. P로 복귀) -> P up
  */
 int walk_tg_tree_from(struct task_group *from,
 			     tg_visitor down, tg_visitor up, void *data)
@@ -1278,7 +1311,6 @@ down:
 	list_for_each_entry_rcu(child, &parent->children, siblings) {
 		parent = child;
 		goto down;
-
 up:
 		continue;
 	}

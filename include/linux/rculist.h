@@ -48,6 +48,33 @@ static inline void INIT_LIST_HEAD_RCU(struct list_head *list)
 #define check_arg_count_one(dummy)
 
 #ifdef CONFIG_PROVE_RCU_LIST
+/*
+ * IAMROOT, 2022.12.26:
+ * - extra... 
+ *   list_for_each_entry_rcu()등의 매크로에서 __list_check_rcu()를 사용할때
+ *   cond...를 통해서 인자를 한개만 받아왔는지 검사한다.
+ *
+ *   ex) list_for_each_entry_rcu()에서 cond...로 받아오는 인자가 2개 이상
+ *   일 경우
+ *   list_for_each_entry_rcu(a, b, c, c1)
+ *   -> __list_check_rcu(dummy, c, c1, 0) 
+ *   -> check_arg_count_one(c1, c0); -> 문법 error.
+ *   
+ * - ex) list_for_each_entry_rcu에서 cond... 인자가 없는경우
+ *   __list_check_rcu(dummy, 0) 로 확장되고
+ *   check_arg_count_one(); 이 된다. 이는 컴파일 문법적으로 허용된다.
+ *   RCU_LOCKDEP_WARN(!(0) &&....) 이 된다.
+ *
+ * - ex) list_for_each_entry_rcu에서 cond... 인자가 v로 한개 온경우
+ *   __list_check_rcu(dummy, v, 0) 로 확장되고
+ *   check_arg_count_one(v); 
+ *   RCU_LOCKDEP_WARN(!(v) &&....) 이 된다.
+ *
+ * - ex) list_for_each_entry_rcu에서 cond... 인자가 v1, v2로 두개이상 온경우
+ *   __list_check_rcu(dummy, v1, v2, 0) 로 확장되고
+ *   check_arg_count_one(v2, v0); -> compile error.
+ *   RCU_LOCKDEP_WARN(!(v1) &&....) 이 된다.
+ */
 #define __list_check_rcu(dummy, cond, extra...)				\
 	({								\
 	check_arg_count_one(extra);					\
@@ -385,6 +412,53 @@ static inline void list_splice_tail_init_rcu(struct list_head *list,
  * This list-traversal primitive may safely run concurrently with
  * the _rcu list-mutation primitives such as list_add_rcu()
  * as long as the traversal is guarded by rcu_read_lock().
+ */
+/*
+ * IAMROOT, 2022.12.26:
+ * --- cond 사용에 대한 macro 용법 ---
+ *
+ * - #define X(cond...) 
+ *
+ *   가변인자 cond를 사용할려면 cond앞에 인자가 반드시 하나 있어야된다.
+ *
+ *   #define X(cond...) Y( ## cond)
+ *
+ *   이런식으로 사용하면 (와 cond가 붙어 버리는 개념이 되서 error가 발생한다.
+ *   예를 들면 다음과 같이 확장되며 compile에러가 되는것이다.
+ *
+ *   ex) X(1, 2) -> Y((1, 2) 
+ *
+ *   그래서 사용하지 않은 dummy인자를 앞에써서 사용한다.
+ *
+ *   #define X(cond...) Y(dummy, ## cond)
+ *
+ *   확장 예를 보면 다음과 같다.
+ *
+ *   ex) X(1, 2) -> Y(dummy, 1, 2) 
+ *
+ * - #define Y(dummy, v, extra...)
+ *
+ *   #define X(cond...) 에서 cond는 가변 인자이므로 이 가변인자를 받을수 있는
+ *   extra...를 정의한다. 이렇게하면 cond...의 첫번째 인자를 v로 받고
+ *   나머지 인자를 extra...로 받을수있다.
+ *
+ *   ex) X(1, 2, 3) -> Y(dummy, 1, 2, 3) 
+ *                              ^ ^^^^^
+ *                              v extra...
+ *
+ * - cond...가 없는 경우
+ *   __list_check_rcu(dummy, 0)
+ *   __list_check_rcu내부에서 cond가 0으로 동작하는것과 같게 된다.
+ *
+ * - cond...가 1개(v) 있는 경우
+ *   __list_check_rcu(dummy, v, 0)
+ *   __list_check_rcu내부에서 cond가 v로 동작하는 것과 같게 된다.
+ *
+ * - cond...가 2개(v1, v2) 있는 경우
+ *   __list_check_rcu(dummy, v1 v2, 0)
+ *   이건 compile에러가 발생한다.
+ *
+ * ------------------------------------
  */
 #define list_for_each_entry_rcu(pos, head, member, cond...)		\
 	for (__list_check_rcu(dummy, ## cond, 0),			\
