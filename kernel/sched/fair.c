@@ -375,6 +375,10 @@ static inline void cfs_rq_tg_path(struct cfs_rq *cfs_rq, char *path, int len)
 		strlcpy(path, "(null)", len);
 }
 
+/*
+ * IAMROOT, 2022.12.27:
+ * - TODO
+ */
 static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
@@ -3481,6 +3485,16 @@ static inline void cfs_rq_util_change(struct cfs_rq *cfs_rq, int flags)
  * If cfs_rq is not on the list, test whether a child needs its to be added to
  * connect a branch to the tree  * (see list_add_leaf_cfs_rq() for details).
  */
+/*
+ * IAMROOT, 2022.12.27:
+ * - TODO
+ * - papago
+ *   list_add_leaf_cfs_rq는 항상 상위 cfs_rq 바로 앞에 하위 cfs_rq를 
+ *   목록에 배치하고 cfs_rqs는 목록 상향식에서 제거하기 때문에 목록에서 
+ *   우리 앞에 있는 cfs_rq가 하위인지 여부만 테스트하면 됩니다.  
+ *   cfs_rq가 목록에 없으면 분기를 트리에 연결하기 위해 자식을 추가해야 
+ *   하는지 여부를 테스트합니다 * (자세한 내용은 list_add_leaf_cfs_rq() 참조)
+ */
 static inline bool child_cfs_rq_on_list(struct cfs_rq *cfs_rq)
 {
 	struct cfs_rq *prev_cfs_rq;
@@ -3499,6 +3513,10 @@ static inline bool child_cfs_rq_on_list(struct cfs_rq *cfs_rq)
 	return (prev_cfs_rq->tg->parent == cfs_rq->tg);
 }
 
+/*
+ * IAMROOT, 2022.12.27:
+ * - TODO
+ */
 static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
 {
 	if (cfs_rq->load.weight)
@@ -4476,6 +4494,10 @@ static inline bool cfs_bandwidth_used(void);
  * CPU and an up-to-date min_vruntime on the destination CPU.
  */
 
+/*
+ * IAMROOT, 2022.12.27:
+ * - TODO
+ */
 static void
 enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
@@ -5122,6 +5144,12 @@ static inline int throttled_lb_pair(struct task_group *tg,
 	       throttled_hierarchy(dest_cfs_rq);
 }
 
+/*
+ * IAMROOT, 2022.12.27:
+ * - throttle count 값을 감소시킨다. 0이 됬다면 throttled 된 시간을 누적한다.
+ *   또한 이때 cfs rq가 decayed가 아니거나 nr_running개수가 존재한다면
+ *   list_add_leaf_cfs_rq를 수행한다.
+ */
 static int tg_unthrottle_up(struct task_group *tg, void *data)
 {
 	struct rq *rq = data;
@@ -5244,7 +5272,7 @@ done:
 
 /*
  * IAMROOT, 2022.12.23:
- * - 
+ * - TODO
  */
 void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 {
@@ -5262,12 +5290,16 @@ void unthrottle_cfs_rq(struct cfs_rq *cfs_rq)
 	raw_spin_lock(&cfs_b->lock);
 /*
  * IAMROOT, 2022.12.23:
- * - throttled 됫떤 시간을 기록해놓는다.
+ * - throttled 됫던 시간을 기록해놓는다.
  */
 	cfs_b->throttled_time += rq_clock(rq) - cfs_rq->throttled_clock;
 	list_del_rcu(&cfs_rq->throttled_list);
 	raw_spin_unlock(&cfs_b->lock);
 
+/*
+ * IAMROOT, 2022.12.27:
+ * - cfs->tg를 포함한 하위그룹에 대해 tg_unthrottle_up을 수행한다.
+ */
 	/* update hierarchical throttle state */
 	walk_tg_tree_from(cfs_rq->tg, tg_nop, tg_unthrottle_up, (void *)rq);
 
@@ -5347,7 +5379,8 @@ unthrottle_throttle:
 
 /*
  * IAMROOT, 2022.12.23:
- * - 
+ * - @cfs_b에 소속된 rq들에 runtime을 분배한다. 분배에 성공하면
+ *   해당 rq를 unthrottle한다.
  */
 static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 {
@@ -5424,7 +5457,13 @@ next:
  *   내에 활동이 없으면 예약이 재개될 때까지 타이머가 비활성화됩니다. cfs_b->idle은 이 상태를 추적하는 
  *   데 사용됩니다. 
  *
- * 1. runtime refill
+ * @return 0 : timer restart. 
+ *         1 : timer 종료.
+ *
+ * 1. @cfs_b runtime refill
+ * 2. @cfs_b 소속 rq에 runttime 분배
+ * 3. bandwidth idle 제어
+ * 4. timter restart 제어
  */
 static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, unsigned long flags)
 {
@@ -5449,6 +5488,8 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
  * - papago 
  *  유휴는 !throttled(적자가 큰 경우)에 따라 달라지며 비활성 상태가 되면 다른 
  *  모든 작업을 연기할 수 있습니다. 
+ *
+ * - 이미 idle이 되어있는데 throttled rq도 없는 상황. timer 종료
  */
 	if (cfs_b->idle && !throttled)
 		goto out_deactivate;
@@ -5456,6 +5497,9 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 /*
  * IAMROOT, 2022.12.23:
  * - throttled_cfs_rq에 아무것도 없다면 bandwidth를 idle시키고 return 0.
+    일반 이번에 idle만들고 restart한다. 만약 그 다음 timer에도 들어왓을때
+	idle이 안풀려있고 throttled도니가 없으면 바로 위 code에서 out_deactivate
+	로 계속 빠지며 timer restart는 안할것이다.
  */
 	if (!throttled) {
 		/* mark as potentially idle for the upcoming period */
@@ -5488,6 +5532,13 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 	 * insufficient to cover the existing bandwidth deficit.  (Forcing the
 	 * timer to remain active while there are any throttled entities.)
 	 */
+/*
+ * IAMROOT, 2022.12.27:
+ * - papago
+ *   스로틀 해제 후 기간 동안 활동이 보장되지만 새 대역폭이 기존 대역폭 
+ *   부족을 충당하기에 불충분한 경우도 포함됩니다. (조절된 엔터티가 있는 
+ *   동안 타이머가 활성 상태를 유지하도록 합니다.).
+ */
 	cfs_b->idle = 0;
 
 	return 0;
@@ -5683,7 +5734,12 @@ extern const u64 max_cfs_quota_period;
 
 /*
  * IAMROOT, 2022.12.22:
- * - */
+ * - 1. bandwidth rutime refill
+ *   2. bandwidth에 소속된 rq runtime에 재분배
+ *   3. timer 재가동 여부 판단.
+ *   4. timer overrun이 자주 발생하면 timer period 및 runtime refill양등
+ *      증가
+ */
 static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 {
 	struct cfs_bandwidth *cfs_b =

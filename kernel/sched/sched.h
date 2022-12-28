@@ -643,6 +643,26 @@ struct cfs_bandwidth { };
 /* CFS-related fields in a runqueue */
 struct cfs_rq {
 	struct load_weight	load;
+/*
+ * IAMROOT, 2022.12.27:
+ * - chat open ai
+ *  nr_running is an unsigned integer that stores the number of tasks that 
+ *  are currently running on the runqueue.
+ *  h_nr_running is an unsigned integer that stores the number of tasks that 
+ *  are currently running on the runqueue, but only includes tasks with a 
+ *  normal, batch, or idle scheduling policy.
+ *  idle_h_nr_running is an unsigned integer that stores the number of tasks 
+ *  that are currently running on the runqueue, but only includes tasks with 
+ *  an idle scheduling policy. 
+ *
+ *  nr_running은 현재 runqueue에서 실행 중인 작업 수를 저장하는 부호 없는 
+ *  정수입니다. 
+ *  h_nr_running은 실행 대기열에서 현재 실행 중인 작업 수를 저장하는 부호 
+ *  없는 정수이지만 일반, 배치 또는 유휴 스케줄링 정책이 있는 작업만 
+ *  포함합니다. 
+ *  idle_h_nr_running은 현재 실행 대기열에서 실행 중인 작업 수를 저장하는 
+ *  부호 없는 정수이지만 유휴 스케줄링 정책이 있는 작업만 포함합니다. 
+ */
 	unsigned int		nr_running;
 	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		idle_h_nr_running; /* SCHED_IDLE */
