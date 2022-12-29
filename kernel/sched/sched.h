@@ -89,8 +89,15 @@ struct rq;
 struct cpuidle_state;
 
 /* task_struct::on_rq states: */
-#define TASK_ON_RQ_QUEUED	1 /* in */
-#define TASK_ON_RQ_MIGRATING	2 /* moving to another cpu */
+/*
+ * IAMROOT, 2022.12.29:
+ * - TASK_ON_RQ_QUEUED
+ *   queue에 들어간 상태
+ * - TASK_ON_RQ_MIGRATING
+ *   다른 cpu로 move중인 상태(migrate)
+ */
+#define TASK_ON_RQ_QUEUED	1
+#define TASK_ON_RQ_MIGRATING	2
 
 extern __read_mostly int scheduler_running;
 
@@ -285,6 +292,11 @@ dl_entity_preempt(struct sched_dl_entity *a, struct sched_dl_entity *b)
 /*
  * This is the priority-queue data structure of the RT scheduling class:
  */
+/*
+ * IAMROOT, 2022.12.29:
+ * - bitmap
+ *   init_rt_rq()에서 delimiter 용법으로 초기화된다.
+ */
 struct rt_prio_array {
 	DECLARE_BITMAP(bitmap, MAX_RT_PRIO+1); /* include 1 bit for delimiter */
 	struct list_head queue[MAX_RT_PRIO];
@@ -333,6 +345,20 @@ static inline int dl_bandwidth_enabled(void)
 /*
  * IAMROOT, 2022.11.26:
  * - papago
+ *  -deadline 작업의 대역폭을 제어하려면 다음과 같은 장소가 필요합니다. 
+ *  - 각 CPU의 최대 기한 대역폭을 저장합니다.
+ *  - 각 루트 도메인에 현재 할당된 대역폭의 일부를 캐시합니다.
+ *
+ *   이것은 모두 아래 데이터 구조에서 수행됩니다. 이것은 RT 조절(rt_bandwidth)
+ *   에 사용되는 것과 유사하지만 여기서는 승인 제어에만 관심이 있기 때문에 
+ *   그룹이 실행되는 동안 런타임을 줄이지 않으며 이를 보충하기 위한 타이머도 
+ *   필요하지 않습니다. 
+ *
+ *   SMP와 관련하여 대역폭은 루트 도메인별로 제공되며 이는 다음을 의미합니다.
+ *   - bw(< 100%)는 각 CPU의 데드라인 대역폭입니다. 
+ *   - total_bw는 각 루트 도메인에서 현재 할당된 대역폭입니다. 
+ *
+ * - BW_SHIFT로 shift해서 사용한다. (1 ==> 1 << BW_SHIFT)
  */
 struct dl_bw {
 	raw_spinlock_t		lock;
@@ -2137,7 +2163,7 @@ static inline struct task_group *task_group(struct task_struct *p)
 /* Change a task's cfs_rq and parent entity if it moves across CPUs/groups */
 /*
  * IAMROOT, 2022.11.26:
- * TODO.
+ * - @p의 cfs, rt의 rq를 tg의 @cpu에 대한 cfs, rt의 rq로 설정한다.
  */
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
 {
@@ -2169,7 +2195,7 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 /*
  * IAMROOT, 2022.11.26:
- * - 
+ * - @p의 cfs, rt rq를 @p의 tg의 @cpu에 대해서 설정한다.
  */
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
@@ -2339,6 +2365,18 @@ static_assert(WF_TTWU == SD_BALANCE_WAKE);
  * slice expiry etc.
  */
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - papago
+ *   CPU 전체에서 비정상적인 nice 값을 가진 작업의 고르지 않은 배포로 인한 
+ *   niceness의 전복을 방지하기 위해 실행 대기열의 로드에 대한 각 작업의 
+ *   기여도는 스케줄링 클래스 및 nice 값에 따라 가중치가 부여됩니다. 
+ *   SCHED_NORMAL 작업의 경우 이는 시간 조각 만료 등에서 받는 새 시간 조각 
+ *   할당의 확장된 버전일 뿐입니다.
+.*
+ * - sched_prio_to_weight를 참고하면 제일 낮은게 15이다. idle은 이것보다도 낮은
+ *   3을 사용한다.
+ */
 #define WEIGHT_IDLEPRIO		3
 #define WMULT_IDLEPRIO		1431655765
 

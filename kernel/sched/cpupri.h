@@ -7,11 +7,19 @@
 /* values 1-99 are for RT1-RT99 priorities */
 #define CPUPRI_HIGHER		100
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - cpupri_init()에서 초기화.
+ */
 struct cpupri_vec {
 	atomic_t		count;
 	cpumask_var_t		mask;
 };
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - cpupri_init()에서 초기화.
+ */
 struct cpupri {
 	struct cpupri_vec	pri_to_cpu[CPUPRI_NR_PRIORITIES];
 	int			*cpu_to_pri;

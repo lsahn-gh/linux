@@ -469,6 +469,7 @@ static void free_rootdomain(struct rcu_head *rcu)
 /*
  * IAMROOT, 2022.11.26:
  * - @rq에 @rd를 등록한다.
+ *   @rq에 rd가 있었다면 old에 대한 기록을 지우고 @rd를 등록한다.
  */
 void rq_attach_root(struct rq *rq, struct root_domain *rd)
 {

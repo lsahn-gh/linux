@@ -42,7 +42,7 @@ static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
 
 /*
  * IAMROOT, 2022.11.26:
- * - 초기화.
+ * - rt bw 초기화.
  */
 void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime)
 {

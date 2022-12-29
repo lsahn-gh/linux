@@ -902,6 +902,10 @@ struct task_struct {
 	int				recent_used_cpu;
 	int				wake_cpu;
 #endif
+/*
+ * IAMROOT, 2022.12.29:
+ * - TASK_ON_RQ_QUEUED등의 값이 들어간다.
+ */
 	int				on_rq;
 
 	int				prio;
@@ -909,6 +913,10 @@ struct task_struct {
 	int				normal_prio;
 	unsigned int			rt_priority;
 
+/*
+ * IAMROOT, 2022.12.29:
+ * -  DEFINE_SCHED_CLASS(...) 으로 정의된 callback함수들.
+ */
 	const struct sched_class	*sched_class;
 	struct sched_entity		se;
 	struct sched_rt_entity		rt;
@@ -1118,6 +1126,32 @@ struct task_struct {
 	struct completion		*vfork_done;
 
 	/* CLONE_CHILD_SETTID: */
+/*
+ * IAMROOT, 2022.12.29:
+ * - chat openai
+ *   Linux 커널에서 struct task_struct의 set_child_tid 필드는 작업이 실행될 
+ *   때 커널이 작업의 자식 프로세스 ID를 저장할 수 있는 메모리 위치의 주소를 
+ *   저장하는 데 사용됩니다.
+ *
+ *   set_child_tid 필드는 int __user * 유형이며 이는 사용자 공간 메모리의 
+ *   정수에 대한 포인터임을 의미합니다. 작업이 실행되면 커널은 
+ *   set_child_tid가 가리키는 메모리 위치에 작업의 자식 프로세스 ID를 
+ *   저장합니다. 이를 통해 부모 프로세스는 자식 프로세스 ID를 인수로 사용하는 
+ *   waitpid 시스템 호출을 사용하여 자식 프로세스가 완료될 때까지 기다릴 수 
+ *   있습니다.
+ *
+ *   일반적인(kthread가 아닌) 작업의 경우 set_child_tid 필드는 위에서 설명한 
+ *   대로 사용됩니다. 작업이 실행되면 커널은 set_child_tid가 가리키는 메모리 
+ *   위치에 자식 프로세스 ID를 저장하고 부모 프로세스는 waitpid 시스템 호출을 
+ *   사용하여 자식 프로세스가 완료될 때까지 기다릴 수 있습니다. 
+ *
+ *   커널 스레드의 경우 set_child_tid 필드는 작업의 자식 프로세스 ID를 
+ *   저장하기 위한 메모리 위치로 의도된 용도가 아니라 커널 스레드와 연결된 
+ *   struct kthread에 대한 포인터를 저장하기 위해 종종 "남용"됩니다. 이는 
+ *   커널 스레드를 실행할 수 없고 PF_KTHREAD 플래그를 지울 수 없기 때문입니다. 
+ *   set_child_tid 필드는 copy_process 함수로 잘못 복사할 수 없기 때문에 
+ *   이렇게 사용됩니다.
+ */
 	int __user			*set_child_tid;
 
 	/* CLONE_CHILD_CLEARTID: */

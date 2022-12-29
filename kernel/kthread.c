@@ -68,6 +68,11 @@ enum KTHREAD_BITS {
 	KTHREAD_SHOULD_PARK,
 };
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - @k가 kthread인경우 set_child_tid에 kthread 자료구조가 저장되있다.
+ *   kthread가 아닌경우 해당 필드는 원래 역할을 하므로 이함수를 부르면 안된다.
+ */
 static inline struct kthread *to_kthread(struct task_struct *k)
 {
 	WARN_ON(!(k->flags & PF_KTHREAD));
@@ -110,7 +115,9 @@ static inline struct kthread *__to_kthread(struct task_struct *p)
 
 /*
  * IAMROOT, 2022.11.26:
- * - kthread가 없다면 자료구조를 할당한다.
+ * - @p가 kthread인데 kthread 자료구조가 아직 할당이 안됬다면 할당한다.
+ * - set_child_tid는 원래 child process관련 정보를 저장하는 장소인데
+ *   kthread인경우 kthread 자료구조를 저장하는데 사용한다.
  */
 void set_kthread_struct(struct task_struct *p)
 {

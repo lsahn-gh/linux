@@ -788,6 +788,10 @@ void vtime_task_switch_generic(struct task_struct *prev)
 	write_seqcount_end(&vtime->seqcount);
 }
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - vtime 초기화.
+ */
 void vtime_init_idle(struct task_struct *t, int cpu)
 {
 	struct vtime *vtime = &t->vtime;

@@ -8,6 +8,10 @@ struct cpudl_item {
 	int			idx;
 };
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - cpudl_init 에서 초기화
+ */
 struct cpudl {
 	raw_spinlock_t		lock;
 	int			size;

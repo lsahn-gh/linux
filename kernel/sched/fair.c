@@ -3269,6 +3269,10 @@ static inline void
 dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se) { }
 #endif
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - TODO
+ */
 static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 			    unsigned long weight)
 {
@@ -3296,6 +3300,10 @@ static void reweight_entity(struct cfs_rq *cfs_rq, struct sched_entity *se,
 
 }
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - TODO
+ */
 void reweight_task(struct task_struct *p, int prio)
 {
 	struct sched_entity *se = &p->se;
@@ -12261,6 +12269,10 @@ void show_numa_stats(struct task_struct *p, struct seq_file *m)
 #endif /* CONFIG_NUMA_BALANCING */
 #endif /* CONFIG_SCHED_DEBUG */
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - sched에 관련한 softirq를 하나 열어둔다.
+ */
 __init void init_sched_fair_class(void)
 {
 #ifdef CONFIG_SMP

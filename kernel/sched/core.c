@@ -86,6 +86,11 @@ const_debug unsigned int sysctl_sched_nr_migrate = 32;
  */
 unsigned int sysctl_sched_rt_period = 1000000;
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - 스케쥴러가 동작중이고 예약이 가능한지를 나타낸다.
+ *   동작중이면 1.
+ */
 __read_mostly int scheduler_running;
 
 #ifdef CONFIG_SCHED_CORE
@@ -1335,7 +1340,15 @@ int tg_nop(struct task_group *tg, void *data)
 
 /*
  * IAMROOT, 2022.11.26:
- * - 
+ * - @update_load SCHED_IDLE이 아닌 경우에 적용
+ *     true : weight가 이미 설정되있으니까 다시 계산하라는 의미.
+ *            cfs인 경우만 해당.
+ *     false : weight 재설정.
+ * - update_load가 true인경우 : TODO
+ * - SCHED_IDLE인 경우 IDLE weight를 적용한다.
+ * - SCHED_IDLE
+ *   -- update_load가 false이거나 sched이 fair_sched_class이 아닌 경우
+ *      weight table에서 가져온다.
  */
 static void set_load_weight(struct task_struct *p, bool update_load)
 {
@@ -2056,8 +2069,9 @@ static void uclamp_post_fork(struct task_struct *p)
 
 /*
  * IAMROOT, 2022.11.26:
- * - uclamp
+ * - uclamp(CPU utilization clamp)
  *   Dcoumentation/scheduler/sched-capacity.rst
+ *   특정 cpu에서 실행되는 task에서 사용할수 있는 cpu 양에 대한 제한 설정.
  */
 static void __init init_uclamp_rq(struct rq *rq)
 {
@@ -4577,6 +4591,10 @@ void sched_post_fork(struct task_struct *p)
 	uclamp_post_fork(p);
 }
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - BW_SHIFT 로 shift하여 사용한다.
+ */
 unsigned long to_ratio(u64 period, u64 runtime)
 {
 	if (runtime == RUNTIME_INF)
@@ -4587,6 +4605,12 @@ unsigned long to_ratio(u64 period, u64 runtime)
 	 * the calling paths, and returning zero seems
 	 * safe for them anyway.
 	 */
+/*
+ * IAMROOT, 2022.12.29:
+ * - papago
+ *   여기에서 이렇게 하면 모든 호출 경로에서 많은 검사를 저장하고 0을 
+ *   반환하는 것이 어쨌든 안전해 보입니다.
+ */
 	if (period == 0)
 		return 0;
 
@@ -8909,6 +8933,16 @@ void show_state_filter(unsigned int state_filter)
 /*
  * IAMROOT, 2022.11.26:
  * - @cpu에대한 @idle 초기화.
+ *   1. @idle의 기본정보 초기화(마치 fork가 이뤄진것처럼)
+ *   2. kthread 자료구조 할당.
+ *   3. state, exec_start등의 설정.
+ *   4. idle task이고, kthread라는것을 flags에 표시
+ *   5. pcpu thread 표시.
+ *   6. cpu rq의 idle을 @idle로 등록.
+ *   7. preempt를 disable로 초기화.
+ *   8. sched_class 을 idle_sched_class로 설정.
+ *   9. vtime 초기화.
+ *   10. comm(이름)설정.
  */
 void __init init_idle(struct task_struct *idle, int cpu)
 {
@@ -8961,10 +8995,14 @@ void __init init_idle(struct task_struct *idle, int cpu)
 /*
  * IAMROOT, 2022.11.26:
  * - papago
- *   init_idle()이 작업에서 여러 번 호출될 가능성이 있습니다. 이 경우
- *   do_set_cpus_allowed()는 올바른 작업을 수행하지 않습니다.
+ *   init_idle()이 태스크에서 여러 번 호출될 수 있으며, 이 경우 
+ *   do_set_cpus_allowed()가 올바른 작업을 수행하지 못할 수 있습니다.
  *
- *   그리고 이것은 부팅이므로 직렬화를 생략할 수 있습니다.
+ *   부팅이므로 직렬화를 포기할 수 있습니다.
+ *
+ * - init_idle이 task에서 여러번 호출되있는 함수이며, 이때 다른 cpu로
+ *   여러번 호출되면 단일 cpu에 대한 idle설정이 안될수 있다.
+ *   하지만 부팅중에 호출되므로 이러한 걱정은 할 필요없다는게 주석의 의미이다.
  */
 	set_cpus_allowed_common(idle, cpumask_of(cpu), 0);
 #endif
@@ -8980,11 +9018,40 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	 */
 	/*
 	 * IAMROOT, 2022.11.26:
+	 * - papago
 	 * 닭과 달걀 문제가 있습니다. rq->lock을 유지하고 있지만 CPU가 아직 이
 	 * CPU로 설정되지 않았으므로 task_group()의 lockdep 검사가
 	 * 실패합니다. sched_fork()와 비슷한 경우입니다. / 또는 여기에서
 	 * task_rq_lock()을 사용하고 다른 rq->lock을 얻을 수 있습니다.
 	 * Silence PROVE_RCU
+	 *
+	 * - chat open ai
+	 *   init_idle 함수의 주석은 유휴 작업의 CPU를 지정된 CPU로 설정하는 
+	 *   코드를 보호하기 위해 rcu_read_lock 및 rcu_read_unlock 함수를 
+	 *   사용하는 이유를 설명하고 있습니다. 
+	 *
+	 *   rcu_read_lock 및 rcu_read_unlock 함수는 다른 스레드에서 동시에 
+	 *   수정할 수 있는 데이터를 읽는 코드를 보호하는 데 사용됩니다. 
+	 *   일반적으로 reader-writer 잠금을 사용하여 업데이트되는 데이터 구조에 
+	 *   대한 액세스를 보호하는 데 사용됩니다.
+	 *
+	 *   init_idle 함수의 경우 runqueue 잠금을 유지하면서 유휴 작업의 CPU를 
+	 *   지정된 CPU로 설정하는 데 닭과 달걀 문제가 있음을 주석이 나타냅니다. 
+	 *   runqueue 잠금은 특정 CPU에서 실행할 준비가 된 작업을 추적하는 데 
+	 *   사용되는 runqueue 데이터 구조에 대한 액세스를 보호하는 데 사용됩니다.
+	 *
+	 *   runqueue 잠금을 유지하면서 유휴 태스크의 CPU를 설정하는 문제는 유휴 
+	 *   태스크의 CPU가 잠금을 획득한 시점에 아직 지정된 CPU로 설정되지 
+	 *   않았다는 것입니다. task_group 함수가 태스크의 CPU를 사용하여 
+	 *   태스크가 현재 실행 중인 실행 대기열을 결정하기 때문에 이로 인해 
+	 *   task_group 함수의 lockdep 검사가 실패할 수 있습니다.
+	 *
+	 *   runqueue 잠금을 유지하면서 유휴 작업의 CPU를 설정하는 문제를 
+	 *   해결하기 위해 init_idle 함수는 rcu_read_lock 및 rcu_read_unlock 
+	 *   함수를 사용하여 유휴 작업의 CPU를 설정하는 코드를 보호합니다. 
+	 *   이렇게 하면 runqueue 잠금을 유지하지 않고 유휴 작업의 CPU를 지정된 
+	 *   CPU로 설정할 수 있으며 task_group 함수의 lockdep 검사가 실패하는 
+	 *   것을 방지할 수 있습니다.
 	 */
 	rcu_read_lock();
 	__set_task_cpu(idle, cpu);
@@ -9005,11 +9072,20 @@ void __init init_idle(struct task_struct *idle, int cpu)
 	/*
 	 * The idle tasks have their own, simple scheduling class:
 	 */
+/*
+ * IAMROOT, 2022.12.29:
+ * - idle_sched_class
+ *   DEFINE_SCHED_CLASS(idle) 참고
+ */
 	idle->sched_class = &idle_sched_class;
 	ftrace_graph_init_idle_task(idle, cpu);
 	vtime_init_idle(idle, cpu);
 #ifdef CONFIG_SMP
-	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu); /* swapper/0 */
+/*
+ * IAMROOT, 2022.12.29:
+ * - ex) swapper/0 
+ */
+	sprintf(idle->comm, "%s/%d", INIT_TASK_COMM, cpu);
 #endif
 }
 
@@ -9616,7 +9692,15 @@ DECLARE_PER_CPU(cpumask_var_t, select_idle_mask);
 
 /*
  * IAMROOT, 2022.11.26:
- * - 
+ * 1. root_task_group의 se, rq, bw 자료구조 할당. 및 초기화
+ * 2. init_task의 autogroup, weight등의 설정. idle task로 변경.
+ * 3. pcp rq 초기화.
+ * 4. current task를 idle task로 초기화. 및 idle_threads에 current등록.
+ * 5. calc_load_update 갱신
+ * 6. rq cpu balance off
+ * 7. softirq SCHED_SOFTIRQ에 run_rebalance_domains 등록
+ * 8. psi, uclamp init
+ * 9. scheduler_running 1로설정. 즉 스케쥴러가 동작.
  */
 void __init sched_init(void)
 {
@@ -9691,6 +9775,7 @@ void __init sched_init(void)
 /*
  * IAMROOT, 2022.11.26:
  * load balancing 에 사용
+ * dl, cpudl, cpupri를 초기화
  */
 	init_defrootdomain();
 #endif
@@ -11211,6 +11296,23 @@ void dump_cpu_task(int cpu)
  * it's +10% CPU usage. (to achieve that we use a multiplier of 1.25.
  * If a task goes up by ~10% and another task goes down by ~10% then
  * the relative distance between them is ~25%.)
+ */
+/*
+ * IAMROOT, 2022.12.29:
+ * - papago
+ *   나이스 레벨은 승산되며, 나이스 레벨이 변경될 때마다 완만하게 10%씩 
+ *   변경됩니다. 즉. CPU 바운드 작업이 nice 0에서 nice 1로 변경되면 nice 0에 
+ *   남아 있는 다른 CPU 바운드 작업보다 CPU 시간이 10% 정도 줄어듭니다. 
+ *
+ *   10% 효과는 상대적이며 누적됩니다.
+ *   _any_ 좋은 수준에서 한 수준 올라가면 CPU 사용량이 -10%이고, 한 수준 
+ *   아래로 내려가면 CPU 사용량이 +10%입니다. (이를 달성하기 위해 1.25의 
+ *   승수를 사용합니다. 
+ *   작업이 ~10% 증가하고 다른 작업이 ~10% 감소하면 이들 사이의 상대적 
+ *   거리는 ~25%입니다.). 
+ *
+ * - nice값이 1줄어들때마다 cpu 할당을 10%더 할당받을수 있도록 weight가 
+ *   25%증가한다.
  */
 const int sched_prio_to_weight[40] = {
  /* -20 */     88761,     71755,     56483,     46273,     36291,

@@ -209,6 +209,10 @@ static void group_init(struct psi_group *group)
 	rcu_assign_pointer(group->poll_task, NULL);
 }
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - psi init
+ */
 void __init psi_init(void)
 {
 	if (!psi_enable) {

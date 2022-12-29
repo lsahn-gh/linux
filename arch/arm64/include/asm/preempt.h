@@ -30,6 +30,10 @@ static inline void preempt_count_set(u64 pc)
 	task_thread_info(p)->preempt_count = FORK_PREEMPT_COUNT; \
 } while (0)
 
+/*
+ * IAMROOT, 2022.12.29:
+ * - disable로 시작한다.
+ */
 #define init_idle_preempt_count(p, cpu) do { \
 	task_thread_info(p)->preempt_count = PREEMPT_DISABLED; \
 } while (0)
