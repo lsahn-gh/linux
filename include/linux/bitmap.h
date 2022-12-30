@@ -351,6 +351,11 @@ static inline void bitmap_complement(unsigned long *dst, const unsigned long *sr
 #endif
 #define BITMAP_MEM_MASK (BITMAP_MEM_ALIGNMENT - 1)
 
+
+/*
+ * IAMROOT, 2022.12.30:
+ * - return true : @src1 == @src2
+ */
 static inline int bitmap_equal(const unsigned long *src1,
 			const unsigned long *src2, unsigned int nbits)
 {

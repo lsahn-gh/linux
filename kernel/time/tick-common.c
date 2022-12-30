@@ -27,7 +27,7 @@
  */
 /*
  * IAMROOT, 2022.08.27:
- * - sche tick. 
+ * - sched tick. 
  */
 DEFINE_PER_CPU(struct tick_device, tick_cpu_device);
 /*
@@ -160,10 +160,15 @@ static void tick_periodic(int cpu)
  */
 /*
  * IAMROOT, 2022.12.03:
+ * ----
+ *  - hrtimer 비활성화시
+ *    tick_handle_periodic
+ *  - hritmer 활성화시
+ *    -- schedule tick의 경우
+ *    hrtimer_interrupt -> tick_sched_timer
+ * ----
  * - event_handler에 등록되서 사용된다. timer interrupt
  *   hrtimer가 활성화 되기 전에 timer interrupt가 이 함수로 진입한다.
- * - schedule tick의 경우
- *   활성화가 된후에는 hrtimer_interrupt를 통해서 tick_sched_timer가 호출된다.
  */
 void tick_handle_periodic(struct clock_event_device *dev)
 {
@@ -354,6 +359,17 @@ void tick_install_replacement(struct clock_event_device *newdev)
 		tick_oneshot_notify();
 }
 
+
+/*
+ * IAMROOT, 2022.12.30:
+ * TODO
+ * @return true : 교체가능
+ *         false : 교체불가.
+ * - return false
+ *   1. @cpu가 @newdev->cpumask에 포함안됬으면 return false.
+ * - return true
+ *   1. @cpu가 포함된 cpumask와 @newdev의 cpumask가 일치하면.
+ */
 static bool tick_check_percpu(struct clock_event_device *curdev,
 			      struct clock_event_device *newdev, int cpu)
 {
@@ -394,6 +410,12 @@ static bool tick_check_preferred(struct clock_event_device *curdev,
  * Check whether the new device is a better fit than curdev. curdev
  * can be NULL !
  */
+
+/*
+ * IAMROOT, 2022.12.30:
+ * TODO
+ * - return true : 교체해야된다는뜻.
+ */
 bool tick_check_replacement(struct clock_event_device *curdev,
 			    struct clock_event_device *newdev)
 {
@@ -409,6 +431,7 @@ bool tick_check_replacement(struct clock_event_device *curdev,
  */
 /*
  * IAMROOT, 2022.08.27:
+ * TODO
  * - @newdev를 검사하여 tick_do_timer_cpu등을 결정한다.
  */
 void tick_check_new_device(struct clock_event_device *newdev)

@@ -542,7 +542,9 @@ EXPORT_SYMBOL_GPL(clockevents_unbind_device);
  */
 /*
  * IAMROOT, 2022.08.27:
- * - cpumask 검사, state 변경. clock event 등록
+ * - cpumask 검사, state 변경.
+ *   clock_event_device에 @dev 등록.
+ *   pcp tick_cpu_device에 clock event 등록
  */
 void clockevents_register_device(struct clock_event_device *dev)
 {
@@ -579,6 +581,8 @@ EXPORT_SYMBOL_GPL(clockevents_register_device);
 /*
  * IAMROOT, 2022.08.27:
  * - @dev가 @freq로 지원하는 min / max nsec를 구한다.
+ * - @freq, max_delta_ticks을 기준으로 mult, shift를 구한다.
+ * - 구한 mult shift를 가지고 nsec기준의 min, max delta를 구한다.
  */
 static void clockevents_config(struct clock_event_device *dev, u32 freq)
 {
@@ -624,7 +628,10 @@ static void clockevents_config(struct clock_event_device *dev, u32 freq)
  */
 /*
  * IAMROOT, 2022.08.27:
- * - clockevents의 @freq, 최대최소 nsec를 설정하고 시슷템에 clock event를
+ * - @freq을 기준으로 min_delta ~ max_delta사이에 동작하는 @dev를
+ *   1. clockevent_devices에 등록
+ *   2. pcp tick_cpu_device에 등록한다.
+ * - clockevents의 @freq, 최대최소 nsec를 설정하고 시스템에 clock event를
  *   등록한다.
  */
 void clockevents_config_and_register(struct clock_event_device *dev,

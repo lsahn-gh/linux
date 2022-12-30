@@ -2566,11 +2566,99 @@ device_initcall(cpuhp_sysfs_init);
  */
 
 /* cpu_bit_bitmap[0] is empty - so we can back into it */
+/*
+ * IAMROOT, 2022.12.30:
+ * - MASK_DECLARE_8(x)
+ *      v
+ *   MASK_DECLARE_4(x), MASK_DECLARE_4(x+4)
+ *      v
+ *   MASK_DECLARE_2(x),
+ *   MASK_DECLARE_2(x + 2),
+ *   MASK_DECLARE_2(x + 4),
+ *   MASK_DECLARE_2(x + 4 + 2),
+ *     v
+ *   MASK_DECLARE_1(x),
+ *   MASK_DECLARE_1(x + 1),
+ *   MASK_DECLARE_1(x + 2),
+ *   MASK_DECLARE_1(x + 2 + 1),
+ *   MASK_DECLARE_1(x + 4),
+ *   MASK_DECLARE_1(x + 4 + 1),
+ *   MASK_DECLARE_1(x + 4 + 2),
+ *   MASK_DECLARE_1(x + 4 + 2 + 1),
+ *     v(정리)
+ *   MASK_DECLARE_1(x),
+ *   MASK_DECLARE_1(x + 1),
+ *   MASK_DECLARE_1(x + 2),
+ *   MASK_DECLARE_1(x + 3),
+ *   MASK_DECLARE_1(x + 4),
+ *   MASK_DECLARE_1(x + 5),
+ *   MASK_DECLARE_1(x + 6),
+ *   MASK_DECLARE_1(x + 7),
+ *     v
+ *   [x+1][0] = (1UL << (x))
+ *   [x+2][0] = (1UL << (x+1))
+ *   [x+3][0] = (1UL << (x+2))
+ *   [x+4][0] = (1UL << (x+3))
+ *   [x+5][0] = (1UL << (x+4))
+ *   [x+6][0] = (1UL << (x+5))
+ *   [x+7][0] = (1UL << (x+6))
+ *   [x+8][0] = (1UL << (x+7))
+ *     v(x == 0)
+ *   [1][0] = (1UL << (0))
+ *   [2][0] = (1UL << (1))
+ *   [3][0] = (1UL << (2))
+ *   [4][0] = (1UL << (3))
+ *   [5][0] = (1UL << (4))
+ *   [6][0] = (1UL << (5))
+ *   [7][0] = (1UL << (6))
+ *   [8][0] = (1UL << (7))
+ *   ...
+ */
+
 #define MASK_DECLARE_1(x)	[x+1][0] = (1UL << (x))
 #define MASK_DECLARE_2(x)	MASK_DECLARE_1(x), MASK_DECLARE_1(x+1)
 #define MASK_DECLARE_4(x)	MASK_DECLARE_2(x), MASK_DECLARE_2(x+2)
 #define MASK_DECLARE_8(x)	MASK_DECLARE_4(x), MASK_DECLARE_4(x+4)
 
+
+/*
+ * IAMROOT, 2022.12.30:
+ * ---
+ * - MASK_DECLARE_8(x) 매크로에 의해 1 ~ NR_CPUS의 bit가 set된
+ *   배열이 한벌 만들어진다.
+ *   예를 들어서 설명.
+ *
+ * -- NR_CPUS가 1 ~ 64개
+ *  [0][0] = 0x0000_0000_0000_0000 <-- [0][0]은 무조건 0이다.
+ *  [1][0]  = 0x0000_0000_0000_0001
+ *  [2][0]  = 0x0000_0000_0000_0002
+ *  [3][0]  = 0x0000_0000_0000_0004
+ *  [4][0]  = 0x0000_0000_0000_0008
+ *  ..
+ *  [63][0] = 0x4000_0000_0000_0000
+ *  [64][0] = 0x8000_0000_0000_0000
+ *
+ * 여기서 NR_CPUS가 +64개단위로 0으로 채워진 열이 한개 더 생긴다.
+ * 그리고 그 
+ * -- NR_CPUS가 65~128개
+ *  [0][1] 0x00..00 [0][0]  = 0x0000_0000_0000_0000 
+ *  [1][1] 0x00..00 [1][0]  = 0x0000_0000_0000_0001 
+ *                  ..                              
+ *  [63][1] 0x00.00 [62][0] = 0x4000_0000_0000_0000 
+ *  [64][1] 0x00.00 [63][0] = 0x8000_0000_0000_0000 
+ *
+ * -- NR_CPUS가 129~192개
+ * [0][2] 0x00..00 [0][1] 0x00..00  [0][0]  = 0x0000_0000_0000_0000 
+ * [1][2] 0x00..00 [1][1] 0x00..00  [1][0]  = 0x0000_0000_0000_0001 
+ *                                  ..                              
+ * [63][2] 0x00.00 [62][1] 0x00.00  [62][0] = 0x4000_0000_0000_0000 
+ * [64][2] 0x00.00 [63][1] 0x00.00  [63][0] = 0x8000_0000_0000_0000 
+ * ---
+ *
+ * - 해당 구조체는 get_cpu_mask()를 사용해 특정 cpu번호만 set된
+ *   cpumask가 필요할때 사용하기 위한 const 배열이다.
+ *   사용예는 get_cpu_mask()참고
+ */
 const unsigned long cpu_bit_bitmap[BITS_PER_LONG+1][BITS_TO_LONGS(NR_CPUS)] = {
 
 	MASK_DECLARE_8(0),	MASK_DECLARE_8(8),

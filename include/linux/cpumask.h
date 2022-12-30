@@ -478,6 +478,11 @@ static inline void cpumask_complement(struct cpumask *dstp,
  * @src1p: the first input
  * @src2p: the second input
  */
+
+/*
+ * IAMROOT, 2022.12.30:
+ * - return true : @*src1p == @*src2p
+ */
 static inline bool cpumask_equal(const struct cpumask *src1p,
 				const struct cpumask *src2p)
 {
@@ -630,6 +635,11 @@ static inline void cpumask_copy(struct cpumask *dstp,
 /**
  * cpumask_of - the cpumask containing just a given cpu
  * @cpu: the cpu (<= nr_cpu_ids)
+ */
+
+/*
+ * IAMROOT, 2022.12.30:
+ * - @cpu에 대한 cpumask를 얻어온다.
  */
 #define cpumask_of(cpu) (get_cpu_mask(cpu))
 
@@ -881,10 +891,20 @@ set_cpu_dying(unsigned int cpu, bool dying)
  *
  * This does the conversion, and can be used as a constant initializer.
  */
+
+/*
+ * IAMROOT, 2022.12.30:
+ * - @bitmap이 unsigned long * type인지 compile time에 확인한다.
+ */
 #define to_cpumask(bitmap)						\
 	((struct cpumask *)(1 ? (bitmap)				\
 			    : (void *)sizeof(__check_is_bitmap(bitmap))))
 
+
+/*
+ * IAMROOT, 2022.12.30:
+ * - to_cpumask 매크로에서 @bitmap이 unsigned long * type인지 확인하는 용도
+ */
 static inline int __check_is_bitmap(const unsigned long *bitmap)
 {
 	return 1;
@@ -897,9 +917,102 @@ static inline int __check_is_bitmap(const unsigned long *bitmap)
  * padding to the left and the right, and return the constant pointer
  * appropriately offset.
  */
+
 extern const unsigned long
 	cpu_bit_bitmap[BITS_PER_LONG+1][BITS_TO_LONGS(NR_CPUS)];
 
+
+/*
+ * IAMROOT, 2022.12.30:
+ * --- 작동원리.
+ * -- NR_CPUS가 1 ~ 64개까지는 일반 배열진입과 다를바 없다.
+ *  [0]  = {0x0000_0000_0000_0000}
+ *  [1]  = {0x0000_0000_0000_0001}
+ *  ..
+ *  [63] = {0x4000_0000_0000_0000}
+ *  [64] = {0x8000_0000_0000_0000}
+ *
+ *   cpu_bit_bitmap[1 + cpu % BITS_TO_LONGS]에 의해서 cpu + 1번호에
+ *   대한 배열이 선택되고 p -= cpu / BITS_PER_LONG 은 아무동작
+ *   안하기 때문이다.
+ *
+ * -- NR_CPUS가 65 ~ 128개
+ *  [0]  = {0x0000_0000_0000_0000, 0x0}
+ *  [1]  = {0x0000_0000_0000_0001, 0x0}
+ *  ..
+ *  [63] = {0x4000_0000_0000_0000, 0x0}
+ *  [64] = {0x8000_0000_0000_0000, 0x0}
+ *
+ *  cpu 0 ~ 63을 구할땐 p -= cpu / BITS_PER_LONG이 동작을 안하므로
+ *  일반 배열 접근과 같다.
+ *  하지만 65 ~ 128을 접근할땐
+ *
+ *  p -= cpu / BITS_PER_LONG => 로 인해서 -1 long size만큼 시작주소가
+ *   감소한다
+ *
+ *  65번을 예로 했을때.
+ *  [0]  = {0x0000_0000_0000_0000, 0x0}
+ *                                 ^여기가 시작주소가 된다.
+ *  [1]  = {0x0000_0000_0000_0001, 0x0}
+ *
+ *  여기서 cpumask는 2 long size만큼이므로 return되는 값은 address
+ *  기운을 봤을때
+ *  
+ *  {0x0000_0000_0000_0000, 0x0} {0x0000_0000_0000_0001, 0x0}
+ *                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ *                                 이 위치가 되게되고 return값은
+ *
+ *  {0x0000_0000_0000_0000}, {0x0000_0000_0000_0001}
+ *
+ *  가 된다.
+ *
+ *  즉 long size단위로 -를 시킴으로써 long size단위로 건너 뜀으로
+ *  long bits개의 행개수 만큼으로 모든 NR_CPUS개의 각각 set 된
+ *  cpumask bit를 표현할수있다.
+ *
+ * -- NR_CPUS가 129 ~ 192개
+ *  [0]  = {0x0000_0000_0000_0000, 0x0, 0x0}
+ *  [1]  = {0x0000_0000_0000_0001, 0x0, 0x0}
+ *  ..
+ *  [63] = {0x4000_0000_0000_0000, 0x0, 0x0}
+ *  [64] = {0x8000_0000_0000_0000, 0x0, 0x0}
+ *
+ *  cpu 128을 접근한다고 할때.
+ *  p -= cpu / BITS_PER_LONG => 로 인해서 -2 long size만큼 시작주소가
+ *   감소한다
+ *
+ *  [0]  = {0x0000_0000_0000_0000, 0x0, 0x0}
+ *                                 ^여기서 시작되고
+ *  [1]  = {0x0000_0000_0000_0001, 0x0, 0x0}
+ *
+ *  연속된주소로 봤을때.
+ *  {0x0000_0000_0000_0000, 0x0, 0x0} {0x0000_0000_0000_0001, 0x0, 0x0}
+ *                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ *                           
+ *  {0x0}, {0x0}, {0x0000_0000_0000_0001}
+ *  가 return이 된다.
+ *   
+ * ---
+ * - @cpu에 대한 bit만 set된 const cpumask를 얻어온다.
+ * - long bits개 단위로 long size 단위로 시작주소를 -로 감소함으로써
+ *   가장 기본이 되는 64개의 행을 가진 배열 한개로 NR_CPUS만큼의
+ *   bit가 각 set된 cpumask를 가져온다.
+ *   ex) NR_CPU 1 ~ 64개
+ *       cpu = 1  > {0x0000_0000_0000_0001}
+ *       cpu = 2  > {0x0000_0000_0000_0002}
+ *       cpu = 64 > {0x8000_0000_0000_0000}
+ *   ex) NR_CPU 65 ~ 128개
+ *       cpu = 1  > {0x0}, {0x0000_0000_0000_0001}
+ *       cpu = 2  > {0x0}, {0x0000_0000_0000_0002}
+ *       cpu = 64 > {0x0}, {0x8000_0000_0000_0000}
+ *       cpu = 65 > {0x0000_0000_0000_0001}, {0x0}
+ *   ex) NR_CPU 129 ~ 192개
+ *       cpu =  1  > {0x0}, {0x0}, {0x0000_0000_0000_0001}
+ *       cpu =  2  > {0x0}, {0x0}, {0x0000_0000_0000_0002}
+ *       cpu =  64 > {0x0}, {0x0}, {0x8000_0000_0000_0000}
+ *       cpu =  65 > {0x0}, {0x0000_0000_0000_0001}, {0x0}
+ *       cpu = 129 > {0x0000_0000_0000_0001}, {0x0}, {0x0}
+ */
 static inline const struct cpumask *get_cpu_mask(unsigned int cpu)
 {
 	const unsigned long *p = cpu_bit_bitmap[1 + cpu % BITS_PER_LONG];
