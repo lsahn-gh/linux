@@ -3226,6 +3226,15 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * memory. This allows lockless observations without ever seeing the negative
  * values.
  */
+/*
+ * IAMROOT, 2022.12.31:
+ * ---
+ * *ptr -= _val;
+ * if (*ptr < 0)
+ *   *ptr = 0;
+ * ---
+ * - 뺄섬 결과값이 음수면 0으로 한다.
+ */
 #define sub_positive(_ptr, _val) do {				\
 	typeof(_ptr) ptr = (_ptr);				\
 	typeof(*ptr) val = (_val);				\
@@ -3702,9 +3711,82 @@ void set_task_rq_fair(struct sched_entity *se,
  *
  */
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - papago
+ *   마이그레이션 중에 sched_entity가 PELT 계층 구조에 합류/탈퇴할 때 기여도를 
+ *   전파해야 합니다. 이 전파의 핵심은 각 그룹에 대한 불변성입니다. 
+ *
+ *   ge->avg == grq->avg						(1)
+ *
+ *   IFF_ 순수한 실행 및 실행 가능한 합계를 봅니다. 계층 구조의 다른 지점에서 
+ *   매우 동일한 엔터티를 나타내기 때문입니다.
+ *
+ *   위의 update_tg_cfs_util() 및 update_tg_cfs_runnable()은 사소하고 단순히 
+ *   실행/실행 가능한 합계를 복사합니다(그러나 그룹 엔티티 및 그룹 rq에 PELT 
+ *   창이 정렬되어 있지 않기 때문에 여전히 잘못됨). 
+ *
+ *   그러나 update_tg_cfs_load()는 더 복잡합니다. 그래서 우리는: 
+ *
+ *   ge->avg.load_avg = ge->load.weight * ge->avg.runnable_avg		(2)
+ *
+ *   그리고 util과 마찬가지로 실행 가능한 부분을 직접 양도할 수 있어야 하므로 
+ *   다음과 같이 간단하게 접근할 수 있습니다.
+ *
+ *   grq->avg.load_avg = grq->load.weight * grq->avg.runnable_avg	(3)
+ *
+ *   그리고 (1)에 따라 다음이 있습니다. 
+ *
+ *   ge->avg.runnable_avg == grq->avg.runnable_avg 
+ *
+ *   다음을 제공합니다. 
+ *
+ *                      ge->load.weight * grq->avg.load_avg
+ *   ge->avg.load_avg = -----------------------------------		(4)
+ *                               grq->load.weight
+ * 
+ *   틀린 것만 빼면!
+ *
+ *   엔터티의 경우 historical 가중치는 중요하지 않고 실제로는 미래에만 관심이 
+ *   있으므로 순수 실행 가능한 합계를 고려할 수 있지만 실행 대기열은 이를 
+ *   수행할 수 없습니다.
+ *
+ *   우리는 특히 실행 대기열이 과거 가중치를 포함하는 load_avg를 갖기를 원합니다. 
+ *   그것들은 차단된 로드, 즉 (곧) 우리에게 돌아올 것으로 예상되는 로드를 나타냅니다. 
+ *   이것은 가중치를 합계의 필수적인 부분으로 유지해야만 작동합니다. 따라서 
+ *   (3)에 따라 분해할 수 없습니다. 
+ *
+ *   이것이 작동하지 않는 또 다른 이유는 runnable이 0-sum 엔터티가 아니기 때문입니다.  
+ *   각각 2/3 시간 동안 실행 가능한 2개의 작업이 있는 rq를 상상해 보십시오. 
+ *   그런 다음 rq 자체는 이러한 작업의 실행 가능한 섹션이 겹치는 방식 
+ *   (또는 겹치지 않음)에 따라 2/3에서 1 사이 어디에서나 실행 가능합니다. 
+ *   rq를 전체적으로 완벽하게 정렬하려면 시간의 2/3를 실행할 수 있습니다. 
+ *   그러나 항상 최소한 하나의 실행 가능한 작업이 있는 경우 전체 rq는 항상 
+ *   실행 가능합니다.
+ *
+ *   그래서 우리는 근사해야 할 것입니다.. :/ 
+ *
+ *   주어진 제약조건: 
+ *
+ *   ge->avg.running_sum <= ge->avg.runnable_sum <= LOAD_AVG_MAX 
+ *
+ *   최소한의 중첩을 가정하여 rq에 runnable을 추가하는 규칙을 구성할 수 있습니다.
+ *
+ *   제거할 때 각 작업이 동등하게 실행 가능하다고 가정합니다. 결과는 다음과 같습니다.
+ *
+ *   grq->avg.runnable_sum = grq->avg.load_sum / grq->load.weight 
+ *
+ *   XXX: 
+ *   runnable > running ? 부분에 대해서만 이 작업을 수행합니다. 
+ */
 static inline void
 update_tg_cfs_util(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq *gcfs_rq)
 {
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - @gcfs_rq나 @se에 변화가 생긴경우에만 고려한다.
+ */
 	long delta = gcfs_rq->avg.util_avg - se->avg.util_avg;
 	u32 divider;
 
@@ -3719,14 +3801,26 @@ update_tg_cfs_util(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 	divider = get_pelt_divider(&cfs_rq->avg);
 
 	/* Set new sched_entity's utilization */
+/*
+ * IAMROOT, 2022.12.31:
+ * - gcfs_rq값을 new로 생각하고 group se로 update한다.
+ */
 	se->avg.util_avg = gcfs_rq->avg.util_avg;
 	se->avg.util_sum = se->avg.util_avg * divider;
 
 	/* Update parent cfs_rq utilization */
+/*
+ * IAMROOT, 2022.12.31:
+ * - 소속 @cfs_rq엔 변화된값을 적용한다.
+ */
 	add_positive(&cfs_rq->avg.util_avg, delta);
 	cfs_rq->avg.util_sum = cfs_rq->avg.util_avg * divider;
 }
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - util과 동일하게 진행한다.
+ */
 static inline void
 update_tg_cfs_runnable(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq *gcfs_rq)
 {
@@ -3752,6 +3846,10 @@ update_tg_cfs_runnable(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cf
 	cfs_rq->avg.runnable_sum = cfs_rq->avg.runnable_avg * divider;
 }
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - 
+ */
 static inline void
 update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq *gcfs_rq)
 {
@@ -3771,24 +3869,52 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 	 */
 	divider = get_pelt_divider(&cfs_rq->avg);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - 증가됬다면
+ */
 	if (runnable_sum >= 0) {
 		/*
 		 * Add runnable; clip at LOAD_AVG_MAX. Reflects that until
 		 * the CPU is saturated running == runnable.
 		 */
+/*
+ * IAMROOT, 2022.12.31:
+ * - 기존값을 합산한다.
+ */
 		runnable_sum += se->avg.load_sum;
+/*
+ * IAMROOT, 2022.12.31:
+ * - 예외처리. divider보다 초과하면 말이안된다.
+ */
 		runnable_sum = min_t(long, runnable_sum, divider);
 	} else {
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - 감소됬다면.
+ */
 		/*
 		 * Estimate the new unweighted runnable_sum of the gcfs_rq by
 		 * assuming all tasks are equally runnable.
 		 */
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - 반영을 할려는 cfs_rq의 weight와 gcfs_rq의 weight가 다를수도잇는 상태.
+ *   gcfs_rq의 load_sum에서 weight가중치를 제거한다.
+ */
 		if (scale_load_down(gcfs_rq->load.weight)) {
 			load_sum = div_s64(gcfs_rq->avg.load_sum,
 				scale_load_down(gcfs_rq->load.weight));
 		}
 
 		/* But make sure to not inflate se's runnable */
+/*
+ * IAMROOT, 2022.12.31:
+ * - 일반적으로 cfs_rq == se지만 변경이 일어난 상태.
+ *   runnable_sum이 감소로 들어왔으므로 min비교를 한다.
+ */
 		runnable_sum = min(se->avg.load_sum, load_sum);
 	}
 
@@ -3798,14 +3924,28 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 	 * running_sum is in [0 : LOAD_AVG_MAX <<  SCHED_CAPACITY_SHIFT]
 	 * runnable_sum is in [0 : LOAD_AVG_MAX]
 	 */
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - runnable_sum이 running_sum보다 더 크거나 같은 개념.
+ *   (ge->avg.running_sum <= ge->avg.runnable_sum <= LOAD_AVG_MAX )
+ */
 	running_sum = se->avg.util_sum >> SCHED_CAPACITY_SHIFT;
 	runnable_sum = max(runnable_sum, running_sum);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - se에 대한 load_avg를 weights가중치를 포함해 계산한다.
+ */
 	load_sum = (s64)se_weight(se) * runnable_sum;
 	load_avg = div_s64(load_sum, divider);
 
 	se->avg.load_sum = runnable_sum;
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - avg에 대한 변화가 있으면 소속 cfs_rq에 delta를 가중한다.
+ */
 	delta = load_avg - se->avg.load_avg;
 	if (!delta)
 		return;
@@ -3816,6 +3956,11 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 	cfs_rq->avg.load_sum = cfs_rq->avg.load_avg * divider;
 }
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - propagate를 해야된다는걸 알리고, 값을 누적시켜놓는다.
+ *   나중에 할것이다.
+ */
 static inline void add_tg_cfs_propagate(struct cfs_rq *cfs_rq, long runnable_sum)
 {
 	cfs_rq->propagate = 1;
@@ -3823,13 +3968,26 @@ static inline void add_tg_cfs_propagate(struct cfs_rq *cfs_rq, long runnable_sum
 }
 
 /* Update task and its cfs_rq load average */
+/*
+ * IAMROOT, 2022.12.31:
+ * - 
+ */
 static inline int propagate_entity_load_avg(struct sched_entity *se)
 {
 	struct cfs_rq *cfs_rq, *gcfs_rq;
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - entity가 task group인 경우에만 propagate 하면된다.
+ */
 	if (entity_is_task(se))
 		return 0;
 
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - propagate 요청이 있는지 확인한다.
+ */
 	gcfs_rq = group_cfs_rq(se);
 	if (!gcfs_rq->propagate)
 		return 0;
@@ -3838,6 +3996,10 @@ static inline int propagate_entity_load_avg(struct sched_entity *se)
 
 	cfs_rq = cfs_rq_of(se);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - @se가 소속된 cfs_rq에 propagate를 알린다.
+ */
 	add_tg_cfs_propagate(cfs_rq, gcfs_rq->prop_runnable_sum);
 
 	update_tg_cfs_util(cfs_rq, se, gcfs_rq);
@@ -3909,6 +4071,32 @@ static inline void add_tg_cfs_propagate(struct cfs_rq *cfs_rq, long runnable_sum
  * Since both these conditions indicate a changed cfs_rq->avg.load we should
  * call update_tg_load_avg() when this function returns true.
  */
+/*
+ * IAMROOT, 2022.12.31:
+ * - papago
+ *   update_cfs_rq_load_avg - cfs_rq의 로드/유틸 평균 업데이트
+ *   @now: cfs_rq_clock_pelt()에 따른 현재 시간.
+ *   @cfs_rq: 업데이트할 cfs_rq.
+ *
+ *   cfs_rq avg는 모든 엔터티(차단 및 실행 가능) avg의 직접 합계입니다.
+ *   즉각적인 결과는 모든 (공정한) 작업이 연결되어야 한다는 것입니다.
+ *   post_init_entity_util_avg()를 참조하십시오.
+ *
+ *   cfs_rq->avg는 예를 들어 task_h_load() 및 update_cfs_share()에 사용됩니다.
+ *
+ *   로드가 감소했거나 로드를 제거한 경우 true를 반환합니다.
+ *
+ *   이 두 조건 모두 변경된 cfs_rq->avg.load를 나타내므로 이 함수가 true를
+ *   반환할 때 update_tg_load_avg()를 호출해야 합니다.
+ *
+ * @return decay가 됬으면 return 1.
+ *
+ * - 1. removed된게 있으면 removed field를 초기화하면서,
+ *      removed됬던 값들을 cfs_rq에 적용한다.
+ *   2. cfs_rq load update.
+ *   3. Propagate 요청 여부 set.
+ *   4. removed가 된게 있거나 cfs_rq load가 됬다면 decay가 된것이므로 return 1.
+ */
 static inline int
 update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
 {
@@ -3916,10 +4104,19 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
 	struct sched_avg *sa = &cfs_rq->avg;
 	int decayed = 0;
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - removed된게 있었다면.
+ */
 	if (cfs_rq->removed.nr) {
 		unsigned long r;
 		u32 divider = get_pelt_divider(&cfs_rq->avg);
 
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - 0값들과 swap을 하면서 old는 지역변수에 가져온다.
+ */
 		raw_spin_lock(&cfs_rq->removed.lock);
 		swap(cfs_rq->removed.util_avg, removed_util);
 		swap(cfs_rq->removed.load_avg, removed_load);
@@ -3927,6 +4124,12 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
 		cfs_rq->removed.nr = 0;
 		raw_spin_unlock(&cfs_rq->removed.lock);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - removed된 avg값들을 cfs_rq에 avg, sum에 빼준다.
+ *   sum / div = avg
+ *   sum = avg * div
+ */
 		r = removed_load;
 		sub_positive(&sa->load_avg, r);
 		sa->load_sum = sa->load_avg * divider;
@@ -3943,12 +4146,24 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
 		 * removed_runnable is the unweighted version of removed_load so we
 		 * can use it to estimate removed_load_sum.
 		 */
+/*
+ * IAMROOT, 2022.12.31:
+ * - papago
+ *   removed_runnable은 removed_load의 비가중 버전이므로 removed_load_sum을 
+ *   추정하는 데 사용할 수 있습니다.
+ *
+ * - 감소된값을 propagate해야된다. 감소된값을 기록한다.
+ */
 		add_tg_cfs_propagate(cfs_rq,
 			-(long)(removed_runnable * divider) >> SCHED_CAPACITY_SHIFT);
 
 		decayed = 1;
 	}
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - cfs_rq의 load update.
+ */
 	decayed |= __update_load_avg_cfs_rq(now, cfs_rq);
 
 #ifndef CONFIG_64BIT
@@ -4048,7 +4263,8 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
  */
 /*
  * IAMROOT, 2022.12.22:
- * - taskgroup을 update하라는 의미.
+ * - UPDATE_TG: taskgroup을 update하라는 의미.
+ * - DO_ATTACH : cfs rq에 enqueue 된경우.
  */
 #define UPDATE_TG	0x1
 #define SKIP_AGE_LOAD	0x2
@@ -4057,7 +4273,9 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 /* Update task and its cfs_rq load average */
 /*
  * IAMROOT, 2022.12.22:
- * - TODO 
+ * @flags entity_tick에서 불러졌을경우 : UPDATE_TG
+ *        enqueue_entity의 경우 : UPDATE_TG | DO_ATTACH
+ *        attach_entity_cfs_rq  : ATTACH_AGE_LOAD sched_feat가 없는경우 SKIP_AGE_LOAD
  */
 static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 {
@@ -4073,13 +4291,23 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 	 * - google-translate
 	 *   마이그레이션 후 새 CPU로 옮기기 위한 작업 로드 평균 추적 및 마이그레이션에서
 	 *   task_h_load calc에 대한 그룹 sched_entity 로드 평균 추적
+	 *
+	 * - 이전에 update를 했다면, @se에 대한 load sum, avg를 구한다.
 	 */
 	if (se->avg.last_update_time && !(flags & SKIP_AGE_LOAD))
 		__update_load_avg_se(now, cfs_rq, se);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - cfs_rq에 대한 removed 처리 및, load update.
+ */
 	decayed  = update_cfs_rq_load_avg(now, cfs_rq);
 	decayed |= propagate_entity_load_avg(se);
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - 최초이자(entity가 한번도 계산된적없음), ATTACH flag가 있는경우 진입.)
+ */
 	if (!se->avg.last_update_time && (flags & DO_ATTACH)) {
 
 		/*
@@ -11598,7 +11826,8 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
  * - scheduler_tick 에서 호출할 때 매개변수 queued = 0
  *
  * @rq: running task의 runqueue
- * @queued : task가 아직 처리되지 않은 보류중인 tick이 있는지 있는지.
+ * @queued : @curr가 rq에 있는지의 여부. rq에 있으면 true, 없으면(즉 현재 cpu에서 실행중)
+ *           false.
  */
 static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 {

@@ -447,6 +447,36 @@ struct load_weight {
  * time. Since max value of util_est.enqueued for a task is 1024 (PELT util_avg
  * for a task) it is safe to use MSB.
  */
+/*
+ * IAMROOT, 2022.12.31:
+ * - papago
+ *  struct util_est - FAIR 작업의 추정 활용
+ *  @enqueued: 작업/CPU의 즉각적인 예상 사용률
+ *  @ewma: 작업의 지수 가중 이동 평균(EWMA) 사용률입니다.
+ *
+ *  FAIR 작업 활용도의 지수 가중 이동 평균(EWMA)을 추적하는 데이터 구조를 지원합니다.
+ *  작업이 활성화를 완료할 때마다 새 샘플이 이동 평균에 추가됩니다. 샘플의 가중치는 
+ *  EWMA가 작업 부하의 일시적인 변화에 상대적으로 덜 민감하도록 선택됩니다. 
+ *
+ *  대기열에 추가된 속성은 작업 및 cpus에 대해 약간 다른 의미를 갖습니다.
+ *  - task: 마지막 작업 대기열에서 빼기 시간에 작업의 util_avg.
+ *  - cfs_rq: 해당 CPU의 각 RUNNABLE 작업에 대한 util_est.enqueued의 합계 따라서 작업의 
+ *  util_est.enqueued는 해당 작업이 현재 대기열에 있는 CPU의 예상 사용률에 대한 기여도를 
+ *  나타냅니다. 
+ *
+ *  작업에 대해서만 과거 순간 예상 사용률의 이동 평균을 추적합니다. 이를 통해 거의 
+ *  주기적인 작업을 사용할 때 산발적인 감소를 흡수할 수 있습니다. 
+ *
+ *  UTIL_AVG_UNCHANGED 플래그는 util_est를 util_avg 업데이트와 동기화하는 데 사용됩니다. 
+ *  작업이 대기열에서 제거되면 그 동안 util_avg가 업데이트되지 않은 경우 해당 util_est를 
+ *  업데이트하면 안 됩니다.
+ *
+ *  이 정보는 큐에서 제거할 때 util_est.enqueued의 MSB 비트에 매핑됩니다. 작업에 대한 
+ *  util_est.enqueued의 최대 값은 1024(작업에 대한 PELT util_avg)이므로 MSB를 사용하는 
+ *  것이 안전합니다.
+ *
+ * - enqueued의 MSB는 UTIL_AVG_UNCHANGED로 사용될수있다.
+ */
 struct util_est {
 	unsigned int			enqueued;
 	unsigned int			ewma;
@@ -546,10 +576,19 @@ struct util_est {
  *   그런 다음 오버플로 문제를 고려하는 것은 load_weight의 책임입니다.
  */
 struct sched_avg {
+/*
+ * IAMROOT, 2022.12.31:
+ * - ns단위 갱신될때 1024 미만 단위는 버려진다.(___update_load_sum()) 참고
+ */
 	u64				last_update_time;
 	u64				load_sum;
 	u64				runnable_sum;
 	u32				util_sum;
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - accumulate_sum()에서, 직전 주기에서 1ms가 못되서 남겨둔 나머지 시간.
+ */
 	u32				period_contrib;
 	unsigned long			load_avg;
 	unsigned long			runnable_avg;
@@ -617,7 +656,8 @@ struct sched_entity {
 	struct list_head		group_node;
 	/*
 	 * IAMROOT, 2022.12.17:
-	 * - sched_entity 가 rq에 들어가 있는 경우 1
+	 * - sched_entity 가 rq에 들어가 있는 경우 1. 시간할당을 받는 상태
+   *   그게 아니면 sleep인 상태.
 	 */
 	unsigned int			on_rq;
 

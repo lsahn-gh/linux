@@ -150,6 +150,11 @@ extern void call_trace_sched_update_nr_running(struct rq *rq, int count);
  */
 # define NICE_0_LOAD_SHIFT	(SCHED_FIXEDPOINT_SHIFT + SCHED_FIXEDPOINT_SHIFT)
 # define scale_load(w)		((w) << SCHED_FIXEDPOINT_SHIFT)
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - 20bit로 scale up됫던걸 10bit로 변경한다.
+ */
 # define scale_load_down(w) \
 ({ \
 	unsigned long __w = (w); \
@@ -688,6 +693,12 @@ struct cfs_rq {
  *  포함합니다. 
  *  idle_h_nr_running은 현재 실행 대기열에서 실행 중인 작업 수를 저장하는 
  *  부호 없는 정수이지만 유휴 스케줄링 정책이 있는 작업만 포함합니다. 
+ *
+ *  - nr_running
+ *    cfs rq에서 현재 실행가능한 task 수
+ *  - h_nr_running
+ *    하위 그룹까지 포함한 실행가능한 task 수.
+ *    (throttled된 하위 cfs rq는 제외).
  */
 	unsigned int		nr_running;
 	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
@@ -732,6 +743,12 @@ struct cfs_rq {
 #ifndef CONFIG_64BIT
 	u64			load_last_update_time_copy;
 #endif
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - cfs rq에서 se를 deattach(dequeue)할때 즉시 감소시키지 않고 
+ *   removed에 넣어놨다가 나중에 계산한다.update_cfs_rq_load_avg())
+ */
 	struct {
 		raw_spinlock_t	lock ____cacheline_aligned;
 		int		nr;
@@ -742,6 +759,14 @@ struct cfs_rq {
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	unsigned long		tg_load_avg_contrib;
+
+/*
+ * IAMROOT, 2022.12.31:
+ * - propagate 
+ *   propagate를 해야되는지에 대한 flag.
+ * - prop_runnable_sum 
+ *   propagate을 위해 미리 누적해놓는값.
+ */
 	long			propagate;
 	long			prop_runnable_sum;
 
@@ -941,6 +966,13 @@ static inline void se_update_runnable(struct sched_entity *se)
 		se->runnable_weight = se->my_q->h_nr_running;
 }
 
+/*
+ * IAMROOT, 2022.12.31:
+ * @return @se가 runable 상태인지.
+ *
+ * - @se가 task이면 rq에 들어가있을것이므로 on_req를 검사한다.
+ *         task group인 경우엔 runnable_weight를 검사한다.
+ */
 static inline long se_runnable(struct sched_entity *se)
 {
 	if (entity_is_task(se))
@@ -1208,7 +1240,8 @@ struct rq {
 	u64			clock_pelt;
 /*
  * IAMROOT, 2022.12.22:
- * - cpu가 idle였을때 task를 실행하지 않은 시간.
+ * - cpu의 lost된 idle 시간의 적산. 
+ *   task를 실행하지 않은 시간.
  */
 	unsigned long		lost_idle_time;
 

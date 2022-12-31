@@ -37,11 +37,26 @@ update_irq_load_avg(struct rq *rq, u64 running)
 }
 #endif
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - avg할 범위를 구한다. (누적을 했던범위)
+ * -  value
+ *   ------ 의 방법으로 구할 예정인데 
+ *    time
+ *
+ *   time이 결국 전체시간(LOAD_AVG_MAX)가 되겠지만
+ *   sum을 했던 범위를 고려해 sum을 했었던 범위까지만 한정한다.
+ */
 static inline u32 get_pelt_divider(struct sched_avg *avg)
 {
 	return LOAD_AVG_MAX - 1024 + avg->period_contrib;
 }
 
+/*
+ * IAMROOT, 2022.12.31:
+ * - Estimation 기능이 있는 경우만 수행한다.
+ *   UTIL_AVG_UNCHANGED flag를 지운다.
+ */
 static inline void cfs_se_util_change(struct sched_avg *avg)
 {
 	unsigned int enqueued;
@@ -192,6 +207,15 @@ static inline void update_idle_rq_clock_pelt(struct rq *rq)
 	 * this case. We keep track of this lost idle time compare to
 	 * rq's clock_task.
 	 */
+/*
+ * IAMROOT, 2022.12.31:
+ * - papago
+ *  도난 시간을 반영하는 것은 유휴 단계가 최대 용량으로 존재할 경우에만 의미가 
+ *  있습니다. rq의 활용도가 최대값에 도달하는 즉시 유휴 시간 없이 항상 실행 중인 
+ *  rq로 간주됩니다. 이 잠재적 유휴 시간은 이 경우 손실된 것으로 간주됩니다. 
+ *  우리는 rq의 clock_task와 비교하여 이 손실된 유휴 시간을 추적합니다.
+. 
+ */
 	if (util_sum >= divider)
 		rq->lost_idle_time += rq_clock_task(rq) - rq->clock_pelt;
 }
@@ -199,7 +223,7 @@ static inline void update_idle_rq_clock_pelt(struct rq *rq)
 /*
  * IAMROOT, 2022.12.22:
  * - clock_pelt의 실제 실행시간을 가져온다.
- *   (cpu가 idle이엿을대의 시간을뺌)
+ *   (cpu의 lost된 idle을 뺌)
  */
 static inline u64 rq_clock_pelt(struct rq *rq)
 {
