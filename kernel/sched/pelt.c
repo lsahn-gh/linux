@@ -34,19 +34,6 @@
  */
 /*
  * IAMROOT, 2022.12.31:
- * --- LOAD_AVG_PERIOD.
- * - 0.9785^n, n은 1부터 무한의 sum값
- *   sum = a/(1-r)
- *       = 0.9785 / (1 - 0.9785)
- *       = 0.9789 / 0.0215
- *       = 45.3777..
- *   이걸 이진화정수화.
- *   45.3777 * 1024 = 46467
- *   약 LOAD_AVG_PERIOD값 비슷하게 나온다.
- * - LOAD_AVG_PERIOD는 n = 0부터 무한대이므로 1024를 더해준다.
- *   46467 + 1024 = 47491
- *   내림한 수까지 고려하며ㅓㄴ LOAD_AVG_PERIOD값이 나올것이다.
- * ---
  * - ex) val = 8192
  *   -- n == 1인경우
 	   x = mul_u64_u32_shr(8192, runnable_avg_yN_inv[1], 32);
@@ -393,7 +380,7 @@ accumulate_sum(u64 delta, struct sched_avg *sa,
  *   32logY = log0.5
  *   logY = log0.5 / 32
  *   Y = 10^(log0.5 / 32)
- *     = 0.9786
+ *     = 0.97857206208
  * ---
  *  @running curr가 지금 동작중인지의 여부.
  *  @runnable run을 할수있는 상태를 의미.

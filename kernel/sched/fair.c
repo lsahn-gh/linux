@@ -3719,18 +3719,18 @@ void set_task_rq_fair(struct sched_entity *se,
  *
  *   ge->avg == grq->avg						(1)
  *
- *   IFF_ 순수한 실행 및 실행 가능한 합계를 봅니다. 계층 구조의 다른 지점에서 
- *   매우 동일한 엔터티를 나타내기 때문입니다.
+ *   IFF_ 순수한 running 및 runnable sum을 봅니다. 계층 구조의 다른 지점에서 
+ *   매우 동일한 entity를 나타내기 때문입니다.
  *
  *   위의 update_tg_cfs_util() 및 update_tg_cfs_runnable()은 사소하고 단순히 
- *   실행/실행 가능한 합계를 복사합니다(그러나 그룹 엔티티 및 그룹 rq에 PELT 
- *   창이 정렬되어 있지 않기 때문에 여전히 잘못됨). 
+ *   running/runnable sum을 복사합니다(그러나 그룹 엔티티 및 그룹 rq에 PELT 
+ *   window가 정렬되어 있지 않기 때문에 여전히 잘못됨). 
  *
  *   그러나 update_tg_cfs_load()는 더 복잡합니다. 그래서 우리는: 
  *
  *   ge->avg.load_avg = ge->load.weight * ge->avg.runnable_avg		(2)
  *
- *   그리고 util과 마찬가지로 실행 가능한 부분을 직접 양도할 수 있어야 하므로 
+ *   그리고 util과 마찬가지로 runnable을 직접 양도할 수 있어야 하므로 
  *   다음과 같이 간단하게 접근할 수 있습니다.
  *
  *   grq->avg.load_avg = grq->load.weight * grq->avg.runnable_avg	(3)
@@ -3747,22 +3747,30 @@ void set_task_rq_fair(struct sched_entity *se,
  * 
  *   틀린 것만 빼면!
  *
- *   엔터티의 경우 historical 가중치는 중요하지 않고 실제로는 미래에만 관심이 
- *   있으므로 순수 실행 가능한 합계를 고려할 수 있지만 실행 대기열은 이를 
- *   수행할 수 없습니다.
+ *   entity의 경우 historical weight는 중요하지 않고 실제로는 미래에만 관심이 
+ *   있으므로 순수 runnable sum을 고려할 수 있지만 rq는 이를 수행할 수 
+ *   없습니다.
+ *   (se는 weight 필요없이 runnable값으로만 계산해도 상관없지만, cfs_rq는
+ *   필요해서 결국 weight를 고려해야된다는 말이다.)
  *
- *   우리는 특히 실행 대기열이 과거 가중치를 포함하는 load_avg를 갖기를 원합니다. 
- *   그것들은 차단된 로드, 즉 (곧) 우리에게 돌아올 것으로 예상되는 로드를 나타냅니다. 
- *   이것은 가중치를 합계의 필수적인 부분으로 유지해야만 작동합니다. 따라서 
+ *   우리는 특히 rq가 historical weight를 포함하는 load_avg를 갖기를 원합니다. 
+ *   그것들은 blocked load, 즉 (곧) 우리에게 돌아올 것으로 예상되는 load를 
+ *   나타냅니다. 
+ *   이것은 weight를 sum의 필수적인 부분으로 유지해야만 작동합니다. 따라서 
  *   (3)에 따라 분해할 수 없습니다. 
+ *   (historical weight load_avg가 rq에 필요하기 때문에 결국 load sum을 
+ *   계산할때 weight를 사용해야된다는 의미.)
  *
- *   이것이 작동하지 않는 또 다른 이유는 runnable이 0-sum 엔터티가 아니기 때문입니다.  
- *   각각 2/3 시간 동안 실행 가능한 2개의 작업이 있는 rq를 상상해 보십시오. 
- *   그런 다음 rq 자체는 이러한 작업의 실행 가능한 섹션이 겹치는 방식 
- *   (또는 겹치지 않음)에 따라 2/3에서 1 사이 어디에서나 실행 가능합니다. 
- *   rq를 전체적으로 완벽하게 정렬하려면 시간의 2/3를 실행할 수 있습니다. 
- *   그러나 항상 최소한 하나의 실행 가능한 작업이 있는 경우 전체 rq는 항상 
- *   실행 가능합니다.
+ *   이것이 작동하지 않는 또 다른 이유는 runnable이 0-sum entity가 아니기 
+ *   때문입니다.  
+ *   각각 2/3 시간 동안 runnable 2개의 작업이 있는 rq를 상상해 보십시오. 
+ *   그런 다음 rq 자체는 이러한 작업의 runnable 섹션이 겹치는 방식 
+ *   (또는 겹치지 않음)에 따라 2/3에서 1 사이 어디에서나 runnable 가능합니다. 
+ *   rq를 전체적으로 완벽하게 정렬하려면 시간의 2/3를 runnable 수 있습니다. 
+ *   그러나 항상 최소한 하나의 runnable 작업이 있는 경우 전체 rq는 항상 
+ *   runnable 가능합니다.
+ *   (각 task runnable시간의 sum이 group의 sum보다 같거나 작을수박에
+ *   없다는의미.)
  *
  *   그래서 우리는 근사해야 할 것입니다.. :/ 
  *
@@ -3770,15 +3778,138 @@ void set_task_rq_fair(struct sched_entity *se,
  *
  *   ge->avg.running_sum <= ge->avg.runnable_sum <= LOAD_AVG_MAX 
  *
- *   최소한의 중첩을 가정하여 rq에 runnable을 추가하는 규칙을 구성할 수 있습니다.
+ *   최소한의 overlap을 가정하여 rq에 runnable을 추가하는 규칙을 구성할 수 있습니다.
+ *   (runnable이 양수인경우엔 overlap의 개념을 도입해서 적당히 그냥 add만
+ *   한다는 의미.)
  *
- *   제거할 때 각 작업이 동등하게 실행 가능하다고 가정합니다. 결과는 다음과 같습니다.
+ *   제거할 때 각 작업이 동등하게 runnable이라고가정합니다. 결과는 다음과 
+ *   같습니다.
  *
  *   grq->avg.runnable_sum = grq->avg.load_sum / grq->load.weight 
  *
+ *   (runnable이 음수일때는 제거되는 과정이 되므로 overlap된값을 결국 배제하고 
+ *   좀 정확히 계산해야되므로 식을 사용해 계산해야된다는 의미.)
+ *
  *   XXX: 
  *   runnable > running ? 부분에 대해서만 이 작업을 수행합니다. 
- */
+ *
+ * ------------------ chat open ai --------------------------------------
+ * --- 주석의 줄임말
+ * - "IFF"는 "if and only if"의 약자입니다. 명제가 특정 조건에서만 참임을 
+ *   나타내는 데 사용됩니다.
+*
+*  -"XXX"는 수행해야 하거나 추가 주의가 필요한 작업에 대한 자리 표시자입니다.
+*   검토하거나 수정해야 하는 영역을 나타내기 위해 코드 주석에서 자주 
+*   사용됩니다. 
+*
+*  - 0-sum entity
+*  스케줄러에서 "runnable" entity의 개념입니다. 
+*  "0-sum"이라는 용어는 작업 그룹에 대한 "runnable" 시간의 sum가 그룹이 
+*  실행 가능한 총 시간과 반드시 같지는 않다는 사실을 나타냅니다. 이는 그룹의 
+*  작업이 항상 동시에 실행되지 않을 수 있기 때문에 그룹 전체가 개별 작업의 
+*  실행 가능한 시간의 합보다 더 긴 시간 동안 실행될 수 있기 때문입니다. 
+* --------------------
+* --- PELT 관련 용어 ---
+*  - PELT window
+*  task 또는 task gorup의 load 및 util을 추적하는 기간입니다. PELT window의 
+*  크기는 task 또는 task group의 load 및 util avg이 업데이트되는 빈도에 따라 
+*  결정됩니다. 
+*
+*  PELT window의 크기는 task 또는 task group의 load 및 util avg이 
+*  업데이트되는 빈도에 따라 결정됩니다. load 및 uitl avg은 일반적으로 
+*  1ms의 정기적인 간격으로 업데이트됩니다. 즉, PELT window의 크기도 
+*  1ms이며 업데이트 간격과 동시에 시작하고 끝납니다.
+*
+*  - PELT window align
+*  서로 다른 task 및 task group의 PELT window을 서로 정렬하면 크기와 
+*  시작 및 종료 시간이 동일함을 의미합니다. PELT 창을 정렬하면 task 및 
+*  task group에 대해 계산된 load 및 util avg의 정확도를 개선하는 데 도움이 
+*  될 수 있습니다.
+*
+*  예를 들어 A와 B라는 두 개의 task과 CPU에서 실행되는 G라는 task group이 
+*  있다고 가정합니다. A, B, G의 load 및 util avg은 PELT 알고리즘을 사용하여 
+*  계산되며 각 task 및 task group에는 자체 PELT window가 있습니다.
+*
+*  A, B, G의 PELT window가 서로 정렬되어 있지 않으면 크기나 시작 시간과 
+*  종료 시간이 같지 않다는 의미입니다. PELT 알고리즘은 서로 다른 기간 
+*  동안 task 및 task group의 load 및 util을 추적하므로 각 task 및 
+*  task group에 대해 계산된 load 및 util avg이 부정확해질 수 있습니다.
+*
+*  반면에 A, B, G의 PELT 창들이 서로 정렬되어 있다면 크기와 시작 시간과 
+*  종료 시간이 같다는 뜻입니다. 이를 통해 PELT 알고리즘은 동일한 기간 동안 
+*  task 및 task group의 load 및 util을 추적하므로 각 task 및 task group에 
+*  대해 계산된 load 및 util avg의 정확도를 개선하는 데 도움이 될 수 있습니다.
+* --------------------
+* --- load 관련 용어 ---
+*  - historical weigth
+*  과거에 작업 또는 작업 그룹에 주어진 CPU 시간의 양을 나타냅니다. 
+*  스케줄러에서 작업 또는 작업 그룹의 "load_avg"는 향후 소비할 것으로 
+*  예상되는 CPU 시간을 측정한 것입니다. 이 load_avg 값은 작업 또는 그룹의 
+*  현재 및 과거 CPU 사용량을 기반으로 하는 경우가 많습니다. 
+*
+*  예를 들어 오랫동안 CPU에서 실행되어 온 작업 그룹을 생각해 보십시오. 
+*  이 그룹은 과거에 많은 CPU 시간을 소비했기 때문에 높은 "역사적 가중치"를 
+*  갖게 됩니다. 그룹이 앞으로도 비슷한 양의 CPU 시간을 계속 사용할 것으로 
+*  예상되면 해당 load_avg 값이 높아집니다. 반면에 그룹이 앞으로 더 적은 
+*  CPU 시간을 소비할 것으로 예상되는 경우에는 load_avg 값이 더 낮아집니다.
+*
+*  - blocked load
+*  현재 예약 대기 중이며 현재 CPU에서 실행되고 있지 않은 작업의 load입니다. 
+*  이러한 task은 스케줄러에서 CPU를 할당할 때까지 실행할 수 없기 때문에 
+*  "block"된 것으로 간주됩니다.  
+*
+*  blocked load는 block task가 실행 가능해지고 CPU에서 실행되도록 예약된 후 
+*  task 또는 task group이 반환될 것으로 예상되는 load를 나타내기 때문에 
+*  task 또는 task group의 load avg에 포함됩니다. load avg에 block load를
+*  포함함으로써 스케줄러는 예약 대기 중인 작업의 CPU 리소스 사용량을 
+*  고려하고 다른 task 및 task group에 CPU 시간을 할당하는 방법에 대해 더 많은 
+*  정보에 입각한 결정을 내릴 수 있습니다.
+*
+*  blocked load는 task 또는 task group의 avg load를 계산하는 데 사용되기 
+*  때문에 load sum의 필수 부분으로 유지됩니다. 하중 avg은 하중 sum를 
+*  PELT window의 크기로 나누어 계산합니다. blocked load가 load sum의 필수 
+*  부분으로 포함되지 않은 경우 load avg에 정확하게 반영되지 않으며 
+*  스케줄러는 task 또는 task group의 CPU 리소스 사용에 대한 완전한 그림을 
+*  갖지 못할 것입니다. 
+*
+* - overlap
+*  A와 B라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오. 
+*  작업 A는 실행 가능한 시간의 50%이고 작업 B는 실행 가능한 시간의 
+*  40%입니다. 이 경우 두 작업의 실행 가능한 기간이 완전히 겹치기 때문에 
+*  runqueue는 항상 실행 가능합니다. 작업 A가 실행 가능할 때 작업 B도 실행 
+*  가능한 시간의 40%이고 작업 B가 실행 가능한 경우 작업 A도 실행 가능한 
+*  시간의 50%이기 때문입니다.  
+*
+*  이제 C와 D라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오. 
+*  작업 C는 실행 가능한 시간의 60%이고 작업 D는 실행 가능한 시간의 
+*  70%입니다. 이 경우 runqueue는 두 작업의 실행 가능한 기간이 겹치는 방식에 
+*  따라 시간의 60%에서 100% 사이 어디에서나 실행할 수 있습니다. 두 작업을 
+*  동시에 실행할 수 없는 경우 실행 대기열은 시간의 60%만 실행할 수 
+*  있습니다(각 작업이 실행 가능한 최소 시간). 두 작업이 항상 동시에 실행 
+*  가능한 경우 실행 대기열은 시간의 100% 실행 가능합니다(각 작업이 실행 
+*   가능한 최대 시간). 두 작업의 실행 가능 기간이 겹치면 실행 대기열 
+*   실행 가능 시간이 60%에서 100% 사이가 됩니다. 
+*
+* - assuming minimal overlap
+*   runqueue(rq)에 대한 실행 가능 시간을 계산할 때 runqueue에 있는 작업의 
+*   실행 가능 기간이 많이 겹치지 않는다고 가정하는 것을 의미합니다. 이로 
+*   인해 runqueue의 실행 가능한 시간에 대한 추정치가 낮아집니다.
+*
+*   예를 들어 E와 F라는 두 개의 작업이 있는 실행 대기열이 있고 실행 대기열의 
+*   실행 가능 시간을 계산하려는 경우 두 작업의 실행 가능 기간이 전혀 겹치지 
+*   않는다고 가정할 수 있습니다. 이 경우 실행 대기열에 대한 총 실행 가능 
+*   시간을 얻기 위해 각 작업에 대한 실행 가능 시간을 추가하기만 하면 됩니다. 
+*   이렇게 하면 두 작업 간의 중복이 최소화된다고 가정하기 때문에 실행 
+*   대기열의 실행 가능한 시간에 대한 추정치가 낮아집니다.
+*
+*   반면에 두 작업의 실행 가능한 기간이 상당히 겹친다고 가정하면 실행 
+*   대기열의 실행 가능한 시간에 대해 더 높은 추정치를 얻을 수 있습니다. 
+*   작업이 동시에 더 자주 실행될 수 있다고 가정하기 때문에 실행 대기열의 
+*   전체 실행 가능 시간이 늘어납니다. 
+* --------------------
+ * ----------------------------------------------------------------------
+* - @gcfs_rq나 @se에 변화가 생긴경우 @se, @cfs를 update한다.
+*/
 static inline void
 update_tg_cfs_util(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq *gcfs_rq)
 {
@@ -3848,7 +3979,18 @@ update_tg_cfs_runnable(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cf
 
 /*
  * IAMROOT, 2022.12.31:
- * - 
+ * - propagate runnable sum값의 증감 유무에 따라 @se의 load를 update하고
+ *   변경된 값만큼 @cfs_rq의 load를 재계산한다.
+ *
+ * 1. 증가하는경우 assuming minimal overlap을 적용하는 개념으로 
+ *    add 와 divider에 대한 min처리만 수행한다.
+ *
+ * 2. 감소하는 경우는 weight를 고려한다. 위쪽 주석의 식에 따라
+ *                      ge->load.weight * grq->avg.load_avg
+ *   ge->avg.load_avg = -----------------------------------	
+ *                               grq->load.weight
+ *
+ *   를 사용하여 재계산한다. 단 재계산값이 증가했을 경우엔 min처리를 한다.
  */
 static inline void
 update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq *gcfs_rq)
@@ -3871,39 +4013,41 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 
 /*
  * IAMROOT, 2022.12.31:
- * - 증가됬다면
+ * - 증가됬다면 asumming minimal overlap을 적용하여, 그냥 더하기만 한다.
+ *   overlap이 있기때문에 max값보다 커질수있으므로 이를 고려한 min처리를
+ *   한다.
  */
 	if (runnable_sum >= 0) {
 		/*
 		 * Add runnable; clip at LOAD_AVG_MAX. Reflects that until
 		 * the CPU is saturated running == runnable.
 		 */
-/*
- * IAMROOT, 2022.12.31:
- * - 기존값을 합산한다.
- */
 		runnable_sum += se->avg.load_sum;
-/*
- * IAMROOT, 2022.12.31:
- * - 예외처리. divider보다 초과하면 말이안된다.
- */
 		runnable_sum = min_t(long, runnable_sum, divider);
 	} else {
 
 /*
  * IAMROOT, 2022.12.31:
- * - 감소됬다면.
+ * - 감소됬다면 task runnable이 균등하게 계산한다는 관점으로 avg와 weight로 
+ *   재계산한다.
+ *   재계산시에는 위에서 유도한 식을 토대로 적용한다.
+ *
+ *                      ge->load.weight * grq->avg.load_avg
+ *   ge->avg.load_avg = -----------------------------------	 (4)
+ *                               grq->load.weight
+ *
+ *   여기서 
+ *
+ *  grq->avg.load_avg
+ * --------------------
+ *   grq->load.weight
+ *  
+ *  이것만 계산해두고 뒤에서 ge->load.weight를 곱한다.
  */
 		/*
 		 * Estimate the new unweighted runnable_sum of the gcfs_rq by
 		 * assuming all tasks are equally runnable.
 		 */
-
-/*
- * IAMROOT, 2022.12.31:
- * - 반영을 할려는 cfs_rq의 weight와 gcfs_rq의 weight가 다를수도잇는 상태.
- *   gcfs_rq의 load_sum에서 weight가중치를 제거한다.
- */
 		if (scale_load_down(gcfs_rq->load.weight)) {
 			load_sum = div_s64(gcfs_rq->avg.load_sum,
 				scale_load_down(gcfs_rq->load.weight));
@@ -3912,8 +4056,9 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 		/* But make sure to not inflate se's runnable */
 /*
  * IAMROOT, 2022.12.31:
- * - 일반적으로 cfs_rq == se지만 변경이 일어난 상태.
- *   runnable_sum이 감소로 들어왔으므로 min비교를 한다.
+ * - 균등하게 계산을 했는데, 오히려 더 커진 경우가 있을수있다.
+ *   (반영을 할려는 cfs_rq의 weight와 gcfs_rq의 weight가 다를수도잇는 상태등)
+ *   min 비교를 해서 커지지 않게 조절한다.
  */
 		runnable_sum = min(se->avg.load_sum, load_sum);
 	}
@@ -3970,7 +4115,7 @@ static inline void add_tg_cfs_propagate(struct cfs_rq *cfs_rq, long runnable_sum
 /* Update task and its cfs_rq load average */
 /*
  * IAMROOT, 2022.12.31:
- * - 
+ * - ING
  */
 static inline int propagate_entity_load_avg(struct sched_entity *se)
 {
@@ -4074,17 +4219,17 @@ static inline void add_tg_cfs_propagate(struct cfs_rq *cfs_rq, long runnable_sum
 /*
  * IAMROOT, 2022.12.31:
  * - papago
- *   update_cfs_rq_load_avg - cfs_rq의 로드/유틸 평균 업데이트
+ *   update_cfs_rq_load_avg - cfs_rq의 load/유틸 avg 업데이트
  *   @now: cfs_rq_clock_pelt()에 따른 현재 시간.
  *   @cfs_rq: 업데이트할 cfs_rq.
  *
- *   cfs_rq avg는 모든 엔터티(차단 및 실행 가능) avg의 직접 합계입니다.
+ *   cfs_rq avg는 모든 entity(차단 및 실행 가능) avg의 직접 sum입니다.
  *   즉각적인 결과는 모든 (공정한) 작업이 연결되어야 한다는 것입니다.
  *   post_init_entity_util_avg()를 참조하십시오.
  *
  *   cfs_rq->avg는 예를 들어 task_h_load() 및 update_cfs_share()에 사용됩니다.
  *
- *   로드가 감소했거나 로드를 제거한 경우 true를 반환합니다.
+ *   load가 감소했거나 load를 제거한 경우 true를 반환합니다.
  *
  *   이 두 조건 모두 변경된 cfs_rq->avg.load를 나타내므로 이 함수가 true를
  *   반환할 때 update_tg_load_avg()를 호출해야 합니다.
@@ -4289,8 +4434,8 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 	/*
 	 * IAMROOT. 2022.12.17:
 	 * - google-translate
-	 *   마이그레이션 후 새 CPU로 옮기기 위한 작업 로드 평균 추적 및 마이그레이션에서
-	 *   task_h_load calc에 대한 그룹 sched_entity 로드 평균 추적
+	 *   마이그레이션 후 새 CPU로 옮기기 위한 작업 load avg 추적 및 마이그레이션에서
+	 *   task_h_load calc에 대한 그룹 sched_entity load avg 추적
 	 *
 	 * - 이전에 update를 했다면, @se에 대한 load sum, avg를 구한다.
 	 */
@@ -5772,7 +5917,7 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
  * IAMROOT, 2022.12.27:
  * - papago
  *   스로틀 해제 후 기간 동안 활동이 보장되지만 새 대역폭이 기존 대역폭 
- *   부족을 충당하기에 불충분한 경우도 포함됩니다. (조절된 엔터티가 있는 
+ *   부족을 충당하기에 불충분한 경우도 포함됩니다. (조절된 entity가 있는 
  *   동안 타이머가 활성 상태를 유지하도록 합니다.).
  */
 	cfs_b->idle = 0;
@@ -11819,7 +11964,7 @@ static inline void task_tick_core(struct rq *rq, struct task_struct *curr) {}
  * - google-translate
  *   스케줄링 클래스의 작업을 치는 스케줄러 틱.
  *
- *   참고: 이 함수는 완전한 dynticks를 따라가는 틱 오프로드에 의해 원격으로 호출될 수
+ *   참고: 이 함수는 완전한 dynticks를 따라가는 틱 오프load에 의해 원격으로 호출될 수
  *   있습니다. 따라서 로컬 가정을 할 수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해
  *   모든 항목에 액세스해야 합니다.
  *
