@@ -73,6 +73,13 @@ const struct clock_event_device *tick_get_wakeup_device(int cpu)
 /*
  * Start the device in periodic mode
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @bc의 event_handler를 tick_handle_periodic_broadcast로 설정한다.
+ *   @bc가 동작중이면 fetures와 tick_broadcast_device mode에 따라
+ *   @dev의 state를 periodic or oneshot으로 설정한다.
+ *   oneshot일 경우 tick_next_period에 맞춰 expire 시간을 program한다.
+ */
 static void tick_broadcast_start_periodic(struct clock_event_device *bc)
 {
 	if (bc)
@@ -82,6 +89,10 @@ static void tick_broadcast_start_periodic(struct clock_event_device *bc)
 /*
  * Check, if the device can be utilized as broadcast device:
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - broadcast로 사용할수있는지 검사한다.
+ */
 static bool tick_check_broadcast_device(struct clock_event_device *curdev,
 					struct clock_event_device *newdev)
 {
@@ -90,14 +101,26 @@ static bool tick_check_broadcast_device(struct clock_event_device *curdev,
 	    (newdev->features & CLOCK_EVT_FEAT_C3STOP))
 		return false;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - broadcast이 oneshot 인데 @newdev가 oneshot이 아니면 false.
+ */
 	if (tick_broadcast_device.mode == TICKDEV_MODE_ONESHOT &&
 	    !(newdev->features & CLOCK_EVT_FEAT_ONESHOT))
 		return false;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - rating이 더 큰게 우선.
+ */
 	return !curdev || newdev->rating > curdev->rating;
 }
 
 #ifdef CONFIG_TICK_ONESHOT
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cpu에 해당하는 tick_oneshot_wakeup_device가져온다.
+ */
 static struct clock_event_device *tick_get_oneshot_wakeup_device(int cpu)
 {
 	return per_cpu(tick_oneshot_wakeup_device, cpu);
@@ -112,6 +135,12 @@ static void tick_oneshot_wakeup_handler(struct clock_event_device *wd)
 	tick_receive_broadcast();
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - wakeup 으로 설정할지를 정한다.
+ *   pcpu, oneshot이여야 하고, 기존 dev에 비해 rating이 작거나 같아야되는등의
+ *   제약조건을 검사한다.
+ */
 static bool tick_set_oneshot_wakeup_device(struct clock_event_device *newdev,
 					   int cpu)
 {
@@ -139,7 +168,15 @@ static bool tick_set_oneshot_wakeup_device(struct clock_event_device *newdev,
 
 	newdev->event_handler = tick_oneshot_wakeup_handler;
 set_device:
+/*
+ * IAMROOT, 2023.01.03:
+ * - @curdev는 ref put시키고 @newdev는 set을 위해 일단 shutdown
+ */
 	clockevents_exchange_device(curdev, newdev);
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cpu의 pcp tick_oneshot_wakeup_device를 @newdev로 설정한다.
+ */
 	per_cpu(tick_oneshot_wakeup_device, cpu) = newdev;
 	return true;
 }
@@ -161,27 +198,49 @@ static bool tick_set_oneshot_wakeup_device(struct clock_event_device *newdev,
  */
 /*
  * IAMROOT, 2022.12.03:
- * - broadcast 인경우에만 동작한다.
+ * 1. wakeup으로 사용할지 결정한다.
+ * 2. broadcast로 설정할지 결정한다. 
+ *    @dev를 pcpu tick_broadcast_device에 등록한다.
  */
 void tick_install_broadcast_device(struct clock_event_device *dev, int cpu)
 {
 	struct clock_event_device *cur = tick_broadcast_device.evtdev;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - wakeup으로 설정할수있는경우 tick_oneshot_wakeup_handler를 설정하고
+ *   빠져나간다.
+ */
 	if (tick_set_oneshot_wakeup_device(dev, cpu))
 		return;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - broadcast로 사용 못하면 reutrn.
+ */
 	if (!tick_check_broadcast_device(cur, dev))
 		return;
 
 	if (!try_module_get(dev->owner))
 		return;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cur과 교체한다.
+ */
 	clockevents_exchange_device(cur, dev);
 	if (cur)
 		cur->event_handler = clockevents_handle_noop;
 	tick_broadcast_device.evtdev = dev;
+
+/*
+ * IAMROOT, 2023.01.03:
+ * - broadcast할게 이미 있는 경우 여기서 시작한다.
+ */
 	if (!cpumask_empty(tick_broadcast_mask))
+	{
 		tick_broadcast_start_periodic(dev);
+	}
 
 	if (!(dev->features & CLOCK_EVT_FEAT_ONESHOT))
 		return;
@@ -190,6 +249,14 @@ void tick_install_broadcast_device(struct clock_event_device *dev, int cpu)
 	 * If the system already runs in oneshot mode, switch the newly
 	 * registered broadcast device to oneshot mode explicitly.
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   시스템이 이미 원샷 모드로 실행 중인 경우 새로 등록된 브로드캐스트 
+ *   장치를 명시적으로 원샷 모드로 전환합니다.
+ *
+ * - 위에서 등록만한 tick_broadcast_device를 실제 설정한다.
+ */
 	if (tick_broadcast_oneshot_active()) {
 		tick_broadcast_switch_to_oneshot();
 		return;
@@ -203,11 +270,27 @@ void tick_install_broadcast_device(struct clock_event_device *dev, int cpu)
 	 * notification the systems stays stuck in periodic mode
 	 * forever.
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   이에 대해 모든 CPU에 알립니다. CPU당 장치가 CLOCK_EVT_FEAT_C3STOP의 
+ *   영향을 받고 원샷 가능 브로드캐스트 장치가 없기 때문에 원샷 모드로 
+ *   전환하지 않은 상황일 수 있습니다. 해당 알림이 없으면 시스템은 
+ *   주기적 모드에 영원히 고정됩니다.
+ */
 	tick_clock_notify();
 }
 
 /*
  * Check, if the device is the broadcast device
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - chat open ai
+ *   브로드캐스트 장치는 시스템의 모든 CPU에 클록 틱을 전달하는 데 사용되는 
+ *   클록 이벤트 장치입니다. 클록 틱은 스케줄링, 시간 관리 및 선점과 같은 
+ *   시간 기반 작업의 실행을 허용하기 위해 시스템에서 생성되는 주기적인 
+ *   인터럽트입니다. 
  */
 int tick_is_broadcast_device(struct clock_event_device *dev)
 {
@@ -232,6 +315,10 @@ static void err_broadcast(const struct cpumask *mask)
 	pr_crit_once("Failed to broadcast timer tick. Some CPUs may be unresponsive.\n");
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dev의 broadcast가 아직 설정이 안되있을경우 tick_broadcast로 설정한다.
+ */
 static void tick_device_setup_broadcast_func(struct clock_event_device *dev)
 {
 	if (!dev->broadcast)
@@ -247,6 +334,11 @@ static void tick_device_setup_broadcast_func(struct clock_event_device *dev)
  * Check, if the device is dysfunctional and a placeholder, which
  * needs to be handled by the broadcast device.
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * @return 1 : broadcast로 동작한다.
+ *         0 : broadcast로 동작안한다.
+ */
 int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 {
 	struct clock_event_device *bc = tick_broadcast_device.evtdev;
@@ -261,7 +353,25 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 	 * operated from the broadcast device and is a placeholder for
 	 * the cpu local device.
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *  주기적 및 원샷 모드가 비활성화된 상태로 장치가 등록될 수 있습니다. 
+ *  이는 장치가 브로드캐스트 장치에서 작동해야 하며 CPU 로컬 장치에 대한 
+ *  자리 표시자임을 나타냅니다.
+ */
 	if (!tick_device_is_functional(dev)) {
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dev가 동작 하고 있지 않다면 
+ *   1. @dev->event_handler = tick_handle_periodic 
+ *      @dev->broadcast = tick_broadcast
+ *   2. @cpu를 tick_broadcast_mask에 추가.
+ *   3. - tick_broadcast_device가 periodic일 경우
+ *      @bc의 event_handler를 tick_handle_periodic_broadcast로 설정
+ *      - oneshot일 경우
+ *      @bc의 event_handler를 tick_handle_oneshot_broadcast로 설정.
+ */
 		dev->event_handler = tick_handle_periodic;
 		tick_device_setup_broadcast_func(dev);
 		cpumask_set_cpu(cpu, tick_broadcast_mask);
@@ -269,12 +379,22 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 			tick_broadcast_start_periodic(bc);
 		else
 			tick_broadcast_setup_oneshot(bc);
+/*
+ * IAMROOT, 2023.01.03:
+ * - broadcast 설정완료.
+ */
 		ret = 1;
 	} else {
 		/*
 		 * Clear the broadcast bit for this cpu if the
 		 * device is not power state affected.
 		 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   장치가 영향을 받는 전원 상태가 아닌 경우 이 CPU에 대한 브로드캐스트 
+ *   비트를 지웁니다.
+ */
 		if (!(dev->features & CLOCK_EVT_FEAT_C3STOP))
 			cpumask_clear_cpu(cpu, tick_broadcast_mask);
 		else
@@ -284,6 +404,11 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 		 * Clear the broadcast bit if the CPU is not in
 		 * periodic broadcast on state.
 		 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   CPU가 주기적인 브로드캐스트 온 상태가 아니면 브로드캐스트 비트를 지웁니다.
+ */
 		if (!cpumask_test_cpu(cpu, tick_broadcast_on))
 			cpumask_clear_cpu(cpu, tick_broadcast_mask);
 
@@ -297,6 +422,17 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 			 * state affected device to stop. Let the
 			 * caller initialize the device.
 			 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   시스템이 원샷 모드에 있으면 무조건 원샷 마스크 비트를 지울 수 있습니다. 
+ *   CPU가 실행 중이고 따라서 전원 상태에 영향을 받는 장치가 중지되는 유휴 
+ *   상태가 아니기 때문입니다. 발신자가 장치를 초기화하도록 합니다.
+ *
+ * - system이 oneshot을 사용하고 있으면 broadcast에서 current cpu를 한번 빼준다.
+ *   oneshot으로 동작을 하기 때문에 굳이 broadcast에서 동작할 필요가없다.
+ *   oneshot이면 결국 broadcast를 안하는 개념이므로 ret = 0
+ */
 			tick_broadcast_clear_oneshot(cpu);
 			ret = 0;
 			break;
@@ -307,6 +443,14 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 			 * whether the broadcast device can be
 			 * switched off now.
 			 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   시스템이 주기적 모드인 경우 브로드캐스트 장치를 지금 끌 수 있는지 
+ *   확인하십시오.
+ *
+ * - broadcast할게 없는데 @bc가 살아 있다면 그냥 끄는듯 하다.
+ */
 			if (cpumask_empty(tick_broadcast_mask) && bc)
 				clockevents_shutdown(bc);
 			/*
@@ -317,6 +461,34 @@ int tick_device_uses_broadcast(struct clock_event_device *dev, int cpu)
 			 * the broadcast device exists and is not
 			 * hrtimer based.
 			 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   CPU를 브로드캐스트 마스크에 유지한 경우 호출자에게 CPU별 장치를 종료 
+ *   상태로 두도록 지시합니다. 주기적 인터럽트는 브로드캐스트 장치가 존재하고 
+ *   hrtimer 기반이 아닌 경우 브로드캐스트 장치에 의해 전달됩니다.
+ *
+ * - chat open ai
+ *   hrtimer 기반 장치가 브로드캐스트 틱을 사용하지 않고 주기적 모드로 작동할 
+ *   수 있기 때문입니다. hrtimer는 hrtimer API를 사용하는 고해상도 타이머로, 
+ *   기존 타이머 API보다 더 정확한 타이머 인터럽트 스케줄링이 가능합니다.
+ *
+ *   hrtimer 기반 장치의 경우 브로드캐스트 모드를 사용할 필요가 없을 정도로 
+ *   정확하게 자체 인터럽트를 생성할 수 있습니다. 따라서 이 경우 함수는 
+ *   호출자가 브로드캐스트 장치가 아닌 CPU당 장치를 사용해야 함을 나타내는 
+ *   0을 반환합니다.
+ *
+ *   브로드캐스트 장치가 hrtimer 기반이 아닌 경우 매우 빈번하거나 고해상도 
+ *   인터럽트를 생성할 수 없습니다. 이 경우 주기적인 인터럽트를 위해 
+ *   브로드캐스트 장치를 사용하는 것이 더 효율적일 수 있습니다. 
+ *   모든 유휴 CPU에 대해 타이머를 한 번에 중지하거나 속도를 늦출 수 있기 
+ *   때문입니다. 이 경우 함수는 CPU가 브로드캐스트 마스크에 있으면 1을 
+ *   반환하여 호출자가 CPU당 장치가 아닌 브로드캐스트 장치를 사용해야 함을 
+ *   나타냅니다. 
+ *
+ * - hrtimer를 지원하는경우 broadcast를 사용하지 않는다. 그러므로 return 0
+ * - hritmer를 사용안하는경우 broadcast에 cpu가 사용중인지 확인한다.
+ */
 			if (bc && !(bc->features & CLOCK_EVT_FEAT_HRTIMER))
 				ret = cpumask_test_cpu(cpu, tick_broadcast_mask);
 			break;
@@ -399,6 +571,13 @@ static bool tick_do_periodic_broadcast(void)
 
 /*
  * Event handler for periodic broadcast ticks
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - PASS
+ * - 고성능 arm에서는 broadcast를 거의 사용안한다.
+ * - event_handler에 등록되서 호출된다.
+ * - broadcast deivce가 아닐경우 tick_handle_periodic이 호출될것이다.
  */
 static void tick_handle_periodic_broadcast(struct clock_event_device *dev)
 {
@@ -514,6 +693,10 @@ EXPORT_SYMBOL_GPL(tick_broadcast_control);
 
 /*
  * Set the periodic handler depending on broadcast on/off
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @broadcast에 따라서 event_handler를 설정한다.
  */
 void tick_set_periodic_handler(struct clock_event_device *dev, int broadcast)
 {
@@ -634,6 +817,10 @@ int tick_check_broadcast_expired(void)
 /*
  * Set broadcast interrupt affinity
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cpumask가 @bc와 불일치하면 affinity를 set한다.
+ */
 static void tick_broadcast_set_affinity(struct clock_event_device *bc,
 					const struct cpumask *cpumask)
 {
@@ -647,6 +834,10 @@ static void tick_broadcast_set_affinity(struct clock_event_device *bc,
 	irq_set_affinity(bc->irq, bc->cpumask);
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @expires로 program.
+ */
 static void tick_broadcast_set_event(struct clock_event_device *bc, int cpu,
 				     ktime_t expires)
 {
@@ -685,6 +876,13 @@ void tick_check_oneshot_broadcast_this_cpu(void)
 
 /*
  * Handle oneshot mode broadcasting
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - PASS
+ * - 고성능 arm에서는 broadcast를 거의 사용안한다.
+ * - broadcast deivce의 event handler 의해 실행된다.
+ *   (tick_broadcast_setup_oneshot() 참고)
  */
 static void tick_handle_oneshot_broadcast(struct clock_event_device *dev)
 {
@@ -982,12 +1180,20 @@ int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
  *
  * Called with tick_broadcast_lock held
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cpu에 대한 tick_broadcast의 oneshot, pending의 cpumask bit clear
+ */
 static void tick_broadcast_clear_oneshot(int cpu)
 {
 	cpumask_clear_cpu(cpu, tick_broadcast_oneshot_mask);
 	cpumask_clear_cpu(cpu, tick_broadcast_pending_mask);
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @mask에 해당하는 cpu들에 대하여 @expires로 next event 동작시간을 설정.
+ */
 static void tick_broadcast_init_next_event(struct cpumask *mask,
 					   ktime_t expires)
 {
@@ -1020,6 +1226,12 @@ static inline ktime_t tick_get_next_period(void)
 /**
  * tick_broadcast_setup_oneshot - setup the broadcast device
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @bc event_handler를 tick_handle_oneshot_broadcast로 설정한다.
+ *   periodic설정으로 되있엇고, current cpu를 제외한 cpu들이 남아있었다면,
+ *   해당 cpu에 대해서 잔여처리를 수행한다.
+ */
 static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
 {
 	int cpu = smp_processor_id();
@@ -1039,11 +1251,25 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
 		 * oneshot_mask bits for those and program the
 		 * broadcast device to fire.
 		 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   여기서 주의해야 합니다. 주기적인 브로드캐스트를 기다리는 다른 CPU가 있을 
+ *   수 있습니다. 이를 위해 oneshot_mask 비트를 설정하고 브로드캐스트 장치를 
+ *   실행하도록 프로그래밍해야 합니다.
+ *
+ * - tick_broadcast_mask에서 @cpu bit를 제외한 나머지를 
+ *   tick_broadcast_oneshot_mask에 추가한다.
+ */
 		cpumask_copy(tmpmask, tick_broadcast_mask);
 		cpumask_clear_cpu(cpu, tmpmask);
 		cpumask_or(tick_broadcast_oneshot_mask,
 			   tick_broadcast_oneshot_mask, tmpmask);
-
+/*
+ * IAMROOT, 2023.01.03:
+ * - periodic이 였는데, @cpu를 제외한 tick_broadcast_mask에 cpu들이 존재한다면
+ *   해당 cpu들에 대해 expire시간을 정하고 @bc는 oneshot으로 정한다.
+ */
 		if (was_periodic && !cpumask_empty(tmpmask)) {
 			ktime_t nextevt = tick_get_next_period();
 
@@ -1051,6 +1277,11 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
 			tick_broadcast_init_next_event(tmpmask, nextevt);
 			tick_broadcast_set_event(bc, cpu, nextevt);
 		} else
+/*
+ * IAMROOT, 2023.01.03:
+ * - perioidc이 아니였거나, periodic이였어도 잔여 cpu처리를 할 필요없으면
+ *   periodic을 expire off.
+ */
 			bc->next_event = KTIME_MAX;
 	} else {
 		/*
@@ -1060,6 +1291,14 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
 		 * would prevent the first broadcast enter after this
 		 * to program the bc device.
 		 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   원샷 모드로 전환하는 첫 번째 CPU는 일반(주기적) 브로드캐스트 마스크에 
+ *   있는 다른 모든 CPU에 대한 비트를 설정합니다. 따라서 비트가 설정되고 bc 
+ *   장치를 프로그래밍하기 위해 이 이후에 첫 번째 브로드캐스트 입력을 
+ *   방지합니다.
+ */
 		tick_broadcast_clear_oneshot(cpu);
 	}
 }
@@ -1069,7 +1308,8 @@ static void tick_broadcast_setup_oneshot(struct clock_event_device *bc)
  */
 /*
  * IAMROOT, 2022.12.03:
- * - broadcast 설정을 한다. 설정만 할뿐 고성능 arm계열에서는
+ * - broadcast 설정을 한다.
+ *   고성능 arm계열에서는 명시적으로만 설정할뿐
  *   거의 사용하지 않는다. 
  */
 void tick_broadcast_switch_to_oneshot(void)
@@ -1127,6 +1367,11 @@ static void tick_broadcast_oneshot_offline(unsigned int cpu)
 
 /*
  * Check, whether the broadcast device is in one shot mode
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * @return 1 : tick_broadcast_device mode TICKDEV_MODE_ONESHOT
+ * - tick_broadcast_device가 oneshot인지 확인.
  */
 int tick_broadcast_oneshot_active(void)
 {

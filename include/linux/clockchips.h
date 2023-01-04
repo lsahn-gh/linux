@@ -63,6 +63,12 @@ enum clock_event_state {
  *   clock 절전기능. 전원은 끄지 않고 clock만 멈추는 기능.
  */
 # define CLOCK_EVT_FEAT_C3STOP		0x000008
+/*
+ * IAMROOT, 2023.01.03:
+ * - 실제 기능 장치로 설정되었는지에 대한 flag. dummy flag가 없으면 기능이
+ *   되는 장치로 설정되있는 상태.
+ *   (tick_device_is_functional() 참고)
+ */
 # define CLOCK_EVT_FEAT_DUMMY		0x000010
 
 /*
@@ -107,6 +113,15 @@ enum clock_event_state {
  * @owner:		module reference
  */
 struct clock_event_device {
+/*
+ * IAMROOT, 2023.01.03:
+ * - tick device일 경우 등록될수있는 함수들.
+ *   periodic           : tick_handle_periodic
+ *   broadcast periodic : tick_handle_periodic_broadcast
+ *   broadcast oneshot  : tick_handle_oneshot_broadcast
+ *   wakeup             : tick_oneshot_wakeup_handler
+ *   hrtimer 전환후      : tick_sched_timer(실제 동작은 hrtimer 통해서.)
+ */
 	void			(*event_handler)(struct clock_event_device *);
 	int			(*set_next_event)(unsigned long evt, struct clock_event_device *);
 	int			(*set_next_ktime)(ktime_t expires, struct clock_event_device *);
@@ -125,6 +140,11 @@ struct clock_event_device {
 	int			(*set_state_shutdown)(struct clock_event_device *);
 	int			(*tick_resume)(struct clock_event_device *);
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - ex) tick_broadcast
+ *   tick_device_setup_broadcast_func()참고
+ */
 	void			(*broadcast)(const struct cpumask *mask);
 	void			(*suspend)(struct clock_event_device *);
 	void			(*resume)(struct clock_event_device *);

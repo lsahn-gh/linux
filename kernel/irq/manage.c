@@ -150,6 +150,9 @@ cpumask_var_t irq_default_affinity;
 /*
  * IAMROOT, 2022.10.01:
  * - set affinity가 가능한지 확인한다.
+ *   1. balancing을 할수있어야 된다.
+ *   2. chip 할당이 되있어야된다.
+ *   3. affinity 기능이 있어야된다.
  */
 static bool __irq_can_set_affinity(struct irq_desc *desc)
 {
@@ -163,6 +166,10 @@ static bool __irq_can_set_affinity(struct irq_desc *desc)
  *	irq_can_set_affinity - Check if the affinity of a given irq can be set
  *	@irq:		Interrupt to check
  *
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity가 가능한지 확인한다.
  */
 int irq_can_set_affinity(unsigned int irq)
 {
@@ -229,6 +236,10 @@ static void irq_validate_effective_affinity(struct irq_data *data)
 		     chip->name, data->irq);
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @mask를 @data의 affinity mask에 copy한다.
+ */
 static inline void irq_init_effective_affinity(struct irq_data *data,
 					       const struct cpumask *mask)
 {
@@ -242,6 +253,8 @@ static inline void irq_init_effective_affinity(struct irq_data *data,
 
 /*
  * IAMROOT, 2022.10.01:
+ * - irq_set_thread_affinity callback수행.
+ *   (gicv3 : gic_set_affinity)
  * - @mask에 해당하는 cpu중에 하나를  @data irq의 gic register에 set한다.
  */
 int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
@@ -359,6 +372,10 @@ static inline int irq_set_affinity_pending(struct irq_data *data,
 }
 #endif
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity 수행.
+ */
 static int irq_try_set_affinity(struct irq_data *data,
 				const struct cpumask *dest, bool force)
 {
@@ -374,6 +391,12 @@ static int irq_try_set_affinity(struct irq_data *data,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - 비활성화되있는 경우엔 @desc와 @data의 affinity에 @mask를 추가하고
+ *   return true.
+ *   그게 아니면 return false.
+ */
 static bool irq_set_affinity_deactivated(struct irq_data *data,
 					 const struct cpumask *mask, bool force)
 {
@@ -388,6 +411,15 @@ static bool irq_set_affinity_deactivated(struct irq_data *data,
 	 * driver has to make sure anyway that the interrupt is in a
 	 * usable state so startup works.
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   활성화된 상태에서만 선호도를 처리할 수 있는 irq 칩을 올바르게 처리합니다.
+ *
+ *   인터럽트가 아직 활성화되지 않은 경우 선호도 마스크만 저장하고 칩 
+ *   드라이버를 전혀 호출하지 마십시오. 활성화 시 드라이버는 어쨌든 
+ *   인터럽트가 사용 가능한 상태인지 확인해야 시작이 작동합니다.
+ */
 	if (!IS_ENABLED(CONFIG_IRQ_DOMAIN_HIERARCHY) ||
 	    irqd_is_activated(data) || !irqd_affinity_on_activate(data))
 		return false;
@@ -398,6 +430,12 @@ static bool irq_set_affinity_deactivated(struct irq_data *data,
 	return true;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - irq가 affinity set을 수행한다. 못하는 상황이면 cpumask에 @mask를 등록만 
+ *   해놓거나 set affinity pending을 해놓는다.
+ *   affinity_notify가 필요하면 scheduler에 예약해놓는다.
+ */
 int irq_set_affinity_locked(struct irq_data *data, const struct cpumask *mask,
 			    bool force)
 {
@@ -408,19 +446,41 @@ int irq_set_affinity_locked(struct irq_data *data, const struct cpumask *mask,
 	if (!chip || !chip->irq_set_affinity)
 		return -EINVAL;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - deactivate 이면 mask만 추가하고 종료한다.
+ *   activation이면 계속 진행한다.
+ */
 	if (irq_set_affinity_deactivated(data, mask, force))
 		return 0;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - process move가 가능하고 set affinity가 pending중이 아니라면 set affinity
+ *   수행.
+ */
 	if (irq_can_move_pcntxt(data) && !irqd_is_setaffinity_pending(data)) {
 		ret = irq_try_set_affinity(data, mask, force);
 	} else {
+/*
+ * IAMROOT, 2023.01.03:
+ * - 아니면 pending시킨다.
+ */
 		irqd_set_move_pending(data);
 		irq_copy_pending(desc, mask);
 	}
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - affinity_notify를 해야된다면 scheduler work에 예약해놓는다.
+ */
 	if (desc->affinity_notify) {
 		kref_get(&desc->affinity_notify->kref);
 		if (!schedule_work(&desc->affinity_notify->work)) {
+/*
+ * IAMROOT, 2023.01.03:
+ * - 이미 작업이 예약됬다면 ref down 
+ */
 			/* Work was already scheduled, drop our extra ref */
 			kref_put(&desc->affinity_notify->kref,
 				 desc->affinity_notify->release);
@@ -501,6 +561,10 @@ out_unlock:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity수행.
+ */
 static int __irq_set_affinity(unsigned int irq, const struct cpumask *mask,
 			      bool force)
 {
@@ -523,6 +587,10 @@ static int __irq_set_affinity(unsigned int irq, const struct cpumask *mask,
  * @cpumask:	cpumask
  *
  * Fails if cpumask does not contain an online CPU
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity수행
  */
 int irq_set_affinity(unsigned int irq, const struct cpumask *cpumask)
 {

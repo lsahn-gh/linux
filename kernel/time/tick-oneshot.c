@@ -70,6 +70,10 @@ void tick_resume_oneshot(void)
 /**
  * tick_setup_oneshot - setup the event device for oneshot mode (hres or nohz)
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @handler를 @newdev에 설정하고 @nexet_event로 program한다.
+ */
 void tick_setup_oneshot(struct clock_event_device *newdev,
 			void (*handler)(struct clock_event_device *),
 			ktime_t next_event)
@@ -84,7 +88,14 @@ void tick_setup_oneshot(struct clock_event_device *newdev,
  */
 /*
  * IAMROOT, 2022.12.03:
- * - oneshot 모드로 동작되면 return 0
+ * --- periodic -> hrtimer oneshot 전환 ----
+ * 1. 부팅시 최초에 td->mode는 TICKDEV_MODE_PERIODIC이 였다.
+ * 2. event_handler는 tick_handle_periodic이였다.
+ * 3. 현재 함수에 진입하면서 mode는 oneshot으로, handler는 @handler로 대체된다.
+ * -----------------------------------------
+ *
+ *  - pcpu tick_cpu_device를 oneshot mode로 전환하고 event_handler를 @handler
+ *  로 교체한다.
  */
 int tick_switch_to_oneshot(void (*handler)(struct clock_event_device *))
 {
@@ -118,6 +129,11 @@ int tick_switch_to_oneshot(void (*handler)(struct clock_event_device *))
  * tick_check_oneshot_mode - check whether the system is in oneshot mode
  *
  * returns 1 when either nohz or highres are enabled. otherwise 0.
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * @return 1 oneshot mode. return 0 oneshot mode아님.
+ * - TICKDEV_MODE_ONESHOT mode인지 확인.
  */
 int tick_oneshot_mode_active(void)
 {

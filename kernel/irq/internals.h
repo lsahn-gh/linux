@@ -212,6 +212,10 @@ static inline unsigned int irqd_get(struct irq_data *d)
 /*
  * Manipulation functions for irq_data.state
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity pending flag set.
+ */
 static inline void irqd_set_move_pending(struct irq_data *d)
 {
 	__irqd_to_state(d) |= IRQD_SETAFFINITY_PENDING;
@@ -423,6 +427,10 @@ irq_init_generic_chip(struct irq_chip_generic *gc, const char *name,
 #endif /* CONFIG_GENERIC_IRQ_CHIP */
 
 #ifdef CONFIG_GENERIC_PENDING_IRQ
+/*
+ * IAMROOT, 2023.01.03:
+ * - 다른 process context로 이동할수 있는지 확인.
+ */
 static inline bool irq_can_move_pcntxt(struct irq_data *data)
 {
 	return irqd_can_move_in_process_context(data);
@@ -431,6 +439,10 @@ static inline bool irq_move_pending(struct irq_data *data)
 {
 	return irqd_is_setaffinity_pending(data);
 }
+/*
+ * IAMROOT, 2023.01.03:
+ * - @mask를 pending_mask에 copy.
+ */
 static inline void
 irq_copy_pending(struct irq_desc *desc, const struct cpumask *mask)
 {

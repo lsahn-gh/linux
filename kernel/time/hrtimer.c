@@ -2560,6 +2560,7 @@ static __latent_entropy void hrtimer_run_softirq(struct softirq_action *h)
  *   hrtimer가 활성화된후 timer interrupt가 이함수로 진입해서
  *   schedule tick에 대한것은 tick_sched_timer가 호출된다.
  *   그 전까지는 tick_handle_periodic으로 진입한다.
+ *   (tick_handle_periodic() 주석참고)
  */
 void hrtimer_interrupt(struct clock_event_device *dev)
 {

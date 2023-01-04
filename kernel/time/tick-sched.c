@@ -1522,6 +1522,13 @@ void tick_irq_enter(void)
  */
 /*
  * IAMROOT, 2022.12.03:
+ * ----
+ *  - hrtimer 비활성화시
+ *    tick_handle_periodic
+ *  - hritmer 활성화시
+ *    -- schedule tick의 경우
+ *    hrtimer_interrupt -> tick_sched_timer
+ * ----
  * - jiffies갱신 및 tick 작업 수행 및 hrtimer tick 생성.
  */
 static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
@@ -1530,6 +1537,7 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		container_of(timer, struct tick_sched, sched_timer);
 	struct pt_regs *regs = get_irq_regs();
 	ktime_t now = ktime_get();
+	printk(KERN_EMERG "=============== kkr %s %d\n", __func__, __LINE__);
 
 	tick_sched_do_timer(ts, now);
 
@@ -1647,6 +1655,10 @@ void tick_clock_notify(void)
 
 /*
  * Async notification about clock event changes
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - oneshot에서 어떤 변경이 일어났을때 system에 알린다.
  */
 void tick_oneshot_notify(void)
 {

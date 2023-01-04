@@ -318,6 +318,10 @@ extern int cpumask_next_wrap(int n, const struct cpumask *mask, int start, bool 
  * @cpu: cpu number (< nr_cpu_ids)
  * @dstp: the cpumask pointer
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dstp에 @cpu bit를 추가한다.
+ */
 static inline void cpumask_set_cpu(unsigned int cpu, struct cpumask *dstp)
 {
 	set_bit(cpumask_check(cpu), cpumask_bits(dstp));

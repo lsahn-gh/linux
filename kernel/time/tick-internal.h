@@ -31,6 +31,12 @@ extern struct tick_device *tick_get_device(int cpu);
 
 extern int clockevents_tick_resume(struct clock_event_device *dev);
 /* Check, if the device is functional or a dummy for broadcast */
+/*
+ * IAMROOT, 2023.01.03:
+ * @return 1 @dev 동작중. 0 @dev 동작안하고 있는중.
+ *
+ * - @dev가 동작하고있는지 확인.
+ */
 static inline int tick_device_is_functional(struct clock_event_device *dev)
 {
 	return !(dev->features & CLOCK_EVT_FEAT_DUMMY);

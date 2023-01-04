@@ -292,6 +292,10 @@ enum {
 
 #define __irqd_to_state(d) ACCESS_PRIVATE((d)->common, state_use_accessors)
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - set affinity가 pending중인지 확인.
+ */
 static inline bool irqd_is_setaffinity_pending(struct irq_data *d)
 {
 	return __irqd_to_state(d) & IRQD_SETAFFINITY_PENDING;
@@ -302,6 +306,11 @@ static inline bool irqd_is_per_cpu(struct irq_data *d)
 	return __irqd_to_state(d) & IRQD_PER_CPU;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * @return true balanced가능. false 불가
+ * - pcpu거나 no balanced flag가 있으면 balance를 할수없다.
+ */
 static inline bool irqd_can_balance(struct irq_data *d)
 {
 	return !(__irqd_to_state(d) & (IRQD_PER_CPU | IRQD_NO_BALANCING));
@@ -392,6 +401,10 @@ static inline bool irqd_is_wakeup_set(struct irq_data *d)
 	return __irqd_to_state(d) & IRQD_WAKEUP_STATE;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - 다른 process context로 이동할수 있는지 확인.
+ */
 static inline bool irqd_can_move_in_process_context(struct irq_data *d)
 {
 	return __irqd_to_state(d) & IRQD_MOVE_PCNTXT;
@@ -969,6 +982,10 @@ static inline struct cpumask *irq_get_affinity_mask(int irq)
 	return d ? d->common->affinity : NULL;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @d의 affinity cpumask return
+ */
 static inline struct cpumask *irq_data_get_affinity_mask(struct irq_data *d)
 {
 	return d->common->affinity;

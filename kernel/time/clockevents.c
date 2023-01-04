@@ -545,6 +545,8 @@ EXPORT_SYMBOL_GPL(clockevents_unbind_device);
  * - cpumask 검사, state 변경.
  *   clock_event_device에 @dev 등록.
  *   pcp tick_cpu_device에 clock event 등록
+ * - periodic timer로 등록될경우 tick_handle_periodic이 event handler로 등록되고
+ *   동작을 시작한다.
  */
 void clockevents_register_device(struct clock_event_device *dev)
 {
@@ -697,6 +699,11 @@ void clockevents_handle_noop(struct clock_event_device *dev)
  *
  * Called from various tick functions with clockevents_lock held and
  * interrupts disabled.
+ */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @old는 ref down, detached, released로 이동 시킨다.
+ *   @new는 일단 shutdonw 시키는걸로 준비를 하는걸로 간주한다.
  */
 void clockevents_exchange_device(struct clock_event_device *old,
 				 struct clock_event_device *new)

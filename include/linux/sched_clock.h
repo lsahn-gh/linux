@@ -26,6 +26,13 @@
  * IAMROOT, 2022.12.16:
  * - mult : tick <-> ns 변환 계수
  * - read_sched_clock : cd의 경우 jiffy_sched_clock_read 가 기본.
+ *   -- arm64 --
+ *     1. type 에 CP15 존재
+ *     - arm64, !hyp                      = arch_counter_get_cntvct
+ *     - ppi = virt_ppi                   = arch_counter_get_cntvct 
+ *     - 그외(arm64가 아니거나 hyp mode)  = arch_counter_get_cntpct 
+ *     2. type 에 CP15 없음(MEM이라는뜻). = arch_counter_get_cntvct_mem
+ *   -----------
  */
 struct clock_read_data {
 	u64 epoch_ns;

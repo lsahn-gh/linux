@@ -166,15 +166,56 @@ static void tick_periodic(int cpu)
  *  - hritmer 활성화시
  *    -- schedule tick의 경우
  *    hrtimer_interrupt -> tick_sched_timer
- * ----
+ * ---
+ * ---- tick_handle_periodic -> tick_sched_timer 전환 시나리오 ---
+ *
+ *  1. clockevents_register_device()함수등으로 최초에 periodic timer로 등록.
+ *
+ *     tick device mode : TICKDEV_MODE_PERIODIC
+ *     handler : tick_handle_periodic
+ *
+ *     로 설정되어 tick_handle_periodic() 동작시작.
+ *
+ *  2. 최초에 동작시작후 tick_handle_periodic내부에서 자기자신을 program하며
+ *     계속 동작
+ *
+ *  3. 이후 hrtimer()가 사용가능해지면,
+ *
+ *  4. tick_periodic() -> update_process_times() -> run_local_timers()
+ *      -> hrtimer_run_queues() 
+ *
+ *      의 루틴에서 hrtimer()동작 가능이 감지되고
+ *
+ *  5. hrtimer_run_queues() -> hrtimer_switch_to_hres() ->
+ *     tick_init_highres() -> tick_switch_to_oneshot()
+ *
+ *     에서 
+ *
+ *     tick device mode : TICKDEV_MODE_ONESHOT
+ *     handler : hrtimer_interrupt
+ *
+ * 5. hrtimer_switch_to_hres() -> tick_setup_sched_timer() 
+ *
+ *    에서 tick_cpu_sched에 tick_sched_timer를 등록.
+ *    tick_cpu_sched를 hrtimer에 등록함으로써 hrtimer가 동작할때
+ *    (hrtimer_interrupt()에서) tick_sched_timer를 동작하게 한다.
+ *
+ * 6. 이후 hrtimer를 동작킨다. hrtimer_interrupt에서 동작을 시작한다.
+ *
+ * 7. event_handler대체 및 hrtimer동작후 @dev는 oneshot이 되고 현재 함수에서
+ *    dev->event_handler != tick_handle_periodic으로 검사되어 종료된다.
+ * ---------------------------------------------------------------
  * - event_handler에 등록되서 사용된다. timer interrupt
  *   hrtimer가 활성화 되기 전에 timer interrupt가 이 함수로 진입한다.
+ * - broadcast deivce일경우 tick_handle_periodic_broadcast()가 동작한다.
+ *   (tick_set_periodic_handler() 참고)
  */
 void tick_handle_periodic(struct clock_event_device *dev)
 {
 	int cpu = smp_processor_id();
 	ktime_t next = dev->next_event;
 
+	printk(KERN_EMERG "=============== kkr %s %d\n", __func__, __LINE__);
 	tick_periodic(cpu);
 
 #if defined(CONFIG_HIGH_RES_TIMERS) || defined(CONFIG_NO_HZ_COMMON)
@@ -215,21 +256,44 @@ void tick_handle_periodic(struct clock_event_device *dev)
 /*
  * Setup the device for a periodic tick
  */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dev의 event_handler를 @broadcast에 따라 설정한다.
+ *   @dev의 features에 따라 clock state를 변경한다.
+ */
 void tick_setup_periodic(struct clock_event_device *dev, int broadcast)
 {
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dev의 event_handler를 broadcast에 따라 
+ *   tick_handle_periodic or tick_handle_periodic_broadcast 로 설정
+ */
 	tick_set_periodic_handler(dev, broadcast);
 
 	/* Broadcast setup ? */
 	if (!tick_device_is_functional(dev))
 		return;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - @dev가 periodic 이고 tick_broadcast_device가 oneshot이 아니면 
+ *   @dev를 PERIODIC으로 set한다.
+ */
 	if ((dev->features & CLOCK_EVT_FEAT_PERIODIC) &&
 	    !tick_broadcast_oneshot_active()) {
 		clockevents_switch_state(dev, CLOCK_EVT_STATE_PERIODIC);
 	} else {
+/*
+ * IAMROOT, 2023.01.03:
+ * - oneshot이다.
+ */
 		unsigned int seq;
 		ktime_t next;
 
+/*
+ * IAMROOT, 2023.01.03:
+ * - tick_next_period에 맞춰서 expire시간을 정한다.
+ */
 		do {
 			seq = read_seqcount_begin(&jiffies_seq);
 			next = tick_next_period;
@@ -270,7 +334,16 @@ static void tick_take_do_timer_from_boot(void)
  */
 /*
  * IAMROOT, 2022.12.03:
- * - 최초의 진입이라면(tick device setup) @cpu를 tick_do_timer_cpu로 정한다.
+ * @cpumask @cpu만 set되있는 cpumask
+ *
+ * 1. 최초의 진입이라면(tick device setup) @cpu를 tick_do_timer_cpu로 정하고,
+ * @td mode를 periodic으로 설정한다.
+ * 2. @td의 evtdev를 @newdev로 등록한다.
+ * 3. @cpumask로 affinity를 재설정한다.
+ * 4. broadcast로 동작 유무를 판단한다. broadcast로 동작해야된다면 broadcast
+ *    설정을 한다.
+ * 5. broadcast를 사용하지 않는 상황이라면 mode에 따라 oneshot/periodic으로
+ *    설정한다.
  */
 static void tick_setup_device(struct tick_device *td,
 			      struct clock_event_device *newdev, int cpu,
@@ -329,6 +402,11 @@ static void tick_setup_device(struct tick_device *td,
 	 * When the device is not per cpu, pin the interrupt to the
 	 * current cpu:
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @cpu만 set되있는 @cpumask랑 불일치. 즉 @newdev가 여러 cpu에 
+ *   대한것이라면   set affinity 수행.
+ */
 	if (!cpumask_equal(newdev->cpumask, cpumask))
 		irq_set_affinity(newdev->irq, cpumask);
 
@@ -339,8 +417,26 @@ static void tick_setup_device(struct tick_device *td,
 	 * way. This function also returns !=0 when we keep the
 	 * current active broadcast state for this CPU.
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   글로벌 브로드캐스팅이 활성화되면 현재 장치가 브로드캐스트 모드의 자리 
+ *   표시자로 등록되어 있는지 확인하십시오.
+ *   이를 통해 일반적인 방식으로 x86의 잘못된 기능을 처리할 수 있습니다. 
+ *   이 함수는 또한 이 CPU에 대한 현재 활성 브로드캐스트 상태를 
+ *   유지할 때 !=0을 반환합니다.
+ *
+ * - broadcast로 동작하는지 확인.
+ */
 	if (tick_device_uses_broadcast(newdev, cpu))
 		return;
+
+/*
+ * IAMROOT, 2023.01.03:
+ * - boradcast로 동작안하고 있는상태. periodic / oneshot에 따라 
+ *   설정한다.
+ *   periodic일 경우 tick_handle_periodic이 event_handler로 등록된다.
+ */
 
 	if (td->mode == TICKDEV_MODE_PERIODIC)
 		tick_setup_periodic(newdev, 0);
@@ -362,34 +458,84 @@ void tick_install_replacement(struct clock_event_device *newdev)
 
 /*
  * IAMROOT, 2022.12.30:
- * TODO
  * @return true : 교체가능
  *         false : 교체불가.
- * - return false
- *   1. @cpu가 @newdev->cpumask에 포함안됬으면 return false.
- * - return true
- *   1. @cpu가 포함된 cpumask와 @newdev의 cpumask가 일치하면.
+ * - cpumask와 affinity에 대해서 검사한다.
+ *
+ *  1. @newdev에 @cpu가 할당이 안되있으면 사용못한다.
+ *  2. cpumask에 @cpu만 단일 할당이 되있는경우가 우선된다.
+ *  3. affinity가 가능해야된다.
+ *  4. 같은 조건이면 @newdev가 우선된다.
  */
 static bool tick_check_percpu(struct clock_event_device *curdev,
 			      struct clock_event_device *newdev, int cpu)
 {
+/*
+ * IAMROOT, 2023.01.03:
+ * - @newdev->cpumask에 @cpu가 없다면 return false.
+ */
 	if (!cpumask_test_cpu(cpu, newdev->cpumask))
 		return false;
+/*
+ * IAMROOT, 2023.01.03:
+ * - @newdev->cpumask에 @cpu만 set되있다면. return true
+ */
 	if (cpumask_equal(newdev->cpumask, cpumask_of(cpu)))
 		return true;
+/*
+ * IAMROOT, 2023.01.03:
+ * - 여기까지 왔으면 @newdev->cpumask에 @cpu외에 다른 것들도
+ *   set되있는 상태.
+ */
 	/* Check if irq affinity can be set */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @irq가 이미 할당이 되있는데, affinity가 불가능하면 false
+ */
 	if (newdev->irq >= 0 && !irq_can_set_affinity(newdev->irq))
 		return false;
 	/* Prefer an existing cpu local device */
+/*
+ * IAMROOT, 2023.01.03:
+ * - 기존 @curdev가 @cpu단일 이라면 false.
+ */
 	if (curdev && cpumask_equal(curdev->cpumask, cpumask_of(cpu)))
 		return false;
+/*
+ * IAMROOT, 2023.01.03:
+ * - 여기까지 왓으면
+ *  1. @newdev는 @cpu를 포함한 여러 cpu가 있는 상태.
+ *  2. @curdev도 @cpu를 포함한 여러 cpu가 있는 상태.
+ *  2. affinity가 가능한 상태.
+ *  이러면 @newdev를 우선한다.
+ */
 	return true;
 }
 
+/*
+ * IAMROOT, 2023.01.03:
+ * 1. @curdev만 oneshot모드 지원라면 @curdev가 선택된다.
+ * 2. @rating이 높은게 우선이된다.
+ * 3. @cpumask가 변경이 됬으면 @newdev
+ *
+ * O, X : oneshot mode 지원 여부
+ *  @newdev @curdev | 결정
+ *  X       X       | rating, cpumask 비교
+ *  X       O       | @curdev
+ *  O       X       | rating, cpumask 비교
+ *  O       O       | rating, cpumask 비교
+ */
 static bool tick_check_preferred(struct clock_event_device *curdev,
 				 struct clock_event_device *newdev)
 {
 	/* Prefer oneshot capable device */
+/*
+ * IAMROOT, 2023.01.03:
+ * - @newdev가 oneshot지원이 안될때, @curdev가 oneshot이면
+ *   @curdev를 우선한다.
+ *   1. @curdev가 이미 oneshot지원 인경우 @curdev.
+ *   2. 이미 oneshot mode가 active인 경우
+ */
 	if (!(newdev->features & CLOCK_EVT_FEAT_ONESHOT)) {
 		if (curdev && (curdev->features & CLOCK_EVT_FEAT_ONESHOT))
 			return false;
@@ -401,6 +547,12 @@ static bool tick_check_preferred(struct clock_event_device *curdev,
 	 * Use the higher rated one, but prefer a CPU local device with a lower
 	 * rating than a non-CPU local device
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - true.
+ *   1. @newdev가 rating이 높은경우 return true.
+ *   2. cpumask가 동일하지 말아야한다.
+ */
 	return !curdev ||
 		newdev->rating > curdev->rating ||
 	       !cpumask_equal(curdev->cpumask, newdev->cpumask);
@@ -413,8 +565,7 @@ static bool tick_check_preferred(struct clock_event_device *curdev,
 
 /*
  * IAMROOT, 2022.12.30:
- * TODO
- * - return true : 교체해야된다는뜻.
+ * - cpumask, affinity, oneshot, rating을 비교해서 교체가능한지 검사한다.
  */
 bool tick_check_replacement(struct clock_event_device *curdev,
 			    struct clock_event_device *newdev)
@@ -431,8 +582,14 @@ bool tick_check_replacement(struct clock_event_device *curdev,
  */
 /*
  * IAMROOT, 2022.08.27:
- * TODO
- * - @newdev를 검사하여 tick_do_timer_cpu등을 결정한다.
+ * - @newdev를 pcp tick_cpu_device로 등록할지 결정한다.
+ *   periodic timer로 등록하기 위해 진입했을 경우 (tick periodic으로 동작할 
+ *   경우) tick_handle_periodic이 event_handler로 등록되며 동작을 시작한다.
+ *
+ * - 최초로 tick_cpu_device을 등록하는경우 td mode는 periodic이 된다.
+ *
+ * - @newdev가 replace가 안될경우 wakeup interrupt나 broadcast device로
+ *   동작할지 추가로 검사한다.
  */
 void tick_check_new_device(struct clock_event_device *newdev)
 {
@@ -444,6 +601,12 @@ void tick_check_new_device(struct clock_event_device *newdev)
 	td = &per_cpu(tick_cpu_device, cpu);
 	curdev = td->evtdev;
 
+/*
+ * IAMROOT, 2023.01.04:
+ * - pcp tick_cpu_device를 교체할수있는지 검사한다.
+ *   curdev == NULL이면 최초의 pcp tick_cpu_device 초기화가 되어
+ *   무조건 newdev로 대체하게될것이다.
+ */
 	if (!tick_check_replacement(curdev, newdev))
 		goto out_bc;
 
@@ -455,11 +618,30 @@ void tick_check_new_device(struct clock_event_device *newdev)
 	 * device. If the current device is the broadcast device, do
 	 * not give it back to the clockevents layer !
 	 */
+/*
+ * IAMROOT, 2023.01.03:
+ * - papago
+ *   최종적으로 존재하는 장치를 새 장치로 교체하십시오. 현재 기기가 
+ *   브로드캐스트 기기라면 clockevents 계층에 돌려주지 마세요!.
+ *
+ * - @curdev가 broadcast 인경우 shutdown 시킨다. 
+ */
 	if (tick_is_broadcast_device(curdev)) {
 		clockevents_shutdown(curdev);
 		curdev = NULL;
 	}
+/*
+ * IAMROOT, 2023.01.03:
+ * - @newdev를 기동준비한다.
+ *   @curdev가 broadcast device인경우 shutdown이 되었을것이다.
+ *   그게 아니면 ref down / detach 로 하고 released로 넘긴다.
+ *
+ */
 	clockevents_exchange_device(curdev, newdev);
+/*
+ * IAMROOT, 2023.01.03:
+ * - @td의 evtdev를 @newdev로 설정한다.
+ */
 	tick_setup_device(td, newdev, cpu, cpumask_of(cpu));
 	if (newdev->features & CLOCK_EVT_FEAT_ONESHOT)
 		tick_oneshot_notify();
