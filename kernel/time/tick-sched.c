@@ -1537,7 +1537,6 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		container_of(timer, struct tick_sched, sched_timer);
 	struct pt_regs *regs = get_irq_regs();
 	ktime_t now = ktime_get();
-	printk(KERN_EMERG "=============== kkr %s %d\n", __func__, __LINE__);
 
 	tick_sched_do_timer(ts, now);
 
