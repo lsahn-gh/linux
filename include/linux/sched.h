@@ -661,6 +661,12 @@ struct sched_statistics {
  */
 struct sched_entity {
 	/* For load-balancing: */
+/*
+ * IAMROOT, 2023.01.07:
+ * - tg shares * load 기여율의 비율에따른 shares값이 load에 set된다.
+ *   (update_cfs_group(), calc_group_shares(), reweight_entity()참고)
+ *   단, cfs_rq에 들어가는 load weight은 해당 entity들의 weight 총합이 된다.
+ */
 	struct load_weight		load;
 	struct rb_node			run_node;
 	struct list_head		group_node;
@@ -2231,6 +2237,12 @@ extern char *__get_task_comm(char *to, size_t len, struct task_struct *tsk);
 })
 
 #ifdef CONFIG_SMP
+
+/*
+ * IAMROOT, 2023.01.07:
+ * - 별거안한다. reschedule은 interrupt를 빠져나가면서 수행하기 때문에
+ *   reschedule ipi를 받았다는 명목상의 이유로 호출할뿐이다.
+ */
 static __always_inline void scheduler_ipi(void)
 {
 	/*
@@ -2279,11 +2291,19 @@ static inline int test_and_clear_tsk_thread_flag(struct task_struct *tsk, int fl
 	return test_and_clear_ti_thread_flag(task_thread_info(tsk), flag);
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @flag가 있으면 return 1. 없으면 return 0
+ */
 static inline int test_tsk_thread_flag(struct task_struct *tsk, int flag)
 {
 	return test_ti_thread_flag(task_thread_info(tsk), flag);
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @tsk에 set TIF_NEED_RESCHED. reschedule 요청.
+ */
 static inline void set_tsk_need_resched(struct task_struct *tsk)
 {
 	set_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
@@ -2294,6 +2314,11 @@ static inline void clear_tsk_need_resched(struct task_struct *tsk)
 	clear_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - TIF_NEED_RESCHED이 있으면 return 1. 없으면 return 0.
+ * - resched 요청이 있는지 확인한다.
+ */
 static inline int test_tsk_need_resched(struct task_struct *tsk)
 {
 	return unlikely(test_tsk_thread_flag(tsk,TIF_NEED_RESCHED));

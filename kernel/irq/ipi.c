@@ -260,6 +260,11 @@ int __ipi_send_single(struct irq_desc *desc, unsigned int cpu)
  *
  * Return: %0 on success or negative error number on failure.
  */
+/*
+ * IAMROOT, 2023.01.07:
+ * - cpumask로 ipi를 전송하는 기능이 있으면 그걸 사용하고 아니면 single로 interate 
+ *   하면서 호출한다.
+ */
 int __ipi_send_mask(struct irq_desc *desc, const struct cpumask *dest)
 {
 	struct irq_data *data = irq_desc_get_irq_data(desc);

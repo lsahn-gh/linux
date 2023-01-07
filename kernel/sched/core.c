@@ -876,6 +876,15 @@ static inline void hrtick_rq_init(struct rq *rq)
  * this avoids any races wrt polling state changes and thereby avoids
  * spurious IPIs.
  */
+/*
+ * IAMROOT, 2023.01.07:
+ * - papago
+ *   원자 단위로 TIF_NEED_RESCHED를 설정하고 TIF_POLLING_NRFLAG를 
+ *   테스트하면 폴링 상태 변경에 대한 경합을 방지하여 가짜 IPI를 방지할 
+ *   수 있습니다.
+ *
+ * - cpu 경합 방지를 위한 코드. arm 계열은 아래 쪽 code를 사용한다.
+ */
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
 	struct thread_info *ti = task_thread_info(p);
@@ -907,6 +916,11 @@ static bool set_nr_if_polling(struct task_struct *p)
 }
 
 #else
+
+/*
+ * IAMROOT, 2023.01.07:
+ * - arm64 @p에 reschedule 요청.
+ */
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
 	set_tsk_need_resched(p);
@@ -1016,7 +1030,8 @@ void wake_up_q(struct wake_q_head *head)
  */
 /*
  * IAMROOT, 2022.12.22:
- * - TODO
+ * - @rq가 자기자신이면 reschedule 수행. 아닌 경우 @rq의 cpu로
+ *   ipi를 통해서 reschedule 요청을 한다.
  */
 void resched_curr(struct rq *rq)
 {
@@ -1025,16 +1040,30 @@ void resched_curr(struct rq *rq)
 
 	lockdep_assert_rq_held(rq);
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - reschedule 요청이 있으면 빠져나간다.
+ */
 	if (test_tsk_need_resched(curr))
 		return;
 
 	cpu = cpu_of(rq);
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @rq가 현재 cpu라면 reschedule요청을 한다.
+ */
 	if (cpu == smp_processor_id()) {
 		set_tsk_need_resched(curr);
 		set_preempt_need_resched();
 		return;
 	}
+
+/*
+ * IAMROOT, 2023.01.07:
+ * - @rq가 현재 cpu가 아닌 상태. rq의 cpu의 대상으로 reschedule ipi를 보낸다.
+ *   해당 cpu는 interrupt가 끝나면 reschedule을 할 것이다.
+ */
 
 	if (set_nr_and_not_polling(curr))
 		smp_send_reschedule(cpu);
