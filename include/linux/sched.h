@@ -593,6 +593,16 @@ struct sched_avg {
 	unsigned long			load_avg;
 	unsigned long			runnable_avg;
 	unsigned long			util_avg;
+/*
+ * IAMROOT, 2023.01.01: 
+ * - util_est가 새롭게 추가되었다.
+ *   예를 들어 cpu 점유율(util_avg)이 큰 task가 있다고 가정한다. 
+ *   이 task가 long 슬립한 후 깨어나면, 그 long 슬립한 기간만큼 util_avg가
+ *   decay하여 아주 작은 값이 된다. 그러면 스케줄러가 이의 cpu 점유율이 
+ *   작다고 판단하여 cpu freq가 낮게 시작할 수 있다. 이를 방지하기 위해
+ *   슬립을 위해 dequeue 되는 순간의 util_avg 값과, 새롭게 산출된 util_avg
+ *   값을 비교하여 max 값을 사용하기 위해 적용되었다.
+ */
 	struct util_est			util_est;
 } ____cacheline_aligned;
 
