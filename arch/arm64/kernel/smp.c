@@ -1022,6 +1022,10 @@ static irqreturn_t ipi_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @ipinr을 @target에 요청한다.
+ */
 static void smp_cross_call(const struct cpumask *target, unsigned int ipinr)
 {
 	trace_ipi_raise(target, ipi_types[ipinr]);
@@ -1107,6 +1111,11 @@ void __init set_smp_ipi_range(int ipi_base, int n)
 	ipi_setup(smp_processor_id());
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @cpu에 ipi reschedule 요청을 한다. ipi를 받은 cpu에선
+ *   do_handle_IPI()를 통해서 scheduler_ipi()가 호출된다.
+ */
 void smp_send_reschedule(int cpu)
 {
 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);

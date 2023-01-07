@@ -306,6 +306,11 @@ do { \
 do { \
 	set_preempt_need_resched(); \
 } while (0)
+
+/*
+ * IAMROOT, 2023.01.07:
+ * - current task info reschedule 요청이 있으면 reschedule set한다.
+ */
 #define preempt_fold_need_resched() \
 do { \
 	if (tif_need_resched()) \

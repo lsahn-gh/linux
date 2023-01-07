@@ -695,7 +695,7 @@ struct cfs_rq {
  *  부호 없는 정수이지만 유휴 스케줄링 정책이 있는 작업만 포함합니다. 
  *
  *  - nr_running
- *    cfs rq에서 현재 실행가능한 task 수
+ *    cfs rq에서 현재 실행가능한 entity 수
  *  - h_nr_running
  *    하위 그룹까지 포함한 실행가능한 task 수.
  *    (throttled된 하위 cfs rq는 제외).
@@ -758,6 +758,12 @@ struct cfs_rq {
 	} removed;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
+
+/*
+ * IAMROOT, 2023.01.07:
+ * - 직전에 tg->load_avg에 적용된 cfs_rq의 load_avg.
+ *   (update_tg_load_avg() 참고)
+ */
 	unsigned long		tg_load_avg_contrib;
 
 /*
@@ -3239,6 +3245,10 @@ DECLARE_PER_CPU(struct update_util_data __rcu *, cpufreq_update_util_data);
  * RT sched class to trigger extra cpufreq updates to prevent it from stalling,
  * but that really is a band-aid.  Going forward it should be replaced with
  * solutions targeted more specifically at RT tasks.
+ */
+/*
+ * IAMROOT, 2023.01.07:
+ * - @rq의 변화에 따라 cpu freq를 바꿀수있는 기능이 있으면 이를 수행한다.
  */
 static inline void cpufreq_update_util(struct rq *rq, unsigned int flags)
 {

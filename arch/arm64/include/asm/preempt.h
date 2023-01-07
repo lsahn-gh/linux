@@ -38,6 +38,10 @@ static inline void preempt_count_set(u64 pc)
 	task_thread_info(p)->preempt_count = PREEMPT_DISABLED; \
 } while (0)
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - reschedule 요청.
+ */
 static inline void set_preempt_need_resched(void)
 {
 	current_thread_info()->preempt.need_resched = 0;

@@ -113,6 +113,10 @@ static inline int test_and_clear_ti_thread_flag(struct thread_info *ti, int flag
 	return test_and_clear_bit(flag, (unsigned long *)&ti->flags);
 }
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - @flag있으면 return 1. 없으면 return 0.
+ */
 static inline int test_ti_thread_flag(struct thread_info *ti, int flag)
 {
 	return test_bit(flag, (unsigned long *)&ti->flags);
@@ -163,6 +167,10 @@ static inline int test_ti_thread_flag(struct thread_info *ti, int flag)
 	clear_ti_thread_flag(task_thread_info(t), TIF_##fl)
 #endif /* !CONFIG_GENERIC_ENTRY */
 
+/*
+ * IAMROOT, 2023.01.07:
+ * - current_thread_info에 TIF_NEED_RESCHED이 있는지 확인한다.
+ */
 #define tif_need_resched() test_thread_flag(TIF_NEED_RESCHED)
 
 #ifndef CONFIG_HAVE_ARCH_WITHIN_STACK_FRAMES
