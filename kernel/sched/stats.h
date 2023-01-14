@@ -156,6 +156,15 @@ static inline void psi_sched_switch(struct task_struct *prev,
  * from dequeue_task() to account for possible rq->clock skew across CPUs. The
  * delta taken on each CPU would annul the skew.
  */
+/*
+ * IAMROOT. 2023.01.14:
+ * - google-translate
+ *   우리는 태스크가 큐에 들어간 *처음* 시간부터 마침내 CPU에 도달한 시간까지의
+ *   시간을 알고 싶습니다. 우리는 dequeue_task()에서 이 루틴을 호출하여 CPU에서
+ *   가능한 rq->clock skew를 설명합니다. 각 CPU에서 취한 델타는 skew를 무효화합니다.
+ *
+ * -  task 가 rq에 진입한 후 실행 되기 까지 delay 시간을 run_delay에 저장
+ */
 static inline void sched_info_dequeue(struct rq *rq, struct task_struct *t)
 {
 	unsigned long long delta = 0;

@@ -305,6 +305,10 @@ static void rcu_qs(void)
  *
  * Caller must disable interrupts.
  */
+ /*
+  * IAMROOT, 2023.01.14:
+  * - TODO.
+  */
 void rcu_note_context_switch(bool preempt)
 {
 	struct task_struct *t = current;

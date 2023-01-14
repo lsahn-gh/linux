@@ -697,7 +697,7 @@ struct cfs_rq {
  *  - nr_running
  *    cfs rq에서 현재 실행가능한 entity 수
  *  - h_nr_running
- *    하위 그룹까지 포함한 실행가능한 task 수.
+ *    하위 그룹까지 포함한 실행가능한 cfs_rq의 task 수.
  *    (throttled된 하위 cfs rq는 제외).
  */
 	unsigned int		nr_running;
@@ -1165,6 +1165,11 @@ struct rq {
 	 * nr_running and cpu_load should be in the same cacheline because
 	 * remote CPUs use both these fields when doing load calculation.
 	 */
+	 /*
+	  * IAMROOT, 2023.01.14:
+	  * - nr_running : 해당 cpu의 rq에서 동작하는 모든 task 의 수
+	  *   stop, dl, rt, cfs 에서 동작하는 task의 총합
+	  */
 	unsigned int		nr_running;
 #ifdef CONFIG_NUMA_BALANCING
 	unsigned int		nr_numa_running;
@@ -1219,6 +1224,14 @@ struct rq {
 	 * one CPU and if it got migrated afterwards it may decrease
 	 * it on another CPU. Always updated under the runqueue lock:
 	 */
+	/*
+	 * IAMROOT. 2023.01.14:
+	 * - google-translate
+	 *   이것은 모든 CPU에 대한 총 합계만 중요한 글로벌 카운터의 일부입니다. 작업은 한
+	 *   CPU에서 이 카운터를 증가시킬 수 있으며 나중에 마이그레이션된 경우 다른 CPU에서
+	 *   감소시킬 수 있습니다. runqueue 잠금 상태에서 항상 업데이트됨:
+	 * - load에 참여할 io thread가 io 대기중인 경우의 task 수
+	 */
 	unsigned int		nr_uninterruptible;
 
 	struct task_struct __rcu	*curr;
@@ -1227,6 +1240,12 @@ struct rq {
 	unsigned long		next_balance;
 	struct mm_struct	*prev_mm;
 
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - #define RQCF_REQ_SKIP		0x01
+	 *   #define RQCF_ACT_SKIP		0x02
+	 *   #define RQCF_UPDATED		0x04
+	 */
 	unsigned int		clock_update_flags;
 /*
  * IAMROOT, 2022.12.22:
@@ -2440,6 +2459,25 @@ extern const u32		sched_prio_to_wmult[40];
  * ENQUEUE_MIGRATED  - the task was migrated during wakeup
  *
  */
+/*
+ * IAMROOT. 2023.01.14:
+ * - google-translate
+ *   {de,en}대기열 플래그:
+ *
+ *   DEQUEUE_SLEEP - 작업이 더 이상 실행 가능하지 않음
+ *   ENQUEUE_WAKEUP - 작업이 실행 가능함
+ *
+ *   SAVE/RESTORE - 작업이 수정을 허용하는 알려진 상태에 있음을 확인하기 위해
+ *   수행되는 가짜 대기열에서 빼기/인입하기. 이러한 쌍은 가능한 한 많은 상태를
+ *   보존해야 합니다.
+ *
+ *   MOVE -SAVE/RESTORE와 쌍을 이루어 실행 대기열의 위치를 ​​명시적으로
+ *   보존하지 않습니다.
+ *
+ *   ENQUEUE_HEAD - runqueue 앞에 배치(지정되지 않은 경우 꼬리)
+ *   ENQUEUE_REPLENISH - CBS(런타임 보충 및 기한 연기)
+ *   ENQUEUE_MIGRATED - 깨우는 동안 작업이 마이그레이션됨
+ */
 
 #define DEQUEUE_SLEEP		0x01
 #define DEQUEUE_SAVE		0x02 /* Matches ENQUEUE_RESTORE */
@@ -2669,6 +2707,10 @@ static inline bool sched_rt_runnable(struct rq *rq)
 	return rq->rt.rt_queued > 0;
 }
 
+/*
+ * IAMROOT, 2023.01.14:
+ * - cfs_rq에 동작하는 entity가 하나이상 있으면 true 반환
+ */
 static inline bool sched_fair_runnable(struct rq *rq)
 {
 	return rq->cfs.nr_running > 0;

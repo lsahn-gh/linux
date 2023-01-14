@@ -479,6 +479,11 @@ asmlinkage void noinstr el1h_64_sync_handler(struct pt_regs *regs)
 	}
 }
 
+/*
+ * IAMROOT, 2023.01.14:
+ * - schedule() 함수 호출 경로
+ *   arm64_preempt_schedule_irq -> preempt_schedule_irq -> __schedule()
+ */
 static void noinstr el1_interrupt(struct pt_regs *regs,
 				  void (*handler)(struct pt_regs *))
 {
@@ -810,6 +815,9 @@ asmlinkage void noinstr el0t_64_sync_handler(struct pt_regs *regs)
 /*
  * IAMROOT, 2022.11.07:
  * - irq, fiq disable후 @handler 수행
+ * - schedule()함수 호출 경로
+ *   exit_to_user_mode -> prepare_exit_to_user_mode -> do_notify_resume ->
+ *   schedule()
  */
 static void noinstr el0_interrupt(struct pt_regs *regs,
 				  void (*handler)(struct pt_regs *))

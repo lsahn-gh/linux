@@ -2204,6 +2204,11 @@ void activate_task(struct rq *rq, struct task_struct *p, int flags)
 
 void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 {
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - schedule 에서 진입한 경우는 DEQUEUE_SLEEP
+	 *   그 외는 load balancing 으로 인해 deactivate
+	 */
 	p->on_rq = (flags & DEQUEUE_SLEEP) ? 0 : TASK_ON_RQ_MIGRATING;
 
 	dequeue_task(rq, p, flags);
@@ -5806,6 +5811,27 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	 * higher scheduling class, because otherwise those lose the
 	 * opportunity to pull in more work from other CPUs.
 	 */
+	/*
+	 * IAMROOT. 2023.01.14:
+	 * - google-translate
+	 *   최적화: 우리는 모든 작업이 공정한 클래스에 있으면 해당 함수를 직접 호출할 수
+	 *   있지만 @prev 작업이 더 높은 스케줄링 클래스가 아닌 경우에만 다른 CPU에서
+	 *   더 많은 작업을 가져올 기회를 잃기 때문에 알고 있습니다.
+	 *
+	 * -  vmlinux.lds.h
+	 *   #define SCHED_DATA				\
+	 *   STRUCT_ALIGN();				\
+	 *   __begin_sched_classes = .;			\
+	 *    *(__idle_sched_class)			\
+	 *    *(__fair_sched_class)			\
+	 *    *(__rt_sched_class)			\
+	 *    *(__dl_sched_class)			\
+	 *    *(__stop_sched_class)			\
+	 *   __end_sched_classes = .;
+	 *
+	 * - 아래는 sched_class가 idle 이나 cfs 이고 동작중인 task가
+	 *   모두 cfs_rq task 일 경우의 조건
+	 */
 	if (likely(prev->sched_class <= &fair_sched_class &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
 
@@ -6364,6 +6390,14 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  * SM_MASK_PREEMPT for !RT has all bits set, which allows the compiler to
  * optimize the AND operation out and just check for zero.
  */
+/*
+ * IAMROOT. 2023.01.14:
+ * - google-translate
+ *   __schedule()의 sched_mode 인수에 대한 상수입니다. 모드 인수를 사용하면 RT 지원
+ *   커널이 '수면' 스핀/rwlock에 대한 차단과 선점을 구별할 수 있습니다. !RT에 대한
+ *   SM_MASK_PREEMPT에는 모든 비트가 설정되어 있어 컴파일러가 AND 연산을 최적화하고
+ *   0인지 확인할 수 있습니다.
+ */
 #define SM_NONE			0x0
 #define SM_PREEMPT		0x1
 #define SM_RTLOCK_WAIT		0x2
@@ -6538,6 +6572,11 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		if (signal_pending_state(prev_state, prev)) {
 			WRITE_ONCE(prev->__state, TASK_RUNNING);
 		} else {
+			/*
+			 * IAMROOT, 2023.01.14:
+			 * - sched_contributes_to_load - io thread 가 load에
+			 *   참여 할지를 설정하는 변수
+			 */
 			prev->sched_contributes_to_load =
 				(prev_state & TASK_UNINTERRUPTIBLE) &&
 				!(prev_state & TASK_NOLOAD) &&
@@ -6557,6 +6596,12 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 			 *
 			 * After this, schedule() must not care about p->state any more.
 			 */
+			/*
+			 * IAMROOT, 2023.01.14:
+			 * - DEQUEUE_NOCLOCK 설정이 아닐 경우에 update_rq_clock을
+			 *   호출함. 위에서 update_rq_clock을 호출 했으므로
+			 *   DEQUEUE_NOCLOCK 을 설정.
+			 */
 			deactivate_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK);
 
 			if (prev->in_iowait) {
@@ -6564,6 +6609,13 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 				delayacct_blkio_start();
 			}
 		}
+		/*
+		 * IAMROOT, 2023.01.14:
+		 * - sleep 에서 깨어나서 preemption 아닌 경우 nvcsw 를 설정
+		 *   preemption 인 경우는 nivcsw를 switch_count로 설정한다
+		 *   nvcsw(number_voluntary_count_switch?)
+		 *   nivcsw(number_involuntary_count_switch?)
+		 */
 		switch_count = &prev->nvcsw;
 	}
 

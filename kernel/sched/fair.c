@@ -33,12 +33,17 @@
  * (to see the precise effective timeslice length of your workload,
  *  run vmstat and monitor the context-switches (cs) field)
  *
- * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
  */
 /*
  * IAMROOT, 2023.01.07:
- * - TODO
- * - 6ms
+ * - (default: 6ms * (1 + ilog2(ncpus)), units: nanoseconds)
+ * - cpu 갯수 2 = 6 * (1 + ilog2(2)) = 6 * 2 = 12 ms
+ *   cpu 갯수 3 = 6 * (1 + ilog2(3)) = 6 * 2 = 12 ms
+ *   cpu 갯수 4 = 6 * (1 + ilog2(4)) = 6 * 3 = 18 ms
+ *   cpu 갯수 5 = 6 * (1 + ilog2(5)) = 6 * 3 = 18 ms
+ *   cpu 갯수 6 = 6 * (1 + ilog2(6)) = 6 * 3 = 18 ms
+ *   cpu 갯수 7 = 6 * (1 + ilog2(7)) = 6 * 3 = 18 ms
+ *   cpu 갯수 8 = 6 * (1 + ilog2(8)) = 6 * 4 = 24 ms
  */
 unsigned int sysctl_sched_latency			= 6000000ULL;
 static unsigned int normalized_sysctl_sched_latency	= 6000000ULL;
@@ -287,6 +292,25 @@ static void __update_inv_weight(struct load_weight *lw)
  *      2,147,483,648
  *   5. (delta_exec * fact) >> 31
  *      (1000000 * 2,147,483,648) >> 31 = 1,000,000
+ *
+ * - ex. sched_slice 에서 호출하였을 때. delta_exec = 6ms
+ *   task 1 : nice 0, 1024(weight), 4194304(inv_weight)
+ *   task 2 : nice -10, 9548(weight), 449829(inv_weight)
+ *   cfs_rq : weight = task1 + task2 = 1024 + 9548 = 10572
+ *            inv_weight = (2^32-1) / 10572 = 406258
+ *
+ *  (delta_exec * (weight * lw->inv_weight)) >> 32
+ *  delta_exec = 6000000(6ms), weight = 1024 or 9548
+ *  lw_inv_weight = 406258
+ *
+ *   task 1 : fact = mul_u32_u32(fact, lw->inv_weight)
+ *            1024 * 406258 = 416008192 = 0x18CB_C800 => fact_hi 조건 pass
+ *            (6000000 * 1024 * 406258) >> 32 = 581,156ns
+ *
+ *   task 2 : fact = mul_u32_u32(fact, lw->inv_weight)
+ *            9548 * 406258 = 3878951384 = 0xE734_19D8 => fact_hi 조건 pass
+ *            (6000000 * 9548 * 406258) >> 32 = 5,418,832 ns
+ *
  */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
@@ -748,6 +772,10 @@ static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	rb_erase_cached(&se->run_node, &cfs_rq->tasks_timeline);
 }
 
+/*
+ * IAMROOT, 2023.01.14:
+ * - rbtree에서 가장 작은 vruntime entity를 반환한다.
+ */
 struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 {
 	struct rb_node *left = rb_first_cached(&cfs_rq->tasks_timeline);
@@ -758,6 +786,10 @@ struct sched_entity *__pick_first_entity(struct cfs_rq *cfs_rq)
 	return __node_2_se(left);
 }
 
+/*
+ * IAMROOT, 2023.01.14:
+ * - rbtree에서 @se 의 vruntime 보다 많은 다음 se를 반환한다.
+ */
 static struct sched_entity *__pick_next_entity(struct sched_entity *se)
 {
 	struct rb_node *next = rb_next(&se->run_node);
@@ -834,13 +866,18 @@ static inline u64 calc_delta_fair(u64 delta, struct sched_entity *se)
  */
 /*
  * IAMROOT, 2023.01.07:
- * - ING
+ * - se 갯수가 8 이하이면 sysctl_sched_latency(6ms) 반환.
+ *   단 cpu 갯수가 2이상이면 (1 + ilog2(cpus)) 을 곱한다.
+ * - se 갯수가 9 이상이면 nr_running * sysctl_sched_min_granularity
+ *   ex. se = 9, cpu = 1
+ *   9 * 0.75(sysctl_sched_min_granularity) = 6.75 ms
+ *   단 cpu 갯수가 2이상이면 (1 + ilog2(cpus)) 을 곱한다.
  */
 static u64 __sched_period(unsigned long nr_running)
 {
 /*
  * IAMROOT, 2023.01.07:
- * - sched_nr_latency(8개) 이상일 때에는 
+ * - sched_nr_latency(9개) 이상일 때에는
  */
 	if (unlikely(nr_running > sched_nr_latency))
 		return nr_running * sysctl_sched_min_granularity;
@@ -856,7 +893,9 @@ static u64 __sched_period(unsigned long nr_running)
  */
 /*
  * IAMROOT, 2023.01.07:
- * - ING
+ * - @se에 대한 slice 값을 반환한다
+ *   @se->load.weight / @cfs_rq->load.weight 비율로 slice 값을 산출하되
+ *   @se 는 parent 를 모두 찾을 때까지 loop 를 돌며 계속해서 slice 값을 업데이트 한다.
  */
 static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
@@ -874,6 +913,10 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	if (sched_feat(ALT_PERIOD))
 		nr_running = rq_of(cfs_rq)->cfs.h_nr_running;
 
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - one cpu se 8개 이하 기준 6ms 반환
+	 */
 	slice = __sched_period(nr_running + !se->on_rq);
 
 	for_each_sched_entity(se) {
@@ -889,9 +932,18 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
 			update_load_add(&lw, se->load.weight);
 			load = &lw;
 		}
+		/*
+		 * IAMROOT, 2023.01.14:
+		 * - @se에 사용할 slice 를 알아온다.
+		 */
 		slice = __calc_delta(slice, se->load.weight, load);
 	}
-		
+
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - slice값이 0.75ms 보다 작으면 0.75ms(sysctl_sched_min_granularity)를
+	 *   그냥 사용한다.
+	 */
 	if (sched_feat(BASE_SLICE))
 		slice = max(slice, (u64)sysctl_sched_min_granularity);
 
@@ -5399,6 +5451,10 @@ static void __clear_buddies_skip(struct sched_entity *se)
 	}
 }
 
+/*
+ * IAMROOT, 2023.01.14:
+ * - @se에 대한 buddy 설정이 있으면 삭제한다.
+ */
 static void clear_buddies(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	if (cfs_rq->last == se)
@@ -5471,6 +5527,8 @@ dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
 /*
  * IAMROOT, 2023.01.07:
  * - @resched_curr 요청을 할지 결정한다.
+ *   1. 실행시간을 다 소모했으면 rechedule 요청을 하고 @curr 가 buddy 설정된경우
+ *   buddy 설정 clear
  */
 static void
 check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
@@ -5484,13 +5542,23 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
  * - @curr runtime을 종료된것을 검사한다. 다 사용됬으면 
  *   @cfs_rq의 cpu한테 reschedule 요청을 한다.
  */
+
 	ideal_runtime = sched_slice(cfs_rq, curr);
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - prev_sum_exec_runtime: set_next_entity 에서 entity 전환시 저장
+	 */
 	delta_exec = curr->sum_exec_runtime - curr->prev_sum_exec_runtime;
 	if (delta_exec > ideal_runtime) {
 		resched_curr(rq_of(cfs_rq));
 		/*
 		 * The current task ran long enough, ensure it doesn't get
 		 * re-elected due to buddy favours.
+		 */
+		/*
+		 * IAMROOT, 2023.01.14:
+		 * - 현재 작업이 충분히 실행되었으므로 재선택 되지 않도록 buddies
+		 *   관련 설정을 지운다.
 		 */
 		clear_buddies(cfs_rq, curr);
 		return;
@@ -5500,6 +5568,12 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * Ensure that a task that missed wakeup preemption by a
 	 * narrow margin doesn't have to wait for a full slice.
 	 * This also mitigates buddy induced latencies under load.
+	 */
+	/*
+	 * IAMROOT. 2023.01.14:
+	 * - google-translate
+	 *   근소한 차이로 웨이크업 선점을 놓친 작업이 전체 슬라이스를 기다릴 필요가 없도록
+	 *   합니다. 이것은 또한 부하 상태에서 버디 유도 대기 시간을 완화합니다.
 	 */
 /*
  * IAMROOT, 2023.01.07:
@@ -5514,6 +5588,11 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	if (delta < 0)
 		return;
 
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - 특수한 케이스로 rbtree에 새로 들어온 entity가 현재 실행중인 entity에
+	 *   배정된 실행시간보다도 더 이전인 경우 rechedule 요청을 한다.
+	 */
 	if (delta > ideal_runtime)
 		resched_curr(rq_of(cfs_rq));
 }
@@ -12474,6 +12553,10 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 		entity_tick(cfs_rq, se, queued);
 	}
 
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - TODO
+	 */
 	if (static_branch_unlikely(&sched_numa_balancing))
 		task_tick_numa(rq, curr);
 

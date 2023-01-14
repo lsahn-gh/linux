@@ -1232,6 +1232,10 @@ struct task_struct {
 	atomic_t			tick_dep_mask;
 #endif
 	/* Context switch counts: */
+	/*
+	 * IAMROOT, 2023.01.14:
+	 * - 다른 task 로의 switching 횟수
+	 */
 	unsigned long			nvcsw;
 	unsigned long			nivcsw;
 
