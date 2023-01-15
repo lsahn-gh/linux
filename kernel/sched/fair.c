@@ -272,6 +272,7 @@ static void __update_inv_weight(struct load_weight *lw)
  * - 계산을 수행하면서 발생할수있는 32bit overflow에 대한 처리와, 
  *   그에 따른 정밀도 감소처리가 있다.
  *
+ * - calc_delta_fair 에서 호출 하였을 때
  * - ex. delta_exec=1000000, weight=1024, lw.weight=1277
  *   1. fact=1024, lw.inv_weight=3363326
  *   2. fact_hi = (fact >> 32) = 0 -> pass
@@ -293,24 +294,48 @@ static void __update_inv_weight(struct load_weight *lw)
  *   5. (delta_exec * fact) >> 31
  *      (1000000 * 2,147,483,648) >> 31 = 1,000,000
  *
- * - ex. sched_slice 에서 호출하였을 때. delta_exec = 6ms
+ * - sched_slice 에서 호출하였을 때
+ * - ex1.
+ *   delta_exec = 6000000(6ms)
  *   task 1 : nice 0, 1024(weight), 4194304(inv_weight)
  *   task 2 : nice -10, 9548(weight), 449829(inv_weight)
  *   cfs_rq : weight = task1 + task2 = 1024 + 9548 = 10572
- *            inv_weight = (2^32-1) / 10572 = 406258
+ *            lw->inv_weight = (2^32-1) / 10572 = 406258
  *
- *  (delta_exec * (weight * lw->inv_weight)) >> 32
- *  delta_exec = 6000000(6ms), weight = 1024 or 9548
- *  lw_inv_weight = 406258
+ * - 최종식
+ *   (delta_exec * (weight * lw->inv_weight)) >> 32 = (delta_exec * fact) >> 32
+ *   delta_exec = 6000000(6ms)
+ *   weight = 1024(task1), 9548(task2)
+ *   lw->inv_weight = 406258
  *
  *   task 1 : fact = mul_u32_u32(fact, lw->inv_weight)
  *            1024 * 406258 = 416008192 = 0x18CB_C800 => fact_hi 조건 pass
- *            (6000000 * 1024 * 406258) >> 32 = 581,156ns
+ *            (6000000 * 416008192) >> 32 = 581,156ns = 0.58ms
  *
  *   task 2 : fact = mul_u32_u32(fact, lw->inv_weight)
  *            9548 * 406258 = 3878951384 = 0xE734_19D8 => fact_hi 조건 pass
- *            (6000000 * 9548 * 406258) >> 32 = 5,418,832 ns
+ *            (6000000 * 3878951384) >> 32 = 5,418,832 ns = 5.42ms
  *
+ * -- ex1-1. se의 부모가 있을 경우 루프를 계속한다.
+ *    부모 cfs_rq에 se가 3개 있고 각각 1024 weight 라고 가정
+ *    cfs_rq : weight = 1024 * 3 = 3072
+ *             lw->inv_weight = (2^32 - 1) / 3072 = 1398101
+ *
+ * - 최종식
+ *   (delta_exec * (weight * lw->inv_weight)) >> 32 = (delta_exec * fact) >> 32
+ *   delta_exec = 581156(task1), 5418832(task2)
+ *   weight = 1024
+ *   lw->inv_weight = 406258
+
+ *   task 1 : fact = mul_u32_u32(fact, lw->inv_weight)
+ *            1024 * 1398101 = 1431655424  = 0x5555_5400 => fact_hi 조건 pass
+ *            (581156 * 1431655424) >> 32 = 193,718ns = 0.19ms
+ *
+ *   task 2 : fact = mul_u32_u32(fact, lw->inv_weight)
+ *            1024 * 1398101 = 1431655424  = 0x5555_5400 => fact_hi 조건 pass
+ *            (5418832 * 1431655424) >> 32 = 1,806,276ns = 1.81ms
+ *
+ * --- se의 parent == NULL -> 종료
  */
 static u64 __calc_delta(u64 delta_exec, unsigned long weight, struct load_weight *lw)
 {
