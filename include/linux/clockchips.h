@@ -120,7 +120,7 @@ struct clock_event_device {
  *   broadcast periodic : tick_handle_periodic_broadcast
  *   broadcast oneshot  : tick_handle_oneshot_broadcast
  *   wakeup             : tick_oneshot_wakeup_handler
- *   hrtimer 전환후      : tick_sched_timer(실제 동작은 hrtimer 통해서.)
+ *   hrtimer 전환후     : tick_sched_timer(실제 동작은 hrtimer 통해서.)
  */
 	void			(*event_handler)(struct clock_event_device *);
 	int			(*set_next_event)(unsigned long evt, struct clock_event_device *);

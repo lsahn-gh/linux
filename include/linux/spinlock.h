@@ -171,6 +171,58 @@ do {									\
  *
  * Architectures that can implement ACQUIRE better need to take care.
  */
+/*
+ * IAMROOT, 2023.01.26:
+ * - papago
+ *    smp_mb__after_spinlock()은 프로그램 순서 이전 잠금 획득과 프로그램 순서 
+ *    이후 메모리 액세스 사이에 전체 메모리 장벽과 같은 기능을 제공합니다.
+ *
+ *    이렇게 하면 다음 두 가지 속성이 유지됩니다.
+ *
+ *   1) Given the snippet:
+ *
+ *	  { X = 0;  Y = 0; }
+ *
+ *	  CPU0				CPU1
+ *
+ *	  WRITE_ONCE(X, 1);		WRITE_ONCE(Y, 1);
+ *	  spin_lock(S);			smp_mb();
+ *	  smp_mb__after_spinlock();	r1 = READ_ONCE(X);
+ *	  r0 = READ_ONCE(Y);
+ *	  spin_unlock(S);
+ *
+ *    CPU0이 Y에 대한 CPU1의 저장을 관찰하지 않고(r0 = 0) CPU1이 X에 대한 
+ *    CPU0의 저장을 관찰하지 않는 것(r1 = 0)이 금지됩니다. __schedule() 및 
+ *    try_to_wake_up()에서 smp_mb__after_spinlock() 호출 이전의 주석을 
+ *    참조하십시오. 
+ *
+ *   2) Given the snippet:
+ *
+ *  { X = 0;  Y = 0; }
+ *
+ *  CPU0		CPU1				CPU2
+ *
+ *  spin_lock(S);	spin_lock(S);			r1 = READ_ONCE(Y);
+ *  WRITE_ONCE(X, 1);	smp_mb__after_spinlock();	smp_rmb();
+ *  spin_unlock(S);	r0 = READ_ONCE(X);		r2 = READ_ONCE(X);
+ *			WRITE_ONCE(Y, 1);
+ *			spin_unlock(S);
+ *
+ *	CPU0의 크리티컬 섹션이 CPU1의 크리티컬 섹션(r0 = 1) 이전에 실행되는 것은 
+ *	금지되어 있으며, CPU2는 CPU1이 Y에 저장하는 것을 관찰하고(r1 = 1) CPU2는 
+ *	CPU0이 X에 저장하는 것을 관찰하지 않습니다(r2 = 0). 유사한 스니펫을 보려면 
+ *	try_to_wake_up()에서 smp_rmb()를 호출하기 전에 주석을 참조하십시오. 
+ *	그러나 두 CPU에 투영됩니다. 
+ *
+ *	속성 (2)는 잠금을 RCsc 잠금으로 업그레이드합니다.
+ *
+ *	대부분의 로드-스토어 아키텍처는 LL/SC 루프 다음에 smp_mb()로 ACQUIRE를 
+ *	구현하므로 추가 장벽이 필요하지 않습니다. 마찬가지로 우리의 모든 TSO 
+ *	아키텍처는 각 원자 명령에 대해 smp_mb()를 의미하며 마찬가지로 더 이상 
+ *	필요하지 않습니다.
+ *
+ *	ACQUIRE를 더 잘 구현할 수 있는 아키텍처는 주의를 기울여야 합니다.
+ */
 #ifndef smp_mb__after_spinlock
 #define smp_mb__after_spinlock()	do { } while (0)
 #endif

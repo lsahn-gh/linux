@@ -93,8 +93,12 @@ struct task_group;
 
 /*
  * IAMROOT, 2022.11.19:
- * - kthread에만 있는 개념.
- * - wakeup업시 unpark할때까지 잠깐 멈추는 기능.
+ * - TASK_PARKED
+ *   kthread에만 있는 개념.
+ *   wakeup업시 unpark할때까지 잠깐 멈추는 기능.
+ *
+ * - TASK_NOLOAD
+ *   load 계산에서 task를 제외한다.
  */
 #define TASK_PARKED			0x0040
 #define TASK_DEAD			0x0080
@@ -918,6 +922,10 @@ struct task_struct {
 	 */
 	struct thread_info		thread_info;
 #endif
+/*
+ * IAMROOT, 2023.01.26:
+ * - TASK_RUNNING, TASK_INTERRUPTIBLE등의 값이 온다.
+ */
 	unsigned int			__state;
 
 #ifdef CONFIG_PREEMPT_RT
@@ -1074,6 +1082,10 @@ struct task_struct {
 
 	/* Scheduler bits, serialized by scheduler locks: */
 	unsigned			sched_reset_on_fork:1;
+/*
+ * IAMROOT, 2023.01.26:
+ * - io thread 가 load에 참여 할지를 설정하는 변수
+ */
 	unsigned			sched_contributes_to_load:1;
 	unsigned			sched_migrated:1;
 #ifdef CONFIG_PSI
@@ -1235,6 +1247,8 @@ struct task_struct {
 	/*
 	 * IAMROOT, 2023.01.14:
 	 * - 다른 task 로의 switching 횟수
+	 *   nvcsw(number_voluntary_count_switch?)
+	 *   nivcsw(number_involuntary_count_switch?)
 	 */
 	unsigned long			nvcsw;
 	unsigned long			nivcsw;

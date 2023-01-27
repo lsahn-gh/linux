@@ -358,11 +358,19 @@ static inline int restart_syscall(void)
 	return -ERESTARTNOINTR;
 }
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - sig pending중(sig는 보냈지만 처리가 아직안됨)인지 확인한다.
+ */
 static inline int task_sigpending(struct task_struct *p)
 {
 	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
 }
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - TIF_NOTIFY_SIGNAL이 있거나 이미 pending중이면 return 1. 아니면 0
+ */
 static inline int signal_pending(struct task_struct *p)
 {
 	/*
@@ -385,6 +393,11 @@ static inline int fatal_signal_pending(struct task_struct *p)
 	return task_sigpending(p) && __fatal_signal_pending(p);
 }
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - signal이 pending 중인지 확인한다.
+ *   TASK_INTERRUPTIBLE이거나 fatal signal pending이면 return 1.
+ */
 static inline int signal_pending_state(unsigned int state, struct task_struct *p)
 {
 	if (!(state & (TASK_INTERRUPTIBLE | TASK_WAKEKILL)))

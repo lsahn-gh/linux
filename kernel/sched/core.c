@@ -1480,6 +1480,10 @@ DEFINE_STATIC_KEY_FALSE(sched_uclamp_used);
 /* Integer rounded range for each bucket */
 #define UCLAMP_BUCKET_DELTA DIV_ROUND_CLOSEST(SCHED_CAPACITY_SCALE, UCLAMP_BUCKETS)
 
+/*
+ * IAMROOT, 2023.01.27:
+ * - min -> max
+ */
 #define for_each_clamp_id(clamp_id) \
 	for ((clamp_id) = 0; (clamp_id) < UCLAMP_CNT; (clamp_id)++)
 
@@ -1718,6 +1722,19 @@ static inline void uclamp_rq_inc_id(struct rq *rq, struct task_struct *p,
  * always valid. If it's detected they are not, as defensive programming,
  * enforce the expected state and warn.
  */
+/*
+ * IAMROOT, 2023.01.27:
+ * - papago
+ *   작업이 rq에서 대기열에서 제거되면 작업에 의해 계산된 클램프 버킷이 
+ *   해제됩니다. 이것이 rq의 최대 활성 클램프 값을 계산하는 마지막 작업 
+ *   참조인 경우 rq의 클램프 값이 업데이트됩니다.
+ *
+ *   refcounted 작업과 rq의 캐시된 클램프 값은 모두 항상 유효할 것으로 
+ *   예상됩니다. 감지되면 방어 프로그래밍으로 예상 상태를 적용하고 경고하지 
+ *   않습니다.
+ *
+ * - clamp bucket을 해제한다.
+ */
 static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
 				    enum uclamp_id clamp_id)
 {
@@ -1752,6 +1769,29 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
 	 *
 	 * The following check here eliminates the possibility of such race.
 	 */
+/*
+ * IAMROOT, 2023.01.27:
+ * - papago
+ *   작업 @p가 대기열에 들어간 후 sched_uclamp_used가 활성화된 경우 
+ *   uclamp_rq_dec_id()에 대한 불균형 호출로 끝날 수 있습니다.
+ *
+ *   이 경우 uc_se->active 플래그는 enqueue 시간에 uclamp 계산이 수행되지 
+ *   않았기 때문에 false여야 하며 여기로 돌아올 수 있습니다.
+ *
+ *   다음 enqueue/dequeue 순서 문제도 주의해야 합니다.
+ *
+ *   enqueue(taskA)
+ *   // sched_uclamp_used gets enabled
+ *   enqueue(taskB)
+ *   dequeue(taskA)
+ *   // Must not decrement bucket->tasks here
+ *   dequeue(taskB)
+ *
+ *   여기서 우리는 uc_se 및 버킷[uc_se->bucket_id]에서 오래된 데이터로 
+ *   끝날 수 있습니다.
+ *
+ *   여기에서 다음 확인은 이러한 경주의 가능성을 제거합니다.
+ */
 	if (unlikely(!uc_se->active))
 		return;
 
@@ -1769,6 +1809,14 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
 	 * The rq clamp bucket value is reset to its base value whenever
 	 * there are no more RUNNABLE tasks refcounting it.
 	 */
+/*
+ * IAMROOT, 2023.01.27:
+ * - papago
+ *   로컬 최대 집계를 단순하게 유지하고 동일한 버킷에서 일부 RUNNABLE 
+ *   작업을 오버부스트하는 것을 허용합니다. 
+ *   rq 클램프 버킷 값은 이를 참조하는 RUNNABLE 작업이 더 이상 없을 때마다 
+ *   기본 값으로 재설정됩니다.
+ */
 	if (likely(bucket->tasks))
 		return;
 
@@ -1777,6 +1825,13 @@ static inline void uclamp_rq_dec_id(struct rq *rq, struct task_struct *p,
 	 * Defensive programming: this should never happen. If it happens,
 	 * e.g. due to future modification, warn and fixup the expected value.
 	 */
+/*
+ * IAMROOT, 2023.01.27:
+ * - papago
+ *   방어 프로그래밍:
+ *   이것은 결코 일어나서는 안됩니다. 예를 들어 향후 수정으로 인해 예상 
+ *   값을 경고하고 수정합니다. 
+ */
 	SCHED_WARN_ON(bucket->value > rq_clamp);
 	if (bucket->value >= rq_clamp) {
 		bkt_clamp = uclamp_rq_max_value(rq, clamp_id, uc_se->value);
@@ -1808,6 +1863,31 @@ static inline void uclamp_rq_inc(struct rq *rq, struct task_struct *p)
 		rq->uclamp_flags &= ~UCLAMP_FLAG_IDLE;
 }
 
+/*
+ * IAMROOT, 2023.01.27:
+ * --- openai ----
+ *  uclamp는 Utilization Clamping의 약자로 작업이 사용할 수 있는 CPU 
+ *  사용률을 제어하는 데 사용되는 Linux 커널의 기능입니다. 사용량 클램핑을 
+ *  사용하면 작업 또는 작업 그룹의 최대 CPU 사용량을 제한하여 CPU를 
+ *  과도하게 사용하고 다른 작업의 성능에 영향을 주지 않도록 할 수 있습니다. 
+ *  uclamp_rq_dec 함수는 특정 CPU 실행 대기열의 작업 또는 작업 그룹에 대한 
+ *  사용 클램핑 값을 줄이는 데 사용됩니다.
+ * ---------------
+ *
+ * - config UCLAMP_TASK 주석 papago
+ *   이 기능을 사용하면 스케줄러가 해당 CPU에서 예약된 RUNNABLE 작업을 
+ *   기반으로 각 CPU의 고정된 사용률을 추적할 수 있습니다.
+ *
+ *   이 옵션을 사용하면 사용자는 RUNNABLE 작업에 허용되는 최소 및 최대 CPU 
+ *   사용률을 지정할 수 있습니다. 최대 사용률은 작업이 사용해야 하는 최대 
+ *   빈도를 정의하고 최소 사용률은 사용해야 하는 최소 빈도를 정의합니다.
+ *
+ *   최소 및 최대 사용률 클램프 값은 모두 주파수 선택 정책을 개선하는 것을 
+ *   목표로 하는 스케줄러에 대한 힌트이지만 작업에 대한 특정 대역폭을 
+ *   적용하거나 부여하지는 않습니다.
+ *
+ *   의심스러운 경우 N이라고 말하십시오.
+ */
 static inline void uclamp_rq_dec(struct rq *rq, struct task_struct *p)
 {
 	enum uclamp_id clamp_id;
@@ -1818,6 +1898,13 @@ static inline void uclamp_rq_dec(struct rq *rq, struct task_struct *p)
 	 * The condition is constructed such that a NOP is generated when
 	 * sched_uclamp_used is disabled.
 	 */
+/*
+ * IAMROOT, 2023.01.27:
+ * - papago
+ *   uclamp가 사용자 공간에서 실제로 사용될 때까지 오버헤드를 피하십시오.
+ *
+ *   sched_uclamp_used가 비활성화된 경우 NOP가 생성되도록 조건이 구성됩니다. 
+ */
 	if (!static_branch_unlikely(&sched_uclamp_used))
 		return;
 
@@ -2178,14 +2265,27 @@ static inline void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 		sched_core_enqueue(rq, p);
 }
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - sched_core / clamp dec / @flag에 따른 처리등을 수행하고 
+ *   dequeue_task를 수행한다.
+ */
 static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (sched_core_enabled(rq))
 		sched_core_dequeue(rq, p);
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - DEQUEUE_NOCLOCK이 없으면 clock갱신
+ */
 	if (!(flags & DEQUEUE_NOCLOCK))
 		update_rq_clock(rq);
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - DEQUEUE_SAVE 가 없으면 sched_info 갱신 및 psi dequeue 수행.
+ */
 	if (!(flags & DEQUEUE_SAVE)) {
 		sched_info_dequeue(rq, p);
 		psi_dequeue(p, flags & DEQUEUE_SLEEP);
@@ -2202,6 +2302,13 @@ void activate_task(struct rq *rq, struct task_struct *p, int flags)
 	p->on_rq = TASK_ON_RQ_QUEUED;
 }
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - on_rq를 @flags에 DEQUEUE_SLEEP가 있으면 0, 아니면 TASK_ON_RQ_MIGRATING
+ *   으로 update한다.
+ * - sched_core / clamp dec / @flag에 따른 처리등을 수행하고 
+ *   dequeue_task를 수행한다.
+ */
 void deactivate_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	/*
@@ -5799,6 +5906,10 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 /*
  * Pick up the highest-prio task:
  */
+/*
+ * IAMROOT, 2023.01.27:
+ * - ING
+ */
 static inline struct task_struct *
 __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -6374,6 +6485,10 @@ static inline void sched_core_cpu_starting(unsigned int cpu) {}
 static inline void sched_core_cpu_deactivate(unsigned int cpu) {}
 static inline void sched_core_cpu_dying(unsigned int cpu) {}
 
+/*
+ * IAMROOT, 2023.01.27:
+ * - ING
+ */
 static struct task_struct *
 pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -6531,13 +6646,12 @@ static void __sched notrace __schedule(unsigned int sched_mode)
  *   signal_pending_state()->signal_pending()을 재정렬할 수 없는지
  *   확인하십시오.
  *
- * __set_current_state(@state)		signal_wake_up()
- * schedule()				  set_tsk_thread_flag(p, TIF_SIGPENDING)
+ *   __set_current_state(@state)		signal_wake_up()
+ *   schedule()				  set_tsk_thread_flag(p, TIF_SIGPENDING)
  *					  wake_up_state(p, state)
  *   LOCK rq->lock			    LOCK p->pi_state
  *   smp_mb__after_spinlock()		    smp_mb__after_spinlock()
  *     if (signal_pending_state())	    if (p->state & @state)
- *
  *
  *   또한 membarrier 시스템 호출은 사용자 공간에서 온 후 rq->curr에
  *   저장하기 전에 전체 메모리 장벽이 필요합니다.
@@ -6545,6 +6659,10 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	rq_lock(rq, &rf);
 	smp_mb__after_spinlock();
 
+/*
+ * IAMROOT, 2023.01.26:
+ * - RQCF_REQ_SKIP -> RQCF_ACT_SKIP -> RQCF_UPDATED		
+ */
 	/* Promote REQ to ACT */
 	rq->clock_update_flags <<= 1;
 	update_rq_clock(rq);
@@ -6568,7 +6686,28 @@ static void __sched notrace __schedule(unsigned int sched_mode)
  *   수 있습니다.
  */
 	prev_state = READ_ONCE(prev->__state);
+/*
+ * IAMROOT, 2023.01.26:
+ *
+ * ----------
+ * - 비자발적인 경우
+ *   TASK_RUNNING이거나 SM_MASK_PREEMPT값이 있으면 비자발적이다.
+ *   선점됬거나, cpu시간이 만료되어 schedule이 된다는 뜻이다.
+ *
+ * - 자발적인경우
+ *   SM_MASK_PREEMPT이 없고, 즉 선점이 없는 상태에서 TASK_RUNNING이 아닌
+ *   상태이므로, 즉 잠들어야 되서 잠들어야되는 상태이므로 자발적이다.
+ * ----------
+ * - 자발적 schedule 인지 확인한다.
+ *   prev_state 값이 존재 : TASK_RUNNING이 아닌 상태에서 진입했다는뜻.
+ *   
+ */
 	if (!(sched_mode & SM_MASK_PREEMPT) && prev_state) {
+/*
+ * IAMROOT, 2023.01.26:
+ * - signal이 pending중이면 running으로 state를 바꾼다.
+ *   fatal등의 signal이 pending이면 running으로 전환한다.
+ */
 		if (signal_pending_state(prev_state, prev)) {
 			WRITE_ONCE(prev->__state, TASK_RUNNING);
 		} else {
