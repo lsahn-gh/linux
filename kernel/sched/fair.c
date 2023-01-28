@@ -89,6 +89,16 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
  *
  * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *  SCHED_OTHER 깨우기 세분성입니다.
+ *
+ *  이 옵션은 분리된 워크로드의 선점 효과를 지연시키고 과도한 스케줄링을 줄입니다. 
+ *  동기식 워크로드에는 여전히 즉각적인 깨우기/절전 대기 시간이 있습니다.
+ *
+ * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
+ */
 unsigned int sysctl_sched_wakeup_granularity			= 1000000UL;
 static unsigned int normalized_sysctl_sched_wakeup_granularity	= 1000000UL;
 
@@ -537,6 +547,10 @@ static inline void assert_list_leaf_cfs_rq(struct rq *rq)
 				 leaf_cfs_rq_list)
 
 /* Do the two (enqueued) entities belong to the same group ? */
+/*
+ * IAMROOT, 2023.01.28:
+ * - 같은 cfs_rq 소속인지 확인한다.
+ */
 static inline struct cfs_rq *
 is_same_group(struct sched_entity *se, struct sched_entity *pse)
 {
@@ -679,6 +693,10 @@ static inline u64 min_vruntime(u64 min_vruntime, u64 vruntime)
 	return min_vruntime;
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - a가 b보다 vruntime이 작다면 return true;
+ */
 static inline bool entity_before(struct sched_entity *a,
 				struct sched_entity *b)
 {
@@ -787,11 +805,19 @@ static inline bool __entity_less(struct rb_node *a, const struct rb_node *b)
 /*
  * Enqueue an entity into the rb-tree:
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - cfs_rq에 넣는다.
+ */
 static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	rb_add_cached(&se->run_node, &cfs_rq->tasks_timeline, __entity_less);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - cfs_rq에서 제거한다.
+ */
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 	rb_erase_cached(&se->run_node, &cfs_rq->tasks_timeline);
@@ -1158,6 +1184,10 @@ static void update_curr_fair(struct rq *rq)
 	update_curr(cfs_rq_of(&rq->curr->se));
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - schedule stat 처리
+ */
 static inline void
 update_stats_wait_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
@@ -1176,6 +1206,11 @@ update_stats_wait_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	__schedstat_set(se->statistics.wait_start, wait_start);
 }
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - stats 처리.
+ */
 static inline void
 update_stats_wait_end(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
@@ -5218,6 +5253,10 @@ static inline int task_fits_capacity(struct task_struct *p, long capacity)
 	return fits_capacity(uclamp_task_util(p), capacity);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - TODO
+ */
 static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
 {
 	if (!static_branch_unlikely(&sched_asym_cpucapacity))
@@ -5281,6 +5320,10 @@ static inline void update_misfit_status(struct task_struct *p, struct rq *rq) {}
 
 #endif /* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - debug.
+ */
 static void check_spread(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
 #ifdef CONFIG_SCHED_DEBUG
@@ -5622,9 +5665,22 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 		resched_curr(rq_of(cfs_rq));
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 1. @se에 대한 buddy정보를 다 지운다.
+ *   2. on_rq일시 cfs_rq에서 @se를 dequeue한다.
+ *   3. load avg재계산.
+ *   4. @se를 curr로 선택한다.
+ *   5. stats 및 debug처리.
+ *   6. prev_sum_exec_runtime update.
+ */
 static void
 set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
+/*
+ * IAMROOT, 2023.01.28:
+ * - @se에 대한 정보를 다 지운다.
+ */
 	clear_buddies(cfs_rq, se);
 
 	/* 'current' is not kept within the tree. */
@@ -5647,6 +5703,12 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 	 * least twice that of our own weight (i.e. dont track it
 	 * when there are only lesser-weight tasks around):
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   CPU 부하가 자체 무게의 두 배 이상인 경우 최대 슬라이스 길이를 추적합니다(즉, 주변에 더 
+ *   가벼운 작업만 있는 경우 추적하지 않음).
+ */
 	if (schedstat_enabled() &&
 	    rq_of(cfs_rq)->cfs.load.weight >= 2*se->load.weight) {
 		schedstat_set(se->statistics.slice_max,
@@ -5667,6 +5729,21 @@ wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se);
  * 3) pick the "last" process, for cache locality
  * 4) do not run the "skip" process, if something else is available
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   이러한 사항을 염두에 두고 다음 순서로 다음 프로세스를 선택합니다.
+ *
+ *   1) 프로세스/작업 그룹 간에 일을 공정하게 유지
+ *   2) 누군가가 실제로 실행하기를 원하기 때문에 다음 프로세스를 선택하십시오.
+ *   3) 캐시 지역성을 위해 마지막 프로세스를 선택합니다.
+ *   4) 다른 것을 사용할 수 있는 경우 건너뛰기 프로세스를 실행하지 마십시오.
+ *
+ * - @curr의 next를 고른다.
+ *   1. curr의 left인것을 찾는다.
+ *   2. next -> last -> skip고려 순으로 se를 선택한다.
+ *   3. 3개가 전부 없으면 left가 선택될것이다.
+ */
 static struct sched_entity *
 pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 {
@@ -5677,6 +5754,14 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * If curr is set we have to see if its left of the leftmost entity
 	 * still in the tree, provided there was anything in the tree at all.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   curr이 설정되어 있으면 트리에 아무 것도 없는 경우 가장 왼쪽 엔터티의 왼쪽이 여전히 
+ *   트리에 있는지 확인해야 합니다.
+ *   
+ * - curr가 left보다 왼쪽인지 확인한다. 더 왼쪽이면 left = curr.
+ */
 	if (!left || (curr && entity_before(curr, left)))
 		left = curr;
 
@@ -5686,26 +5771,58 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	 * Avoid running the skip buddy, if running something else can
 	 * be done without getting too unfair.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   너무 불공평하지 않고 다른 것을 실행할 수 있다면 스킵 버디를 실행하지 마십시오.
+ * - skip 지정이 되있고, se가 skip에 해당된다면 차선책을 찾는다.
+ *   curr보다 이전인것을 고르려고 노력한다.
+ */
 	if (cfs_rq->skip && cfs_rq->skip == se) {
 		struct sched_entity *second;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - se(skip)이 curr면은 가장작은것을 찾아 second로 고른다.
+ *   se이 curr가 아니면, se의 next를 고른다.
+ */
 		if (se == curr) {
 			second = __pick_first_entity(cfs_rq);
 		} else {
 			second = __pick_next_entity(se);
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - next를 골라봤는데도 불구하고, next가 없거나, curr가 next의 이전이라면
+ *   curr를 second를 사용한다.
+ */
 			if (!second || (curr && entity_before(curr, second)))
 				second = curr;
 		}
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - second가 wakeup_gran보다 너무 앞서있는 경우만 아니면 se를 second로 선택한다.
+ *   최대한 이전을 골라봤는데도 앞서있을수있는데, wakeup_gran만큼은 허용한다는뜻이다.
+ */
 		if (second && wakeup_preempt_entity(second, left) < 1)
 			se = second;
 	}
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - next를 가장 높은 우선순위로 고려한다.
+ * - next가 left 보다 너무 앞서있는경우가 아니면 se를 next로 선택한다. 
+ */
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1) {
 		/*
 		 * Someone really wants this to run. If it's not unfair, run it.
 		 */
 		se = cfs_rq->next;
+/*
+ * IAMROOT, 2023.01.28:
+ * - last도 next처럼 고려한다.
+ */
 	} else if (cfs_rq->last && wakeup_preempt_entity(cfs_rq->last, left) < 1) {
 		/*
 		 * Prefer last buddy, try to return the CPU to a preempted task.
@@ -5718,12 +5835,25 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 
 static bool check_cfs_rq_runtime(struct cfs_rq *cfs_rq);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 1. @prev가 cfs_rq에 있으면 update_curr()
+ *   2. cfs_bandwidth처리
+ *   3. debug및 통계처리
+ *   4. cfs_rq에 enqueue.
+ *   5. load avg 재계산.
+ *   6. curr를 NULL로 update.
+ */
 static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 {
 	/*
 	 * If still on the runqueue then deactivate_task()
 	 * was not called and update_curr() has to be done:
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - rq에 들어가있엇으면 시간갱신을 해준다.
+ */
 	if (prev->on_rq)
 		update_curr(cfs_rq);
 
@@ -6677,6 +6807,10 @@ static void sync_throttle(struct task_group *tg, int cpu)
 }
 
 /* conditionally throttle active cfs_rq's from put_prev_entity() */
+/*
+ * IAMROOT, 2023.01.28:
+ * - cfs_bandwidth 미지원이면 return false.
+ */
 static bool check_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 {
 	if (!cfs_bandwidth_used())
@@ -6992,6 +7126,11 @@ static inline void unthrottle_offline_cfs_rqs(struct rq *rq) {}
  */
 
 #ifdef CONFIG_SCHED_HRTICK
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev에서 slice만큼 동작했는지 확인한다. slice만큼 동작했고 p가 current라면 resched요청을
+ *   하고 그게 아니면 delta후에 hrtick이 동작하도록 조정한다.
+ */
 static void hrtick_start_fair(struct rq *rq, struct task_struct *p)
 {
 	struct sched_entity *se = &p->se;
@@ -8536,6 +8675,10 @@ balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 }
 #endif /* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - @se의 weight를 적용한 gran값을 구한다.
+ */
 static unsigned long wakeup_gran(struct sched_entity *se)
 {
 	unsigned long gran = sysctl_sched_wakeup_granularity;
@@ -8553,6 +8696,17 @@ static unsigned long wakeup_gran(struct sched_entity *se)
 	 * This is especially important for buddies when the leftmost
 	 * task is higher priority than the buddy.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   이제 curr가 실행되기 때문에 gran을 실시간에서 가상 시간으로 단위로 변환하십시오.
+ *
+ *   'curr' 대신 'se'를 사용하여 가벼운 작업에 페널티를 주어 더 쉽게 선점할 수 있습니다.
+ *   즉, 'se' < 'curr'이면 결과 gran이 더 커지므로 더 가벼운 작업에 페널티를 주고, 
+ *   otoh 'se' > 'curr'이면 결과 gran이 더 작아지므로 더 가벼운 작업에 페널티를 줍니다.
+ *
+ *   이것은 가장 왼쪽 작업이 버디보다 우선순위가 높을 때 버디에게 특히 중요합니다.
+ */
 	return calc_delta_fair(gran, se);
 }
 
@@ -8569,6 +8723,22 @@ static unsigned long wakeup_gran(struct sched_entity *se)
  *  w(c, s2) =  0
  *  w(c, s3) =  1
  *
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - @return -1 : curr의 vruntime이 se vruntime 보다 작다
+ *            1 : @se gran값보다 diff가 크면, 즉 충분한 시간차가 있으면
+ *            0 : @se gran값보다 diff가 작으면, 즉 gran 이내의 시간이면(너무 짧은시간)
+ *
+ * ------------
+ *
+ * - curr |  se   : -1
+ *
+ * -      gran 
+ *   se |  curr | : 0
+ *
+ * -      gran 
+ *   se |      |  curr : 1
  */
 static int
 wakeup_preempt_entity(struct sched_entity *curr, struct sched_entity *se)
@@ -8746,6 +8916,11 @@ again:
 }
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - cfs_rq의 curr의 next를 선택한다. 선택이 되면 @prev를 put, 선택된 next를 curr로 계층구조로
+ *   순환하며 설정한다. 선택된 next의 task를 return한다.
+ */
 struct task_struct *
 pick_next_task_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -8769,7 +8944,18 @@ again:
 	 * Therefore attempt to avoid putting and setting the entire cgroup
 	 * hierarchy, only change the part that actually changes.
 	 */
-
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   dequeue_task_fair()의 set_next_buddy() 때문에 다음 작업이 현재 작업과 동일한 cgroup에서 
+ *   나올 가능성이 높습니다.
+ *
+ *   따라서 전체 cgroup 계층 구조를 넣거나 설정하는 것을 피하고 실제로 변경되는 부분만 
+ *   변경하십시오.
+ *
+ * - 계층구조로 내려가면서 curr의 next를 순회한다. 최종적으로 마지막 next로 선택된것을
+ *   se로 선택될것이고, 이것은 task가 된다.
+ */
 	do {
 		struct sched_entity *curr = cfs_rq->curr;
 
@@ -8779,7 +8965,19 @@ again:
 		 * entity, update_curr() will update its vruntime, otherwise
 		 * forget we've ever seen it.
 		 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   put_prev_entity()를 수행하지 않고 여기에 왔기 때문에 cfs_rq->curr도 고려해야 합니다. 
+ *   여전히 실행 가능한 엔터티인 경우 update_curr()는 vruntime을 업데이트하고, 그렇지 않으면 
+ *   우리가 본 적이 있다는 사실을 잊어버립니다.
+ */
 		if (curr) {
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - curr entity가 rq에 안들어가있으면 null로 설정.
+ */
 			if (curr->on_rq)
 				update_curr(cfs_rq);
 			else
@@ -8791,6 +8989,14 @@ again:
 			 * Therefore the nr_running test will indeed
 			 * be correct.
 			 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   check_cfs_rq_runtime()에 대한 이 호출은 스로틀링을 수행하고 상위 항목의 대기열에서 
+ *   제외합니다.
+ *   따라서 nr_running 테스트는 실제로 정확합니다. 
+ * - throttle인지 확인한다.
+ */
 			if (unlikely(check_cfs_rq_runtime(cfs_rq))) {
 				cfs_rq = &rq->cfs;
 
@@ -8812,23 +9018,83 @@ again:
 	 * is a different task than we started out with, try and touch the
 	 * least amount of cfs_rqs.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   아직 put_prev_entity를 수행하지 않았고 선택한 작업이 시작과 다른 작업인 경우 최소량의 
+ *   cfs_rq를 터치해 봅니다.
+ *
+ * - 선택한 p(se)가 @prev가 다르다면 prev se를 put하고, 새로운 p(se)를 set한다.
+ */
 	if (prev != p) {
 		struct sched_entity *pse = &prev->se;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - se, pse가 같은 cfs_rq소속일때까지 반복하며
+ *   pse를 cfs_rq에 enqueue, se를 cfs_rq에서 dequeue를 하고, se를 curr로 update한다.
+ *
+ *         O 
+ *        / \
+ *       O <----same_group
+ *      / \
+ *     O  se
+ *    / \
+ *  pse ..
+ */
 		while (!(cfs_rq = is_same_group(se, pse))) {
 			int se_depth = se->depth;
 			int pse_depth = pse->depth;
 
+			p
+/*
+ * IAMROOT, 2023.01.28:
+ * - pse가 se보다 더 깊거나 같은 위치. pse를 put해준다.
+ * - ex)
+ *         O 
+ *        / \
+ *       O <----same_group
+ *      / \
+ *     O  se
+ *    / \
+ *  pse ..
+ */
 			if (se_depth <= pse_depth) {
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev se를 cfs_rq로 enqueue.
+ */
 				put_prev_entity(cfs_rq_of(pse), pse);
 				pse = parent_entity(pse);
 			}
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - se가 pse보다 더 깊거나 같은 위치. curr를 update해준다.
+ * - ex)
+ *         O 
+ *        / \
+ *       O <----same_group
+ *      / \
+ *     O  pse
+ *    / \
+ *   se ..
+ */
 			if (se_depth >= pse_depth) {
+/*
+ * prifri, 2023.01.28:
+ * - cfs_rq에 se를 dequeue하고 se를 curr로 설정한다.
+ */
 				set_next_entity(cfs_rq_of(se), se);
 				se = parent_entity(se);
 			}
 		}
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - 최종적으로 same_group에서 만낫을때. pse, se의 처리.
+ */
 		put_prev_entity(cfs_rq, pse);
 		set_next_entity(cfs_rq, se);
 	}
@@ -8836,10 +9102,19 @@ again:
 	goto done;
 simple:
 #endif
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - simple인 경우는 계층구조 처리가 필요없어 간단히 처리하고 넘어간다.
+ */
 	if (prev)
 		put_prev_task(rq, prev);
 
 	do {
+/*
+ * IAMROOT, 2023.01.28:
+ * - next를 pick하고 set한다.
+ */
 		se = pick_next_entity(cfs_rq, NULL);
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
@@ -8854,6 +9129,11 @@ done: __maybe_unused;
 	 * the list, so our cfs_tasks list becomes MRU
 	 * one.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   다음 실행 작업을 목록의 맨 앞으로 이동하여 cfs_tasks 목록이 MRU 목록이 되도록 합니다.
+ */
 	list_move(&p->se.group_node, &rq->cfs_tasks);
 #endif
 
@@ -8862,6 +9142,10 @@ done: __maybe_unused;
 
 	update_misfit_status(p, rq);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - next의 task가 return된다.
+ */
 	return p;
 
 idle:
@@ -12246,6 +12530,11 @@ static inline void nohz_newidle_balance(struct rq *this_rq) { }
  *   < 0 - we released the lock and there are !fair tasks present
  *     0 - failed, no new tasks
  *   > 0 - success, new (fair) tasks present
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - TODO
+ *   다른 cpu에서 task를 가져온다.
  */
 static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 {

@@ -6,6 +6,10 @@
 #include <asm/mmu.h>
 
 /* Architectures that care about IRQ state in switch_mm can override this. */
+/*
+ * IAMROOT, 2023.01.28:
+ * - @next로 mm교체.
+ */
 #ifndef switch_mm_irqs_off
 # define switch_mm_irqs_off switch_mm
 #endif

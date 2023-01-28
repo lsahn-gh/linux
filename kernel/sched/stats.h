@@ -5,6 +5,10 @@
 /*
  * Expects runqueue lock to be held for atomicity of update
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - sched stats처리.
+ */
 static inline void
 rq_sched_info_arrive(struct rq *rq, unsigned long long delta)
 {
@@ -16,6 +20,10 @@ rq_sched_info_arrive(struct rq *rq, unsigned long long delta)
 
 /*
  * Expects runqueue lock to be held for atomicity of update
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - sched stats처리.
  */
 static inline void
 rq_sched_info_depart(struct rq *rq, unsigned long long delta)
@@ -130,6 +138,10 @@ static inline void psi_ttwu_dequeue(struct task_struct *p)
 	}
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - psi 처리
+ */
 static inline void psi_sched_switch(struct task_struct *prev,
 				    struct task_struct *next,
 				    bool sleep)
@@ -184,14 +196,31 @@ static inline void sched_info_dequeue(struct rq *rq, struct task_struct *t)
  * long it was waiting to run.  We also note when it began so that we
  * can keep stats on how long its timeslice is.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   작업이 마침내 CPU에 도달하면 호출됩니다. 이제 실행 대기 시간을 
+ *   계산할 수 있습니다. 또한 타임슬라이스의 길이에 대한 통계를 유지할 
+ *   수 있도록 언제 시작되었는지 기록합니다.
+ * - 대기큐에 있다가 cpu로 올라가는상황. sched_info 정보를 기록한다.
+ */
 static void sched_info_arrive(struct rq *rq, struct task_struct *t)
 {
 	unsigned long long now, delta = 0;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 대기큐에 돌아갈때 set되엇을것이다.
+ */
 	if (!t->sched_info.last_queued)
 		return;
 
 	now = rq_clock(rq);
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - 기다렸던 시간.
+ */
 	delta = now - t->sched_info.last_queued;
 	t->sched_info.last_queued = 0;
 	t->sched_info.run_delay += delta;
@@ -205,6 +234,14 @@ static void sched_info_arrive(struct rq *rq, struct task_struct *t)
  * This function is only called from enqueue_task(), but also only updates
  * the timestamp if it is already not set.  It's assumed that
  * sched_info_dequeue() will clear that stamp when appropriate.
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   작업이 마침내 CPU에 도달하면 호출됩니다. 이제 실행 대기 시간을 계산할 
+ *   수 있습니다. 또한 타임슬라이스의 길이에 대한 통계를 유지할 수 있도록 
+ *   언제 시작되었는지 기록합니다.
+ * - rq의 queueing했을대의 시각을 last_queued에 등록한다.
  */
 static inline void sched_info_enqueue(struct rq *rq, struct task_struct *t)
 {
@@ -220,8 +257,22 @@ static inline void sched_info_enqueue(struct rq *rq, struct task_struct *t)
  * sched_info_enqueue() to mark that it has now again started waiting on
  * the runqueue.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   일반적으로 시간 조각 만료로 인해 프로세스가 비자발적으로 활성 실행 
+ *   프로세스가 되는 것을 중단할 때 호출됩니다(유휴 작업으로 전환할 때도 호출될 
+ *   수 있음). 이제 우리는 얼마나 오래 달렸는지 계산할 수 있습니다. 
+ *   또한 프로세스가 여전히 TASK_RUNNING 상태인 경우 sched_info_enqueue()를 
+ *   호출하여 이제 다시 실행 대기열에서 대기하기 시작했음을 표시합니다.
+ * - @t sched_info의 last_queued를 rq clock으로 update.
+ */
 static inline void sched_info_depart(struct rq *rq, struct task_struct *t)
 {
+/*
+ * IAMROOT, 2023.01.28:
+ * - delat는 대기큐에 있는동안의 시간이 될것이다.
+ */
 	unsigned long long delta = rq_clock(rq) - t->sched_info.last_arrival;
 
 	rq_sched_info_depart(rq, delta);
@@ -235,6 +286,14 @@ static inline void sched_info_depart(struct rq *rq, struct task_struct *t)
  * their time slice.  (This may also be called when switching to or from
  * the idle task.)  We are only called when prev != next.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   작업이 일반적으로 타임 슬라이스 만료로 인해 비자발적으로 전환될 때 
+ *   호출됩니다. (유휴 작업으로 전환하거나 전환할 때 호출될 수도 있습니다.) 
+ *   prev != next일 때만 호출됩니다.
+ * - prev, next 각각의 cpu에서의 제거, 등록에 따른 sched_info를 기록한다.
+ */
 static inline void
 sched_info_switch(struct rq *rq, struct task_struct *prev, struct task_struct *next)
 {
@@ -243,6 +302,13 @@ sched_info_switch(struct rq *rq, struct task_struct *prev, struct task_struct *n
 	 * stats about how efficient we were at scheduling the idle
 	 * process, however.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   prev는 이제 CPU를 떠납니다. 그러나 유휴 프로세스를 예약하는 데 얼마나 
+ *   효율적이었는지에 대한 통계를 기록하는 것은 흥미롭지 않습니다.
+ * - prev, next가 idle task가 아니라면 해당 동작들을 한다.
+ */
 	if (prev != rq->idle)
 		sched_info_depart(rq, prev);
 

@@ -140,6 +140,11 @@ do {									\
 #define smp_mb__after_atomic()	__smp_mb__after_atomic()
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - cpu간 memory 동기화가 필요할때, 단방향 barrier로 사용한다.
+ *   barrier중에서 가장빠른 barrier.
+ */
 #ifndef smp_store_release
 #define smp_store_release(p, v) __smp_store_release(p, v)
 #endif

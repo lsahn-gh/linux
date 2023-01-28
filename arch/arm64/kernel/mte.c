@@ -192,6 +192,11 @@ void mte_thread_init_user(void)
 	set_mte_ctrl(current, 0);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ * - MTE
+ */
 void mte_thread_switch(struct task_struct *next)
 {
 	if (!system_supports_mte())

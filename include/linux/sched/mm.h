@@ -374,6 +374,10 @@ enum {
 #include <asm/membarrier.h>
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - membarrier 처리.
+ */
 static inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
 {
 	if (current->mm != mm)
@@ -381,6 +385,11 @@ static inline void membarrier_mm_sync_core_before_usermode(struct mm_struct *mm)
 	if (likely(!(atomic_read(&mm->membarrier_state) &
 		     MEMBARRIER_STATE_PRIVATE_EXPEDITED_SYNC_CORE)))
 		return;
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - arm64는 없어보인다.
+ */
 	sync_core_before_usermode();
 }
 

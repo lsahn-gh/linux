@@ -28,11 +28,20 @@ enum kcov_mode {
 void kcov_task_init(struct task_struct *t);
 void kcov_task_exit(struct task_struct *t);
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - debug.
+ */
 #define kcov_prepare_switch(t)			\
 do {						\
 	(t)->kcov_mode |= KCOV_IN_CTXSW;	\
 } while (0)
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - debug.
+ */
 #define kcov_finish_switch(t)			\
 do {						\
 	(t)->kcov_mode &= ~KCOV_IN_CTXSW;	\

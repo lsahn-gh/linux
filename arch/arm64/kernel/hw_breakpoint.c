@@ -906,6 +906,11 @@ NOKPROBE_SYMBOL(reinstall_suspended_bps);
 /*
  * Context-switcher for restoring suspended breakpoints.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ *   hw debug
+ */
 void hw_breakpoint_thread_switch(struct task_struct *next)
 {
 	/*

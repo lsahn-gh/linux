@@ -577,6 +577,12 @@ void tick_nohz_dep_clear_signal(struct signal_struct *sig, enum tick_dep_bits bi
  * It might need the tick due to per task/process properties:
  * perf events, posix CPU timers, ...
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - nohz full은 보통 task가 한개일때의 얘기가 된다.
+ *   tick이 멈춰있는 상태이다.
+ * - nohz full을 해제한다.
+ */
 void __tick_nohz_task_switch(void)
 {
 	struct tick_sched *ts;

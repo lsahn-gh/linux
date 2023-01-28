@@ -2422,6 +2422,10 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 				  const struct cpumask *new_mask,
 				  u32 flags);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - @p를 SCA_MIGRATE_DISABLE 한다. RT를 위해서 잠깐 migrate disable을 한다는 의미인거같다.
+ */
 static void migrate_disable_switch(struct rq *rq, struct task_struct *p)
 {
 	if (likely(!p->migration_disabled))
@@ -4871,6 +4875,10 @@ __fire_sched_out_preempt_notifiers(struct task_struct *curr,
 		notifier->ops->sched_out(notifier, next);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - cpu에서 switch 될때마다 notify해달라는 요청에 대한 처리.
+ */
 static __always_inline void
 fire_sched_out_preempt_notifiers(struct task_struct *curr,
 				 struct task_struct *next)
@@ -4893,6 +4901,10 @@ fire_sched_out_preempt_notifiers(struct task_struct *curr,
 
 #endif /* CONFIG_PREEMPT_NOTIFIERS */
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - on_cpu set.
+ */
 static inline void prepare_task(struct task_struct *next)
 {
 #ifdef CONFIG_SMP
@@ -4902,10 +4914,24 @@ static inline void prepare_task(struct task_struct *next)
 	 *
 	 * See the ttwu() WF_ON_CPU case and its ordering comment.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   작업을 실행 중이라고 주장합니다. 실행 중인 모든 작업이 이 설정을 
+ *   갖도록 전환하기 전에 이 작업을 수행합니다. 
+ *
+ *   ttwu() WF_ON_CPU 사례 및 주문 설명을 참조하십시오.
+ */
 	WRITE_ONCE(next->on_cpu, 1);
 #endif
 }
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - on_cpu clear
+ *   단방향 barrier를 사용하는게 보인다.
+ */
 static inline void finish_task(struct task_struct *prev)
 {
 #ifdef CONFIG_SMP
@@ -4920,6 +4946,18 @@ static inline void finish_task(struct task_struct *prev)
 	 *
 	 * Pairs with the smp_cond_load_acquire() in try_to_wake_up().
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   이것은 이 CPU에서 @prev에 대한 마지막 참조여야 합니다. p->on_cpu가 
+ *   지워지면 작업을 다른 CPU로 옮길 수 있습니다. 전환이 완전히 완료될 
+ *   때까지 이런 일이 발생하지 않도록 해야 합니다.
+ *
+ *   특히 finish_task_switch()에서 prev->state의 로드는 이보다 먼저 
+ *   일어나야 합니다.
+ *
+ *   try_to_wake_up()에서 smp_cond_load_acquire()와 쌍을 이룹니다.
+ */
 	smp_store_release(&prev->on_cpu, 0);
 #endif
 }
@@ -4961,6 +4999,10 @@ static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
 	return head;
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - TODO
+ */
 static void __balance_callbacks(struct rq *rq)
 {
 	do_balance_callbacks(rq, splice_balance_callbacks(rq));
@@ -4994,6 +5036,10 @@ static inline void balance_callbacks(struct rq *rq, struct callback_head *head)
 
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - switch 직전 lock관련 처리. finish_lock_switch()와 한쌍이다.
+ */
 static inline void
 prepare_lock_switch(struct rq *rq, struct task_struct *next, struct rq_flags *rf)
 {
@@ -5003,6 +5049,13 @@ prepare_lock_switch(struct rq *rq, struct task_struct *next, struct rq_flags *rf
 	 * of the scheduler it's an obvious special-case), so we
 	 * do an early lockdep release here:
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   runqueue 잠금은 다음 작업에 의해 해제되기 때문에(유효하지 
+ *   않은 잠금 작업이지만 스케줄러의 경우에는 명백한 특수 사례임) 
+ *   여기에서 초기 lockdep 해제를 수행합니다.
+ */
 	rq_unpin_lock(rq, rf);
 	spin_release(&__rq_lockp(rq)->dep_map, _THIS_IP_);
 #ifdef CONFIG_DEBUG_SPINLOCK
@@ -5011,6 +5064,10 @@ prepare_lock_switch(struct rq *rq, struct task_struct *next, struct rq_flags *rf
 #endif
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - prepare_lock_switch()와 한쌍이다.
+ */
 static inline void finish_lock_switch(struct rq *rq)
 {
 	/*
@@ -5035,6 +5092,12 @@ static inline void finish_lock_switch(struct rq *rq)
 # define finish_arch_post_lock_switch()	do { } while (0)
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - KMAP
+ *   32bit에서 사용한다.
+ *   highmam을 mapping하기 위한 방식.
+ */
 static inline void kmap_local_sched_out(void)
 {
 #ifdef CONFIG_KMAP_LOCAL
@@ -5043,6 +5106,12 @@ static inline void kmap_local_sched_out(void)
 #endif
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - KMAP
+ *   32bit에서 사용한다.
+ *   highmam을 mapping하기 위한 방식.
+ */
 static inline void kmap_local_sched_in(void)
 {
 #ifdef CONFIG_KMAP_LOCAL
@@ -5064,6 +5133,23 @@ static inline void kmap_local_sched_in(void)
  * prepare_task_switch sets up locking and calls architecture specific
  * hooks.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   prepare_task_switch - 작업 전환 준비
+ *   @rq: 전환을 준비하는 런큐 
+ *   @prev: 전환 중인 현재 작업 
+ *   @next: 전환할 작업.
+ *   이것은 rq 잠금이 유지되고 인터럽트가 꺼진 상태에서 호출됩니다. 
+ *   컨텍스트 전환 후 후속 finish_task_switch와 쌍을 이루어야 합니다.
+ *   prepare_task_switch는 잠금을 설정하고 아키텍처별 후크를 호출합니다.
+ *
+ * - 1. sched_info update.
+ *   2. kcov, perf등 debug 처리.
+ *   3. fire sched out등 notify 처리
+ *   4. rseq systemcall을 위한 처리.
+ *   5. on_cpu set.
+ */
 static inline void
 prepare_task_switch(struct rq *rq, struct task_struct *prev,
 		    struct task_struct *next)
@@ -5071,6 +5157,11 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 	kcov_prepare_switch(prev);
 	sched_info_switch(rq, prev, next);
 	perf_event_task_sched_out(prev, next);
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - Gitblame 참고 (restartable sequences system call)
+ */
 	rseq_preempt(prev);
 	fire_sched_out_preempt_notifiers(prev, next);
 	kmap_local_sched_out();
@@ -5096,6 +5187,27 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
  * local variables which were saved when this task called schedule() in the
  * past. prev == current is still correct but we need to recalculate this_rq
  * because prev may have moved to another CPU.
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   finish_task_switch - 작업 전환 후 정리
+ *   @prev: 방금 전환한 스레드입니다.
+ *
+ *   finish_task_switch는 컨텍스트 전환 이후에 호출되어야 하며, 컨텍스트 전환 
+ *   전에는 prepare_task_switch 호출과 쌍을 이루어야 합니다.
+ *   finish_task_switch는 prepare_task_switch에 의해 설정된 잠금을 조정하고 
+ *   다른 아키텍처별 정리 작업을 수행합니다.
+ *
+ *   context_switch()에서 mm 삭제를 지연했을 수 있습니다. 그렇다면 실행 대기열
+ *   잠금 외부에서 여기에서 완료합니다. (잠금이 유지된 상태에서 작업을 
+ *   수행하면 교착 상태가 발생할 수 있습니다. 자세한 내용은 schedule()을 
+ *   참조하십시오.) 컨텍스트 스위치는 이전에 이 작업이 schedule()을 호출할 때 
+ *   저장된 로컬 변수를 복원했습니다. prev == current는 여전히 정확하지만 
+ *   prev가 다른 CPU로 이동했을 수 있으므로 this_rq를 다시 계산해야 합니다.
+ *
+ * - prev task에 대한 context 정리를 한다. prev task가 TASK_DEAD라면
+ *   자료구조까지 정리해준다.
  */
 static struct rq *finish_task_switch(struct task_struct *prev)
 	__releases(rq->lock)
@@ -5133,10 +5245,28 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 	 * running on another CPU and we could rave with its RUNNING -> DEAD
 	 * transition, resulting in a double drop.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   task 구조체에는 현재로 사용할 참조가 하나 있습니다.
+ *   task가 종료되면 tsk->state에서 TASK_DEAD를 설정하고 마지막으로 
+ *   schedule을 호출합니다. 일정 호출은 반환되지 않으며 예약된 작업은 
+ *   해당 참조를 삭제해야 합니다.
+ *
+ *   우리는 prev->on_cpu를 지우기 전에(finish_task에서) prev->state를 
+ *   관찰해야 합니다. 그렇지 않으면 동시 웨이크업이 다른 CPU에서 prev 
+ *   실행될 수 있고 우리는 RUNNING -> DEAD 전환으로 격찬하여 더블 
+ *   드롭을 초래할 수 있습니다.
+ */
 	prev_state = READ_ONCE(prev->__state);
 	vtime_task_switch(prev);
 	perf_event_task_sched_in(prev, current);
 	finish_task(prev);
+/*
+ * IAMROOT, 2023.01.28:
+ * - task가 switch가 됬다는게 nohz full이 아니라는 상태이므로 nohz
+ *   full이면 해제한다.
+ */
 	tick_nohz_task_switch();
 	finish_lock_switch(rq);
 	finish_arch_post_lock_switch();
@@ -5163,10 +5293,20 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 	 *   provided by mmdrop(),
 	 * - a sync_core for SYNC_CORE.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev mm이 존재하면 mm에대한 ref drop.
+ */
 	if (mm) {
 		membarrier_mm_sync_core_before_usermode(mm);
 		mmdrop(mm);
 	}
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev task가 완전히 죽으면서 context switch를 한상태다.
+ *   task_dead를 호출하여 prev를 current가 정리해주는 개념이다.
+ */
 	if (unlikely(prev_state == TASK_DEAD)) {
 		if (prev->sched_class->task_dead)
 			prev->sched_class->task_dead(prev);
@@ -5178,6 +5318,10 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		kprobe_flush_task(prev);
 
 		/* Task is done with its stack. */
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev stack제거
+ */
 		put_task_stack(prev);
 
 		put_task_struct_rcu_user(prev);
@@ -5214,6 +5358,12 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 /*
  * context_switch - switch to the new MM and the new thread's register state.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - 1. mm switch
+ *      같은 가상주소를 사용하고있으면 할필요없지만 아닌경우 해야된다.
+ *   2. process context switch
+ */
 static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
 	       struct task_struct *next, struct rq_flags *rf)
@@ -5234,15 +5384,45 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	 * kernel ->   user   switch + mmdrop() active
 	 *   user ->   user   switch
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - mm
+ *   유저 process인 경우 자신의 mm
+ *   유저 thread인 경우 해당 부모 프로세스의 mm
+ *   kernel thread : NULL
+ * - active_mm
+ *   유저 process인 경우 자신의 mm
+ *   유저 thread인 경우 해당 부모 프로세스의 mm
+ *   kernel thread : 이전 유전 프로세스의 mm을 전달받아 사용한다.
+ *
+ * - mm == NULL : kernel
+ *   mm != NULL : user
+ */
 	if (!next->mm) {                                // to kernel
 		enter_lazy_tlb(prev->active_mm, next);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev -> next로 update. active_mm는 항상 user task mm이 들어가 있다.
+ *   인계하는 개념.
+ */
 		next->active_mm = prev->active_mm;
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - prev가 user였으면 active_mm ref count를 증가시키고,
+ *   prev가 kernel이였으면 prev의 active_mm이
+ *   next로 active_mm으로 넘어갔으므로 prev active_mm을 지운다.
+ */
 		if (prev->mm)                           // from user
 			mmgrab(prev->active_mm);
 		else
 			prev->active_mm = NULL;
 	} else {                                        // to user
+/*
+ * IAMROOT, 2023.01.28:
+ * - user공간에서는 mm간의 간섭을 막기위해 membarrier 처리를한다.
+ */
 		membarrier_switch_mm(rq, prev->active_mm, next->mm);
 		/*
 		 * sys_membarrier() requires an smp_mb() between setting
@@ -5252,8 +5432,24 @@ context_switch(struct rq *rq, struct task_struct *prev,
 		 * case 'prev->active_mm == next->mm' through
 		 * finish_task_switch()'s mmdrop().
 		 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   sys_membarrier()는 rq->curr / membarrier_switch_mm() 설정과 사용자 
+ *   공간으로 돌아가는 사이에 smp_mb()가 필요합니다.
+ *
+ *   아래는 switch_mm()을 통해 또는 'prev->active_mm == next->mm'인 경우 
+ *   finish_task_switch()의 mmdrop()을 통해 이를 제공합니다.
+ *
+ * - @next로 mm을 교체한다.
+ */
 		switch_mm_irqs_off(prev->active_mm, next->mm, next);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - kernel 인경우 prev->active_mm을 rq->prev_mm으로 옮긴다.
+ *   prev->active_mm은 초기화한다.
+ */
 		if (!prev->mm) {                        // from kernel
 			/* will mmdrop() in finish_task_switch(). */
 			rq->prev_mm = prev->active_mm;
@@ -5881,6 +6077,11 @@ static inline void schedule_debug(struct task_struct *prev, bool preempt)
 	schedstat_inc(this_rq()->sched_count);
 }
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - TODO
+ */
 static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 				  struct rq_flags *rf)
 {
@@ -5908,7 +6109,8 @@ static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
  */
 /*
  * IAMROOT, 2023.01.27:
- * - ING
+ * - @prev가 cfs이고 @rq 소속이 전부 cfs라면 pick_next_task_fair로 next task를 선택한다.
+ *   그게 아니면 sched class 우선순위로 next task를 선택한다.
  */
 static inline struct task_struct *
 __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
@@ -5950,6 +6152,11 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 		if (unlikely(p == RETRY_TASK))
 			goto restart;
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - next가 없는 즉 할게없는 상황. idle task를 선택한다.
+ */
 		/* Assume the next prioritized class is idle_sched_class */
 		if (!p) {
 			put_prev_task(rq, prev);
@@ -5960,14 +6167,29 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	}
 
 restart:
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - load balancing
+ */
 	put_prev_task_balance(rq, prev, rf);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 우선순위별로 rt task 선택.
+ */
 	for_each_class(class) {
 		p = class->pick_next_task(rq);
 		if (p)
 			return p;
 	}
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - dl, rt, cfs_rq, idle 등의 순으로 선택을해봤는데도 없는 경우는 존재하지 않는다 최소한 
+ *   idle이 선택되기때문이다.
+ */
 	/* The idle class should always have a runnable task: */
 	BUG();
 }
@@ -6487,7 +6709,7 @@ static inline void sched_core_cpu_dying(unsigned int cpu) {}
 
 /*
  * IAMROOT, 2023.01.27:
- * - ING
+ * - next task를 선택한다.
  */
 static struct task_struct *
 pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
@@ -6600,7 +6822,11 @@ pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
  *   - 인터럽트 핸들러에서 사용자 공간으로 복귀
  *
  *   경고: 선점을 비활성화한 상태로 호출해야 합니다!.
- * - TODO
+ * - 1. local irq disable
+ *   2. 자발적 / 비자발적유무에 따른 deactivate_task 처리
+ *   3. next task를 선택 및 설정한다.
+ *   4. mm switch 수행.
+ *   5. context switch 수행.
  */
 static void __sched notrace __schedule(unsigned int sched_mode)
 {
@@ -6765,6 +6991,10 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	rq->last_seen_need_resched_ns = 0;
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - @prev가 변경됬다는것이므로 switch가 이뤄졌다.
+ */
 	if (likely(prev != next)) {
 		rq->nr_switches++;
 		/*
@@ -6786,6 +7016,18 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		 * - switch_to() for arm64 (weakly-ordered, spin_unlock
 		 *   is a RELEASE barrier),
 		 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   membarrier 시스템 호출은 각 아키텍처가 rq->curr를 업데이트한 후 사용자 
+ *   공간으로 돌아가기 전에 전체 메모리 장벽을 갖도록 요구합니다.
+ *   다음은 다양한 아키텍처에 대한 장벽을 제공하는 체계입니다.
+ *
+ *   - mm ? switch_mm() : x86, s390, sparc, PowerPC용 mmdrop(). 
+ *   switch_mm()은 PowerPC의 membarrier_arch_switch_mm()에 의존합니다.
+ *   - spin_unlock이 전체 장벽인 weak order의 아키텍처에 대한 finish_lock_switch(),
+ *   - arm64에 대한 switch_to()(약한 순서, spin_unlock은 RELEASE 장벽임).
+ */
 		++*switch_count;
 
 		migrate_disable_switch(rq, prev);

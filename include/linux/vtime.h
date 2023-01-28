@@ -89,6 +89,10 @@ static inline bool vtime_accounting_enabled_this_cpu(void)
 
 extern void vtime_task_switch_generic(struct task_struct *prev);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - vtime accounting
+ */
 static inline void vtime_task_switch(struct task_struct *prev)
 {
 	if (vtime_accounting_enabled_this_cpu())

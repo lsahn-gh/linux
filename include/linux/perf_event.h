@@ -1201,6 +1201,11 @@ static inline void perf_event_task_migrate(struct task_struct *task)
 		task->sched_migrated = 1;
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ *   perf
+ */
 static inline void perf_event_task_sched_in(struct task_struct *prev,
 					    struct task_struct *task)
 {
@@ -1214,6 +1219,10 @@ static inline void perf_event_task_sched_in(struct task_struct *prev,
 	}
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - perf 
+ */
 static inline void perf_event_task_sched_out(struct task_struct *prev,
 					     struct task_struct *next)
 {

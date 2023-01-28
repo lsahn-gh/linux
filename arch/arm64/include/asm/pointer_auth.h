@@ -125,6 +125,10 @@ static __always_inline void ptrauth_enable(void)
 						 PR_PAC_ENABLED_KEYS_MASK);    \
 	} while (0)
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ */
 #define ptrauth_thread_switch_user(tsk)                                        \
 	ptrauth_keys_install_user(&(tsk)->thread.keys_user)
 

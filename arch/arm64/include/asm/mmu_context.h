@@ -26,6 +26,13 @@
 
 extern bool rodata_full;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - pid 저장용도.
+ * - CONTEXTIDR_EL1, Context ID Register (EL1) 
+ *   AArch64 상태에서 CONTEXTIDR_EL1은 ASID와 독립적이며 EL1&0 변환 체제의 
+ *   경우 TTBR0_EL1 또는 TTBR1_EL1이 ASID를 보유합니다.
+ */
 static inline void contextidr_thread_switch(struct task_struct *next)
 {
 	if (!IS_ENABLED(CONFIG_PID_IN_CONTEXTIDR))
@@ -278,12 +285,22 @@ enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 	update_saved_ttbr0(tsk, &init_mm);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - next가 kernel : 교체안한다. ttbr0를 rserved로 set.
+ *   next가 user   : @next로 mm교체.
+ */
 static inline void __switch_mm(struct mm_struct *next)
 {
 	/*
 	 * init_mm.pgd does not contain any user mappings and it is always
 	 * active for kernel addresses in TTBR1. Just set the reserved TTBR0.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - next가 kernel이면 kernel의 user접근을 막기위해
+ *   ttbr0를 비운다.
+ */
 	if (next == &init_mm) {
 		cpu_set_reserved_ttbr0();
 		return;
@@ -292,6 +309,10 @@ static inline void __switch_mm(struct mm_struct *next)
 	check_and_switch_context(next);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - @next로 mm교체
+ */
 static inline void
 switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	  struct task_struct *tsk)
@@ -305,6 +326,13 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	 * ASID has changed since the last run (following the context switch
 	 * of another thread of the same process).
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   이전 값이 아직 초기화되지 않았거나(activate_mm 호출자) 마지막 실행 
+ *   이후 ASID가 변경되었을 수 있으므로 예약된 작업의 저장된 TTBR0_EL1을 
+ *   업데이트합니다(동일한 프로세스의 다른 스레드의 컨텍스트 전환 후).
+ */
 	update_saved_ttbr0(tsk, next);
 }
 

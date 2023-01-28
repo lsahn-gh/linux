@@ -726,6 +726,13 @@ struct cfs_rq {
 	 * 'curr' points to currently running entity on this cfs_rq.
 	 * It is set to NULL otherwise (i.e when none are currently running).
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - set 함수 정리.
+ *   next : set_next_buddy(check_preempt_wakeup(), yield_to_task_fair(), dequeue_task_fair())
+ *   last : set_last_buddy(check_preempt_wakeup())
+ *   skip : set_skip_buddy(yield_to_task_fair())
+ */
 	struct sched_entity	*curr;
 	struct sched_entity	*next;
 	struct sched_entity	*last;
@@ -1304,6 +1311,10 @@ struct rq {
 	int			cpu;
 	int			online;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 현재 rq에서 runable하고있는 task들.
+ */
 	struct list_head cfs_tasks;
 
 	struct sched_avg	avg_rt;
@@ -1790,6 +1801,10 @@ static inline void assert_clock_updated(struct rq *rq)
 	SCHED_WARN_ON(rq->clock_update_flags < RQCF_ACT_SKIP);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - return clock
+ */
 static inline u64 rq_clock(struct rq *rq)
 {
 	lockdep_assert_rq_held(rq);
@@ -2906,6 +2921,10 @@ static inline int hrtick_enabled(struct rq *rq)
 	return hrtimer_is_hres_active(&rq->hrtick_timer);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - sched HRTICK 지원 확인.
+ */
 static inline int hrtick_enabled_fair(struct rq *rq)
 {
 	if (!sched_feat(HRTICK))
@@ -3501,15 +3520,33 @@ static inline bool sched_energy_enabled(void) { return false; }
  * - store to rq->membarrier_state and following user-space memory accesses.
  * In the same way it provides those guarantees around store to rq->curr.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   - 스케줄러는 다음 사이에 membarrier에 필요한 메모리 배리어를 제공합니다.
+ *   - 이전 사용자 공간 메모리 액세스 및 rq->membarrier_state 저장,
+ *   - rq->membarrier_state에 저장하고 사용자 공간 메모리 액세스를 따릅니다.
+ *   같은 방식으로 저장소 주변에서 rq->curr에 대한 보증을 제공합니다.
+ *
+ * - user공간에서는 mm간의 간섭을 막기위해 membarrier 처리를한다.
+ */
 static inline void membarrier_switch_mm(struct rq *rq,
 					struct mm_struct *prev_mm,
 					struct mm_struct *next_mm)
 {
 	int membarrier_state;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - mm이 안바꼇으면 switch할필요없다.
+ */
 	if (prev_mm == next_mm)
 		return;
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - rq의 membarrier_state를 next로 갱신한다.
+ */
 	membarrier_state = atomic_read(&next_mm->membarrier_state);
 	if (READ_ONCE(rq->membarrier_state) == membarrier_state)
 		return;

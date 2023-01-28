@@ -47,6 +47,10 @@ static inline void set_preempt_need_resched(void)
 	current_thread_info()->preempt.need_resched = 0;
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - need_resched clear(1로 set).
+ */
 static inline void clear_preempt_need_resched(void)
 {
 	current_thread_info()->preempt.need_resched = 1;

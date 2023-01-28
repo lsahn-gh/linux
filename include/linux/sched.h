@@ -365,10 +365,21 @@ extern struct root_domain def_root_domain;
 extern struct mutex sched_domains_mutex;
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - sched_info_arrive(), sched_info_depart() 참고
+ */
 struct sched_info {
 #ifdef CONFIG_SCHED_INFO
 	/* Cumulative counters: */
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - pcount    : cpu에 올라간 횟수.
+ *   run_delay : 대기queue에서 기다렸던 시간총합.
+ *   last_arrival : cpu에 마지막에 올라간 시각
+ *   last_queued  : cpu에서 마지막에 제거된 시각.
+ */
 	/* # of times we have run on this CPU: */
 	unsigned long			pcount;
 
@@ -2327,6 +2338,11 @@ static inline void set_tsk_need_resched(struct task_struct *tsk)
 	set_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
 }
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - TIF_NEED_RESCHED clear.
+ */
 static inline void clear_tsk_need_resched(struct task_struct *tsk)
 {
 	clear_tsk_thread_flag(tsk,TIF_NEED_RESCHED);
@@ -2551,6 +2567,12 @@ static inline void rseq_signal_deliver(struct ksignal *ksig,
 }
 
 /* rseq_preempt() requires preemption to be disabled. */
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ * - Gitblame 참고 (restartable sequences system call)
+ *   rseq systemcall을 위한것
+ */
 static inline void rseq_preempt(struct task_struct *t)
 {
 	__set_bit(RSEQ_EVENT_PREEMPT_BIT, &t->rseq_event_mask);

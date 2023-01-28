@@ -761,6 +761,10 @@ void vtime_account_idle(struct task_struct *tsk)
 	account_idle_time(get_vtime_delta(&tsk->vtime));
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - vtime(virtual time) accounting
+ */
 void vtime_task_switch_generic(struct task_struct *prev)
 {
 	struct vtime *vtime = &prev->vtime;

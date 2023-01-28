@@ -299,6 +299,10 @@ static inline void __tick_nohz_task_switch(void) { }
 static inline void tick_nohz_full_setup(cpumask_var_t cpumask) { }
 #endif
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - nohz full을 해제한다.
+ */
 static inline void tick_nohz_task_switch(void)
 {
 	if (tick_nohz_full_enabled())

@@ -394,6 +394,12 @@ void tls_preserve_current_state(void)
 	*task_user_tls(current) = read_sysreg(tpidr_el0);
 }
 
+
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ * - tls(thread local storage)
+ */
 static void tls_thread_switch(struct task_struct *next)
 {
 	tls_preserve_current_state();
@@ -409,6 +415,11 @@ static void tls_thread_switch(struct task_struct *next)
 /*
  * Force SSBS state on context-switch, since it may be lost after migrating
  * from a CPU which treats the bit as RES0 in a heterogeneous system.
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ * - SSBS처리
  */
 static void ssbs_thread_switch(struct task_struct *next)
 {
@@ -447,6 +458,10 @@ static void ssbs_thread_switch(struct task_struct *next)
  */
 DEFINE_PER_CPU(struct task_struct *, __entry_task);
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - 동작할 task(next)를 __entry_task에 기록한다.
+ */
 static void entry_task_switch(struct task_struct *next)
 {
 	__this_cpu_write(__entry_task, next);
@@ -458,6 +473,10 @@ static void entry_task_switch(struct task_struct *next)
  *
  * - disable access when switching from a 64bit task to a 32bit task
  * - enable access when switching from a 32bit task to a 64bit task
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
  */
 static void erratum_1418040_thread_switch(struct task_struct *prev,
 					  struct task_struct *next)
@@ -490,6 +509,16 @@ static void erratum_1418040_thread_switch(struct task_struct *prev,
  * sctlr_user must be made in the same preemption disabled block so that
  * __switch_to() does not see the variable update before the SCTLR_EL1 one.
  */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   __switch_to()는 current->thread.sctlr_user를 최적화로 확인합니다. 따라서 
+ *   이 함수는 선점을 비활성화한 상태에서 호출해야 하며 sctlr_user에 대한 
+ *   업데이트는 동일한 선점 비활성화 블록에서 수행해야 __switch_to()가 
+ *   SCTLR_EL1 이전에 변수 업데이트를 볼 수 없습니다.
+ *
+ *  - sctlr_el1을 수정하면 isb를 무조건해줘야한다.
+ */
 void update_sctlr_el1(u64 sctlr)
 {
 	/*
@@ -504,6 +533,13 @@ void update_sctlr_el1(u64 sctlr)
 
 /*
  * Thread switching.
+ */
+/*
+ * IAMROOT, 2023.01.28:
+ * - 1. __entry_task에 next기록한다.
+ *   2. dsb(ish)수행한다.
+ *   3. sctlr_el1이 변경됬으면 갱신한다.
+ *   4. cpu_switch_to 실행.
  */
 __notrace_funcgraph struct task_struct *__switch_to(struct task_struct *prev,
 				struct task_struct *next)
@@ -525,6 +561,14 @@ __notrace_funcgraph struct task_struct *__switch_to(struct task_struct *prev,
 	 * This full barrier is also required by the membarrier system
 	 * call.
 	 */
+/*
+ * IAMROOT, 2023.01.28:
+ * - papago
+ *   스레드가 다른 CPU로 마이그레이션되는 경우 이 CPU에서 보류 중인 TLB 또는 
+ *   캐시 유지 관리를 완료하십시오. 
+ *   이 전체 장벽은 membarrier 시스템 호출에도 필요합니다.
+ * - tlb cache등을 flush 한 경우에 완료될때까지 기다린다.
+ */
 	dsb(ish);
 
 	/*
@@ -534,6 +578,10 @@ __notrace_funcgraph struct task_struct *__switch_to(struct task_struct *prev,
 	 */
 	mte_thread_switch(next);
 	/* avoid expensive SCTLR_EL1 accesses if no change */
+/*
+ * IAMROOT, 2023.01.28:
+ * - sctlr_user가 다르다면 sctlr_el1을 변경되는 sctlr_user로 바꾼다.
+ */
 	if (prev->thread.sctlr_user != next->thread.sctlr_user)
 		update_sctlr_el1(next->thread.sctlr_user);
 

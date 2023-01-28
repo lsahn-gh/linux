@@ -1035,6 +1035,11 @@ void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
 		       current);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * - PASS
+ * - fpsimd 관련 처리
+ */
 void fpsimd_thread_switch(struct task_struct *next)
 {
 	bool wrong_task, wrong_cpu;

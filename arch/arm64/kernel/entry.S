@@ -1447,6 +1447,17 @@ SYM_DATA_END(__entry_tramp_data_start)
  * Previous and next are guaranteed not to be the same.
  *
  */
+
+
+/*
+ * IAMROOT, 2023.01.28: 
+ * - x0 : prev, x1 : next (__switch_to() 참고)
+ * - 일부 레지스터만 prev에 backup / next에 restore.
+ *   thread.cpu_context에 backup한다.
+ * - sp_el0에 x1(next)가 등록된다.
+ *   ret을 통해 x0가(prev) return 된다.
+ */
+
 SYM_FUNC_START(cpu_switch_to)
 	mov	x10, #THREAD_CPU_CONTEXT
 	add	x8, x0, x10

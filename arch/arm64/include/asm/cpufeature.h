@@ -949,6 +949,11 @@ static inline bool system_uses_hw_pan(void)
 		cpus_have_const_cap(ARM64_HAS_PAN);
 }
 
+/*
+ * IAMROOT, 2023.01.28:
+ * @return true : sw pan을 써야되는 경우
+ * - PAN을 써야되는데 hw pan이 지원 여부 확인.
+ */
 static inline bool system_uses_ttbr0_pan(void)
 {
 	return IS_ENABLED(CONFIG_ARM64_SW_TTBR0_PAN) &&
