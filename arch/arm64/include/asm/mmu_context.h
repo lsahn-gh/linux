@@ -32,6 +32,9 @@ extern bool rodata_full;
  * - CONTEXTIDR_EL1, Context ID Register (EL1) 
  *   AArch64 상태에서 CONTEXTIDR_EL1은 ASID와 독립적이며 EL1&0 변환 체제의 
  *   경우 TTBR0_EL1 또는 TTBR1_EL1이 ASID를 보유합니다.
+ * - Git blame
+ *   하드웨어 트레이스를 분석할 때 유용합니다. 이 레지스터에 대한 쓰기가 
+ *   트레이스 스트림으로 이벤트를 내보내도록 구성될 수 있기 때문입니다. 
  */
 static inline void contextidr_thread_switch(struct task_struct *next)
 {

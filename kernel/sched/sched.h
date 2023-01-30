@@ -1617,12 +1617,20 @@ static inline void raw_spin_rq_lock(struct rq *rq)
 	raw_spin_rq_lock_nested(rq, 0);
 }
 
+/*
+ * IAMROOT, 2023.01.30:
+ * - irq disable + spin lock
+ */
 static inline void raw_spin_rq_lock_irq(struct rq *rq)
 {
 	local_irq_disable();
 	raw_spin_rq_lock(rq);
 }
 
+/*
+ * IAMROOT, 2023.01.30:
+ * - spin unlock + irq disable
+ */
 static inline void raw_spin_rq_unlock_irq(struct rq *rq)
 {
 	raw_spin_rq_unlock(rq);

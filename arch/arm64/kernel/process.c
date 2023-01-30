@@ -419,7 +419,7 @@ static void tls_thread_switch(struct task_struct *next)
 /*
  * IAMROOT, 2023.01.28:
  * - PASS
- * - SSBS처리
+ * - SSBS(Speculative Store Bypass Safe)처리
  */
 static void ssbs_thread_switch(struct task_struct *next)
 {
@@ -455,6 +455,8 @@ static void ssbs_thread_switch(struct task_struct *next)
  *
  *   이것은 EL0의 예외 항목에 대한 *only*이며 사용자 작업을 __switch_to()할
  *   때까지 유효하지 않습니다.
+ *
+ * - context swtich 를 할때 next process가 저장된다.
  */
 DEFINE_PER_CPU(struct task_struct *, __entry_task);
 
@@ -476,7 +478,19 @@ static void entry_task_switch(struct task_struct *next)
  */
 /*
  * IAMROOT, 2023.01.28:
- * - PASS
+ * - papago
+ *   ARM 정오표 1418040 처리, CNTVCT의 32비트 보기에 영향을 미침.
+ *   시작 시간에 가상 카운터가 활성화되었다고 가정합니다.
+ *
+ *   - 64비트 태스크에서 32비트 태스크로 전환 시 접근 금지
+ *   - 32비트 태스크에서 64비트 태스크로 전환할 때 액세스를 활성화합니다. 
+ *
+ * - prev와 next가 같은경우
+ *   return.
+ * - 32bit -> 64bit
+ *   ARCH_TIMER_USR_VCT_ACCESS_EN 추가
+ * - 64bit -> 32bit
+ *   ARCH_TIMER_USR_VCT_ACCESS_EN 제거
  */
 static void erratum_1418040_thread_switch(struct task_struct *prev,
 					  struct task_struct *next)

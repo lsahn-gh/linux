@@ -5066,7 +5066,7 @@ prepare_lock_switch(struct rq *rq, struct task_struct *next, struct rq_flags *rf
 
 /*
  * IAMROOT, 2023.01.28:
- * - prepare_lock_switch()와 한쌍이다.
+ * - prepare_lock_switch()와 한쌍이다. irq enable을 겸한다.
  */
 static inline void finish_lock_switch(struct rq *rq)
 {
@@ -5206,8 +5206,9 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
  *   저장된 로컬 변수를 복원했습니다. prev == current는 여전히 정확하지만 
  *   prev가 다른 CPU로 이동했을 수 있으므로 this_rq를 다시 계산해야 합니다.
  *
- * - prev task에 대한 context 정리를 한다. prev task가 TASK_DEAD라면
- *   자료구조까지 정리해준다.
+ * - 1. prev task에 대한 context 정리를 한다.
+ *   2. prev task가 TASK_DEAD라면 자료구조까지 정리해준다.
+ *   3. irq enable
  */
 static struct rq *finish_task_switch(struct task_struct *prev)
 	__releases(rq->lock)
@@ -5268,6 +5269,10 @@ static struct rq *finish_task_switch(struct task_struct *prev)
  *   full이면 해제한다.
  */
 	tick_nohz_task_switch();
+/*
+ * IAMROOT, 2023.01.30:
+ * - balancing + irq enable
+ */
 	finish_lock_switch(rq);
 	finish_arch_post_lock_switch();
 	kcov_finish_switch(current);
@@ -5363,6 +5368,7 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
  * - 1. mm switch
  *      같은 가상주소를 사용하고있으면 할필요없지만 아닌경우 해야된다.
  *   2. process context switch
+ *   3. irq enable
  */
 static __always_inline struct rq *
 context_switch(struct rq *rq, struct task_struct *prev,
