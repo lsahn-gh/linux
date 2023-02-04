@@ -661,6 +661,10 @@ int __update_load_avg_cfs_rq(u64 now, struct cfs_rq *cfs_rq)
 
 int update_rt_rq_load_avg(u64 now, struct rq *rq, int running)
 {
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - load_sum 평균을 구한다
+	 */
 	if (___update_load_sum(now, &rq->avg_rt,
 				running,
 				running,

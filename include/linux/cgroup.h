@@ -496,6 +496,10 @@ static inline struct css_set *task_css_set(struct task_struct *task)
  *
  * See task_css_check().
  */
+/*
+ * IAMROOT, 2023.02.04:
+ * - return task->cgroups->subsys[id]
+ */
 static inline struct cgroup_subsys_state *task_css(struct task_struct *task,
 						   int subsys_id)
 {
@@ -794,7 +798,8 @@ void __cgroup_account_cputime_field(struct cgroup *cgrp,
 
 /*
  * IAMROOT, 2022.12.22:
- * - account용 
+ * - account용
+ * - 해당 task가 소속된 cgroup의 실행시간 누적
  */
 static inline void cgroup_account_cputime(struct task_struct *task,
 					  u64 delta_exec)

@@ -39,6 +39,10 @@ static inline struct cpuacct *css_ca(struct cgroup_subsys_state *css)
 }
 
 /* Return CPU accounting group to which this task belongs */
+/*
+ * IAMROOT, 2023.02.04:
+ * - task->cgroups->subsys[cpuacct_cgrp_id] 가리키는 css 를 포함하는 cpuacct 구조체 반환
+ */
 static inline struct cpuacct *task_ca(struct task_struct *tsk)
 {
 	return css_ca(task_css(tsk, cpuacct_cgrp_id));
@@ -340,6 +344,10 @@ void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 {
 	struct cpuacct *ca;
 	int index = CPUACCT_STAT_SYSTEM;
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - 백업한 irq context를 가져온다
+	 */
 	struct pt_regs *regs = get_irq_regs() ? : task_pt_regs(tsk);
 
 	if (regs && user_mode(regs))
@@ -347,6 +355,10 @@ void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 
 	rcu_read_lock();
 
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - 해당 task가 소속된 cgroup 부터 root 그룹까지 cputime을 usages에 증가시킨다
+	 */
 	for (ca = task_ca(tsk); ca; ca = parent_ca(ca))
 		__this_cpu_add(ca->cpuusage->usages[index], cputime);
 

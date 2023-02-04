@@ -253,6 +253,10 @@ static inline struct rq *rq_of_rt_rq(struct rt_rq *rt_rq)
 	return container_of(rt_rq, struct rq, rt);
 }
 
+/*
+ * IAMROOT, 2023.02.04:
+ * - return: rt_se task의 per cpu rq
+ */
 static inline struct rq *rq_of_rt_se(struct sched_rt_entity *rt_se)
 {
 	struct task_struct *p = rt_task_of(rt_se);
@@ -695,6 +699,11 @@ bool sched_rt_bandwidth_account(struct rt_rq *rt_rq)
 /*
  * We ran out of runtime, see if we can borrow some from our neighbours.
  */
+/*
+ * IAMROOT, 2023.02.04:
+ * - 이미 실행된 시간을 보충하기 위하여 다른 cpu 의 남은 시간에서 모자란 시간 만큼을
+ *   span cpu 갯수만큼 나누어 보충해 온다.
+ */
 static void do_balance_runtime(struct rt_rq *rt_rq)
 {
 	struct rt_bandwidth *rt_b = sched_rt_bandwidth(rt_rq);
@@ -710,6 +719,10 @@ static void do_balance_runtime(struct rt_rq *rt_rq)
 		struct rt_rq *iter = sched_rt_period_rt_rq(rt_b, i);
 		s64 diff;
 
+		/*
+		 * IAMROOT, 2023.02.04:
+		 * - 자기 자신(인자로 들어온 rt_rq)은 뺀다
+		 */
 		if (iter == rt_rq)
 			continue;
 
@@ -719,12 +732,25 @@ static void do_balance_runtime(struct rt_rq *rt_rq)
 		 * or __disable_runtime() below sets a specific rq to inf to
 		 * indicate its been disabled and disallow stealing.
 		 */
+		/*
+		 * IAMROOT. 2023.02.04:
+		 * - google-translate
+		 *   모든 rq에는 inf 런타임이 있고 steal할 것이 없거나 아래의 __disable_runtime()이
+		 *   특정 rq를 inf로 설정하여 비활성화되었음을 나타내고 steal을 허용하지 않습니다.
+		 */
 		if (iter->rt_runtime == RUNTIME_INF)
 			goto next;
 
 		/*
 		 * From runqueues with spare time, take 1/n part of their
 		 * spare time, but no more than our period.
+		 */
+		/*
+		 * IAMROOT. 2023.02.04:
+		 * - google-translate
+		 *   여유 시간이 있는 실행 대기열에서 여가 시간의 1/n을 사용하되 우리 기간보다 더
+		 *   많이 사용하지 마십시오.
+		 * - diff > 0 이면 빌려줄수 있다.
 		 */
 		diff = iter->rt_runtime - iter->rt_time;
 		if (diff > 0) {
@@ -733,6 +759,10 @@ static void do_balance_runtime(struct rt_rq *rt_rq)
 				diff = rt_period - rt_rq->rt_runtime;
 			iter->rt_runtime -= diff;
 			rt_rq->rt_runtime += diff;
+			/*
+			 * IAMROOT, 2023.02.04:
+			 * - runtime을 최대치로 충전했으면 더이상 진행할 필요 없다
+			 */
 			if (rt_rq->rt_runtime == rt_period) {
 				raw_spin_unlock(&iter->rt_runtime_lock);
 				break;
@@ -855,6 +885,10 @@ static void __enable_runtime(struct rq *rq)
 
 static void balance_runtime(struct rt_rq *rt_rq)
 {
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - default false. cpu 시간을 배분 할수 있는 기능
+	 */
 	if (!sched_feat(RT_RUNTIME_SHARE))
 		return;
 
@@ -964,10 +998,21 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 	return rt_task_of(rt_se)->prio;
 }
 
+/*
+ * IAMROOT, 2023.02.04:
+ * - return: exceeded 된 경우 1 그렇지 않으면 0
+ */
 static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 {
 	u64 runtime = sched_rt_runtime(rt_rq);
 
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - CONFIG_RT_GROUP_SCHED 설정이고 boost 중이면 0을 반환해서 reschedule
+	 *   되지 않고 계속 진행하게 한다. 즉 bandwidth 기능을 이번 periods에서 멈춘다
+	 * - CONFIG_RT_GROUP_SCHED 설정이 아닌 경우는 throttled 인 경우 reschedule
+	 *   한다.
+	 */
 	if (rt_rq->rt_throttled)
 		return rt_rq_throttled(rt_rq);
 
@@ -986,6 +1031,12 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 		 * Don't actually throttle groups that have no runtime assigned
 		 * but accrue some time due to boosting.
 		 */
+		/*
+		 * IAMROOT. 2023.02.04:
+		 * - google-translate
+		 *   런타임이 할당되지 않았지만 부스팅으로 인해 시간이 누적되는 그룹을 실제로
+		 *   제한하지 마십시오.
+		 */
 		if (likely(rt_b->rt_runtime)) {
 			rt_rq->rt_throttled = 1;
 			printk_deferred_once("sched: RT throttling activated\n");
@@ -994,6 +1045,12 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 			 * In case we did anyway, make it go away,
 			 * replenishment is a joke, since it will replenish us
 			 * with exactly 0 ns.
+			 */
+			/*
+			 * IAMROOT. 2023.02.04:
+			 * - google-translate
+			 *   어쨌든 우리가 그것을 사라지게 만들면
+			 *   보충은 정확히 0ns로 우리를 보충할 것이기 때문에 농담입니다.
 			 */
 			rt_rq->rt_time = 0;
 		}
@@ -1011,6 +1068,12 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
  * Update the current task's runtime statistics. Skip current tasks that
  * are not in our scheduling class.
  */
+/*
+ * IAMROOT, 2023.02.04:
+ * - 1. curr->se.sum_exec_runtime 누적
+ *   2. curr task 의 cgroup cpu 실행시간 누적
+ *   3. 실행시간이 rt_runtime을 초과 했다면 resched_curr 호출
+ */
 static void update_curr_rt(struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
@@ -1026,6 +1089,10 @@ static void update_curr_rt(struct rq *rq)
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - CONFIG_SCHEDSTATS 설정시 rt task max 실행시간 기록. 추적용
+	 */
 	schedstat_set(curr->se.statistics.exec_max,
 		      max(curr->se.statistics.exec_max, delta_exec));
 
@@ -1051,6 +1118,11 @@ static void update_curr_rt(struct rq *rq)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.04:
+ * - 1. rq->nr_running -= rt_rq->rt_nr_running
+ *   2. rt_queued = 0 으로 해서 동작 안함 표시
+ */
 static void
 dequeue_top_rt_rq(struct rt_rq *rt_rq)
 {
@@ -2470,6 +2542,12 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	/*
 	 * RR tasks need a special form of timeslice management.
 	 * FIFO tasks have no timeslices.
+	 */
+	/*
+	 * IAMROOT. 2023.02.04:
+	 * - google-translate
+	 *   RR 작업에는 특별한 형태의 타임슬라이스 관리가 필요합니다. FIFO 작업에는 타임
+	 *   슬라이스가 없습니다.
 	 */
 	if (p->policy != SCHED_RR)
 		return;

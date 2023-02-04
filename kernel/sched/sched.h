@@ -887,8 +887,18 @@ struct rt_rq {
 	struct plist_head	pushable_tasks;
 
 #endif /* CONFIG_SMP */
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - rt_queued : rt_rq 가동상태(rt task 가 1개 이상 enqueue 상태일때)
+	 */
 	int			rt_queued;
 
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - rt_throttled : 각 rt periosds 마다 throttled 된 적이 있는지
+	 * - rt_time : 각 rt periosds 마다 rt 실행 시간 누적 시간
+	 * - rt_runtime : runtime 으로 설정된 시간. 매 periods 마다 갱신.
+	 */
 	int			rt_throttled;
 	u64			rt_time;
 	u64			rt_runtime;
@@ -1042,6 +1052,11 @@ struct root_domain {
 	atomic_t		refcount;
 	atomic_t		rto_count;
 	struct rcu_head		rcu;
+	/*
+	 * IAMROOT, 2023.02.04:
+	 * - span: root_domain에 참여한 cpumask
+	 * - online: root_domain 참여한 cpu중 schedule이 가능한 cpumask
+	 */
 	cpumask_var_t		span;
 	cpumask_var_t		online;
 

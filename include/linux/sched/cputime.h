@@ -177,6 +177,7 @@ static inline void account_group_system_time(struct task_struct *tsk,
  *
  *   스레드 그룹 시간이 유지되는 경우 실행 중인 CPU의 구조를
  *   가져오고 거기에서 sum_exec_runtime 필드를 업데이트합니다.
+ * - sum_exec_runtime 누적
  */
 static inline void account_group_exec_runtime(struct task_struct *tsk,
 					      unsigned long long ns)
