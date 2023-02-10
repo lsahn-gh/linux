@@ -340,6 +340,10 @@ static struct cftype files[] = {
  *
  * called with rq->lock held.
  */
+/*
+ * IAMROOT, 2023.02.10:
+ * - 해당 task가 소속된 cgroup 부터 root 그룹까지 cputime을 usages에 증가시킨다.
+ */
 void cpuacct_charge(struct task_struct *tsk, u64 cputime)
 {
 	struct cpuacct *ca;

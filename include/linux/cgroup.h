@@ -562,6 +562,10 @@ static inline struct cgroup *task_dfl_cgroup(struct task_struct *task)
 	return task_css_set(task)->dfl_cgrp;
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @cgrp의 parent를 반환한다.
+ */
 static inline struct cgroup *cgroup_parent(struct cgroup *cgrp)
 {
 	struct cgroup_subsys_state *parent_css = cgrp->self.parent;
@@ -810,6 +814,10 @@ static inline void cgroup_account_cputime(struct task_struct *task,
 
 	rcu_read_lock();
 	cgrp = task_dfl_cgroup(task);
+/*
+ * IAMROOT, 2023.02.10:
+ * - cgroup parent 에대한 cputime accounting.
+ */
 	if (cgroup_parent(cgrp))
 		__cgroup_account_cputime(cgrp, delta_exec);
 	rcu_read_unlock();

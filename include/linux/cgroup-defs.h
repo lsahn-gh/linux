@@ -40,6 +40,11 @@ struct poll_table_struct;
 
 /* define the enumeration of all cgroup subsystems */
 #define SUBSYS(_x) _x ## _cgrp_id,
+/*
+ * IAMROOT, 2023.02.10:
+ * - SUBSYS(x) define을 통해 enum이 만들어진다.
+ * - ex) SUBSYS(cpuset) -> cpuset_cgrp_id,
+ */
 enum cgroup_subsys_id {
 #include <linux/cgroup_subsys.h>
 	CGROUP_SUBSYS_COUNT,
@@ -313,11 +318,49 @@ struct cgroup_base_stat {
  * updated_children and updated_next - and the fields which track basic
  * resource statistics on top of it - bsync, bstat and last_bstat.
  */
+/*
+ * IAMROOT, 2023.02.10:
+ * --- chat openai
+ * - recursive statistics
+ *   재귀 통계는 데이터 전체를 더 깊이 이해하기 위해 복잡한 데이터 세트를 더 
+ *   작고 관리하기 쉬운 부분으로 나누는 통계 방법을 말합니다. 재귀 통계는 
+ *   큰 데이터 세트를 더 작은 하위 집합으로 나누고 각 하위 집합을 개별적으로 
+ *   분석하여 작동하며 각 분석 결과는 후속 분석을 알리고 개선하는 데 
+ *   사용됩니다. 이 과정은 데이터를 완전히 이해할 때까지 반복됩니다. 
+ *   재귀 통계의 목표는 데이터의 복잡한 패턴과 관계에 대한 통찰력을 얻어 
+ *   상관 관계, 인과 관계 및 기타 중요한 경향을 식별하는 데 도움이 될 수 
+ *   있습니다. 
+ * ---
+ * - papago
+ *   rstat - cgroup 확장 가능한 재귀 통계. 계산은 cgroup_rstat_cpu에서 cpu별로 
+ *   수행되며 읽기 시 계층 구조 위로 느리게 전파됩니다. 
+ *
+ *   통계가 업데이트되면 cgroup_rstat_cpu와 그 조상이 업데이트된 트리에 
+ *   연결됩니다. 다음 읽기에서 전파는 업데이트된 트리만 고려하고 소비합니다. 
+ *   이렇게 하면 O(전체 자손 수) 대신 O(마지막 읽은 이후 활성화된 자손 수)를 
+ *   읽게 됩니다.
+ *
+ *   활성 상태가 아닌 많은 (드레이닝) cgroup이 있을 수 있고 통계를 자주 
+ *   읽을 수 있기 때문에 이것은 중요합니다. 조합은 매우 비쌀 수 있습니다. 
+ *   선택적으로 전파함으로써 읽기 빈도를 높이면 각 읽기 비용이 줄어듭니다.
+ *
+ *   이 구조체는 위의 항목을 구현하는 필드(update_children 및 updated_next)와 
+ *   기본 리소스 통계를 추적하는 필드(bsync, bstat 및 last_bstat)를 모두 
+ *   호스팅합니다.
+ */
 struct cgroup_rstat_cpu {
 	/*
 	 * ->bsync protects ->bstat.  These are the only fields which get
 	 * updated in the hot path.
 	 */
+/*
+ * IAMROOT, 2023.02.10:
+ * - papago
+ *   - ->bsync는 ->bstat을 보호합니다. hot path에서 업데이트되는 유일한 필드이다.
+ *
+ * - bsync, bstat은 hot path(자주 실행되는)에서 사용하고, 나머지 필드는
+ *   cold path(자주 실행안됨)에서 사용한다는 뜻이다.
+ */
 	struct u64_stats_sync bsync;
 	struct cgroup_base_stat bstat;
 
@@ -325,6 +368,12 @@ struct cgroup_rstat_cpu {
 	 * Snapshots at the last reading.  These are used to calculate the
 	 * deltas to propagate to the global counters.
 	 */
+/*
+ * IAMROOT, 2023.02.10:
+ * - papago
+ *  마지막 판독 시 스냅샷. 이는 전역 카운터에 전파할 델타를 계산하는 데 
+ *  사용됩니다.
+ */
 	struct cgroup_base_stat last_bstat;
 
 	/*
@@ -338,6 +387,17 @@ struct cgroup_rstat_cpu {
 	 *
 	 * Protected by per-cpu cgroup_rstat_cpu_lock.
 	 */
+/*
+ * IAMROOT, 2023.02.10:
+ * - papago
+ *   마지막 읽기 이후 이 cpu에 대한 통계 업데이트가 있는 자식 cgroup은 
+ *   ->updated_next를 통해 부모의 ->updated_children에 연결됩니다.
+ *
+ *   더 컴팩트한 것 외에도 cgroup을 가리키는 단일 연결 목록은 각 cpu 
+ *   구조가 연결된 cgroup을 다시 가리킬 필요가 없습니다.
+ *
+ *   CPU당 cgroup_rstat_cpu_lock으로 보호됩니다.
+ */
 	struct cgroup *updated_children;	/* terminated by self cgroup */
 	struct cgroup *updated_next;		/* NULL iff not on the list */
 };

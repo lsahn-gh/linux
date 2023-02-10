@@ -18,6 +18,14 @@
  * - the arch is not required to handle n==0 if implementing the fallback
  */
 #ifndef CONFIG_ARCH_HAS_ILOG2_U32
+/*
+ * IAMROOT, 2023.02.03:
+ * - n == 0 : -1 (invalid)
+ *   n = 1  : 0
+ *   n = 2  : 1
+ *   n = 3  : 1
+ *   n = 4  : 2
+ */
 static inline __attribute__((const))
 int __ilog2_u32(u32 n)
 {
@@ -26,6 +34,14 @@ int __ilog2_u32(u32 n)
 #endif
 
 #ifndef CONFIG_ARCH_HAS_ILOG2_U64
+/*
+ * IAMROOT, 2023.02.03:
+ * - n == 0 : -1 (invalid)
+ *   n = 1  : 0
+ *   n = 2  : 1
+ *   n = 3  : 1
+ *   n = 4  : 2
+ */
 static inline __attribute__((const))
 int __ilog2_u64(u64 n)
 {
@@ -51,6 +67,11 @@ bool is_power_of_2(unsigned long n)
  * __roundup_pow_of_two() - round up to nearest power of two
  * @n: value to round up
  */
+/*
+ * IAMROOT, 2023.02.03:
+ * - n == 0 이면 invalid
+ * ex) 127 -> 128
+ */
 static inline __attribute__((const))
 unsigned long __roundup_pow_of_two(unsigned long n)
 {
@@ -60,6 +81,11 @@ unsigned long __roundup_pow_of_two(unsigned long n)
 /**
  * __rounddown_pow_of_two() - round down to nearest power of two
  * @n: value to round down
+ */
+/*
+ * IAMROOT, 2023.02.03:
+ * - n == 0 이면 invalid
+ *   ex) 127 -> 64
  */
 static inline __attribute__((const))
 unsigned long __rounddown_pow_of_two(unsigned long n)
@@ -153,6 +179,14 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
  *
  * selects the appropriately-sized optimised version depending on sizeof(n)
  */
+/*
+ * IAMROOT, 2023.02.03:
+ * - n이 const면 compile 타임에 정해진다.
+ * - n = 0, 1 : 0
+ *   n = 2    : 1
+ *   n = 3    : 1
+ *   n = 4    : 2
+ */
 #define ilog2(n) \
 ( \
 	__builtin_constant_p(n) ?	\
@@ -170,6 +204,21 @@ unsigned long __rounddown_pow_of_two(unsigned long n)
  * round the given value up to the nearest power of two
  * - the result is undefined when n == 0
  * - this can be used to initialise global variables from constant data
+ */
+/*
+ * IAMROOT, 2023.02.03:
+ * - papago
+ *   roundup_pow_of_two - 주어진 값을 가장 가까운 2의 거듭제곱으로 반올림
+ *   @n: 매개변수
+ *
+ *   주어진 값을 가장 가까운 2의 거듭제곱으로 반올림
+ *   - n == 0일 때 결과는 정의되지 않음
+ *   - 상수 데이터에서 전역 변수를 초기화하는 데 사용할 수 있습니다.
+ * - 2^n으로 roundup 한값을 구한다.
+ *   ex) 127 -> 128
+ *       1   -> 1
+ *       2   -> 2
+ *       3   -> 4
  */
 #define roundup_pow_of_two(n)			\
 (						\

@@ -1270,6 +1270,10 @@ insert_vmap_area_augment(struct vmap_area *va,
  * buggy behaviour, a system can be alive and keep
  * ongoing.
  */
+/*
+ * IAMROOT, 2023.02.03:
+ * - TODO
+ */
 static __always_inline struct vmap_area *
 merge_or_add_vmap_area(struct vmap_area *va,
 	struct rb_root *root, struct list_head *head)
@@ -2183,9 +2187,22 @@ static struct vmap_area *find_vmap_area(unsigned long addr)
  * room for at least 16 percpu vmap blocks per CPU.
  */
 /*
+ * IAMROOT, 2023.02.03:
+ * - papago
+ *   vmap 공간은 특히 32비트 아키텍처에서 제한됩니다. CPU당 최소 16개의 
+ *   percpu vmap 블록을 위한 공간이 있는지 확인합니다.
+ */
+/*
  * If we had a constant VMALLOC_START and VMALLOC_END, we'd like to be able
  * to #define VMALLOC_SPACE		(VMALLOC_END-VMALLOC_START). Guess
  * instead (we just need a rough idea)
+ */
+/*
+ * IAMROOT, 2023.02.03:
+ * - papago
+ *   상수 VMALLOC_START 및 VMALLOC_END가 있는 경우 
+ *   VMALLOC_SPACE(VMALLOC_END-VMALLOC_START)를 #define할 수 있기를 바랍니다.
+ *   대신 추측해 보세요(대략적인 아이디어만 있으면 됩니다). 
  */
 #if BITS_PER_LONG == 32
 #define VMALLOC_SPACE		(128UL*1024*1024)
@@ -2193,12 +2210,26 @@ static struct vmap_area *find_vmap_area(unsigned long addr)
 #define VMALLOC_SPACE		(128UL*1024*1024*1024)
 #endif
 
+/*
+ * IAMROOT, 2023.02.03:
+ * - 64bit 4kpage 의 경우 32 * 1024 * 1024
+ */
 #define VMALLOC_PAGES		(VMALLOC_SPACE / PAGE_SIZE)
 #define VMAP_MAX_ALLOC		BITS_PER_LONG	/* 256K with 4K pages */
 #define VMAP_BBMAP_BITS_MAX	1024	/* 4MB with 4K pages */
 #define VMAP_BBMAP_BITS_MIN	(VMAP_MAX_ALLOC*2)
 #define VMAP_MIN(x, y)		((x) < (y) ? (x) : (y)) /* can't use min() */
 #define VMAP_MAX(x, y)		((x) > (y) ? (x) : (y)) /* can't use max() */
+/*
+ * IAMROOT, 2023.02.03:
+ * - 128 ~ 1024
+ *   VMALLOC_PAGES / 16 = 2 * 1024 * 1024
+ *   NR_CPUS  VMAP_BBMAP_BITS
+ *   <= 2048  1024 
+ *   <= 4096  512
+ *   <= 8192  256
+ *   > 8192   128
+ */
 #define VMAP_BBMAP_BITS		\
 		VMAP_MIN(VMAP_BBMAP_BITS_MAX,	\
 		VMAP_MAX(VMAP_BBMAP_BITS_MIN,	\
@@ -2314,6 +2345,10 @@ static void *new_vmap_block(unsigned int order, gfp_t gfp_mask)
 	return vaddr;
 }
 
+/*
+ * IAMROOT, 2023.02.03:
+ * - TODO
+ */
 static void free_vmap_block(struct vmap_block *vb)
 {
 	struct vmap_block *tmp;
@@ -2325,6 +2360,12 @@ static void free_vmap_block(struct vmap_block *vb)
 	kfree_rcu(vb, rcu_head);
 }
 
+/*
+ * IAMROOT, 2023.02.03:
+ * - fully frag된것을 찾아서 purge한다.
+ *   일단 fully frag를 찾아서 local purge list에 옮기고, purge를 수행하는
+ *   식으로 한다.
+ */
 static void purge_fragmented_blocks(int cpu)
 {
 	LIST_HEAD(purge);
@@ -2335,10 +2376,20 @@ static void purge_fragmented_blocks(int cpu)
 	rcu_read_lock();
 	list_for_each_entry_rcu(vb, &vbq->free, free_list) {
 
+/*
+ * IAMROOT, 2023.02.03:
+ * - fully fragemented block만 찾는다. fully frag가 아니라면 continue
+ */
 		if (!(vb->free + vb->dirty == VMAP_BBMAP_BITS && vb->dirty != VMAP_BBMAP_BITS))
 			continue;
 
 		spin_lock(&vb->lock);
+/*
+ * IAMROOT, 2023.02.03:
+ * - free_list에서 purge로 옮긴다.
+ *   spin_lock을 거는 사이테 free, dirty가 변경될수있으므로 다시한번 if조건
+ *   이 있는것처럼 보인다.
+ */
 		if (vb->free + vb->dirty == VMAP_BBMAP_BITS && vb->dirty != VMAP_BBMAP_BITS) {
 			vb->free = 0; /* prevent further allocs after releasing lock */
 			vb->dirty = VMAP_BBMAP_BITS; /* prevent purging it again */
@@ -2456,6 +2507,13 @@ static void vb_free(unsigned long addr, unsigned long size)
 		spin_unlock(&vb->lock);
 }
 
+/*
+ * IAMROOT, 2023.02.03:
+ * - dirty값이 있는 경우 start, end를 갱신하며 flush를 set한다.
+ *   frag block들에 대해서 purge를 수행하고, 수행후
+ *   purge_vmap_area_list가 비엇고 flush set이라면 flush_tlb_kernel_range를
+ *   수행한다.
+ */
 static void _vm_unmap_aliases(unsigned long start, unsigned long end, int flush)
 {
 	int cpu;
@@ -2508,6 +2566,22 @@ static void _vm_unmap_aliases(unsigned long start, unsigned long end, int flush)
  * vm_unmap_aliases flushes all such lazy mappings. After it returns, we can
  * be sure that none of the pages we have control over will have any aliases
  * from the vmap layer.
+ */
+/*
+ * IAMROOT, 2023.02.03:
+ * - papago
+ *   vm_unmap_filename - vmap 계층에서 미결 지연 별칭을 매핑 해제합니다.
+ *
+ *   vmap/vmalloc 계층은 주로 TLB 플러시 오버헤드를 상각하기 위해 커널 가상 
+ *   매핑을 느리게 플러시합니다. 이것은 당신이 현재 가지고 있는 페이지가 전생에 
+ *   vmap 계층에 의해 커널 가상 주소로 매핑되었을 수 있으며, 따라서 여전히 그 
+ *   페이지를 참조하는 TLB 항목이 있는 CPU가 있을 수 있다는 것을 
+ *   의미한다(일반적인 1:1 커널 매핑에 추가).
+ *
+ *   vm_unmap_mapping은 이러한 모든 느린 매핑을 플러시합니다. 반환된 후에는 
+ *   제어할 수 있는 페이지 중 vmap 계층의 별칭을 가진 페이지가 없는지 확인할 
+ *   수 있습니다.
+ * - TODO
  */
 void vm_unmap_aliases(void)
 {
@@ -3011,6 +3085,10 @@ static inline void set_area_direct_map(const struct vm_struct *area,
 }
 
 /* Handle removing and resetting vm mappings related to the vm_struct. */
+/*
+ * IAMROOT, 2023.02.03:
+ * - TODO
+ */
 static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 {
 	unsigned long start = ULONG_MAX, end = 0;
@@ -3100,6 +3178,8 @@ static void __vunmap(const void *addr, int deallocate_pages)
  * IAMROOT, 2022.07.02: 
  * 언매핑 후 @deallocate_pages(vfree 요청)==1 이면 모든 관련 페이지들을
  * 할당 해제한다.
+ * vmap에서 flag에 VM_MAP_PUT_PAGES가 있었을경우 pages 정보(nr_pages, 
+ * area->pages)가 set되었을 것이다. pages를 해제한다.
  */
 	if (deallocate_pages) {
 		unsigned int page_order = vm_area_page_order(area);
@@ -3235,6 +3315,10 @@ EXPORT_SYMBOL(vfree);
  *
  * Must not be called in interrupt context.
  */
+/*
+ * IAMROOT, 2023.02.03:
+ * - TODO
+ */
 void vunmap(const void *addr)
 {
 	BUG_ON(in_interrupt());
@@ -3258,6 +3342,26 @@ EXPORT_SYMBOL(vunmap);
  * vfree() is called on the return value.
  *
  * Return: the address of the area or %NULL on failure
+ */
+/*
+ * IAMROOT, 2023.02.03:
+ * - papago
+ *   vmap - 페이지 배열을 거의 연속적인 공간으로 매핑 @pages: 페이지 포인터 배열
+ *   @count: 매핑할 페이지 수
+ *   @플래그: vm_area->플래그
+ *   @prot: 매핑을 위한 페이지 보호
+ *   @pages의 @count 페이지를 인접한 커널 가상 공간으로 매핑합니다.
+ *   @flags에 %VM_MAP_PUT_PAGES가 포함되어 있으면 페이지 배열 자체의 
+ *   소유권(kmalloc 또는 vmalloc 메모리여야 함)과 페이지당 하나의 참조가 
+ *   호출자에서 vmap()으로 전송되고 vfree()가 실행될 때 해제/삭제됩니다. 
+ *   반환 값을 호출했습니다.
+ *
+ *   Return: 영역의 주소 또는 실패 시 %NULL.
+ *
+ *   - 요청인자로 vm_struct를 가져오고, vm_struct에 pages를
+ *   mapping한다.
+ *   - flags VM_MAP_PUT_PAGES가 있을경우 pages정보가 vm_struct에 설정되어,
+ *   vfree로 호출될때 같이 해제할수있게 한다.
  */
 void *vmap(struct page **pages, unsigned int count,
 	   unsigned long flags, pgprot_t prot)

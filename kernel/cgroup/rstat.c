@@ -22,6 +22,17 @@ static struct cgroup_rstat_cpu *cgroup_rstat_cpu(struct cgroup *cgrp, int cpu)
  * rstat_cpu->updated_children list.  See the comment on top of
  * cgroup_rstat_cpu definition for details.
  */
+/*
+ * IAMROOT, 2023.02.10:
+ * - papago
+ *   cgroup_rstat_updated - 업데이트된 rstat_cpu를 추적합니다.
+ *   @cgrp: 대상 cgroup
+ *   @cpu: rstat_cpu가 업데이트된 CPU
+ *   @cpu에 대한 @cgrp의 rstat_cpu가 업데이트되었습니다. 부모의 일치하는 
+ *   rstat_cpu->updated_children 목록에 넣습니다. 자세한 내용은 
+ *   cgroup_rstat_cpu 정의 상단의 주석을 참조하십시오.
+ * - PASS
+ */
 void cgroup_rstat_updated(struct cgroup *cgrp, int cpu)
 {
 	raw_spinlock_t *cpu_lock = per_cpu_ptr(&cgroup_rstat_cpu_lock, cpu);
@@ -35,6 +46,16 @@ void cgroup_rstat_updated(struct cgroup *cgrp, int cpu)
 	 * instead of NULL, we can tell whether @cgrp is on the list by
 	 * testing the next pointer for NULL.
 	 */
+/*
+ * IAMROOT, 2023.02.10:
+ * - papago
+ *   이미 목록에 있는 추측 테스트입니다. 이로 인해 일시적인 부정확성이 
+ *   발생할 수 있으며, 이는 괜찮습니다. 
+ *
+ *   @parent's updated_children은 NULL이 아닌 @parent로 종료되므로 
+ *   다음 포인터의 NULL을 테스트하여 @cgrp가 목록에 있는지 여부를 
+ *   확인할 수 있습니다. 
+ */
 	if (cgroup_rstat_cpu(cgrp, cpu)->updated_next)
 		return;
 
@@ -346,6 +367,10 @@ static void cgroup_base_stat_flush(struct cgroup *cgrp, int cpu)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @cgrp에 대한 pcpu rstatc를 얻어온다.
+ */
 static struct cgroup_rstat_cpu *
 cgroup_base_stat_cputime_account_begin(struct cgroup *cgrp, unsigned long *flags)
 {
@@ -356,6 +381,10 @@ cgroup_base_stat_cputime_account_begin(struct cgroup *cgrp, unsigned long *flags
 	return rstatc;
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - cgrp에 대한 rstat update
+ */
 static void cgroup_base_stat_cputime_account_end(struct cgroup *cgrp,
 						 struct cgroup_rstat_cpu *rstatc,
 						 unsigned long flags)
@@ -365,6 +394,10 @@ static void cgroup_base_stat_cputime_account_end(struct cgroup *cgrp,
 	put_cpu_ptr(rstatc);
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @cgrp에 대한 cpu 시간(delta_exec)를 통계를 적산한다.
+ */
 void __cgroup_account_cputime(struct cgroup *cgrp, u64 delta_exec)
 {
 	struct cgroup_rstat_cpu *rstatc;

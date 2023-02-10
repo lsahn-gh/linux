@@ -6,7 +6,10 @@
 #include "sched.h"
 
 #include "pelt.h"
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - 100ms
+ */
 int sched_rr_timeslice = RR_TIMESLICE;
 int sysctl_sched_rr_timeslice = (MSEC_PER_SEC / HZ) * RR_TIMESLICE;
 /* More than 4 hours if BW_SHIFT equals 20. */
@@ -243,11 +246,24 @@ err:
 
 #define rt_entity_is_task(rt_se) (1)
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - +-- task ------------------------+
+ *   | ..                             |
+ *   | struct sched_rt_entity rt_se   |
+ *   | ..                             |
+ *   +--------------------------------+
+ * - @rt_se는 task에 embed된 struct sched_rt_entity 일것이다.
+ */
 static inline struct task_struct *rt_task_of(struct sched_rt_entity *rt_se)
 {
 	return container_of(rt_se, struct task_struct, rt);
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @rt_rq는 struct rq에 소속된 struct rt_rq일 것이다.
+ */
 static inline struct rq *rq_of_rt_rq(struct rt_rq *rt_rq)
 {
 	return container_of(rt_rq, struct rq, rt);
@@ -256,6 +272,16 @@ static inline struct rq *rq_of_rt_rq(struct rt_rq *rt_rq)
 /*
  * IAMROOT, 2023.02.04:
  * - return: rt_se task의 per cpu rq
+ * - @rt_se는 task에 embed되있다. rt_se가 소속된 task의 rq를 가져온다.
+ *   @rt_se -> task -(task cpu)-> rq 의 접근으로 가져온다.
+ * 1. task를 알아낸다.
+ *   +-- task ------------------------+
+ *   | ..                             |
+ *   | struct sched_rt_entity rt_se   |
+ *   | ..                             |
+ *   +-------------------------------+
+ * 2. 알아낸 task를 통해서 cpu nr을 알아온다.
+ * 3. cpu nr을 통해 cpu rq를 가져온다.
  */
 static inline struct rq *rq_of_rt_se(struct sched_rt_entity *rt_se)
 {
@@ -264,6 +290,11 @@ static inline struct rq *rq_of_rt_se(struct sched_rt_entity *rt_se)
 	return task_rq(p);
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @rt_se의 rq를 가져온다. @rt_se는 task에 embed된 rt_se이다.
+ *   @rt_se -> task -(task cpu)-> cpu rq -> cpu rq의 rt_rq 의 접근으로 가져온다.
+ */
 static inline struct rt_rq *rt_rq_of_se(struct sched_rt_entity *rt_se)
 {
 	struct rq *rq = rq_of_rt_se(rt_se);
@@ -535,6 +566,10 @@ static inline struct task_group *next_task_group(struct task_group *tg)
 		(iter = next_task_group(iter)) &&			\
 		(rt_rq = iter->rt_rq[cpu_of(rq)]);)
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - parent로 타고 올라간다.
+ */
 #define for_each_sched_rt_entity(rt_se) \
 	for (; rt_se; rt_se = rt_se->parent)
 
@@ -612,6 +647,10 @@ static inline const struct cpumask *sched_rt_period_mask(void)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @rt_b가 속한 task_group에서 @cpu에 해당하는 rt_rq를 가져온다.
+ */
 static inline
 struct rt_rq *sched_rt_period_rt_rq(struct rt_bandwidth *rt_b, int cpu)
 {
@@ -659,6 +698,10 @@ static inline void sched_rt_rq_enqueue(struct rt_rq *rt_rq)
 	resched_curr(rq);
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - rt_rq를 rt_rq가 속한 rq에서 dequeue한다..
+ */
 static inline void sched_rt_rq_dequeue(struct rt_rq *rt_rq)
 {
 	dequeue_top_rt_rq(rt_rq);
@@ -674,6 +717,10 @@ static inline const struct cpumask *sched_rt_period_mask(void)
 	return cpu_online_mask;
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - rt_bandwidth가 없는 버전. pcp rq에서 rt_rq를 가져온다.
+ */
 static inline
 struct rt_rq *sched_rt_period_rt_rq(struct rt_bandwidth *rt_b, int cpu)
 {
@@ -715,13 +762,17 @@ static void do_balance_runtime(struct rt_rq *rt_rq)
 
 	raw_spin_lock(&rt_b->rt_runtime_lock);
 	rt_period = ktime_to_ns(rt_b->rt_period);
+/*
+ * IAMROOT, 2023.02.10:
+ * - root_domain에 속한 cpu를 iterate한다.
+ */
 	for_each_cpu(i, rd->span) {
 		struct rt_rq *iter = sched_rt_period_rt_rq(rt_b, i);
 		s64 diff;
 
 		/*
 		 * IAMROOT, 2023.02.04:
-		 * - 자기 자신(인자로 들어온 rt_rq)은 뺀다
+		 * - 자기 자신(인자로 들어온 rt_rq)은 건너뛴다.
 		 */
 		if (iter == rt_rq)
 			continue;
@@ -883,6 +934,12 @@ static void __enable_runtime(struct rq *rq)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - RT_RUNTIME_SHARE가 켜져있고, 실행시간(rt_time)이 설정시간(rt_runtime)
+ *   보다 크면 do_balance_runtime을 수행한다.
+ *   over한 시간만큼 다른 cpu에서 빼온다.
+ */
 static void balance_runtime(struct rt_rq *rt_rq)
 {
 	/*
@@ -1000,7 +1057,18 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 
 /*
  * IAMROOT, 2023.02.04:
- * - return: exceeded 된 경우 1 그렇지 않으면 0
+ * - return: exceeded 된 경우 1. resched을 해도된다는 의미도 포함된다.
+ *           그렇지 않으면 0
+ * - return 1
+ *   1. throttle 중이면서 boost 아님.
+ *   2. 설정시간보다 많이 쓴 상태에서 bandwidth가 동작중인상태. 즉
+ *      throttle된 상태.
+ *
+ * - return 0.
+ *   1. throttle 중이면서 boost 중.
+ *   2. period이상 runtime 사용.
+ *   3. rt_rq 비활성화.
+ *   4. 설정시간보다 runtime을 덜씀.
  */
 static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 {
@@ -1016,14 +1084,31 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 	if (rt_rq->rt_throttled)
 		return rt_rq_throttled(rt_rq);
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - runtime을 다썻다.
+ */
 	if (runtime >= sched_rt_period(rt_rq))
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - runtime 초과분에 대한 balance을 수행한다.
+ */
 	balance_runtime(rt_rq);
+/*
+ * IAMROOT, 2023.02.10:
+ * - balance_runtime을 통해서 runtime이 수정됫을 수 있으므로 한번더 호출한다.
+ *   비활성화면 return 0.
+ */
 	runtime = sched_rt_runtime(rt_rq);
 	if (runtime == RUNTIME_INF)
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - 실행시간이 설정시간보다 높다면 throttled인지 확인한다.
+ */
 	if (rt_rq->rt_time > runtime) {
 		struct rt_bandwidth *rt_b = sched_rt_bandwidth(rt_rq);
 
@@ -1036,6 +1121,10 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 		 * - google-translate
 		 *   런타임이 할당되지 않았지만 부스팅으로 인해 시간이 누적되는 그룹을 실제로
 		 *   제한하지 마십시오.
+		 *
+		 * - bandwidth의 runtime이 잇다면, 즉 배분할 runtime이 남아있다면
+		 *   throttled로 설정한다.
+		 *   그게 아니면 rt_time을 0으로 설정하여 아에 배분을 못받게 해버린다.
 		 */
 		if (likely(rt_b->rt_runtime)) {
 			rt_rq->rt_throttled = 1;
@@ -1054,7 +1143,10 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 			 */
 			rt_rq->rt_time = 0;
 		}
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - throttled 됬다면 dequeue시키고 return 1.
+ */
 		if (rt_rq_throttled(rt_rq)) {
 			sched_rt_rq_dequeue(rt_rq);
 			return 1;
@@ -1106,8 +1198,17 @@ static void update_curr_rt(struct rq *rq)
 		return;
 
 	for_each_sched_rt_entity(rt_se) {
+/*
+ * IAMROOT, 2023.02.10:
+ * - rt_se -> task -> pcpu rq -> rt_rq의 접근으로 rt_rq를 가져온다.
+ */
 		struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - RUNTIME_INF not equal이라는 의미가 활성화 상태라는것.
+ *   활성화 상태인 rt_rq에 대하여 rt_time을 적산한다.
+ * - rt_rq가 runtime이 초과됬는지 확인한다. 초과됬으면 reschedule을 요청한다.
+ */
 		if (sched_rt_runtime(rt_rq) != RUNTIME_INF) {
 			raw_spin_lock(&rt_rq->rt_runtime_lock);
 			rt_rq->rt_time += delta_exec;
@@ -1122,6 +1223,7 @@ static void update_curr_rt(struct rq *rq)
  * IAMROOT, 2023.02.04:
  * - 1. rq->nr_running -= rt_rq->rt_nr_running
  *   2. rt_queued = 0 으로 해서 동작 안함 표시
+ * - rq에서 rt_rq에 대한 running개수를 빼버리고 동작안함 표시.
  */
 static void
 dequeue_top_rt_rq(struct rt_rq *rt_rq)
@@ -1499,6 +1601,10 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - TODO
+ */
 static void requeue_task_rt(struct rq *rq, struct task_struct *p, int head)
 {
 	struct sched_rt_entity *rt_se = &p->rt;
@@ -2495,6 +2601,11 @@ prio_changed_rt(struct rq *rq, struct task_struct *p, int oldprio)
 }
 
 #ifdef CONFIG_POSIX_TIMERS
+/*
+ * IAMROOT, 2023.02.10:
+ * - task rlimit이 활성화됭ㅆ으면 timeout을 기록하고 제한값 초과이면
+ *   timer의 CPUCLOCK_SCHED에 sum_exec_runtime을 nextevt로 기록한다.
+ */
 static void watchdog(struct rq *rq, struct task_struct *p)
 {
 	unsigned long soft, hard;
@@ -2502,15 +2613,27 @@ static void watchdog(struct rq *rq, struct task_struct *p)
 	/* max may change after cur was read, this will be fixed next tick */
 	soft = task_rlimit(p, RLIMIT_RTTIME);
 	hard = task_rlimit_max(p, RLIMIT_RTTIME);
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - rlimit이 활성화되있으면
+ */
 	if (soft != RLIM_INFINITY) {
 		unsigned long next;
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - 중복 기록 방지. 이전 기록 시관가 다를때만 timeout 증가
+ */
 		if (p->rt.watchdog_stamp != jiffies) {
 			p->rt.timeout++;
 			p->rt.watchdog_stamp = jiffies;
 		}
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - soft / hard 시간중에 작은것을 기준으로 제한값을 계산한다.
+ *   제한값보다 timeout시간이 크면 timer의 CPUCLOCK_SCHED에 
+ *   sum_exec_runtime을 nextevt로 기록한다.
+ */
 		next = DIV_ROUND_UP(min(soft, hard), USEC_PER_SEC/HZ);
 		if (p->rt.timeout > next) {
 			posix_cputimers_rt_watchdog(&p->posix_cputimers,
@@ -2530,6 +2653,10 @@ static inline void watchdog(struct rq *rq, struct task_struct *p) { }
  * and everything must be accessed through the @rq and @curr passed in
  * parameters.
  */
+/*
+ * IAMROOT, 2023.02.10:
+ * - ING. requeue_task_rt 할차례
+ */
 static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 {
 	struct sched_rt_entity *rt_se = &p->rt;
@@ -2548,13 +2675,25 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	 * - google-translate
 	 *   RR 작업에는 특별한 형태의 타임슬라이스 관리가 필요합니다. FIFO 작업에는 타임
 	 *   슬라이스가 없습니다.
+	 *
+	 * - 즉 FIFO는 여기서 return된다. FIFO는 task가 queued에서 없어질때까지 수행할
+	 *   뿐이기 때문이다.
 	 */
 	if (p->policy != SCHED_RR)
 		return;
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - 여기부터는 RR 스케쥴링이다. RR에 대한 스케쥴링은 아래 코드들로 끝난다.
+ * - time_slice가 아직 소모안됬으면 여기서 return된다.
+ */
 	if (--p->rt.time_slice)
 		return;
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - time_slice를 여기서 다시 충전한다.
+ */
 	p->rt.time_slice = sched_rr_timeslice;
 
 	/*
@@ -2562,7 +2701,18 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	 * the only element on the queue
 	 */
 	for_each_sched_rt_entity(rt_se) {
+/*
+ * IAMROOT, 2023.02.10:
+ * - prev != next 라면 유일한 task가 아니라는 의미. 
+ *   task가 한개면 그것만 돌리면 되므로 task가 두개이상이여야
+ *   rescheule을 하는 의미가 있다.
+ */
 		if (rt_se->run_list.prev != rt_se->run_list.next) {
+/*
+ * IAMROOT, 2023.02.10:
+ * - @p를 rq의 tail에 넣고 rescheduled 요청을 한다. 제일 뒤의 순서로
+ *   옮기는 개념.
+ */
 			requeue_task_rt(rq, p, 0);
 			resched_curr(rq);
 			return;

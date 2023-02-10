@@ -658,7 +658,10 @@ int __update_load_avg_cfs_rq(u64 now, struct cfs_rq *cfs_rq)
  *   load_avg and runnable_avg are not supported and meaningless.
  *
  */
-
+/*
+ * IAMROOT, 2023.02.10:
+ * - load sum / load avg을 갱신한다.
+ */
 int update_rt_rq_load_avg(u64 now, struct rq *rq, int running)
 {
 	/*

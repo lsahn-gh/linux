@@ -71,6 +71,10 @@ extern void normalize_rt_tasks(void);
  * default timeslice is 100 msecs (used only for SCHED_RR tasks).
  * Timeslices get refilled after they expire.
  */
+/*
+ * IAMROOT, 2023.02.10:
+ * - 100ms
+ */
 #define RR_TIMESLICE		(100 * HZ / 1000)
 
 #endif /* _LINUX_SCHED_RT_H */

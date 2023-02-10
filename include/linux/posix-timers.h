@@ -153,6 +153,10 @@ static inline void posix_cputimers_init(struct posix_cputimers *pct)
 
 void posix_cputimers_group_init(struct posix_cputimers *pct, u64 cpu_limit);
 
+/*
+ * IAMROOT, 2023.02.10:
+ * - @runtime을 CPUCLOCK_SCHED의 nexevt에 등록한다.
+ */
 static inline void posix_cputimers_rt_watchdog(struct posix_cputimers *pct,
 					       u64 runtime)
 {
