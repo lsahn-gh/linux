@@ -94,7 +94,7 @@ unsigned int sysctl_sched_child_runs_first __read_mostly;
  * - papago
  *  SCHED_OTHER 깨우기 세분성입니다.
  *
- *  이 옵션은 분리된 워크로드의 선점 효과를 지연시키고 과도한 스케줄링을 줄입니다. 
+ *  이 옵션은 분리된 워크로드의 선점 효과를 지연시키고 과도한 스케줄링을 줄입니다.
  *  동기식 워크로드에는 여전히 즉각적인 깨우기/절전 대기 시간이 있습니다.
  *
  * (default: 1 msec * (1 + ilog(ncpus)), units: nanoseconds)
@@ -279,7 +279,7 @@ static void __update_inv_weight(struct load_weight *lw)
  *
  * - 실제론 이미 계산된 1 / lw.weight값을 사용해서 이진화 정수계산으로
  *   구한다 (위 주석 참고)
- * - 계산을 수행하면서 발생할수있는 32bit overflow에 대한 처리와, 
+ * - 계산을 수행하면서 발생할수있는 32bit overflow에 대한 처리와,
  *   그에 따른 정밀도 감소처리가 있다.
  *
  * - calc_delta_fair 에서 호출 하였을 때
@@ -713,20 +713,20 @@ static inline bool entity_before(struct sched_entity *a,
  *   2. curr가 없거나 on_rq가 아닌 상태면 leftmost_se->vruntime으로 처리
  *   3. 그게 아니면 min_vruntime유지
  *
- * - 보통은 curr->vruntime이 가장 빠른 시간으로 설정되고, 그에따라 
+ * - 보통은 curr->vruntime이 가장 빠른 시간으로 설정되고, 그에따라
  *   아래 조건들로 해서도 왠간해선 curr->vruntime이 선택 될것이다.
  *   그러나 어찌됫든 혹시나 모를 상황에 대비해 min, max비교등을 수행해서
  *   min_vruntime이 갱신된다.
  *
  * --- vruntime이 min_vruntime보다 클경우(chat open ai. 검증필요. 참고만)
- *  1. task이 이전에 선점되었고 나중에 재개된 경우입니다. task가 선점되면 
- *  해당 vruntime이 일시적으로 중지될 수 있으며 다시 시작되면 해당 
- *  vruntime이 현재 시간으로 업데이트될 수 있습니다. task가 min_vruntime 
+ *  1. task이 이전에 선점되었고 나중에 재개된 경우입니다. task가 선점되면
+ *  해당 vruntime이 일시적으로 중지될 수 있으며 다시 시작되면 해당
+ *  vruntime이 현재 시간으로 업데이트될 수 있습니다. task가 min_vruntime
  *  값보다 나중에 재개되면 해당 vruntime이 min_vruntime보다 클 수 있습니다.
  *
- *  2. 현재 실행 중인 task이 cfs_rq의 다른 task보다 높은 우선 순위를 
- *  가지고 있어 더 많은 CPU 시간을 받은 경우입니다. 이 경우 현재 실행 중인 
- *  task의 vruntime이 아직 실행되지 않은 task의 vruntime보다 클 수 
+ *  2. 현재 실행 중인 task이 cfs_rq의 다른 task보다 높은 우선 순위를
+ *  가지고 있어 더 많은 CPU 시간을 받은 경우입니다. 이 경우 현재 실행 중인
+ *  task의 vruntime이 아직 실행되지 않은 task의 vruntime보다 클 수
  *  있으므로 min_vruntime 값보다 클 수 있습니다.
  */
 static void update_min_vruntime(struct cfs_rq *cfs_rq)
@@ -740,14 +740,14 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
  * IAMROOT, 2022.12.21:
  * - min_vruntime과 비교될 vruntime을 결정한다.
  *
- * 1. curr가 rq에 들어있다. leftmost 
+ * 1. curr가 rq에 들어있다. leftmost
  * 1. curr가 rq에 들어있고, leftmost가 존재.
  *   vruntime = min_vruntime(curr->vruntime, leftmost_se->vruntime)
  * 2. leftmost가 있고 curr가 없는 상태.
  *   vruntime = leftmost_se->vruntime
  *
  * curr on_rq leftmost (compare max_vruntime cfs_rq->min_vruntime)
- * X    -     X        -                   
+ * X    -     X        -
  * X    -     O        leftmost_se->vruntime
  * O    X     X        -
  * O    X     O        leftmost_se->vruntime
@@ -762,7 +762,7 @@ static void update_min_vruntime(struct cfs_rq *cfs_rq)
  * - leftmost가 없는 상황이면 curr->vruntime이 min_vruntime과 비교되서
  *   들어가는데 보통은 같다.
  *
- * - 
+ * -
  */
 	if (curr) {
 /*
@@ -956,7 +956,7 @@ static u64 sched_slice(struct cfs_rq *cfs_rq, struct sched_entity *se)
  */
 	unsigned int nr_running = cfs_rq->nr_running;
 	u64 slice;
-	
+
 /*
  * IAMROOT, 2023.01.07:
  * - 계층구조의 task 수로 갱신한다.
@@ -3439,7 +3439,7 @@ dequeue_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se) { }
  *
  *   reweight_entity 진입전 값들정리(cpu0 = 50%)
  *   cfs_rq load weight = 1024
- *   cfs_rq load avg    = 1024 
+ *   cfs_rq load avg    = 1024
  *   cfs_rq load sum    = 47742
  *
  *   se load weight = 512
@@ -3617,22 +3617,22 @@ void reweight_task(struct task_struct *p, int prio)
  * - papago
  *   이 모든 것은 우리 모두가 싫어하는 전체 합계를 포함하는 계층적 비율에 가깝습니다.
  *
- *   즉, 그룹 엔터티의 가중치는 그룹 실행 대기열 가중치를 기반으로 한 그룹 가중치의 비례적 
- *   공유입니다. 그건: 
+ *   즉, 그룹 엔터티의 가중치는 그룹 실행 대기열 가중치를 기반으로 한 그룹 가중치의 비례적
+ *   공유입니다. 그건:
  *
  *                     tg->weight * grq->load.weight
  *   ge->load.weight = -----------------------------               (1)
  *                       \Sum grq->load.weight
- *  
- *  이제 그 합계를 계산하는 것은 엄청나게 비용이 많이 들기 때문에(거기에 있었고, 
- *  완료했습니다) 우리는 이 평균값으로 근사합니다. 평균은 느리게 이동하므로 근사값이 더 
+ *
+ *  이제 그 합계를 계산하는 것은 엄청나게 비용이 많이 들기 때문에(거기에 있었고,
+ *  완료했습니다) 우리는 이 평균값으로 근사합니다. 평균은 느리게 이동하므로 근사값이 더
  *  저렴하고 안정적입니다.
  *
- *  따라서 위의 대신 다음을 대체합니다. 
+ *  따라서 위의 대신 다음을 대체합니다.
  *
  *  grq->load.weight -> grq->avg.load_avg (2)
  *
- *  결과는 다음과 같습니다. 
+ *  결과는 다음과 같습니다.
  *
  *
  *                     tg->weight * grq->avg.load_avg
@@ -3645,19 +3645,19 @@ void reweight_task(struct task_struct *p, int prio)
  *
  * 그것은 share_avg이며, 맞습니다(주어진 근사치(2)).
  *
- * 문제는 평균이 느리기 때문에(당연히 정확히 그렇게 설계되었으므로) 경계 조건에서 과도 
- * 현상이 발생한다는 것입니다. 특히 그룹이 유휴 상태이고 하나의 작업을 시작하는 경우입니다. 
- * CPU의 grq->avg.load_avg가 쌓이는 데 시간이 걸리고 대기 시간이 좋지 않습니다. 
+ * 문제는 평균이 느리기 때문에(당연히 정확히 그렇게 설계되었으므로) 경계 조건에서 과도
+ * 현상이 발생한다는 것입니다. 특히 그룹이 유휴 상태이고 하나의 작업을 시작하는 경우입니다.
+ * CPU의 grq->avg.load_avg가 쌓이는 데 시간이 걸리고 대기 시간이 좋지 않습니다.
  *
  * 이제 특별한 경우 (1)은 다음과 같이 줄어듭니다.
  *
  *                     tg->weight * grq->load.weight
  *   ge->load.weight = ----------------------------- = tg->weight   (4)
  *                         grp->load.weight
- *                         
+ *
  * 즉, 다른 모든 CPU가 유휴 상태이므로 합계가 축소됩니다. UP 시나리오.
  *
- * 따라서 우리가 하는 일은 다음과 같이 (가까운) UP 사례에서 (4)에 접근하도록 근사치 (3)을 
+ * 따라서 우리가 하는 일은 다음과 같이 (가까운) UP 사례에서 (4)에 접근하도록 근사치 (3)을
  * 수정하는 것입니다.
  *
  *   ge->load.weight =
@@ -3665,14 +3665,14 @@ void reweight_task(struct task_struct *p, int prio)
  *              tg->weight * grq->load.weight
  *     ---------------------------------------------------         (5)
  *     tg->load_avg - grq->avg.load_avg + grq->load.weight
- *  
+ *
  *  (
  *     ex) rq 2개.
  *         rq 1개가 idle. 1개가 tg의 load를 100%했을때. 즉 UP와 다름 없는 상황.
  *         tg->load_avg == grp->avg.load_avg
  *
  *              tg->weight * grq->load.weight
- *     ---------------------------------------------------         
+ *     ---------------------------------------------------
  *     tg->load_avg - tg->load_avg + grq->load.weight
  *
  *     =
@@ -3681,12 +3681,12 @@ void reweight_task(struct task_struct *p, int prio)
  *                     grq->load.weight
  *
  *     ex) rq 2개.
- *         rq 1개가 50%. 1개가 50%했을때. 
+ *         rq 1개가 50%. 1개가 50%했을때.
  *
  *         tg->load_avg / 2 == grp->avg.load_avg
  *
  *              tg->weight * grq->load.weight
- *     ---------------------------------------------------         
+ *     ---------------------------------------------------
  *     tg->load_avg - tg->load_avg / 2 + grq->load.weight
  *
  *     =
@@ -3700,7 +3700,7 @@ void reweight_task(struct task_struct *p, int prio)
  *         tg->load_avg * 7 / 10 == grp->avg.load_avg
  *
  *              tg->weight * grq->load.weight
- *     ---------------------------------------------------         
+ *     ---------------------------------------------------
  *     tg->load_avg - tg->load_avg * 7 / 10 + grq->load.weight
  *
  *     =
@@ -3716,7 +3716,7 @@ void reweight_task(struct task_struct *p, int prio)
  *           tg->load_avg * 7 / 10 + grq->load.weigh
  *  )
  *
- * 그러나 grq->load.weight가 0으로 떨어질 수 있으므로 결과적으로 0으로 나누기 때문에 
+ * 그러나 grq->load.weight가 0으로 떨어질 수 있으므로 결과적으로 0으로 나누기 때문에
  * grq->avg.load_avg를 하한으로 사용해야 합니다. 그런 다음 다음을 제공합니다.
  *
  *
@@ -3729,7 +3729,7 @@ void reweight_task(struct task_struct *p, int prio)
  *   tg_load_avg' = tg->load_avg - grq->avg.load_avg +
  *                  max(grq->load.weight, grq->avg.load_avg)
  *
- * 그리고 그것은 share_weight이고 엉뚱합니다. (가까운) UP 경우에는 (4)에 접근하고 일반적인 
+ * 그리고 그것은 share_weight이고 엉뚱합니다. (가까운) UP 경우에는 (4)에 접근하고 일반적인
  * 경우에는 (3)에 접근합니다. ge->load.weight를 일관되게 과대평가하므로 다음과 같습니다.
  *
  *   \Sum ge->load.weight >= tg->weight
@@ -3775,18 +3775,18 @@ static long calc_group_shares(struct cfs_rq *cfs_rq)
  *   grq->avg.load_avg => cfs_rq->tg_load_avg_contrib로 치환해서 생각한다.
  *
  *
- * - 풀어쓰기 
+ * - 풀어쓰기
  *   load = max(scale_load_down(cfs_rq->load.weight), cfs_rq->avg.load_avg);
  *
  *                     tg->weight * grq->load.weight
- *   ge->load.weight = -----------------------------		   
+ *   ge->load.weight = -----------------------------
  *                             tg_load_avg'
  *
  *   =>
  *                          tg->shares * load
  *   return = --------------------------------------------------
  *             tg->load_avg - cfs_rq->tg_load_avg_contrib + load
- *             
+ *
  */
 	tg_shares = READ_ONCE(tg->shares);
 
@@ -3823,14 +3823,14 @@ static long calc_group_shares(struct cfs_rq *cfs_rq)
 /*
  * IAMROOT, 2023.01.07:
  * - papago
- *   MIN_SHARES는 tg->shares 값이 작은 그룹의 CPU당 파티셔닝을 지원하기 위해 
- *   여기에서 크기를 조정하지 않아야 합니다. CPU에서 그룹을 나타내는 
- *   sched_entity에 최소 load.weight로 할당되는 floor 값입니다. 
+ *   MIN_SHARES는 tg->shares 값이 작은 그룹의 CPU당 파티셔닝을 지원하기 위해
+ *   여기에서 크기를 조정하지 않아야 합니다. CPU에서 그룹을 나타내는
+ *   sched_entity에 최소 load.weight로 할당되는 floor 값입니다.
  *
- *   예를 들어 64비트에서 tg->shares of scale_load(15)=15*1024 그룹의 경우 
- *   하나의 CPU 공유에서 각각 실행 가능한 8개의 작업이 있는 8코어 시스템에서 
- *   15*1024*1/8=1920이 되어야 합니다. scale_load(MIN_SHARES)=2*1024. 
- *   CPU에서 실행할 수 있는 작업이 없는 경우 MIN_SHARES=2가 0 대신 반환되어야 합니다. 
+ *   예를 들어 64비트에서 tg->shares of scale_load(15)=15*1024 그룹의 경우
+ *   하나의 CPU 공유에서 각각 실행 가능한 8개의 작업이 있는 8코어 시스템에서
+ *   15*1024*1/8=1920이 되어야 합니다. scale_load(MIN_SHARES)=2*1024.
+ *   CPU에서 실행할 수 있는 작업이 없는 경우 MIN_SHARES=2가 0 대신 반환되어야 합니다.
  */
 	return clamp_t(long, shares, MIN_SHARES, tg_shares);
 }
@@ -3874,7 +3874,7 @@ static void update_cfs_group(struct sched_entity *se)
  * - UMP일 경우.
  * - @se weight와 group의 shares가 같으면 return.
  *   reweight을 할 필요가 없다.
- *   초기값은 shares기준으로 만들어지기때문이다. 
+ *   초기값은 shares기준으로 만들어지기때문이다.
  *   shares나 weight이 변경되는 경우만 아래로 진입할것이다.
  */
 	shares = READ_ONCE(gcfs_rq->tg->shares);
@@ -3932,16 +3932,16 @@ static inline void cfs_rq_util_change(struct cfs_rq *cfs_rq, int flags)
 /*
  * IAMROOT, 2023.01.07:
  * - papago
- *   이것이 놓칠 수 있는 몇 가지 경계 사례가 있지만 실제 문제가 되지 않도록 
- *   충분히 자주 호출되어야 합니다. 
+ *   이것이 놓칠 수 있는 몇 가지 경계 사례가 있지만 실제 문제가 되지 않도록
+ *   충분히 자주 호출되어야 합니다.
  *
- *   유휴 스레드가 다른 클래스(!fair)이기 때문에 유휴 상태일 때 호출되지 않으며 
+ *   유휴 스레드가 다른 클래스(!fair)이기 때문에 유휴 상태일 때 호출되지 않으며
  *   사용률에 RT 작업과 같은 항목이 포함되지 않습니다.
  *
- *   있는 그대로, util 번호는 freq-invariant가 아닙니다(이를 위해 
- *   arch_scale_freq_capacity()를 구현해야 합니다). 
+ *   있는 그대로, util 번호는 freq-invariant가 아닙니다(이를 위해
+ *   arch_scale_freq_capacity()를 구현해야 합니다).
  *
- *   cpu_util()을 참조하십시오. 
+ *   cpu_util()을 참조하십시오.
  */
 		cpufreq_update_util(rq, flags);
 	}
@@ -3961,10 +3961,10 @@ static inline void cfs_rq_util_change(struct cfs_rq *cfs_rq, int flags)
  * IAMROOT, 2022.12.27:
  * - TODO
  * - papago
- *   list_add_leaf_cfs_rq는 항상 상위 cfs_rq 바로 앞에 하위 cfs_rq를 
- *   목록에 배치하고 cfs_rqs는 목록 상향식에서 제거하기 때문에 목록에서 
- *   우리 앞에 있는 cfs_rq가 하위인지 여부만 테스트하면 됩니다.  
- *   cfs_rq가 목록에 없으면 분기를 트리에 연결하기 위해 자식을 추가해야 
+ *   list_add_leaf_cfs_rq는 항상 상위 cfs_rq 바로 앞에 하위 cfs_rq를
+ *   목록에 배치하고 cfs_rqs는 목록 상향식에서 제거하기 때문에 목록에서
+ *   우리 앞에 있는 cfs_rq가 하위인지 여부만 테스트하면 됩니다.
+ *   cfs_rq가 목록에 없으면 분기를 트리에 연결하기 위해 자식을 추가해야
  *   하는지 여부를 테스트합니다 * (자세한 내용은 list_add_leaf_cfs_rq() 참조)
  */
 static inline bool child_cfs_rq_on_list(struct cfs_rq *cfs_rq)
@@ -4035,13 +4035,13 @@ static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
 /*
  * IAMROOT, 2023.01.07:
  * - papago
- *   update_tg_load_avg - update the tg's load avg 
+ *   update_tg_load_avg - update the tg's load avg
  *   @cfs_rq: the cfs_rq whose avg changed
  *
  *   이 기능은 다음을 '보장'합니다. tg->load_avg := \Sum tg->cfs_rq[]->avg.load.
  *   그러나 tg->load_avg는 전역 값이므로 성능을 고려해야 합니다.
  *
- *   다른 cfs_rq를 볼 필요가 없도록 전파한 마지막 값을 저장하는 차등 업데이트를 사용합니다. 
+ *   다른 cfs_rq를 볼 필요가 없도록 전파한 마지막 값을 저장하는 차등 업데이트를 사용합니다.
  *   차등이 '작은' 경우 업데이트를 건너뛸 수 있습니다.
  *
  *   update_cfs_share() 전에 tg의 load_avg 업데이트가 필요합니다.
@@ -4193,198 +4193,198 @@ void set_task_rq_fair(struct sched_entity *se,
 /*
  * IAMROOT, 2022.12.31:
  * - papago
- *   마이그레이션 중에 sched_entity가 PELT 계층 구조에 합류/탈퇴할 때 기여도를 
- *   전파해야 합니다. 이 전파의 핵심은 각 그룹에 대한 불변성입니다. 
+ *   마이그레이션 중에 sched_entity가 PELT 계층 구조에 합류/탈퇴할 때 기여도를
+ *   전파해야 합니다. 이 전파의 핵심은 각 그룹에 대한 불변성입니다.
  *
  *   ge->avg == grq->avg						(1)
  *
- *   IFF_ 순수한 running 및 runnable sum을 봅니다. 계층 구조의 다른 지점에서 
+ *   IFF_ 순수한 running 및 runnable sum을 봅니다. 계층 구조의 다른 지점에서
  *   매우 동일한 entity를 나타내기 때문입니다.
  *
- *   위의 update_tg_cfs_util() 및 update_tg_cfs_runnable()은 사소하고 단순히 
- *   running/runnable sum을 복사합니다(그러나 그룹 엔티티 및 그룹 rq에 PELT 
- *   window가 정렬되어 있지 않기 때문에 여전히 잘못됨). 
+ *   위의 update_tg_cfs_util() 및 update_tg_cfs_runnable()은 사소하고 단순히
+ *   running/runnable sum을 복사합니다(그러나 그룹 엔티티 및 그룹 rq에 PELT
+ *   window가 정렬되어 있지 않기 때문에 여전히 잘못됨).
  *
- *   그러나 update_tg_cfs_load()는 더 복잡합니다. 그래서 우리는: 
+ *   그러나 update_tg_cfs_load()는 더 복잡합니다. 그래서 우리는:
  *
  *   ge->avg.load_avg = ge->load.weight * ge->avg.runnable_avg		(2)
  *
- *   그리고 util과 마찬가지로 runnable을 직접 양도할 수 있어야 하므로 
+ *   그리고 util과 마찬가지로 runnable을 직접 양도할 수 있어야 하므로
  *   다음과 같이 간단하게 접근할 수 있습니다.
  *
  *   grq->avg.load_avg = grq->load.weight * grq->avg.runnable_avg	(3)
  *
- *   그리고 (1)에 따라 다음이 있습니다. 
+ *   그리고 (1)에 따라 다음이 있습니다.
  *
- *   ge->avg.runnable_avg == grq->avg.runnable_avg 
+ *   ge->avg.runnable_avg == grq->avg.runnable_avg
  *
- *   다음을 제공합니다. 
+ *   다음을 제공합니다.
  *
  *                      ge->load.weight * grq->avg.load_avg
  *   ge->avg.load_avg = -----------------------------------		(4)
  *                               grq->load.weight
- * 
+ *
  *   틀린 것만 빼면!
  *
- *   entity의 경우 historical weight는 중요하지 않고 실제로는 미래에만 관심이 
- *   있으므로 순수 runnable sum을 고려할 수 있지만 rq는 이를 수행할 수 
+ *   entity의 경우 historical weight는 중요하지 않고 실제로는 미래에만 관심이
+ *   있으므로 순수 runnable sum을 고려할 수 있지만 rq는 이를 수행할 수
  *   없습니다.
  *   (se는 weight 필요없이 runnable값으로만 계산해도 상관없지만, cfs_rq는
  *   필요해서 결국 weight를 고려해야된다는 말이다.)
  *
- *   우리는 특히 rq가 historical weight를 포함하는 load_avg를 갖기를 원합니다. 
- *   그것들은 blocked load, 즉 (곧) 우리에게 돌아올 것으로 예상되는 load를 
- *   나타냅니다. 
- *   이것은 weight를 sum의 필수적인 부분으로 유지해야만 작동합니다. 따라서 
- *   (3)에 따라 분해할 수 없습니다. 
- *   (historical weight load_avg가 rq에 필요하기 때문에 결국 load sum을 
+ *   우리는 특히 rq가 historical weight를 포함하는 load_avg를 갖기를 원합니다.
+ *   그것들은 blocked load, 즉 (곧) 우리에게 돌아올 것으로 예상되는 load를
+ *   나타냅니다.
+ *   이것은 weight를 sum의 필수적인 부분으로 유지해야만 작동합니다. 따라서
+ *   (3)에 따라 분해할 수 없습니다.
+ *   (historical weight load_avg가 rq에 필요하기 때문에 결국 load sum을
  *   계산할때 weight를 사용해야된다는 의미.)
  *
- *   이것이 작동하지 않는 또 다른 이유는 runnable이 0-sum entity가 아니기 
- *   때문입니다.  
- *   각각 2/3 시간 동안 runnable 2개의 작업이 있는 rq를 상상해 보십시오. 
- *   그런 다음 rq 자체는 이러한 작업의 runnable 섹션이 겹치는 방식 
- *   (또는 겹치지 않음)에 따라 2/3에서 1 사이 어디에서나 runnable 가능합니다. 
- *   rq를 전체적으로 완벽하게 정렬하려면 시간의 2/3를 runnable 수 있습니다. 
- *   그러나 항상 최소한 하나의 runnable 작업이 있는 경우 전체 rq는 항상 
+ *   이것이 작동하지 않는 또 다른 이유는 runnable이 0-sum entity가 아니기
+ *   때문입니다.
+ *   각각 2/3 시간 동안 runnable 2개의 작업이 있는 rq를 상상해 보십시오.
+ *   그런 다음 rq 자체는 이러한 작업의 runnable 섹션이 겹치는 방식
+ *   (또는 겹치지 않음)에 따라 2/3에서 1 사이 어디에서나 runnable 가능합니다.
+ *   rq를 전체적으로 완벽하게 정렬하려면 시간의 2/3를 runnable 수 있습니다.
+ *   그러나 항상 최소한 하나의 runnable 작업이 있는 경우 전체 rq는 항상
  *   runnable 가능합니다.
  *   (각 task runnable시간의 sum이 group의 sum보다 같거나 작을수박에
  *   없다는의미.)
  *
- *   그래서 우리는 근사해야 할 것입니다.. :/ 
+ *   그래서 우리는 근사해야 할 것입니다.. :/
  *
- *   주어진 제약조건: 
+ *   주어진 제약조건:
  *
- *   ge->avg.running_sum <= ge->avg.runnable_sum <= LOAD_AVG_MAX 
+ *   ge->avg.running_sum <= ge->avg.runnable_sum <= LOAD_AVG_MAX
  *
  *   최소한의 overlap을 가정하여 rq에 runnable을 추가하는 규칙을 구성할 수 있습니다.
  *   (runnable이 양수인경우엔 overlap의 개념을 도입해서 적당히 그냥 add만
  *   한다는 의미.)
  *
- *   제거할 때 각 작업이 동등하게 runnable이라고가정합니다. 결과는 다음과 
+ *   제거할 때 각 작업이 동등하게 runnable이라고가정합니다. 결과는 다음과
  *   같습니다.
  *
- *   grq->avg.runnable_sum = grq->avg.load_sum / grq->load.weight 
+ *   grq->avg.runnable_sum = grq->avg.load_sum / grq->load.weight
  *
- *   (runnable이 음수일때는 제거되는 과정이 되므로 overlap된값을 결국 배제하고 
+ *   (runnable이 음수일때는 제거되는 과정이 되므로 overlap된값을 결국 배제하고
  *   좀 정확히 계산해야되므로 식을 사용해 계산해야된다는 의미.)
  *
- *   XXX: 
- *   runnable > running ? 부분에 대해서만 이 작업을 수행합니다. 
+ *   XXX:
+ *   runnable > running ? 부분에 대해서만 이 작업을 수행합니다.
  *
  * ------------------ chat open ai --------------------------------------
  * --- 주석의 줄임말
- * - "IFF"는 "if and only if"의 약자입니다. 명제가 특정 조건에서만 참임을 
+ * - "IFF"는 "if and only if"의 약자입니다. 명제가 특정 조건에서만 참임을
  *   나타내는 데 사용됩니다.
 *
 *  -"XXX"는 수행해야 하거나 추가 주의가 필요한 작업에 대한 자리 표시자입니다.
-*   검토하거나 수정해야 하는 영역을 나타내기 위해 코드 주석에서 자주 
-*   사용됩니다. 
+*   검토하거나 수정해야 하는 영역을 나타내기 위해 코드 주석에서 자주
+*   사용됩니다.
 *
 *  - 0-sum entity
-*  스케줄러에서 "runnable" entity의 개념입니다. 
-*  "0-sum"이라는 용어는 작업 그룹에 대한 "runnable" 시간의 sum가 그룹이 
-*  실행 가능한 총 시간과 반드시 같지는 않다는 사실을 나타냅니다. 이는 그룹의 
-*  작업이 항상 동시에 실행되지 않을 수 있기 때문에 그룹 전체가 개별 작업의 
-*  실행 가능한 시간의 합보다 더 긴 시간 동안 실행될 수 있기 때문입니다. 
+*  스케줄러에서 "runnable" entity의 개념입니다.
+*  "0-sum"이라는 용어는 작업 그룹에 대한 "runnable" 시간의 sum가 그룹이
+*  실행 가능한 총 시간과 반드시 같지는 않다는 사실을 나타냅니다. 이는 그룹의
+*  작업이 항상 동시에 실행되지 않을 수 있기 때문에 그룹 전체가 개별 작업의
+*  실행 가능한 시간의 합보다 더 긴 시간 동안 실행될 수 있기 때문입니다.
 * --------------------
 * --- PELT 관련 용어 ---
 *  - PELT window
-*  task 또는 task gorup의 load 및 util을 추적하는 기간입니다. PELT window의 
-*  크기는 task 또는 task group의 load 및 util avg이 업데이트되는 빈도에 따라 
-*  결정됩니다. 
+*  task 또는 task gorup의 load 및 util을 추적하는 기간입니다. PELT window의
+*  크기는 task 또는 task group의 load 및 util avg이 업데이트되는 빈도에 따라
+*  결정됩니다.
 *
-*  PELT window의 크기는 task 또는 task group의 load 및 util avg이 
-*  업데이트되는 빈도에 따라 결정됩니다. load 및 uitl avg은 일반적으로 
-*  1ms의 정기적인 간격으로 업데이트됩니다. 즉, PELT window의 크기도 
+*  PELT window의 크기는 task 또는 task group의 load 및 util avg이
+*  업데이트되는 빈도에 따라 결정됩니다. load 및 uitl avg은 일반적으로
+*  1ms의 정기적인 간격으로 업데이트됩니다. 즉, PELT window의 크기도
 *  1ms이며 업데이트 간격과 동시에 시작하고 끝납니다.
 *
 *  - PELT window align
-*  서로 다른 task 및 task group의 PELT window을 서로 정렬하면 크기와 
-*  시작 및 종료 시간이 동일함을 의미합니다. PELT 창을 정렬하면 task 및 
-*  task group에 대해 계산된 load 및 util avg의 정확도를 개선하는 데 도움이 
+*  서로 다른 task 및 task group의 PELT window을 서로 정렬하면 크기와
+*  시작 및 종료 시간이 동일함을 의미합니다. PELT 창을 정렬하면 task 및
+*  task group에 대해 계산된 load 및 util avg의 정확도를 개선하는 데 도움이
 *  될 수 있습니다.
 *
-*  예를 들어 A와 B라는 두 개의 task과 CPU에서 실행되는 G라는 task group이 
-*  있다고 가정합니다. A, B, G의 load 및 util avg은 PELT 알고리즘을 사용하여 
+*  예를 들어 A와 B라는 두 개의 task과 CPU에서 실행되는 G라는 task group이
+*  있다고 가정합니다. A, B, G의 load 및 util avg은 PELT 알고리즘을 사용하여
 *  계산되며 각 task 및 task group에는 자체 PELT window가 있습니다.
 *
-*  A, B, G의 PELT window가 서로 정렬되어 있지 않으면 크기나 시작 시간과 
-*  종료 시간이 같지 않다는 의미입니다. PELT 알고리즘은 서로 다른 기간 
-*  동안 task 및 task group의 load 및 util을 추적하므로 각 task 및 
+*  A, B, G의 PELT window가 서로 정렬되어 있지 않으면 크기나 시작 시간과
+*  종료 시간이 같지 않다는 의미입니다. PELT 알고리즘은 서로 다른 기간
+*  동안 task 및 task group의 load 및 util을 추적하므로 각 task 및
 *  task group에 대해 계산된 load 및 util avg이 부정확해질 수 있습니다.
 *
-*  반면에 A, B, G의 PELT 창들이 서로 정렬되어 있다면 크기와 시작 시간과 
-*  종료 시간이 같다는 뜻입니다. 이를 통해 PELT 알고리즘은 동일한 기간 동안 
-*  task 및 task group의 load 및 util을 추적하므로 각 task 및 task group에 
+*  반면에 A, B, G의 PELT 창들이 서로 정렬되어 있다면 크기와 시작 시간과
+*  종료 시간이 같다는 뜻입니다. 이를 통해 PELT 알고리즘은 동일한 기간 동안
+*  task 및 task group의 load 및 util을 추적하므로 각 task 및 task group에
 *  대해 계산된 load 및 util avg의 정확도를 개선하는 데 도움이 될 수 있습니다.
 * --------------------
 * --- load 관련 용어 ---
 *  - historical weigth
-*  과거에 작업 또는 작업 그룹에 주어진 CPU 시간의 양을 나타냅니다. 
-*  스케줄러에서 작업 또는 작업 그룹의 "load_avg"는 향후 소비할 것으로 
-*  예상되는 CPU 시간을 측정한 것입니다. 이 load_avg 값은 작업 또는 그룹의 
-*  현재 및 과거 CPU 사용량을 기반으로 하는 경우가 많습니다. 
+*  과거에 작업 또는 작업 그룹에 주어진 CPU 시간의 양을 나타냅니다.
+*  스케줄러에서 작업 또는 작업 그룹의 "load_avg"는 향후 소비할 것으로
+*  예상되는 CPU 시간을 측정한 것입니다. 이 load_avg 값은 작업 또는 그룹의
+*  현재 및 과거 CPU 사용량을 기반으로 하는 경우가 많습니다.
 *
-*  예를 들어 오랫동안 CPU에서 실행되어 온 작업 그룹을 생각해 보십시오. 
-*  이 그룹은 과거에 많은 CPU 시간을 소비했기 때문에 높은 "역사적 가중치"를 
-*  갖게 됩니다. 그룹이 앞으로도 비슷한 양의 CPU 시간을 계속 사용할 것으로 
-*  예상되면 해당 load_avg 값이 높아집니다. 반면에 그룹이 앞으로 더 적은 
+*  예를 들어 오랫동안 CPU에서 실행되어 온 작업 그룹을 생각해 보십시오.
+*  이 그룹은 과거에 많은 CPU 시간을 소비했기 때문에 높은 "역사적 가중치"를
+*  갖게 됩니다. 그룹이 앞으로도 비슷한 양의 CPU 시간을 계속 사용할 것으로
+*  예상되면 해당 load_avg 값이 높아집니다. 반면에 그룹이 앞으로 더 적은
 *  CPU 시간을 소비할 것으로 예상되는 경우에는 load_avg 값이 더 낮아집니다.
 *
 *  - blocked load
-*  현재 예약 대기 중이며 현재 CPU에서 실행되고 있지 않은 작업의 load입니다. 
-*  이러한 task은 스케줄러에서 CPU를 할당할 때까지 실행할 수 없기 때문에 
-*  "block"된 것으로 간주됩니다.  
+*  현재 예약 대기 중이며 현재 CPU에서 실행되고 있지 않은 작업의 load입니다.
+*  이러한 task은 스케줄러에서 CPU를 할당할 때까지 실행할 수 없기 때문에
+*  "block"된 것으로 간주됩니다.
 *
-*  blocked load는 block task가 실행 가능해지고 CPU에서 실행되도록 예약된 후 
-*  task 또는 task group이 반환될 것으로 예상되는 load를 나타내기 때문에 
+*  blocked load는 block task가 실행 가능해지고 CPU에서 실행되도록 예약된 후
+*  task 또는 task group이 반환될 것으로 예상되는 load를 나타내기 때문에
 *  task 또는 task group의 load avg에 포함됩니다. load avg에 block load를
-*  포함함으로써 스케줄러는 예약 대기 중인 작업의 CPU 리소스 사용량을 
-*  고려하고 다른 task 및 task group에 CPU 시간을 할당하는 방법에 대해 더 많은 
+*  포함함으로써 스케줄러는 예약 대기 중인 작업의 CPU 리소스 사용량을
+*  고려하고 다른 task 및 task group에 CPU 시간을 할당하는 방법에 대해 더 많은
 *  정보에 입각한 결정을 내릴 수 있습니다.
 *
-*  blocked load는 task 또는 task group의 avg load를 계산하는 데 사용되기 
-*  때문에 load sum의 필수 부분으로 유지됩니다. 하중 avg은 하중 sum를 
-*  PELT window의 크기로 나누어 계산합니다. blocked load가 load sum의 필수 
-*  부분으로 포함되지 않은 경우 load avg에 정확하게 반영되지 않으며 
-*  스케줄러는 task 또는 task group의 CPU 리소스 사용에 대한 완전한 그림을 
-*  갖지 못할 것입니다. 
+*  blocked load는 task 또는 task group의 avg load를 계산하는 데 사용되기
+*  때문에 load sum의 필수 부분으로 유지됩니다. 하중 avg은 하중 sum를
+*  PELT window의 크기로 나누어 계산합니다. blocked load가 load sum의 필수
+*  부분으로 포함되지 않은 경우 load avg에 정확하게 반영되지 않으며
+*  스케줄러는 task 또는 task group의 CPU 리소스 사용에 대한 완전한 그림을
+*  갖지 못할 것입니다.
 *
 * - overlap
-*  A와 B라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오. 
-*  작업 A는 실행 가능한 시간의 50%이고 작업 B는 실행 가능한 시간의 
-*  40%입니다. 이 경우 두 작업의 실행 가능한 기간이 완전히 겹치기 때문에 
-*  runqueue는 항상 실행 가능합니다. 작업 A가 실행 가능할 때 작업 B도 실행 
-*  가능한 시간의 40%이고 작업 B가 실행 가능한 경우 작업 A도 실행 가능한 
-*  시간의 50%이기 때문입니다.  
+*  A와 B라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오.
+*  작업 A는 실행 가능한 시간의 50%이고 작업 B는 실행 가능한 시간의
+*  40%입니다. 이 경우 두 작업의 실행 가능한 기간이 완전히 겹치기 때문에
+*  runqueue는 항상 실행 가능합니다. 작업 A가 실행 가능할 때 작업 B도 실행
+*  가능한 시간의 40%이고 작업 B가 실행 가능한 경우 작업 A도 실행 가능한
+*  시간의 50%이기 때문입니다.
 *
-*  이제 C와 D라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오. 
-*  작업 C는 실행 가능한 시간의 60%이고 작업 D는 실행 가능한 시간의 
-*  70%입니다. 이 경우 runqueue는 두 작업의 실행 가능한 기간이 겹치는 방식에 
-*  따라 시간의 60%에서 100% 사이 어디에서나 실행할 수 있습니다. 두 작업을 
-*  동시에 실행할 수 없는 경우 실행 대기열은 시간의 60%만 실행할 수 
-*  있습니다(각 작업이 실행 가능한 최소 시간). 두 작업이 항상 동시에 실행 
-*  가능한 경우 실행 대기열은 시간의 100% 실행 가능합니다(각 작업이 실행 
-*   가능한 최대 시간). 두 작업의 실행 가능 기간이 겹치면 실행 대기열 
-*   실행 가능 시간이 60%에서 100% 사이가 됩니다. 
+*  이제 C와 D라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오.
+*  작업 C는 실행 가능한 시간의 60%이고 작업 D는 실행 가능한 시간의
+*  70%입니다. 이 경우 runqueue는 두 작업의 실행 가능한 기간이 겹치는 방식에
+*  따라 시간의 60%에서 100% 사이 어디에서나 실행할 수 있습니다. 두 작업을
+*  동시에 실행할 수 없는 경우 실행 대기열은 시간의 60%만 실행할 수
+*  있습니다(각 작업이 실행 가능한 최소 시간). 두 작업이 항상 동시에 실행
+*  가능한 경우 실행 대기열은 시간의 100% 실행 가능합니다(각 작업이 실행
+*   가능한 최대 시간). 두 작업의 실행 가능 기간이 겹치면 실행 대기열
+*   실행 가능 시간이 60%에서 100% 사이가 됩니다.
 *
 * - assuming minimal overlap
-*   runqueue(rq)에 대한 실행 가능 시간을 계산할 때 runqueue에 있는 작업의 
-*   실행 가능 기간이 많이 겹치지 않는다고 가정하는 것을 의미합니다. 이로 
+*   runqueue(rq)에 대한 실행 가능 시간을 계산할 때 runqueue에 있는 작업의
+*   실행 가능 기간이 많이 겹치지 않는다고 가정하는 것을 의미합니다. 이로
 *   인해 runqueue의 실행 가능한 시간에 대한 추정치가 낮아집니다.
 *
-*   예를 들어 E와 F라는 두 개의 작업이 있는 실행 대기열이 있고 실행 대기열의 
-*   실행 가능 시간을 계산하려는 경우 두 작업의 실행 가능 기간이 전혀 겹치지 
-*   않는다고 가정할 수 있습니다. 이 경우 실행 대기열에 대한 총 실행 가능 
-*   시간을 얻기 위해 각 작업에 대한 실행 가능 시간을 추가하기만 하면 됩니다. 
-*   이렇게 하면 두 작업 간의 중복이 최소화된다고 가정하기 때문에 실행 
+*   예를 들어 E와 F라는 두 개의 작업이 있는 실행 대기열이 있고 실행 대기열의
+*   실행 가능 시간을 계산하려는 경우 두 작업의 실행 가능 기간이 전혀 겹치지
+*   않는다고 가정할 수 있습니다. 이 경우 실행 대기열에 대한 총 실행 가능
+*   시간을 얻기 위해 각 작업에 대한 실행 가능 시간을 추가하기만 하면 됩니다.
+*   이렇게 하면 두 작업 간의 중복이 최소화된다고 가정하기 때문에 실행
 *   대기열의 실행 가능한 시간에 대한 추정치가 낮아집니다.
 *
-*   반면에 두 작업의 실행 가능한 기간이 상당히 겹친다고 가정하면 실행 
-*   대기열의 실행 가능한 시간에 대해 더 높은 추정치를 얻을 수 있습니다. 
-*   작업이 동시에 더 자주 실행될 수 있다고 가정하기 때문에 실행 대기열의 
-*   전체 실행 가능 시간이 늘어납니다. 
+*   반면에 두 작업의 실행 가능한 기간이 상당히 겹친다고 가정하면 실행
+*   대기열의 실행 가능한 시간에 대해 더 높은 추정치를 얻을 수 있습니다.
+*   작업이 동시에 더 자주 실행될 수 있다고 가정하기 때문에 실행 대기열의
+*   전체 실행 가능 시간이 늘어납니다.
 * --------------------
  * ----------------------------------------------------------------------
 * - @gcfs_rq나 @se에 변화가 생긴경우 @se, @cfs를 update한다.
@@ -4461,12 +4461,12 @@ update_tg_cfs_runnable(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cf
  * - propagate runnable sum값의 증감 유무에 따라 @se의 load를 update하고
  *   변경된 값만큼 @cfs_rq의 load를 재계산한다.
  *
- * 1. 증가하는경우 assuming minimal overlap을 적용하는 개념으로 
+ * 1. 증가하는경우 assuming minimal overlap을 적용하는 개념으로
  *    add 와 divider에 대한 min처리만 수행한다.
  *
  * 2. 감소하는 경우는 weight를 고려한다. 위쪽 주석의 식에 따라
  *                      ge->load.weight * grq->avg.load_avg
- *   ge->avg.load_avg = -----------------------------------	
+ *   ge->avg.load_avg = -----------------------------------
  *                               grq->load.weight
  *
  *   를 사용하여 재계산한다. 단 재계산값이 증가했을 경우엔 min처리를 한다.
@@ -4507,10 +4507,10 @@ update_tg_cfs_load(struct cfs_rq *cfs_rq, struct sched_entity *se, struct cfs_rq
 
 /*
  * IAMROOT, 2022.12.31:
- * - 감소됬다면 task runnable이 균등하게 계산한다는 관점으로 avg와 weight로 
+ * - 감소됬다면 task runnable이 균등하게 계산한다는 관점으로 avg와 weight로
  *   재계산한다.
  *
- *   runnable_sum = grq->avg.load_sum / grq->load.weight 
+ *   runnable_sum = grq->avg.load_sum / grq->load.weight
  */
 		/*
 		 * Estimate the new unweighted runnable_sum of the gcfs_rq by
@@ -4768,7 +4768,7 @@ update_cfs_rq_load_avg(u64 now, struct cfs_rq *cfs_rq)
 /*
  * IAMROOT, 2022.12.31:
  * - papago
- *   removed_runnable은 removed_load의 비가중 버전이므로 removed_load_sum을 
+ *   removed_runnable은 removed_load의 비가중 버전이므로 removed_load_sum을
  *   추정하는 데 사용할 수 있습니다.
  *
  * - 감소된값을 propagate해야된다. 감소된값을 기록한다.
@@ -4827,7 +4827,7 @@ static void attach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 /*
  * IAMROOT, 2023.01.07:
  * - papago
- *   @se를 @cfs_rq에 첨부할 때 decay window 을 정렬해야 합니다. 그렇지 않으면 정말 이상하고 
+ *   @se를 @cfs_rq에 첨부할 때 decay window 을 정렬해야 합니다. 그렇지 않으면 정말 이상하고
  *   멋진 일이 발생할 수 있기 때문입니다.
  *   (entity 입장에서의 decay window에 대한 정렬을 의미)
  */
@@ -4843,8 +4843,8 @@ static void attach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 /*
  * IAMROOT, 2023.01.07:
  * - papago
- *   Hell(o) 불쾌한 물건.. 새 period_contrib를 기반으로 _sum을 다시 계산해야 합니다. 
- *   이것은 정확하지는 않지만 우리는 완전히 PELT 계층 구조 밖에 있기 때문에 _sum을 
+ *   Hell(o) 불쾌한 물건.. 새 period_contrib를 기반으로 _sum을 다시 계산해야 합니다.
+ *   이것은 정확하지는 않지만 우리는 완전히 PELT 계층 구조 밖에 있기 때문에 _sum을
  *   약간 잘라도 아무도 신경 쓰지 않습니다.
  */
 	se->avg.util_sum = se->avg.util_avg * divider;
@@ -4942,7 +4942,7 @@ static void detach_entity_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
  *    2. @cfs_rq에 대한 load avg 계산.
  *    3. @se에 대한 전파 처리.
  *    4. @se가 attach인 경우 @cfs_rq에 attach.
- *    5. decay됫거나 attach인경우 
+ *    5. decay됫거나 attach인경우
  *       cpu freq 변경시도, taskgroup에 변경을 알려야되는경우 update.
  */
 static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *se, int flags)
@@ -5607,7 +5607,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 
 /*
  * IAMROOT, 2023.01.07:
- * - @curr runtime을 종료된것을 검사한다. 다 사용됬으면 
+ * - @curr runtime을 종료된것을 검사한다. 다 사용됬으면
  *   @cfs_rq의 cpu한테 reschedule 요청을 한다.
  */
 
@@ -5706,7 +5706,7 @@ set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   CPU 부하가 자체 무게의 두 배 이상인 경우 최대 슬라이스 길이를 추적합니다(즉, 주변에 더 
+ *   CPU 부하가 자체 무게의 두 배 이상인 경우 최대 슬라이스 길이를 추적합니다(즉, 주변에 더
  *   가벼운 작업만 있는 경우 추적하지 않음).
  */
 	if (schedstat_enabled() &&
@@ -5757,9 +5757,9 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   curr이 설정되어 있으면 트리에 아무 것도 없는 경우 가장 왼쪽 엔터티의 왼쪽이 여전히 
+ *   curr이 설정되어 있으면 트리에 아무 것도 없는 경우 가장 왼쪽 엔터티의 왼쪽이 여전히
  *   트리에 있는지 확인해야 합니다.
- *   
+ *
  * - curr가 left보다 왼쪽인지 확인한다. 더 왼쪽이면 left = curr.
  */
 	if (!left || (curr && entity_before(curr, left)))
@@ -5812,7 +5812,7 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 /*
  * IAMROOT, 2023.01.28:
  * - next를 가장 높은 우선순위로 고려한다.
- * - next가 left 보다 너무 앞서있는경우가 아니면 se를 next로 선택한다. 
+ * - next가 left 보다 너무 앞서있는경우가 아니면 se를 next로 선택한다.
  */
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1) {
 		/*
@@ -5874,7 +5874,7 @@ static void put_prev_entity(struct cfs_rq *cfs_rq, struct sched_entity *prev)
 
 /*
  * IAMROOT, 2022.12.21:
- * - @curr 
+ * - @curr
  *   ex) A:33%, B:33%, C:34%
  *   A가 33%에 대한 분배 시간을 다 마치고 이함수에 진입했을때 curr는 B가 된다.
  * - queued
@@ -6006,7 +6006,7 @@ static inline u64 default_cfs_period(void)
 
 /*
  * IAMROOT, 2022.12.22:
- * - nsec 단위로 return. 기본값 5ms 
+ * - nsec 단위로 return. 기본값 5ms
  */
 static inline u64 sched_cfs_bandwidth_slice(void)
 {
@@ -6023,7 +6023,7 @@ static inline u64 sched_cfs_bandwidth_slice(void)
 /*
  * IAMROOT, 2022.12.23:
  * - papago
- *   할당량에 따라 런타임을 보충합니다. rq->lock 주변에 추가 동기화를 추가하지 
+ *   할당량에 따라 런타임을 보충합니다. rq->lock 주변에 추가 동기화를 추가하지
  *   않도록 rq->clock 대신 sched_clock_cpu를 직접 사용합니다.
  *
  *   cfs_b->잠금이 필요합니다.
@@ -6056,15 +6056,15 @@ static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
  *
  *  1) quota == RUNTIME_INF. bandwidth 사용안하는 경우
  *  cfs_b | runtime_  | cfs_b   || timer | runtime_  |
- *  qouta | remaining | runtime || 예약  | remaining | runtime 
+ *  qouta | remaining | runtime || 예약  | remaining | runtime
  *  +-----+-----------+---------++-------+-----------+--------
- *  | ~0  | -         | -       || X     | 5ms       | 유지     
+ *  | ~0  | -         | -       || X     | 5ms       | 유지
  *
  *  2) runtime_remain 이 target_runtime이 될때까지 불충분한 경우
  *     남아있는 runtime만큼 runtime_remain이 충전된다.
  *
  *  | runtime_  | cfs_b   || timer | runtime_  |
- *  | remaining | runtime || 예약  | remaining | runtime 
+ *  | remaining | runtime || 예약  | remaining | runtime
  *  +-----------+---------++-------+-----------+--------
  *  | 0ms       | 0ms     || O     | 0ms       | 0ms
  *  | 0ms       | 1ms     || O     | 1ms       | 0ms
@@ -6078,7 +6078,7 @@ static inline struct cfs_bandwidth *tg_cfs_bandwidth(struct task_group *tg)
  *  3) runtime_remain이 target_runtime이 될때까지 충분한 경우
  *
  *  | runtime_  | cfs_b   || timer | runtime_  |
- *  | remaining | runtime || 예약  | remaining | runtime 
+ *  | remaining | runtime || 예약  | remaining | runtime
  *  +-----------+---------++-------+-----------+--------
  *  | 0ms       | 5ms     || O     | 5ms       | 0ms
  *  | 5ms       | 0ms     || O     | 5ms       | 0ms
@@ -6122,7 +6122,7 @@ static int __assign_cfs_rq_runtime(struct cfs_bandwidth *cfs_b,
 
 /*
  * IAMROOT, 2022.12.22:
- * - runtime 이미 남아있다면 amount만큼 빼준다. 그리고 뺀만큼을 
+ * - runtime 이미 남아있다면 amount만큼 빼준다. 그리고 뺀만큼을
  *   runtime_remaining에 추가한다.
  */
 		if (cfs_b->runtime > 0) {
@@ -6187,7 +6187,7 @@ static void __account_cfs_rq_runtime(struct cfs_rq *cfs_rq, u64 delta_exec)
  * - likely(cfs_rq->curr)
  *   현재 실행중
  * - assign_cfs_rq_runtime(cfs_rq)
- *   runtime_remain을 얻어오고 period_timer 예약 
+ *   runtime_remain을 얻어오고 period_timer 예약
  * - runtime_remain을 얻어오는데 실패했는데 실행중이면 resched_curr 요청.
  */
 	/*
@@ -6501,7 +6501,7 @@ static void distribute_cfs_runtime(struct cfs_bandwidth *cfs_b)
 		rq_lock_irqsave(rq, &rf);
 /*
  * IAMROOT, 2022.12.23:
- * - bandwidth 사용중인지, throttle이 남아있는지 확인 
+ * - bandwidth 사용중인지, throttle이 남아있는지 확인
  */
 		if (!cfs_rq_throttled(cfs_rq))
 			goto next;
@@ -6558,11 +6558,11 @@ next:
 /*
  * IAMROOT, 2022.12.23:
  * - papago
- *   task_group의 대역폭을 다시 채우고 cfs_rqs를 적절하게 조절 해제하는 일을 담당합니다. 마지막 기간 
- *   내에 활동이 없으면 예약이 재개될 때까지 타이머가 비활성화됩니다. cfs_b->idle은 이 상태를 추적하는 
- *   데 사용됩니다. 
+ *   task_group의 대역폭을 다시 채우고 cfs_rqs를 적절하게 조절 해제하는 일을 담당합니다. 마지막 기간
+ *   내에 활동이 없으면 예약이 재개될 때까지 타이머가 비활성화됩니다. cfs_b->idle은 이 상태를 추적하는
+ *   데 사용됩니다.
  *
- * @return 0 : timer restart. 
+ * @return 0 : timer restart.
  *         1 : timer 종료.
  *
  * 1. @cfs_b runtime refill
@@ -6590,9 +6590,9 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 	 */
 /*
  * IAMROOT, 2022.12.23:
- * - papago 
- *  유휴는 !throttled(적자가 큰 경우)에 따라 달라지며 비활성 상태가 되면 다른 
- *  모든 작업을 연기할 수 있습니다. 
+ * - papago
+ *  유휴는 !throttled(적자가 큰 경우)에 따라 달라지며 비활성 상태가 되면 다른
+ *  모든 작업을 연기할 수 있습니다.
  *
  * - 이미 idle이 되어있는데 throttled rq도 없는 상황. timer 종료
  */
@@ -6640,8 +6640,8 @@ static int do_sched_cfs_period_timer(struct cfs_bandwidth *cfs_b, int overrun, u
 /*
  * IAMROOT, 2022.12.27:
  * - papago
- *   스로틀 해제 후 기간 동안 활동이 보장되지만 새 대역폭이 기존 대역폭 
- *   부족을 충당하기에 불충분한 경우도 포함됩니다. (조절된 entity가 있는 
+ *   스로틀 해제 후 기간 동안 활동이 보장되지만 새 대역폭이 기존 대역폭
+ *   부족을 충당하기에 불충분한 경우도 포함됩니다. (조절된 entity가 있는
  *   동안 타이머가 활성 상태를 유지하도록 합니다.).
  */
 	cfs_b->idle = 0;
@@ -6899,7 +6899,7 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
 			 */
 /*
  * IAMROOT, 2022.12.23:
- * - 너무 자주 발생한다. 
+ * - 너무 자주 발생한다.
  *   1. period를 2배로 늘리는걸 시도 한다.
  *   2. period동안 사용할 수있는 cpu 작업양 2배로 늘린다.
  *   3. period동안 single burst를 수행하는 cpu 수행 양을 늘린다.
@@ -6950,7 +6950,7 @@ static enum hrtimer_restart sched_cfs_period_timer(struct hrtimer *timer)
  *   period를 쓰는 정도.
  *   ex) period = 1, quota = -1인 경우 (편의상 ns를 sec로 하여 1로 표현)
  *   cfs process A, B가 있는 경우 각각 50%씩 사용. (합쳐서 100%)
- *   
+ *
  *   ex) perioid = 1, quota = 0.3인 경우,
  *   cfs process A, B가 있는 경우 각각 16.66%씩 사용. (33%)
  *
@@ -6986,7 +6986,7 @@ static void init_cfs_rq_runtime(struct cfs_rq *cfs_rq)
 
 /*
  * IAMROOT, 2022.12.22:
- * - perioid_timer(sched_cfs_period_timer)를 cfs_b->period후에 
+ * - perioid_timer(sched_cfs_period_timer)를 cfs_b->period후에
  *   시작하도록한다.
  */
 void start_cfs_bandwidth(struct cfs_bandwidth *cfs_b)
@@ -8702,7 +8702,7 @@ static unsigned long wakeup_gran(struct sched_entity *se)
  *   이제 curr가 실행되기 때문에 gran을 실시간에서 가상 시간으로 단위로 변환하십시오.
  *
  *   'curr' 대신 'se'를 사용하여 가벼운 작업에 페널티를 주어 더 쉽게 선점할 수 있습니다.
- *   즉, 'se' < 'curr'이면 결과 gran이 더 커지므로 더 가벼운 작업에 페널티를 주고, 
+ *   즉, 'se' < 'curr'이면 결과 gran이 더 커지므로 더 가벼운 작업에 페널티를 주고,
  *   otoh 'se' > 'curr'이면 결과 gran이 더 작아지므로 더 가벼운 작업에 페널티를 줍니다.
  *
  *   이것은 가장 왼쪽 작업이 버디보다 우선순위가 높을 때 버디에게 특히 중요합니다.
@@ -8734,10 +8734,10 @@ static unsigned long wakeup_gran(struct sched_entity *se)
  *
  * - curr |  se   : -1
  *
- * -      gran 
+ * -      gran
  *   se |  curr | : 0
  *
- * -      gran 
+ * -      gran
  *   se |      |  curr : 1
  */
 static int
@@ -8947,10 +8947,10 @@ again:
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   dequeue_task_fair()의 set_next_buddy() 때문에 다음 작업이 현재 작업과 동일한 cgroup에서 
+ *   dequeue_task_fair()의 set_next_buddy() 때문에 다음 작업이 현재 작업과 동일한 cgroup에서
  *   나올 가능성이 높습니다.
  *
- *   따라서 전체 cgroup 계층 구조를 넣거나 설정하는 것을 피하고 실제로 변경되는 부분만 
+ *   따라서 전체 cgroup 계층 구조를 넣거나 설정하는 것을 피하고 실제로 변경되는 부분만
  *   변경하십시오.
  *
  * - 계층구조로 내려가면서 curr의 next를 순회한다. 최종적으로 마지막 next로 선택된것을
@@ -8968,8 +8968,8 @@ again:
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   put_prev_entity()를 수행하지 않고 여기에 왔기 때문에 cfs_rq->curr도 고려해야 합니다. 
- *   여전히 실행 가능한 엔터티인 경우 update_curr()는 vruntime을 업데이트하고, 그렇지 않으면 
+ *   put_prev_entity()를 수행하지 않고 여기에 왔기 때문에 cfs_rq->curr도 고려해야 합니다.
+ *   여전히 실행 가능한 엔터티인 경우 update_curr()는 vruntime을 업데이트하고, 그렇지 않으면
  *   우리가 본 적이 있다는 사실을 잊어버립니다.
  */
 		if (curr) {
@@ -8992,9 +8992,9 @@ again:
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   check_cfs_rq_runtime()에 대한 이 호출은 스로틀링을 수행하고 상위 항목의 대기열에서 
+ *   check_cfs_rq_runtime()에 대한 이 호출은 스로틀링을 수행하고 상위 항목의 대기열에서
  *   제외합니다.
- *   따라서 nr_running 테스트는 실제로 정확합니다. 
+ *   따라서 nr_running 테스트는 실제로 정확합니다.
  * - throttle인지 확인한다.
  */
 			if (unlikely(check_cfs_rq_runtime(cfs_rq))) {
@@ -9021,7 +9021,7 @@ again:
 /*
  * IAMROOT, 2023.01.28:
  * - papago
- *   아직 put_prev_entity를 수행하지 않았고 선택한 작업이 시작과 다른 작업인 경우 최소량의 
+ *   아직 put_prev_entity를 수행하지 않았고 선택한 작업이 시작과 다른 작업인 경우 최소량의
  *   cfs_rq를 터치해 봅니다.
  *
  * - 선택한 p(se)가 @prev가 다르다면 prev se를 put하고, 새로운 p(se)를 set한다.
@@ -9034,7 +9034,7 @@ again:
  * - se, pse가 같은 cfs_rq소속일때까지 반복하며
  *   pse를 cfs_rq에 enqueue, se를 cfs_rq에서 dequeue를 하고, se를 curr로 update한다.
  *
- *         O 
+ *         O
  *        / \
  *       O <----same_group
  *      / \
@@ -9046,12 +9046,11 @@ again:
 			int se_depth = se->depth;
 			int pse_depth = pse->depth;
 
-			p
 /*
  * IAMROOT, 2023.01.28:
  * - pse가 se보다 더 깊거나 같은 위치. pse를 put해준다.
  * - ex)
- *         O 
+ *         O
  *        / \
  *       O <----same_group
  *      / \
@@ -9072,7 +9071,7 @@ again:
  * IAMROOT, 2023.01.28:
  * - se가 pse보다 더 깊거나 같은 위치. curr를 update해준다.
  * - ex)
- *         O 
+ *         O
  *        / \
  *       O <----same_group
  *      / \
