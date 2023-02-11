@@ -508,6 +508,10 @@ void rq_attach_root(struct rq *rq, struct root_domain *rd)
 		call_rcu(&old_rd->rcu, free_rootdomain);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - ref up
+ */
 void sched_get_rd(struct root_domain *rd)
 {
 	atomic_inc(&rd->refcount);
@@ -667,6 +671,11 @@ DEFINE_PER_CPU(struct sched_domain_shared __rcu *, sd_llc_shared);
 DEFINE_PER_CPU(struct sched_domain __rcu *, sd_numa);
 DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_packing);
 DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - HMP로 동작하는 경우.
+ */
 DEFINE_STATIC_KEY_FALSE(sched_asym_cpucapacity);
 
 static void update_top_cache_domain(int cpu)

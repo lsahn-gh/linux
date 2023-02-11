@@ -109,11 +109,28 @@ ins_node:
  * @node:	&struct plist_node pointer - entry to be removed
  * @head:	&struct plist_head pointer - list head
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - plist(priority list)
+ *   우선순위가 동일한것을 생략한 list한개와, 모두 포함되있는 list 한개가
+ *   있는 개념의 list.
+ * - node_list, prio_list에서 각각 한개씩 지운다.
+ *   단 prio_list에서 삭제함으로써 비워지게 되면 다음 node를 추가한다.
+ */
 void plist_del(struct plist_node *node, struct plist_head *head)
 {
 	plist_check_head(head);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - node단위의 prio_list 에서 
+ */
 	if (!list_empty(&node->prio_list)) {
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 2개 이상인 경우에 next가 empty인 경우 prio_list 한개를 next에 옮긴다.
+ */
 		if (node->node_list.next != &head->node_list) {
 			struct plist_node *next;
 

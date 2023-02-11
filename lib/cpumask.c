@@ -260,18 +260,35 @@ static DEFINE_PER_CPU(int, distribute_cpu_mask_prev);
  *
  * Returns >= nr_cpu_ids if the intersection is empty.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 이전에 사용한 cpu의 next번호를 @src1p, @src2p의 and에서 찾는다.
+ */
 int cpumask_any_and_distribute(const struct cpumask *src1p,
 			       const struct cpumask *src2p)
 {
 	int next, prev;
 
 	/* NOTE: our first selection will skip 0. */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 이전에 선택한 cpu의 next를 src1p, src2p가 겹치는 것중에서 고른다.
+ */
 	prev = __this_cpu_read(distribute_cpu_mask_prev);
 
 	next = cpumask_next_and(prev, src1p, src2p);
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 못찾앗으면 그냥 겹치는것중에 처음것을 고른다.
+ */
 	if (next >= nr_cpu_ids)
 		next = cpumask_first_and(src1p, src2p);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 찾앗으면 prev로 기록한다.
+ */
 	if (next < nr_cpu_ids)
 		__this_cpu_write(distribute_cpu_mask_prev, next);
 

@@ -2,6 +2,10 @@
 
 #define CPUPRI_NR_PRIORITIES	(MAX_RT_PRIO+1)
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - cpupri는 번호가 높을수록 우선순위가 높다.
+ */
 #define CPUPRI_INVALID		-1
 #define CPUPRI_NORMAL		 0
 /* values 1-99 are for RT1-RT99 priorities */

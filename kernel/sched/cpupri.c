@@ -40,6 +40,16 @@
  *
  *				 100	  100 (CPUPRI_HIGHER)
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 원래 prio는 낮을수록 우선순위가 높은데, 이를 역으로 변환하여
+ *   높을수록 우선순위가 높도록 한다.
+ *   (cpupri 또는 user 관점 priority는 번호가 높을수록 우선순위가 높다.)
+ * ----
+ * - 옛날에는 102개 체재 였다(idle이란게 있었다.). 지금은 idle이 빠져 
+ *   101개 체재가 됬다.
+ *   101개 체재에선 RT100을 NORMAL과 동일하게 처리한다.
+ */
 static int convert_prio(int prio)
 {
 	int cpupri;
@@ -58,6 +68,10 @@ static int convert_prio(int prio)
 		break;
 
 	case MAX_RT_PRIO:
+/*
+ * IAMROOT, 2023.02.11:
+ * - deadline 용인듯 싶다.
+ */
 		cpupri = CPUPRI_HIGHER;		/* 100 */
 		break;
 	}
@@ -65,9 +79,20 @@ static int convert_prio(int prio)
 	return cpupri;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @p->cpumask와 @idx 우선순위에 해당하는 cpupri에 둘다 포함되는 cpu가 
+ *   있으면 return 1.
+ *   @lowest_mask 가 NULL이 아니면 겹치는 cpu가 lowest_mask에 기록된다.
+ */
 static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 				struct cpumask *lowest_mask, int idx)
 {
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - @cp의 @idx에 
+ */
 	struct cpupri_vec *vec  = &cp->pri_to_cpu[idx];
 	int skip = 0;
 
@@ -91,15 +116,46 @@ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 	 *  pull this task if the run queue is running at a lower
 	 *  priority.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   벡터를 볼 때 카운터를 읽고 메모리 배리어를 수행한 다음 마스크를 읽어야 
+ *   합니다.
+ *
+ *   Note: 이것은 여전히 정교하지만 처리 할 수 있습니다.
+ *   이상적으로는 설정된 마스크만 보고자 합니다.
+ *
+ *   마스크가 설정되지 않은 경우 유일한 잘못된 점은 필요한 것보다 조금 더 
+ *   많은 작업을 수행한 것입니다.
+ *
+ *   메모리 장벽으로 인해 0 카운트를 읽었지만 마스크가 설정된 경우 실행 
+ *   대기열에 대한 가장 높은 우선 순위 작업이 실행 대기열을 떠났을 때만 
+ *   발생할 수 있으며 이 경우 풀이 이어집니다. 우리가 처리하고 있는 작업이 
+ *   갈 적절한 위치를 찾는 데 실패하면 실행 대기열이 낮은 우선순위에서 실행 
+ *   중인 경우 풀 요청이 이 작업을 풀합니다.
+ */
 	smp_rmb();
 
 	/* Need to do the rmb for every iteration */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 해당 우선순위에 해당하는 cpu가 하나도 없으면 return.
+ */
 	if (skip)
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 미포함. return 0.
+ */
 	if (cpumask_any_and(&p->cpus_mask, vec->mask) >= nr_cpu_ids)
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - cpu_mask와 vec mask 와 겹치는 mask가 있으면 return 1.
+ *   없으면 return 0
+ */
 	if (lowest_mask) {
 		cpumask_and(lowest_mask, &p->cpus_mask, vec->mask);
 
@@ -111,6 +167,14 @@ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 		 * condition, simply act as though we never hit this
 		 * priority level and continue on.
 		 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   vec->mask의 첫 번째 읽기와 두 번째 읽기 사이에 맵이 동시에 비워질 
+ *   수 있기 때문에 배열에 적어도 하나의 비트가 여전히 설정되어 있는지 
+ *   확인해야 합니다. 이 조건에 도달하면 이 우선 순위 수준에 도달하지 않은 
+ *   것처럼 행동하고 계속 진행하십시오.
+ */
 		if (cpumask_empty(lowest_mask))
 			return 0;
 	}
@@ -118,6 +182,11 @@ static inline int __cpupri_find(struct cpupri *cp, struct task_struct *p,
 	return 1;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - fitness_fn 수행을 안하고 그냥 @p의 우선순위 범위에 대해서 @cp에 
+ *   해당하는 cpu를 찾는다.
+ */
 int cpupri_find(struct cpupri *cp, struct task_struct *p,
 		struct cpumask *lowest_mask)
 {
@@ -141,26 +210,76 @@ int cpupri_find(struct cpupri *cp, struct task_struct *p,
  *
  * Return: (int)bool - CPUs were found
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   cpupri_find_fitness - 시스템에서 최상의(가장 낮은 pri) CPU 찾기 
+ *   @cp: cpupri 컨텍스트 
+ *   @p: 작업 
+ *   @lowest_mask: 선택한 CPU(또는 NULL)로 채울 마스크 
+ *   @fitness_fn: 사용자 지정 검사를 수행하는 함수에 대한 포인터는 해당 
+ *   CPU만 반환하도록 CPU가 특정 기준에 맞는지 여부를 확인합니다.
+ *
+ *   참고: 이 함수는 현재 호출 중에 계산된 권장 CPU를 반환합니다. 
+ *   호출이 반환될 때까지 CPU는 실제로 여러 번 우선 순위를 변경했을 수 
+ *   있습니다. 이상적이지는 않지만 일반 리밸런서 로직이 현재 우선 순위 
+ *   구성의 불확실성에 대한 경주로 인해 생성된 모든 불일치를 수정하므로 
+ *   정확성의 문제는 아닙니다.
+ *
+ *   return: (int)bool - CPU가 발견되었습니다.  
+ *
+ * - 1. @p의 우선순위범위에서 @cp 범위와 겹치는 cpu를 찾는다.
+ *   2. @lowest_mask, @fitness_fn 이 있는 경우 찾은 cpu를 기록하고
+ *   fitness_fn을 수행하여 성공한 cpu를 lowest_mask에 기록한다.
+ *   3. @fitness_fn이 없는 경우 cpu를 찾기만 하고 끝낸다.
+ */
 int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
 		struct cpumask *lowest_mask,
 		bool (*fitness_fn)(struct task_struct *p, int cpu))
 {
+/*
+ * IAMROOT, 2023.02.11:
+ * - task priority로 max priority를 구한다.
+ *   자신보다 낮는것을 찾아야되는 상황이다.
+ */
 	int task_pri = convert_prio(p->prio);
 	int idx, cpu;
 
 	BUG_ON(task_pri >= CPUPRI_NR_PRIORITIES);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 낮은것부터 높은순으로 iterate
+ */
 	for (idx = 0; idx < task_pri; idx++) {
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @cp의 idx 우선순위의 cpumask와 @p의 cpumask 둘다 포함되는 cpu를
+ *   lowest_mask에 기록한다. 없으면 continue.
+ */
 		if (!__cpupri_find(cp, p, lowest_mask, idx))
 			continue;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @lowest_mask, fitness_fn 가 인자로 안들어왔으면 그냥 cpu를 찾고 
+ *   끝낸다.
+ */
 		if (!lowest_mask || !fitness_fn)
 			return 1;
 
 		/* Ensure the capacity of the CPUs fit the task */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 찾아낸 lowest_mask에 대해서 @fitness_fn을 수행한다.
+ */
 		for_each_cpu(cpu, lowest_mask) {
 			if (!fitness_fn(p, cpu))
+/*
+ * IAMROOT, 2023.02.11:
+ * - 적합하지 않으면 lowest_mask에서 해당 cpu를 clear한다.
+ */
 				cpumask_clear_cpu(cpu, lowest_mask);
 		}
 
@@ -168,9 +287,18 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
 		 * If no CPU at the current priority can fit the task
 		 * continue looking
 		 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 전부 실패한 개념이되므로 다음 priority로 이동.
+ */
 		if (cpumask_empty(lowest_mask))
 			continue;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - fitness_fn을 해당 priority에서 성공한 lowest_mask cpu가 있었다면 
+ *   return 1.
+ */
 		return 1;
 	}
 
@@ -191,9 +319,35 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
 	 * must do proper RT planning to avoid overloading the system if they
 	 * really care.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   적합한 최하위 마스크를 찾지 못한 경우 이번에는 적합성 기준을 고려하지 
+ *   않고 새 검색을 시작합니다. 
+ *
+ *   이 규칙은 올바른 CPU에 작업을 맞추는 것보다 우선 순위를 존중하는 것을 
+ *   선호합니다(현재 용량 인식이 유일한 사용자임).
+ *   아이디어는 더 높은 우선 순위 작업이 실행될 수 있는 경우 적합하지 않은 
+ *   CPU에서 종료되더라도 실행되어야 한다는 것입니다.
+ *
+ *   이 트레이드 오프의 비용은 완전히 명확하지 않으며 일부 워크로드에는 좋고 
+ *   다른 워크로드에는 좋지 않을 수 있습니다.
+ *
+ *   여기서 주요 아이디어는 일부 CPU가 과도하게 커밋된 경우 스케줄러가 
+ *   전통적으로 수행한 대로 확산을 시도한다는 것입니다. 시스템 관리자는 
+ *   정말로 관심이 있는 경우 시스템 과부하를 피하기 위해 적절한 RT 계획을 
+ *   수행해야 합니다.
+ *
+ * - lowest cpu를 priority범위에서 하나도 못찾았다. fitness_fn 함수 수행
+ *   없이 한번더 시도한다.
+ */
 	if (fitness_fn)
 		return cpupri_find(cp, p, lowest_mask);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - fitness_fn 수행요청없이도 cpu를 못찾은상태. return 0.
+ */
 	return 0;
 }
 

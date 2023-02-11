@@ -9152,6 +9152,11 @@ idle:
 	if (!rf)
 		return NULL;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 아래 코드들이 balancing.
+ *   next task를 못고른 상태가 되어 idle이 되기전에 가져올수 있는 task를 찾는다.
+ */
 	new_tasks = newidle_balance(rq, rf);
 
 	/*

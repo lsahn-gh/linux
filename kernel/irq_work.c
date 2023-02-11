@@ -85,6 +85,10 @@ EXPORT_SYMBOL_GPL(irq_work_queue);
  *
  * Can be re-enqueued while the callback is still in progress.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - irq가 끝나고 나서 해소되는 work
+ */
 bool irq_work_queue_on(struct irq_work *work, int cpu)
 {
 #ifndef CONFIG_SMP

@@ -75,12 +75,21 @@ static void cpu_stop_init_done(struct cpu_stop_done *done, unsigned int nr_todo)
 }
 
 /* signal completion unless @done is NULL */
+/*
+ * IAMROOT, 2023.02.11:
+ * - @done에 대해서 complete를 해준다.
+ */
 static void cpu_stop_signal_done(struct cpu_stop_done *done)
 {
 	if (atomic_dec_and_test(&done->nr_todo))
 		complete(&done->completion);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @work에 @stopper->works를 추가한다.
+ *   @wakeq에 @stopper task를 추가한다.
+ */
 static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
 					struct cpu_stop_work *work,
 					struct wake_q_head *wakeq)
@@ -90,6 +99,11 @@ static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
 }
 
 /* queue @work to @stopper.  if offline, @work is completed immediately */
+/*
+ * IAMROOT, 2023.02.11:
+ * - stop queue work에 @work를 넣고 깨운다.
+ *   동작중인 task를 강제로 stop시키고 빼오기 위함이다
+ */
 static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 {
 	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
@@ -100,12 +114,23 @@ static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 	preempt_disable();
 	raw_spin_lock_irqsave(&stopper->lock, flags);
 	enabled = stopper->enabled;
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - enable : queue work동작을 한다.,
+ *   work->done : 기존 작업이 done인 상태. complete전송.
+ *  
+ */
 	if (enabled)
 		__cpu_stop_queue_work(stopper, work, &wakeq);
 	else if (work->done)
 		cpu_stop_signal_done(work->done);
 	raw_spin_unlock_irqrestore(&stopper->lock, flags);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - stopper를 깨운다.
+ */
 	wake_up_q(&wakeq);
 	preempt_enable();
 
@@ -381,6 +406,10 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
  * true if cpu_stop_work was queued successfully and @fn will be called,
  * false otherwise.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - stopper는 cpu_stopper_thread함수를 통해서 work의 @fn을 호출할것이다.
+ */
 bool stop_one_cpu_nowait(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
 			struct cpu_stop_work *work_buf)
 {
@@ -539,8 +568,7 @@ extern void sched_set_stop_task(int cpu, struct task_struct *stop);
 
 static void cpu_stop_create(unsigned int cpu)
 {
-	sched_set_stop_task(cpu, per_cpu(cpu_stopper.thread, cpu));
-}
+	sched_set_stop_task(cpu, per_cpu(cpu_stopper.thread, cpu)); }
 
 static void cpu_stop_park(unsigned int cpu)
 {
@@ -549,6 +577,10 @@ static void cpu_stop_park(unsigned int cpu)
 	WARN_ON(!list_empty(&stopper->works));
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @cpu에 대한 stopper를 enable하고 thread를 unpark한다.
+ */
 void stop_machine_unpark(int cpu)
 {
 	struct cpu_stopper *stopper = &per_cpu(cpu_stopper, cpu);
@@ -567,6 +599,14 @@ static struct smp_hotplug_thread cpu_stop_threads = {
 	.selfparking		= true,
 };
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - cpu_stopper 초기화. smpboot_register_percpu_thread()함수에서 
+ *   thread가 만들어지고, stopper실행시 cpu_stopper_thread()을 통해
+ *   cpu_stop_work에 등록되는 fn들이 호출될것이다.
+ * - ps -ef를 통해서 migration/X가 항상 있는게 확인된다.
+ * - stopper thread는 deadline보다도 높은 우선순위를 가진다.
+ */
 static int __init cpu_stop_init(void)
 {
 	unsigned int cpu;

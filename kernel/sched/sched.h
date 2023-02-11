@@ -883,6 +883,11 @@ struct rt_rq {
 #ifdef CONFIG_SMP
 	unsigned int		rt_nr_migratory;
 	unsigned int		rt_nr_total;
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 두개 이상의 rt_task가 있는 경우 1.
+ */
 	int			overloaded;
 	struct plist_head	pushable_tasks;
 
@@ -1050,6 +1055,10 @@ struct perf_domain {
  */
 struct root_domain {
 	atomic_t		refcount;
+/*
+ * IAMROOT, 2023.02.11:
+ * - rt overloaded task 숫자
+ */
 	atomic_t		rto_count;
 	struct rcu_head		rcu;
 	/*
@@ -1096,6 +1105,10 @@ struct root_domain {
 	raw_spinlock_t		rto_lock;
 	/* These are only updated and read within rto_lock */
 	int			rto_loop;
+/*
+ * IAMROOT, 2023.02.11:
+ * - IPI RT 푸시를 시작할 때 rto_cpu는 -1로 설정된다.
+ */
 	int			rto_cpu;
 	/* These atomics are updated outside of a lock */
 	atomic_t		rto_loop_next;
@@ -1308,6 +1321,10 @@ struct rq {
 	struct sched_domain __rcu	*sd;
 
 	unsigned long		cpu_capacity;
+/*
+ * IAMROOT, 2023.02.11:
+ * - 현재 cpu성능.
+ */
 	unsigned long		cpu_capacity_orig;
 
 	struct callback_head	*balance_callback;
@@ -1454,6 +1471,10 @@ static inline int cpu_of(struct rq *rq)
 
 #define MDF_PUSH	0x01
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - migration이 안되는 task면 return true.
+ */
 static inline bool is_migration_disabled(struct task_struct *p)
 {
 #ifdef CONFIG_SMP
@@ -1836,6 +1857,10 @@ static inline u64 rq_clock(struct rq *rq)
 	return rq->clock;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 현재시각
+ */
 static inline u64 rq_clock_task(struct rq *rq)
 {
 	lockdep_assert_rq_held(rq);
@@ -2075,6 +2100,12 @@ init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 
 #ifdef CONFIG_SMP
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @func를 등록시켜준다.
+ * - @func : push_rt_tasks
+ *           pull_rt_task
+ */
 static inline void
 queue_balance_callback(struct rq *rq,
 		       struct callback_head *head,
@@ -2103,7 +2134,29 @@ queue_balance_callback(struct rq *rq,
  */
 /*
  * IAMROOT, 2022.09.03:
- * - tree 구조로 되있다. sched domain 위로 올라간다.
+ */
+/*
+ * IAMROOT, 2023.02.11:
+ * ----
+ * - schedule domain
+ *   -- SMT  : l1 cache 공유 
+ *   -- MC   : l2 cache 공유
+ *   -- DIE  : l3 cache 공유
+ *   -- NUMA : memory 공유 numa level 1, 2, 3, 4로 세분화되기도한다.
+ *   ex) SMT :  0, 1, MC : 0, 1, 2, 3, DIE : 0, 1, 2, 3, 4, 5, 6, 7
+ *   이라고 가정.
+ *   0번 cpu기준으로 SMT의 1번이 가장 가깝고 그다음 MC의 2, 3이 가깝고
+ *   그다음 DIE의 4, 5, 6, 7이 가까울것이다.
+ *   이런 묶음으로 domain을 구성하여 가까운 cpu를 찾아가는 개념.
+ *
+ *   -- 자기가 속한 domain은 span을 보고 금방 알아낸다.
+ *
+ * - schedule group
+ *   -- cgroup의 group schedule과는 다른 개념.
+ *   -- schedule domain의 아래 단계 개념
+ * ---
+ * - tree 구조로 되있다. sched domain 위로(SMT -> MC -> DIE -> NUMA)
+ *   올라간다.
  */
 #define for_each_domain(cpu, __sd) \
 	for (__sd = rcu_dereference_check_sched_domain(cpu_rq(cpu)->sd); \
@@ -2692,6 +2745,11 @@ static inline void put_prev_task(struct rq *rq, struct task_struct *prev)
 	prev->sched_class->put_prev_task(rq, prev);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - exec_start를 갱신하고 선택된 @p를 pushable에서 dequeue한다.
+ *   ex) rt : set_next_task_rt()
+ */
 static inline void set_next_task(struct rq *rq, struct task_struct *next)
 {
 	next->sched_class->set_next_task(rq, next, false);
@@ -2770,18 +2828,35 @@ extern void trigger_load_balance(struct rq *rq);
 
 extern void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask, u32 flags);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @rq->curr가 움직일수있는 상태인지 확인한다. 가능하면 ref를 얻고 
+ *   return task.
+ */
 static inline struct task_struct *get_push_task(struct rq *rq)
 {
 	struct task_struct *p = rq->curr;
 
 	lockdep_assert_rq_held(rq);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 이미 누군가 push를 할려고한다.
+ */
 	if (rq->push_busy)
 		return NULL;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 이 task은 허락된 cpu가 한개밖에 없어 이동을 못한다.
+ */
 	if (p->nr_cpus_allowed == 1)
 		return NULL;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - migrate disable
+ */
 	if (p->migration_disabled)
 		return NULL;
 
@@ -3049,6 +3124,19 @@ extern void double_rq_lock(struct rq *rq1, struct rq *rq2);
  * reduces latency compared to the unfair variant below.  However, it
  * also adds more overhead and therefore may reduce throughput.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   fair double_lock_balance: 모든 호출에서 추가 원자적 작업을 강제하는 
+ *   비용으로 공정한 방식으로 두 rq-> 잠금을 안전하게 획득합니다. 이렇게 
+ *   하면 이 아키텍처에서 spinlock_t와 동일한 기본 정책을 사용하여 
+ *   double_lock을 획득할 수 있으므로 아래의 불공평한 변형에 비해 대기 
+ *   시간이 줄어듭니다. 그러나 더 많은 오버헤드가 추가되므로 처리량이 
+ *   줄어들 수 있습니다.
+ *
+ * - double lock을 얻는다. preempt은 무조건 경합한다.
+ *  return 1.
+ */
 static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
 	__releases(this_rq->lock)
 	__acquires(busiest->lock)
@@ -3067,6 +3155,17 @@ static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
  * already in proper order on entry.  This favors lower CPU-ids and will
  * grant the double lock to lower CPUs over higher ids under contention,
  * regardless of entry order into the function.
+ */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   Unfair double_lock_balance: 진입 시 잠금이 이미 적절한 순서로 되어 
+ *   있는 경우 추가적인 원자적 작업을 제거하여 대기 시간을 희생하여 
+ *   처리량을 최적화합니다. 이것은 더 낮은 CPU ID를 선호하며 함수에 대한 
+ *   항목 순서에 관계없이 경합 중인 더 높은 ID보다 더 낮은 CPU에 이중 
+ *   잠금을 부여합니다.
+ *
+ * - double lock을 얻는다. 경합없이 얻으면 return 0. 있으면 return 1.
  */
 static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
 	__releases(this_rq->lock)
@@ -3094,6 +3193,11 @@ static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
 
 /*
  * double_lock_balance - lock the busiest runqueue, this_rq is locked already.
+ */
+/*
+ * IAMROOT, 2023.02.11:
+ * - double lock 획득.
+ * - double lock을 얻는다. 경합없이 얻으면 return 0. 있으면 return 1.
  */
 static inline int double_lock_balance(struct rq *this_rq, struct rq *busiest)
 {

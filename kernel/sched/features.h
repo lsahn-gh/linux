@@ -74,6 +74,17 @@ SCHED_FEAT(WARN_DOUBLE_CLOCK, false)
  * IPI to that CPU and let that CPU push the RT task to where
  * it should go may be a better scenario.
  */
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   동시에 우선 순위를 낮추고 마이그레이션할 수 있고 실행 대기 중인 
+ *   RT 작업이 있는 단일 CPU가 있는 CPU의 thundering herd attack을 피하기 
+ *   위해 다른 CPU가 해당 CPU를 차지하려고 합니다. rq를 잠그고 가능하면 
+ *   대규모 경합을 생성하여 해당 CPU에 IPI를 보내고 해당 CPU가 RT 
+ *   작업을 가야 할 곳으로 푸시하도록 하는 것이 더 나은 시나리오일 
+ *   수 있습니다.
+ */
 SCHED_FEAT(RT_PUSH_IPI, true)
 #endif
 

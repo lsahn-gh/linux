@@ -314,12 +314,20 @@ int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
 
 static void pull_rt_task(struct rq *this_rq);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @rq가 online이고 @prev 우선순위보다 낮다면(숫자가 낮을수록 높음) return true
+ */
 static inline bool need_pull_rt_task(struct rq *rq, struct task_struct *prev)
 {
 	/* Try to pull RT tasks here if we lower this rq's prio */
 	return rq->online && rq->rt.highest_prio.curr > prev->prio;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - rt overloaded task 수를 return한다.
+ */
 static inline int rt_overloaded(struct rq *rq)
 {
 	return atomic_read(&rq->rd->rto_count);
@@ -401,6 +409,11 @@ static void dec_rt_migration(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	update_rt_migration(rt_rq);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - pushable_tasks가 있으면 return 1
+ */
+
 static inline int has_pushable_tasks(struct rq *rq)
 {
 	return !plist_head_empty(&rq->rt.pushable_tasks);
@@ -412,6 +425,12 @@ static DEFINE_PER_CPU(struct callback_head, rt_pull_head);
 static void push_rt_tasks(struct rq *);
 static void pull_rt_task(struct rq *);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - pushable_tasks가 있으면 push를 지정(push_rt_tasks)한다.
+ *   (pull의 경우 pull_rt_task가 지정된다.)
+ *   
+ */
 static inline void rt_queue_push_tasks(struct rq *rq)
 {
 	if (!has_pushable_tasks(rq))
@@ -425,22 +444,46 @@ static inline void rt_queue_pull_task(struct rq *rq)
 	queue_balance_callback(rq, &per_cpu(rt_pull_head, rq->cpu), pull_rt_task);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @p를 pushable task로 enqueue한다.
+ */
 static void enqueue_pushable_task(struct rq *rq, struct task_struct *p)
 {
+/*
+ * IAMROOT, 2023.02.11:
+ * - 이미 등록된 상황일 수도 있다. 일단 삭제하고 다시 추가한다.
+ */
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 	plist_node_init(&p->pushable_tasks, p->prio);
 	plist_add(&p->pushable_tasks, &rq->rt.pushable_tasks);
 
 	/* Update the highest prio pushable task */
+/*
+ * IAMROOT, 2023.02.11:
+ * - highest_prio.next 갱신.
+ */
 	if (p->prio < rq->rt.highest_prio.next)
 		rq->rt.highest_prio.next = p->prio;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - pushable_tasks
+ *   같은 cpu에서 두개 이상의 rt task가 있는 경우 다른 cpu로 밀어내기 
+ *   위한것
+ * - pushable_tasks에 등록되있는 경우 일단 dequeue한다.
+ */
 static void dequeue_pushable_task(struct rq *rq, struct task_struct *p)
 {
 	plist_del(&p->pushable_tasks, &rq->rt.pushable_tasks);
 
 	/* Update the new highest prio pushable task */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 여전시 pushable tasks가 있으면 highest prio를 기록하고 그게 아니면
+ *   max로 설정한다.
+ */
 	if (has_pushable_tasks(rq)) {
 		p = plist_first_entry(&rq->rt.pushable_tasks,
 				      struct task_struct, pushable_tasks);
@@ -487,6 +530,10 @@ static inline void rt_queue_push_tasks(struct rq *rq)
 static void enqueue_top_rt_rq(struct rt_rq *rt_rq);
 static void dequeue_top_rt_rq(struct rt_rq *rt_rq);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - rq에 들어있는지 확인.
+ */
 static inline int on_rt_rq(struct sched_rt_entity *rt_se)
 {
 	return rt_se->on_rq;
@@ -506,6 +553,33 @@ static inline int on_rt_rq(struct sched_rt_entity *rt_se)
  *
  * Note that uclamp_min will be clamped to uclamp_max if uclamp_min
  * > uclamp_max.
+ */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   uclamp 설정을 고려하여 @cpu에서 실행할 작업 @p의 적합성을 확인합니다. 
+ *
+ *   이 검사는 uclamp_min 값이 @cpu의 용량보다 큰 이기종 시스템에서만 
+ *   중요합니다. 이기종 시스템이 아닌 경우 이 함수는 항상 true를 반환합니다.
+ *
+ *   이 함수는 @cpu의 용량이 >= uclamp_min이면 true를 반환하고 그렇지 
+ *   않으면 false를 반환합니다. 
+ *
+ *   uclamp_min > uclamp_max인 경우 uclamp_min은 uclamp_max로 고정됩니다.
+ *
+ * --- UCLAMP ---
+ * - application의 경우 background, forground등에서 동작한다.
+ *   어떤것들은 절전모드에서 조그맣게 동작하는걸 원하고,
+ *   어떤것들은 강력하게 동작하는것을 원한다.
+ *   예를들어 A라는 app이 background에서 가끔돌아도 cpu를 많이 사용해야된다 
+ *   라던가
+ *   벤치마킹 프로그램처럼 무조건 cpu를 많이 사용해야되는 것이 있다.
+ *   이러한 상황들을 위해 제한을 시킨다.
+ *   max는 Big cpu의 max freq 기준으로 정한다.
+ * --------------
+ *
+ * - @p에서 설정한 uclamp의 min/max중 @cpu의 rq가 최소값을 넘으면 
+ *   return true.
  */
 static inline bool rt_task_fits_capacity(struct task_struct *p, int cpu)
 {
@@ -573,6 +647,12 @@ static inline struct task_group *next_task_group(struct task_group *tg)
 #define for_each_sched_rt_entity(rt_se) \
 	for (; rt_se; rt_se = rt_se->parent)
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @rt_se가 entity인지 task인지 확인한다. my_q가 있으면 entity(group)
+ *   return != NULL : group entity이며 my_q를 가져옴.
+ *          NULL    : task
+ */
 static inline struct rt_rq *group_rt_rq(struct sched_rt_entity *rt_se)
 {
 	return rt_se->my_q;
@@ -1043,15 +1123,27 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 	return idle;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - group entity이면 가장 높은 prio, task면 task prio를 return.
+ */
 static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 {
 #ifdef CONFIG_RT_GROUP_SCHED
 	struct rt_rq *rt_rq = group_rt_rq(rt_se);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 자기꺼중에 가장 높은 prio를 가진것을 return.
+ */
 	if (rt_rq)
 		return rt_rq->highest_prio.curr;
 #endif
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - task prio가져온다.
+ */
 	return rt_task_of(rt_se)->prio;
 }
 
@@ -1587,6 +1679,11 @@ static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
  * Put task to the head or the end of the run list without the overhead of
  * dequeue followed by enqueue.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - @rt_se priority list에 @head에 따라 requeue한다.
+ * - group entity의 경우엔 group entity에서 가장 높은 우선순위로 옮긴다.
+ */
 static void
 requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
 {
@@ -1603,7 +1700,8 @@ requeue_rt_entity(struct rt_rq *rt_rq, struct sched_rt_entity *rt_se, int head)
 
 /*
  * IAMROOT, 2023.02.10:
- * - TODO
+ * - @p의 rt_se부터 시작하여 parent까지 올라가면서 @head따라 head / tail로
+ *   requeue를 한다.
  */
 static void requeue_task_rt(struct rq *rq, struct task_struct *p, int head)
 {
@@ -1616,6 +1714,11 @@ static void requeue_task_rt(struct rq *rq, struct task_struct *p, int head)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - rt의 경우 가장높은 우선순위 태스크가 한개밖에 없으면 yield가
+ *   안될 것이다.
+ */
 static void yield_task_rt(struct rq *rq)
 {
 	requeue_task_rt(rq, rq->curr, 0);
@@ -1725,6 +1828,12 @@ static void check_preempt_equal_prio(struct rq *rq, struct task_struct *p)
 
 static int balance_rt(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 {
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - @p가 아직 rq에 없고, @rq(현재 task)보다 @p가(요청한 task) 
+ *   우선순위가 높다면 pull작업을 수행한다.
+ */
 	if (!on_rt_rq(&p->rt) && need_pull_rt_task(rq, p)) {
 		/*
 		 * This is OK, because current is on_cpu, which avoids it being
@@ -1732,6 +1841,13 @@ static int balance_rt(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 		 * disabled avoiding further scheduler activity on it and we've
 		 * not yet started the picking loop.
 		 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   current는 on_cpu이므로 부하 분산 및 선점/IRQ가 추가 스케줄러 활동을 
+ *   방지하기 위해 여전히 비활성화되어 있고 아직 선택 루프를 시작하지 
+ *   않았기 때문에 괜찮습니다.
+ */
 		rq_unpin_lock(rq, rf);
 		pull_rt_task(rq);
 		rq_repin_lock(rq, rf);
@@ -1769,11 +1885,25 @@ static void check_preempt_curr_rt(struct rq *rq, struct task_struct *p, int flag
 #endif
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - exec_start를 갱신하고 선택된 @p를 pushable에서 dequeue한다.
+ * - pick_next_task에서 불러지는 경우 @first = true
+ *   set_next_task에서는 @first = false
+ */
 static inline void set_next_task_rt(struct rq *rq, struct task_struct *p, bool first)
 {
+/*
+ * IAMROOT, 2023.02.11:
+ * - 현재 시각으로 (@rq의 clock_task)로 @p의 exec_start를 갱신한다.
+ */
 	p->se.exec_start = rq_clock_task(rq);
 
 	/* The running task is never eligible for pushing */
+/*
+ * IAMROOT, 2023.02.11:
+ * - @p가 선택된 상황이니, @p를 pushable task에서 dequeue한다.
+ */
 	dequeue_pushable_task(rq, p);
 
 	if (!first)
@@ -1784,12 +1914,25 @@ static inline void set_next_task_rt(struct rq *rq, struct task_struct *p, bool f
 	 * utilization. We only care of the case where we start to schedule a
 	 * rt task
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   이전 작업이 rt인 경우 put_prev_task()는 이미 사용률을 
+ *   업데이트했습니다. 우리는 rt 작업을 예약하기 시작하는 경우에만 
+ *   관심이 있습니다. 
+ * - 이전 task가 rt였다면 put_prev_task_rt()에서 load avg를 갱신했었다.
+ *   이전 task가 rt가 아닌 경우에만 수행한다.
+ */
 	if (rq->curr->sched_class != &rt_sched_class)
 		update_rt_rq_load_avg(rq_clock_pelt(rq), rq, 0);
 
 	rt_queue_push_tasks(rq);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 가장 높은 우선순위주에서도 제일 앞에 있는 rt_se를 가져온다.
+ */
 static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 						   struct rt_rq *rt_rq)
 {
@@ -1798,6 +1941,11 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	struct list_head *queue;
 	int idx;
 
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 제일 높은 priority를 가져온다.
+ */
 	idx = sched_find_first_bit(array->bitmap);
 	BUG_ON(idx >= MAX_RT_PRIO);
 
@@ -1807,6 +1955,10 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	return next;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 제일 높은 priority를 가진 task를 가져온다.
+ */
 static struct task_struct *_pick_next_task_rt(struct rq *rq)
 {
 	struct sched_rt_entity *rt_se;
@@ -1815,12 +1967,22 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 	do {
 		rt_se = pick_next_rt_entity(rq, rt_rq);
 		BUG_ON(!rt_se);
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - rt_rq가 NULL이면 @rt_se가 task라는 의미가 되여 while이 종료되며
+ *   task가 찾아지는 원리이다.
+ */
 		rt_rq = group_rt_rq(rt_se);
 	} while (rt_rq);
 
 	return rt_task_of(rt_se);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 제일 높은 priority를 가진 task를 가져온다.
+ */
 static struct task_struct *pick_task_rt(struct rq *rq)
 {
 	struct task_struct *p;
@@ -1833,6 +1995,11 @@ static struct task_struct *pick_task_rt(struct rq *rq)
 	return p;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 제일높은 task를 선택한다. 선택됬으면 exec_start를 갱신하고
+ *   pushable 상황일때는 push task를 지정(queue_balance_callback)한다.
+ */
 static struct task_struct *pick_next_task_rt(struct rq *rq)
 {
 	struct task_struct *p = pick_task_rt(rq);
@@ -1843,6 +2010,13 @@ static struct task_struct *pick_next_task_rt(struct rq *rq)
 	return p;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 기존 태스크(@p)에 대해 다음과 같은걸 처리한다.
+ *   1. sum_exec_runtime 갱신 및 runtime 초과 처리 
+ *   2. load avg 갱신
+ *   3. 동작할 수 있는 cpu가 2개 이상인경우 pushable task로 enqueue
+ */
 static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
 {
 	update_curr_rt(rq);
@@ -1853,6 +2027,13 @@ static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
 	 * The previous task needs to be made eligible for pushing
 	 * if it is still active
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - rq에 on상태이고 허락된 cpu가 2개 이상인 경우 pushable_tasks로
+ *   enqueue한다.
+ * - 이 상황이되면 rt task가 이미 2개 이상인 상황에서, 다른 rt task에
+ *   우선순위나 RR 정책에 밀려난 상황이된다.
+ */
 	if (on_rt_rq(&p->rt) && p->nr_cpus_allowed > 1)
 		enqueue_pushable_task(rq, p);
 }
@@ -1893,6 +2074,27 @@ static struct task_struct *pick_highest_pushable_task(struct rq *rq, int cpu)
 
 static DEFINE_PER_CPU(cpumask_var_t, local_cpu_mask);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 가장 낮은 우선순위를 가진 cpu rq를 선택한다. 
+ *   idle -> cfs만 있는 rq -> rt task 순으로 낮을 것이다.
+ *
+ * - task의 우선순위범위내(최저 우선순위 부터 tsak 우선순위까지)에서
+ *   cpupri와 겹치며 uclamp조건을 만족하는 cpu를 lowest_mask에 기록한다.
+ *   최종적으로 선택하는 조건은 다음 우선순위로 따른다.
+ *   1. task cpu (l1 cache공유) :
+ *      task가 동작했던 cpu가 lowest_mask에 있는경우
+ *   2. this cpu (l2 cache 이상 공유) :
+ *      this cpu가 lowest_mask에 있고 해당 domain span에 포함되있는경우
+ *   3. best cpu(l2 cache 이상 공유) :
+ *      lowest_mask에 있고 해당 domain span에 포함되있는경우.
+ *   4. domain에서 못찾은 경우 :
+ *      lowest_mask에 this cpu가 있는 경우
+ *   5. this cpu도 lowest_mask에 없는 경우 :
+ *      lowest_mask에서 아무거나 한개.
+ *
+ *   5번까지 조건에도 없으면 return -1.
+ */
 static int find_lowest_rq(struct task_struct *task)
 {
 	struct sched_domain *sd;
@@ -1913,16 +2115,31 @@ static int find_lowest_rq(struct task_struct *task)
 	 * of the CPUs when searching for the lowest_mask.
 	 */
 	if (static_branch_unlikely(&sched_asym_cpucapacity)) {
-
+/*
+ * IAMROOT, 2023.02.11:
+ * - HMP의 경우이다.
+ * - @task의 우선순위범위에서 cpupri 범위와 겹치는 cpu를 찾아서
+ *   uclamp 범위에 적합한지 검사(rt_task_fits_capacity)하여 
+ *   lowest_mask에 기록한다.
+ */
 		ret = cpupri_find_fitness(&task_rq(task)->rd->cpupri,
 					  task, lowest_mask,
 					  rt_task_fits_capacity);
 	} else {
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @task의 우선순위범위에서 cpupri 범위와 겹치는 cpu를 찾아서 겹치는걸
+ *   lowest_mask에 기록한다.
+ */
 		ret = cpupri_find(&task_rq(task)->rd->cpupri,
 				  task, lowest_mask);
 	}
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 위에서 못찾았다. return -1
+ */
 	if (!ret)
 		return -1; /* No targets found */
 
@@ -1934,6 +2151,21 @@ static int find_lowest_rq(struct task_struct *task)
 	 * We prioritize the last CPU that the task executed on since
 	 * it is most likely cache-hot in that location.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   이 시점에서 우리는 시스템에서 가장 낮은 우선 순위 작업을 나타내는 
+ *   CPU 마스크를 만들었습니다. 이제 우리는 선호도와 토폴로지를 기반으로 
+ *   최고의 것을 선택하려고 합니다. 
+ *
+ *   작업이 실행된 마지막 CPU는 해당 위치에서 캐시 핫일 가능성이 높기 
+ *   때문에 우선 순위를 지정합니다.
+ *
+ *  - @task의 cpu가 lowest_mask에 존재한다면 cache hot이라고 
+ *  생각하여 즉시 task cpu로 return한다.
+ *  - 마지막에 동작한 task가 task의 cpu에 기록되있으므로 가능하면 
+ *    @task의 cpu와 같은게 좋다.
+ */
 	if (cpumask_test_cpu(cpu, lowest_mask))
 		return cpu;
 
@@ -1941,11 +2173,24 @@ static int find_lowest_rq(struct task_struct *task)
 	 * Otherwise, we consult the sched_domains span maps to figure
 	 * out which CPU is logically closest to our hot cache data.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - current cpu가 lowest_mask에 속해있지 않은지를 검사한다.
+ */
 	if (!cpumask_test_cpu(this_cpu, lowest_mask))
 		this_cpu = -1; /* Skip this_cpu opt if not among lowest */
 
 	rcu_read_lock();
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 밑에서부터 위로 올라간다.
+ */
 	for_each_domain(cpu, sd) {
+/*
+ * IAMROOT, 2023.02.11:
+ * - SD_WAKE_AFFINE이 있는 domain을 찾는다.
+ */
 		if (sd->flags & SD_WAKE_AFFINE) {
 			int best_cpu;
 
@@ -1953,18 +2198,31 @@ static int find_lowest_rq(struct task_struct *task)
 			 * "this_cpu" is cheaper to preempt than a
 			 * remote processor.
 			 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - current cpu를 선택할수 있는 상황에서 sd에 current cpu가 포함되있다면
+ *   바로 선택한다.
+ */
 			if (this_cpu != -1 &&
 			    cpumask_test_cpu(this_cpu, sched_domain_span(sd))) {
 				rcu_read_unlock();
 				return this_cpu;
 			}
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 위의 상황이 아니라면 best_cpu를 찾는다.(그냥 적당히 숝서대로찾는다)
+ */
 			best_cpu = cpumask_any_and_distribute(lowest_mask,
 							      sched_domain_span(sd));
 			if (best_cpu < nr_cpu_ids) {
 				rcu_read_unlock();
 				return best_cpu;
 			}
+/*
+ * IAMROOT, 2023.02.11:
+ * - 여기까지 왔으면 sd에 소속되있지 않다. 상위 domain으로 간다.
+ */
 		}
 	}
 	rcu_read_unlock();
@@ -1974,17 +2232,35 @@ static int find_lowest_rq(struct task_struct *task)
 	 * just give the caller *something* to work with from the compatible
 	 * locations.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - domain에서 못찾았으면, lowest_mask에 current cpu가 있엇을 경우 그냥
+ *   current cpu로 선택한다.
+ */
 	if (this_cpu != -1)
 		return this_cpu;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - lowest_mask에서 아무거나 고른다.
+ */
 	cpu = cpumask_any_distribute(lowest_mask);
 	if (cpu < nr_cpu_ids)
 		return cpu;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - lowest도 못찾앗다..
+ */
 	return -1;
 }
 
 /* Will lock the rq it finds */
+/*
+ * IAMROOT, 2023.02.11:
+ * - @task보다 우선순위가 낮은 lowest_rq를 찾는다.
+ *   찾아지면 double lock 건채로 lowest_rq return.
+ */
 static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 {
 	struct rq *lowest_rq = NULL;
@@ -1994,6 +2270,10 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 	for (tries = 0; tries < RT_MAX_TRIES; tries++) {
 		cpu = find_lowest_rq(task);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 찾는데 실패했거나 rq cpu와 같으면 break.
+ */
 		if ((cpu == -1) || (cpu == rq->cpu))
 			break;
 
@@ -2005,6 +2285,15 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 			 * retrying does not release any lock and is unlikely
 			 * to yield a different result.
 			 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   대상 rq에는 우선 순위가 같거나 더 높은 작업이 있으며 재시도해도 
+ *   잠금이 해제되지 않으며 다른 결과가 나올 가능성이 없습니다.
+. 
+ * - lowest를 찾았는데 lowest가 @task보다 우선순위가 높은 상태.
+ *   그냥 빠져나간다.
+ */
 			lowest_rq = NULL;
 			break;
 		}
@@ -2017,18 +2306,37 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 			 * migrated already or had its affinity changed.
 			 * Also make sure that it wasn't scheduled on its rq.
 			 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   실행 대기열을 잠금 해제해야 했습니다. 그 동안 작업이 이미 
+ *   마이그레이션되었거나 선호도가 변경되었을 수 있습니다.
+ *   또한 rq에서 예약되지 않았는지 확인하십시오.
+ *
+ * - double lock을 얻는 중에 경합이 발생됬다. 변동이 발생됬을수도
+ *   있는 상황이라 확인해야된다.
+ */
 			if (unlikely(task_rq(task) != rq ||
 				     !cpumask_test_cpu(lowest_rq->cpu, &task->cpus_mask) ||
 				     task_running(rq, task) ||
 				     !rt_task(task) ||
 				     !task_on_rq_queued(task))) {
-
+/*
+ * IAMROOT, 2023.02.11:
+ * - 바뀐 상황. break.
+ */
 				double_unlock_balance(rq, lowest_rq);
 				lowest_rq = NULL;
 				break;
 			}
 		}
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 경합이 발생안했거나 경합이 발햇어도 조건에 맞는 상황.
+ *   lock을 얻은 상태에서 다시한번 우선순위 비교를 해본다.
+ *   task보다 낮은 우선순위가 찾아졌으면 break.
+ */
 		/* If this rq is still suitable use it. */
 		if (lowest_rq->rt.highest_prio.curr > task->prio)
 			break;
@@ -2041,6 +2349,10 @@ static struct rq *find_lock_lowest_rq(struct task_struct *task, struct rq *rq)
 	return lowest_rq;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - pushable task를 한개 빼온다.
+ */
 static struct task_struct *pick_next_pushable_task(struct rq *rq)
 {
 	struct task_struct *p;
@@ -2066,20 +2378,47 @@ static struct task_struct *pick_next_pushable_task(struct rq *rq)
  * running task can migrate over to a CPU that is running a task
  * of lesser priority.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   현재 CPU에 RT 작업이 두 개 이상 있는 경우 실행되지 않는 작업이 
+ *   우선 순위가 낮은 작업을 실행 중인 CPU로 마이그레이션할 수 있는지 
+ *   확인합니다.
+ * @pull push_rt_tasks에서는 fasle
+ */
 static int push_rt_task(struct rq *rq, bool pull)
 {
 	struct task_struct *next_task;
 	struct rq *lowest_rq;
 	int ret = 0;
 
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - overload가 안된경우(2개 미만의 task가 있는 경우) push
+ *   할 필요가 없다.
+ */
 	if (!rq->rt.overloaded)
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - push할 task를 한개 고른다.
+ */
 	next_task = pick_next_pushable_task(rq);
 	if (!next_task)
 		return 0;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - TODO
+ */
 retry:
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - migrate가 안되는 tasdk들은
+ */
 	if (is_migration_disabled(next_task)) {
 		struct task_struct *push_task = NULL;
 		int cpu;
@@ -2087,6 +2426,10 @@ retry:
 		if (!pull || rq->push_busy)
 			return 0;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 아에 못찾았거나 rq의 cpu와 같은경우 return 0.
+ */
 		cpu = find_lowest_rq(rq->curr);
 		if (cpu == -1 || cpu == rq->cpu)
 			return 0;
@@ -2097,6 +2440,15 @@ retry:
 		 * to this other CPU, instead attempt to push the current
 		 * running task on this CPU away.
 		 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   @next_task보다 우선 순위가 낮은 CPU를 찾았으므로 실행 중이어야 합니다.
+ *   그러나 이를 다른 CPU로 마이그레이션할 수는 없으며 대신 이 CPU에서
+ *   현재 실행 중인 작업을 밀어내려고 시도합니다.
+ *   
+ * - @rq->curr가 push가 가능하면 stop을 시킨후 꺼낸다. (push_cpu_stop 실행)
+ */
 		push_task = get_push_task(rq);
 		if (push_task) {
 			raw_spin_rq_unlock(rq);
@@ -2108,6 +2460,10 @@ retry:
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - TODO
+ */
 	if (WARN_ON(next_task == rq->curr))
 		return 0;
 
@@ -2172,6 +2528,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - TODO
+ */
 static void push_rt_tasks(struct rq *rq)
 {
 	/* push_rt_task will return true if it moved an RT */
@@ -2222,6 +2582,48 @@ static void push_rt_tasks(struct rq *rq)
  * the rt_loop_next will cause the iterator to perform another scan.
  *
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   우선 순위가 높은 작업이 CPU에서 예약되고 우선 순위가 낮은 작업이 
+ *   예약되면 우선 순위가 더 높은 RT 작업이 현재 CPU에서 실행 중이기 
+ *   때문에 다른 CPU에서 실행 대기 중인 RT 작업이 있는지 확인합니다.
+ *   이 경우 여러 RT 작업이 대기열에 있는(오버로드된) CPU는 실행되지 
+ *   않는 대기열에 있는 RT 작업 중 하나를 실행할 수 있는 CPU가 열렸음을 
+ *   알려야 합니다. 
+ *
+ *   과부하된 RT 작업이 있는 모든 CPU는 현재 실행 대기 중인 작업의 우선 
+ *   순위가 가장 높은 CPU를 알 수 있는 방법이 없기 때문에 알림을 받아야 
+ *   합니다. CPU가 많은 컴퓨터에서 수행할 때 대기 시간이 길어지는 것으로 
+ *   나타난 이러한 각 CPU에서 스핀록을 시도하는 대신 CPU에 IPI를 보내 
+ *   실행 대기 중인 과부하된 RT 작업을 푸시하도록 합니다.
+ *
+ *   각 CPU에 IPI를 보내는 것만으로도 문제가 됩니다. 많은 수의 CPU 
+ *   머신에서와 같이 이것은 CPU에서 IPI 스톰을 유발할 수 있습니다. 
+ *   우선 순위가 낮은 작업을 동시에 수행합니다.
+ *
+ *   각 루트 도메인에는 RT 과부하 작업으로 모든 CPU를 반복할 수 있는 
+ *   자체 irq 작업 기능이 있습니다. 과부하된 RT 작업이 있는 모든 CPU는 
+ *   우선 순위를 낮추는 CPU가 하나 이상 있는 경우 확인해야 하므로 실행 
+ *   대기 중인 RT 작업을 푸시 오프하려고 시도하는 단일 irq 작업 반복기가 
+ *   있습니다.
+ *
+ *   CPU가 우선 순위가 낮은 작업을 예약하면 과부하된 RT 작업이 있는 
+ *   각 CPU로 이동하는 irq 작업 반복자를 시작합니다.
+ *   우선 순위가 낮은 작업을 예약하는 첫 번째 CPU만 프로세스를 시작하기 
+ *   때문에 rto_start 변수가 증가하고 원자 결과가 1인 경우 해당 CPU는 
+ *   rto_lock을 사용하려고 시도합니다.
+ *   이렇게 하면 프로세스가 우선 순위가 낮은 작업을 예약하는 모든 
+ *   CPU를 처리하므로 잠금에 대한 높은 경합이 방지됩니다.
+ *
+ *   우선 순위가 낮은 작업을 예약하는 모든 CPU는 rt_loop_next 변수를 
+ *   증가시킵니다. 이렇게 하면 irq 작업 반복자가 CPU가 새로운 낮은 우선 
+ *   순위 작업을 예약할 때마다 반복자가 스캔 중에 있더라도 모든 RT 
+ *   오버로드 CPU를 확인합니다. rt_loop_next를 증가시키면 반복자가 다른 
+ *   스캔을 수행하게 됩니다.
+ *
+ * - rto_mask중에서 그전(rto_cpu)의 next cpu를 고른다.
+ */
 static int rto_next_cpu(struct root_domain *rd)
 {
 	int next;
@@ -2240,9 +2642,34 @@ static int rto_next_cpu(struct root_domain *rd)
 	 * the rto_lock held, but any CPU may increment the rto_loop_next
 	 * without any locking.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   IPI RT 푸시를 시작할 때 rto_cpu는 -1로 설정되고 rt_next_cpu()는 
+ *   단순히 rto_mask에서 발견된 첫 번째 CPU를 반환합니다.
+ *
+ *   rto_next_cpu()가 rto_cpu가 유효한 CPU로 호출되면 rto_mask에서 
+ *   발견된 다음 CPU를 반환합니다.
+ *
+ *   rto_mask에 남아 있는 CPU가 더 이상 없으면 rto_loop 및 
+ *   rto_loop_next에 대해 확인합니다. rto_loop는 rto_lock이 유지된 
+ *   상태에서만 업데이트되지만 모든 CPU는 잠금 없이 rto_loop_next를 
+ *   증가시킬 수 있습니다.
+ */
 	for (;;) {
 
 		/* When rto_cpu is -1 this acts like cpumask_first() */
+/*
+ * IAMROOT, 2023.02.11:
+ * - -1부터 시작한다. rto_mask중에서 다음에 선택할 cpu를 정한다.
+ *
+ * - rto_cpu가 -1인 경우
+ *   IPI RT push를 시작하였다. rto_mask에서 발견도니 첫번째 cpu로
+ *   return될 것이다.
+ *
+ * - rto_cpu가 유효한 cpu번호 인경우
+ *   rto_cpu의 다음 cpu로 정해진다.
+ */
 		cpu = cpumask_next(rd->rto_cpu, rd->rto_mask);
 
 		rd->rto_cpu = cpu;
@@ -2250,6 +2677,13 @@ static int rto_next_cpu(struct root_domain *rd)
 		if (cpu < nr_cpu_ids)
 			return cpu;
 
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - rto_cpu가 유효한 cpu번호 인경우에 대해서 만약 rto_mask에 더 이상 
+ *   남아있는 cpu가 없으면 아래로 진입한다.
+ *   rto_cpu를 다시 -1로 설정한다.
+ */
 		rd->rto_cpu = -1;
 
 		/*
@@ -2258,6 +2692,17 @@ static int rto_next_cpu(struct root_domain *rd)
 		 *
 		 * Matches WMB in rt_set_overload().
 		 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   ACQUIRE는 @next 값이 관찰되기 전에 이루어진 @rto_mask 변경 사항을 
+ *   확인하도록 합니다.
+ *
+ *   rt_set_overload()에서 WMB와 일치합니다.
+ *
+ * - loop가 일어나면 rto_loop와 비교한다. 변경이 발생됬으면 갱신하고
+ *   다시 loop로 동작한다. 그게 아닌 경우 return -1
+ */
 		next = atomic_read_acquire(&rd->rto_loop_next);
 
 		if (rd->rto_loop == next)
@@ -2279,6 +2724,12 @@ static inline void rto_start_unlock(atomic_t *v)
 	atomic_set_release(v, 0);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - IPI RT 푸시 상태인경우 cpu를 골라와서 해당 cpu에 ipi work on을 해준다.
+ * - pull 이 필요한 cpu가 overload된 cpu에 대해서 자신한테 push를 하라는 
+ *   ipi를 보내는 상황이다.
+ */
 static void tell_cpu_to_push(struct rq *rq)
 {
 	int cpu = -1;
@@ -2298,6 +2749,17 @@ static void tell_cpu_to_push(struct rq *rq)
 	 * update to loop_next, and nothing needs to be done here.
 	 * Otherwise it is finishing up and an ipi needs to be sent.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - papago
+ *   rto_cpu는 잠금 상태에서 업데이트됩니다. 유효한 CPU가 있는 경우 
+ *   IPI는 여전히 실행 중이고 loop_next에 대한 업데이트로 인해 계속 
+ *   실행되며 여기서 수행할 작업은 없습니다.
+ *   그렇지 않으면 완료되고 ipi를 보내야 합니다.
+ *
+ * - rto_cpu < 0 : *IPI RT 푸시를 시작한 상태. 이 경우
+ *   cpu를 골라 온다.
+ */
 	if (rq->rd->rto_cpu < 0)
 		cpu = rto_next_cpu(rq->rd);
 
@@ -2305,6 +2767,12 @@ static void tell_cpu_to_push(struct rq *rq)
 
 	rto_start_unlock(&rq->rd->rto_loop_start);
 
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - 위에서 cpu가 골라졌으면 해당 cpu에 ipi work on을 해준다.
+ *   ex) rto_push_irq_work_func
+ */
 	if (cpu >= 0) {
 		/* Make sure the rd does not get freed while pushing */
 		sched_get_rd(rq->rd);
@@ -2313,6 +2781,12 @@ static void tell_cpu_to_push(struct rq *rq)
 }
 
 /* Called from hardirq context */
+
+/*
+ * IAMROOT, 2023.02.11:
+ * - @rq의 모든 pushable task를 push하고, 그 다음 cpu한테도
+ *   (있을 경우) irq work on 요청을 한다.
+ */
 void rto_push_irq_work_func(struct irq_work *work)
 {
 	struct root_domain *rd =
@@ -2326,6 +2800,10 @@ void rto_push_irq_work_func(struct irq_work *work)
 	 * We do not need to grab the lock to check for has_pushable_tasks.
 	 * When it gets updated, a check is made if a push is possible.
 	 */
+/*
+ * IAMROOT, 2023.02.11:
+ * - push task를 전부 push 한다.
+ */
 	if (has_pushable_tasks(rq)) {
 		raw_spin_rq_lock(rq);
 		while (push_rt_task(rq, true))
@@ -2336,6 +2814,10 @@ void rto_push_irq_work_func(struct irq_work *work)
 	raw_spin_lock(&rd->rto_lock);
 
 	/* Pass the IPI to the next rt overloaded queue */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 다음 cpu한테도 push 작업을 하게 한다.
+ */
 	cpu = rto_next_cpu(rd);
 
 	raw_spin_unlock(&rd->rto_lock);
@@ -2350,6 +2832,10 @@ void rto_push_irq_work_func(struct irq_work *work)
 }
 #endif /* HAVE_RT_PUSH_IPI */
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - 
+ */
 static void pull_rt_task(struct rq *this_rq)
 {
 	int this_cpu = this_rq->cpu, cpu;
@@ -2368,6 +2854,11 @@ static void pull_rt_task(struct rq *this_rq)
 	smp_rmb();
 
 	/* If we are the only overloaded CPU do nothing */
+/*
+ * IAMROOT, 2023.02.11:
+ * - 현재 cpu에 overloaded 되있다면 return.
+ *   즉 자기가 overload를 시켜놓은 상태.
+ */
 	if (rt_overload_count == 1 &&
 	    cpumask_test_cpu(this_rq->cpu, this_rq->rd->rto_mask))
 		return;
@@ -2655,7 +3146,11 @@ static inline void watchdog(struct rq *rq, struct task_struct *p) { }
  */
 /*
  * IAMROOT, 2023.02.10:
- * - ING. requeue_task_rt 할차례
+ * - 1. exec_runtime 및 rt_runtime 누적
+ *   2. rt_runtime 초과에 따른 reschedule 처리
+ *   3. load sun / avg update
+ *   4. runtime balance
+ *   5. SCHED_RR 처리.
  */
 static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 {
@@ -2703,14 +3198,13 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	for_each_sched_rt_entity(rt_se) {
 /*
  * IAMROOT, 2023.02.10:
- * - prev != next 라면 유일한 task가 아니라는 의미. 
- *   task가 한개면 그것만 돌리면 되므로 task가 두개이상이여야
- *   rescheule을 하는 의미가 있다.
+ * - prev != next 라면 유일한 rt entity가 아니라는 의미. 
+ *   즉 같은 우선순위의 entity가 두개이상일때 reschedule을 한다.
  */
 		if (rt_se->run_list.prev != rt_se->run_list.next) {
 /*
  * IAMROOT, 2023.02.10:
- * - @p를 rq의 tail에 넣고 rescheduled 요청을 한다. 제일 뒤의 순서로
+ * - @p를 rt_rq의 tail에 넣고 rescheduled 요청을 한다. 제일 뒤의 순서로
  *   옮기는 개념.
  */
 			requeue_task_rt(rq, p, 0);

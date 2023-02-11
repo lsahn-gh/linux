@@ -79,6 +79,16 @@ SD_FLAG(SD_BALANCE_WAKE, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
  *
  * SHARED_CHILD: Set from the base domain up to the NUMA reclaim level.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * ---
+ *  task가 잠들엇다 일어날때 가장 좋은방법은 같은 cpu에서 깨어나는것이다.
+ *  만약 그렇지 못할 경우 다른 cpu를 선택해야되는데 그 경우에 대한것이다.
+ *  domain내의 idle sibling중인 cpu에 대해서 선택한다는것이다.
+ * ---
+ * - idle상태에서 깨어난 cpu가 domain내의 idle sibling 선택을 허용한다.
+ *
+ */
 SD_FLAG(SD_WAKE_AFFINE, SDF_SHARED_CHILD)
 
 /*

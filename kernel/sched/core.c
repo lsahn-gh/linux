@@ -935,6 +935,10 @@ static bool set_nr_if_polling(struct task_struct *p)
 #endif
 #endif
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @head에 @task를 추가한다.
+ */
 static bool __wake_q_add(struct wake_q_head *head, struct task_struct *task)
 {
 	struct wake_q_node *node = &task->wake_q;
@@ -971,6 +975,10 @@ static bool __wake_q_add(struct wake_q_head *head, struct task_struct *task)
  * This function must be used as-if it were wake_up_process(); IOW the task
  * must be ready to be woken at this location.
  */
+/*
+ * IAMROOT, 2023.02.11:
+ * - @head에 @task를 추가한다. 성공했으면 ref up.
+ */
 void wake_q_add(struct wake_q_head *head, struct task_struct *task)
 {
 	if (__wake_q_add(head, task))
@@ -1000,6 +1008,11 @@ void wake_q_add_safe(struct wake_q_head *head, struct task_struct *task)
 		put_task_struct(task);
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - TODO
+ *   @head의 task들를 깨운다.
+ */
 void wake_up_q(struct wake_q_head *head)
 {
 	struct wake_q_node *node = head->first;
@@ -2704,6 +2717,11 @@ out:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - this rq에서 task보다 낮은 lowest_rq를 찾아 balance를 수행한다.
+ *   (this rq와 task rq가 같은 경우에 한해서)
+ */
 int push_cpu_stop(void *arg)
 {
 	struct rq *lowest_rq = NULL, *rq = this_rq();
@@ -2712,6 +2730,11 @@ int push_cpu_stop(void *arg)
 	raw_spin_lock_irq(&p->pi_lock);
 	raw_spin_rq_lock(rq);
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - lock만 하고 find_lock_rq에서 double lock을 잡기전 한번 
+ *   검사를 한다.
+ */
 	if (task_rq(p) != rq)
 		goto out_unlock;
 
@@ -2722,6 +2745,13 @@ int push_cpu_stop(void *arg)
 
 	p->migration_flags &= ~MDF_PUSH;
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - rt : find_lock_lowest_rq()
+ *   @p보다 우선순위가 낮은 lowest_rq를 찾아온다. 찾아지면 double lock
+ *   이 걸려있는 상태가 된다.
+ *   
+ */
 	if (p->sched_class->find_lock_rq)
 		lowest_rq = p->sched_class->find_lock_rq(p, rq);
 
@@ -2729,6 +2759,14 @@ int push_cpu_stop(void *arg)
 		goto out_unlock;
 
 	// XXX validate p is still the highest prio task
+/*
+ * IAMROOT, 2023.02.11:
+ * - doublelock을 얻은후에 한번더 task rq와 this rq가 같은지 검사를 
+ *   한다.
+ *
+ * - this rq에서 @p를 deactivate시킨후 lowest_rq에 activate를 시키고,
+ *   lowest_rq를 curr로 reschedule 한다.
+ */
 	if (task_rq(p) == rq) {
 		deactivate_task(rq, p, 0);
 		set_task_cpu(p, lowest_rq->cpu);
@@ -8901,6 +8939,10 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - yield 처리후 schedule 수행.
+ */
 static void do_sched_yield(void)
 {
 	struct rq_flags rf;
@@ -9055,6 +9097,10 @@ EXPORT_SYMBOL(__cond_resched_rwlock_write);
  * If you want to use yield() to wait for something, use wait_event().
  * If you want to use yield() to be 'nice' for others, use cond_resched().
  * If you still want to use yield(), do not!
+ */
+/*
+ * IAMROOT, 2023.02.11:
+ * - yield 처리 후 schedule 처리한다.
  */
 void __sched yield(void)
 {

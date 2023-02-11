@@ -153,6 +153,10 @@ struct sched_domain {
 	unsigned long span[];
 };
 
+/*
+ * IAMROOT, 2023.02.11:
+ * - @sd에 소속되있는 cpumask
+ */
 static inline struct cpumask *sched_domain_span(struct sched_domain *sd)
 {
 	return to_cpumask(sd->span);
