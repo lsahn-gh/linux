@@ -556,6 +556,7 @@ hrtimer_forward(struct hrtimer *timer, ktime_t now, ktime_t interval);
 /*
  * IAMROOT, 2022.12.03:
  * - 현재 시각을 기준으로 interval후에 expire된다.
+ *   @interval 이 0일 경우 최대한 빨리 동작하게 하는 개념이다.
  */
 static inline u64 hrtimer_forward_now(struct hrtimer *timer,
 				      ktime_t interval)

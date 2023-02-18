@@ -983,6 +983,17 @@ struct task_struct {
  */
 	int				on_rq;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - prio
+ *   현재 운영. 상황에 따라 변경될 수 있는 우선순위.
+ * - static_prio
+ *   cfs 설정
+ * - rt_priority
+ *   rt 설정
+ * - normal_prio
+ *   현재 설정. rt로 운영이면 rt_priority, cfs로 운영되면 static_prio
+ */
 	int				prio;
 	int				static_prio;
 	int				normal_prio;

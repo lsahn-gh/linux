@@ -870,6 +870,18 @@ static inline int rt_bandwidth_enabled(void)
 /* Real-Time classes' related field in a runqueue: */
 struct rt_rq {
 	struct rt_prio_array	active;
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt_nr_running
+ *   현재 그룹 이하의 rt task수.
+ * - rr_nr_running
+ *   현재 그룹 이하의 rt task수 중에서도 rr policy를 사용하는 task 수
+ * - rt_nr_total
+ *   overload 검사를 위해 task가 enqueue/dequeue될때 증감을 하는 
+ *   rt task수
+ * - rt_nr_migratory
+ *   migrate 가능한 rt task수. cpu가 2개이상인 경우 증감한다.
+ */
 	unsigned int		rt_nr_running;
 	unsigned int		rr_nr_running;
 #if defined CONFIG_SMP || defined CONFIG_RT_GROUP_SCHED
@@ -1897,6 +1909,10 @@ static inline void rq_clock_skip_update(struct rq *rq)
  * See rt task throttling, which is the only time a skip
  * request is canceled.
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * - clear RQCF_REQ_SKIP
+ */
 static inline void rq_clock_cancel_skipupdate(struct rq *rq)
 {
 	lockdep_assert_rq_held(rq);
@@ -2105,6 +2121,8 @@ init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
  * - @func를 등록시켜준다.
  * - @func : push_rt_tasks
  *           pull_rt_task
+ * - splice 및 실행 부분
+ *   splice_balance_callbacks(), do_balance_callbacks()
  */
 static inline void
 queue_balance_callback(struct rq *rq,
@@ -2568,6 +2586,16 @@ extern const u32		sched_prio_to_wmult[40];
  *   ENQUEUE_HEAD - runqueue 앞에 배치(지정되지 않은 경우 꼬리)
  *   ENQUEUE_REPLENISH - CBS(런타임 보충 및 기한 연기)
  *   ENQUEUE_MIGRATED - 깨우는 동안 작업이 마이그레이션됨
+ *
+ * - ENQUEUE_WAKEUP / DEQUEUE_SLEEP
+ *   sleep했었다가 깨어나는 상황(ENQUEUE_WAKEUP)
+ *   task sleep으로 인한 dequeue(DEQUEUE_SLEEP)
+ *
+ * - DEQUEUE_MOVE / ENQUEUE_MOVE
+ *   cgroup간의 이동.
+ *
+ * - ENQUEUE_RESTORE/ DEQUEUE_SAVE
+ *   설정 변경에 따라 잠깐 dequee/enqueue 할때 사용한다.
  */
 
 #define DEQUEUE_SLEEP		0x01
@@ -3183,6 +3211,11 @@ static inline int _double_lock_balance(struct rq *this_rq, struct rq *busiest)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - push_rt_task() 중간의 주석을 봤을때 unlock과 doublelock 사이에
+ *   migrate가 될 가능할수도 있다는 언급이 있다.
+ */
 	raw_spin_rq_unlock(this_rq);
 	double_rq_lock(this_rq, busiest);
 

@@ -361,6 +361,16 @@ int cpupri_find_fitness(struct cpupri *cp, struct task_struct *p,
  *
  * Returns: (void)
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * - cpupri은 다음과 같은 2개로 관리한다.
+ *   1. pri_to_cpu : pri별 증감
+ *   2. cpu_to_pri : 현재 pri 변경.
+ *
+ * - 현재 cpu별 pri에 대해서 @newpri로 갱신한다.
+ * - @cpu에 대한 pri별 관리하는 것들에 대해선 @newpri에 대해서는 증가,
+ *   oldpri에 대해선 감소를 수행한다.
+ */
 void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 {
 	int *currpri = &cp->cpu_to_pri[cpu];
@@ -380,6 +390,16 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 	 * Note, we must add the new value first, otherwise we risk the
 	 * cpu being missed by the priority loop in cpupri_find.
 	 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   CPU가 현재 다른 값에 매핑된 경우 새 값에 매핑한 다음 이전 값을
+ *   제거해야 합니다.
+ *   새 값을 먼저 추가해야 합니다. 그렇지 않으면 cpupri_find의 우선
+ *   순위 루프에서 CPU를 놓칠 위험이 있습니다.
+ *
+ * - newpri에 대해선 증가, 없어지는 oldpri에 대해선 감소를 수행한다.
+ */
 	if (likely(newpri != CPUPRI_INVALID)) {
 		struct cpupri_vec *vec = &cp->pri_to_cpu[newpri];
 
@@ -389,6 +409,13 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 		 * do a write memory barrier, and then update the count, to
 		 * make sure the vector is visible when count is set.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   새 벡터를 추가할 때 먼저 마스크를 업데이트하고 쓰기 메모리 배리어를 
+ *   수행한 다음 카운트가 설정될 때 벡터가 표시되도록 카운트를 
+ *   업데이트합니다.
+ */
 		smp_mb__before_atomic();
 		atomic_inc(&(vec)->count);
 		do_mb = 1;
@@ -408,6 +435,20 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 		 * We only need to do a memory barrier if we updated
 		 * the new priority vec.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   vec->count의 수정 순서가 중요하기 때문에 이전 prio를 감소시키기 전에 
+ *   새로운 prio의 업데이트가 보이는지 확인해야 합니다. 이렇게 하면 
+ *   실행 대기열의 우선 순위를 높일 때 루프가 둘 중 하나를 볼 수 있습니다. 
+ *   어쨌든 rt 풀을 트리거하므로 우선 순위를 낮추는 경우에는 신경 쓰지 
+ *   않습니다.
+ *
+ *   새로운 우선 순위 vec를 업데이트한 경우에만 메모리 장벽을 수행하면 
+ *   됩니다.
+ *
+ * - newpri가 수행된경우 barrier를 한다.
+ */
 		if (do_mb)
 			smp_mb__after_atomic();
 
@@ -415,11 +456,23 @@ void cpupri_set(struct cpupri *cp, int cpu, int newpri)
 		 * When removing from the vector, we decrement the counter first
 		 * do a memory barrier and then clear the mask.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   벡터에서 제거할 때 카운터를 먼저 감소시키고 메모리 배리어를 수행한 
+ *   다음 마스크를 지웁니다.
+ *
+ * - 제거될때는 count를 먼저 빼고 mask를 clear한다.
+ */
 		atomic_dec(&(vec)->count);
 		smp_mb__after_atomic();
 		cpumask_clear_cpu(cpu, vec->mask);
 	}
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - currpri를 newpri로 갱신한다.
+ */
 	*currpri = newpri;
 }
 

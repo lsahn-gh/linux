@@ -2398,6 +2398,10 @@ inline int task_curr(const struct task_struct *p)
  * this means any call to check_class_changed() must be followed by a call to
  * balance_callback().
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * - cfs -> rt or rt -> cfs 등의 schedule class 전환 상황.
+ */
 static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 				       const struct sched_class *prev_class,
 				       int oldprio)
@@ -2719,6 +2723,8 @@ out:
 
 /*
  * IAMROOT, 2023.02.11:
+ * - 인자로 받은 task보다 우선순위 낮은 cpu를 찾아서 해당 cpu로 task를
+ *   migration한다.
  * - this rq에서 task보다 낮은 lowest_rq를 찾아 balance를 수행한다.
  *   (this rq와 task rq가 같은 경우에 한해서)
  */
@@ -5002,6 +5008,19 @@ static inline void finish_task(struct task_struct *prev)
 
 #ifdef CONFIG_SMP
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @head list에 등록된 func들(balance_callback)들을 순서대로 호출한다.
+ * - 등록되는 balance_callback들
+ * -- rt 관련
+ *   1. push_rt_tasks 
+ *     pick_next_task_rt / set_next_task_rt -> rt_queue_push_tasks()
+ *     switched_to_rt -> rt_queue_pull_task()
+ *
+ *   2. pull_rt_task
+ *     switched_from_rt -> rt_queue_pull_task()
+ *     prio_changed_rt  -> rt_queue_pull_task()
+ */
 static void do_balance_callbacks(struct rq *rq, struct callback_head *head)
 {
 	void (*func)(struct rq *rq);
@@ -5026,6 +5045,10 @@ struct callback_head balance_push_callback = {
 	.func = (void (*)(struct callback_head *))balance_push,
 };
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rq의 balance_callback을 가져오면서 NULL로 초기화한다.
+ */
 static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
 {
 	struct callback_head *head = rq->balance_callback;
@@ -5039,7 +5062,7 @@ static inline struct callback_head *splice_balance_callbacks(struct rq *rq)
 
 /*
  * IAMROOT, 2023.01.28:
- * - TODO
+ * - rq의 balance_callback을 호출한다.
  */
 static void __balance_callbacks(struct rq *rq)
 {
@@ -6124,7 +6147,7 @@ static inline void schedule_debug(struct task_struct *prev, bool preempt)
 
 /*
  * IAMROOT, 2023.01.28:
- * - TODO
+ * - balance을 수행한다. @prev보다 높은 task가 @rq에 pull 될 수 있다.
  */
 static void put_prev_task_balance(struct rq *rq, struct task_struct *prev,
 				  struct rq_flags *rf)
@@ -6929,11 +6952,13 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	rq_lock(rq, &rf);
 	smp_mb__after_spinlock();
 
+	/* Promote REQ to ACT */
 /*
  * IAMROOT, 2023.01.26:
  * - RQCF_REQ_SKIP -> RQCF_ACT_SKIP -> RQCF_UPDATED		
+ * - RQCF_REQ_SKIP 요청이 있으면 RQCF_ACT_SKIP으로 승격이 되면서
+ *   update_rq_clock을 한번 skip할것이다.
  */
-	/* Promote REQ to ACT */
 	rq->clock_update_flags <<= 1;
 	update_rq_clock(rq);
 

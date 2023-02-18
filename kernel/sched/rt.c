@@ -19,6 +19,16 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun);
 
 struct rt_bandwidth def_rt_bandwidth;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 1. timer expire시 rt_period시간에 따라 overrun을 얻어온다. 
+ *      일반적으로 1.
+ *   2. overrun에 따라 rt bw에 속한 rt들에 대해 다음을 수행한다.
+ *     -- 설정시간 및 실행시간을 재계산한다.
+ *     -- throttle이 풀릴수 있는 상황이면 푼다
+ *     -- enqueue할 task가 있으면 enqueue한다.
+ *   3. bw을 실행할 이유가 없으면 timer를 종료하고 그게아니면 재예약을 한다.
+ */
 static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
 {
 	struct rt_bandwidth *rt_b =
@@ -27,15 +37,41 @@ static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
 	int overrun;
 
 	raw_spin_lock(&rt_b->rt_runtime_lock);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - for문의 동작원리 
+ *   1. 최초 timer expire. hrtimer_forward_now에서 일반적으로 overrun = 1
+ *   2. for문동작
+ *   3. 다시 hrtimer_forward_now 진입. expire안됬으므로 overrun = 0.
+ *   4. for문 break되며 idle에 따라 return.
+ */
 	for (;;) {
+/*
+ * IAMROOT, 2023.02.18:
+ * - expire 안됨 : overrun = 0
+ *   rt_period 보다 짧은 시간에 expire : overrun = 1
+ *   rt_period 보다 긴 시간에 expire : overrun = rt_period 배수
+ */
 		overrun = hrtimer_forward_now(timer, rt_b->rt_period);
 		if (!overrun)
 			break;
 
 		raw_spin_unlock(&rt_b->rt_runtime_lock);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - 만약 특수한 상황에따라 여기서 많은 시간이 소요되면 next iterate에서
+ *   overrun이 발생할수도 있다.
+ */
 		idle = do_sched_rt_period_timer(rt_b, overrun);
 		raw_spin_lock(&rt_b->rt_runtime_lock);
 	}
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - idle이 있다면 timer가 쉬게되는 개념이 되므로 active를 clear
+ */
 	if (idle)
 		rt_b->rt_period_active = 0;
 	raw_spin_unlock(&rt_b->rt_runtime_lock);
@@ -46,6 +82,7 @@ static enum hrtimer_restart sched_rt_period_timer(struct hrtimer *timer)
 /*
  * IAMROOT, 2022.11.26:
  * - rt bw 초기화.
+ * - global_rt_period인 경우 rt_period는 1초
  */
 void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime)
 {
@@ -59,6 +96,12 @@ void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime)
 	rt_b->rt_period_timer.function = sched_rt_period_timer;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - bw설정이 안되있으면 수행을 안한다.
+ * - bw 동작 예약이 안되있으면 예약을 한다.
+ *   (sched_rt_period_timer())
+ */
 static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
 {
 	if (!rt_bandwidth_enabled() || rt_b->rt_runtime == RUNTIME_INF)
@@ -75,6 +118,17 @@ static void start_rt_bandwidth(struct rt_bandwidth *rt_b)
 		 * throttle when they start up. Kick the timer right away
 		 * to update the period.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   SCHED_DEADLINE은 대역폭을 업데이트합니다. DL 작업이 포함된 런어웨이 
+ *   RT 작업이 CPU를 독차지할 수 있기 때문입니다. 그러나 DL은 기간을 
+ *   재설정하지 않습니다. RT 작업이 실행되지 않고 마감일 작업이 실행 
+ *   중인 경우 RT 작업이 시작될 때 조절될 수 있습니다. 기간을 
+ *   업데이트하려면 타이머를 바로 킥하십시오.
+ *
+ * - 최대한 빨리 hrtimer가 동작하게 한다.
+ */
 		hrtimer_forward_now(&rt_b->rt_period_timer, ns_to_ktime(0));
 		hrtimer_start_expires(&rt_b->rt_period_timer,
 				      HRTIMER_MODE_ABS_PINNED_HARD);
@@ -333,6 +387,12 @@ static inline int rt_overloaded(struct rq *rq)
 	return atomic_read(&rq->rd->rto_count);
 }
 
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rq의 cpu를 rtomask에 set하고 rto_count를 증가시킨다.
+ *   overload된 cpu를 기록하는 기능이다.
+ */
 static inline void rt_set_overload(struct rq *rq)
 {
 	if (!rq->online)
@@ -348,33 +408,82 @@ static inline void rt_set_overload(struct rq *rq)
 	 *
 	 * Matched by the barrier in pull_rt_task().
 	 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *  과부하 수를 설정하기 전에 마스크가 보이는지 확인하십시오. 마스크를 
+ *  확인해야 하는지 확인하기 위해 확인합니다. 마스크를 본다면 아쉬울 
+ *  텐데 마스크가 아직 업데이트되지 않았습니다.
+ *
+ *  pull_rt_task()의 장벽과 일치합니다.
+ *  
+ *  - cpu mask를 set 및 증가하는 경우 mask set -> count up 순으로 진행한다.
+ */
 	smp_wmb();
 	atomic_inc(&rq->rd->rto_count);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rq의 cpu에 대한 정보를 rto mask와 count에서 제거한다.
+ */
 static inline void rt_clear_overload(struct rq *rq)
 {
 	if (!rq->online)
 		return;
 
 	/* the order here really doesn't matter */
+/*
+ * IAMROOT, 2023.02.18:
+ *  - cpu mask를 clear 및 감소하는 경우 count down -> mask clear 
+ *  순으로 진행한다.
+ */
 	atomic_dec(&rq->rd->rto_count);
 	cpumask_clear_cpu(rq->cpu, rq->rd->rto_mask);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - overload를 해야되는 상황에 호출되면 overload시키고,
+ *   overload를 풀어야되는 상황에서 호출되면 overload를 푼다.
+ */
 static void update_rt_migration(struct rt_rq *rt_rq)
 {
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt_rq->rt_nr_migratory != 0
+ *   migrate가능한 task가 있으면서 cpu가 두개 이상인 환경
+ * - 1. if문을 해석하면 cpu가 두개 이상 이다.
+ *   2. migrate가능 한 task가 있다.
+ *   3. rt task가 2개이상 있다.
+ */
 	if (rt_rq->rt_nr_migratory && rt_rq->rt_nr_total > 1) {
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_rq가 overload되는 상황이다. @rt_rq의 cpu에 대한 정보를
+ *   rt_rq의 rd의 rto에 기록한다.
+ */
 		if (!rt_rq->overloaded) {
 			rt_set_overload(rq_of_rt_rq(rt_rq));
 			rt_rq->overloaded = 1;
 		}
 	} else if (rt_rq->overloaded) {
+/*
+ * IAMROOT, 2023.02.18:
+ * - overload가 풀리는 상황에서 update_rt_migration이 호출되는 상황.
+ *   @rt_rq에 대한 overload를 푼다.
+ */
 		rt_clear_overload(rq_of_rt_rq(rt_rq));
 		rt_rq->overloaded = 0;
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_se가 task인 경우에만 count를 증가하고 overload에 대해서 갱신한다.
+ *   (overload가 안됬으면 overload로 전환될수도있다.)
+ */
 static void inc_rt_migration(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
 	struct task_struct *p;
@@ -392,6 +501,11 @@ static void inc_rt_migration(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	update_rt_migration(rt_rq);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_se가 task인 경우에만 count를 빼고 overload에 대해서 갱신한다.
+ *   (overload가 된상태였으면 overload가 풀릴수 있다.)
+ */
 static void dec_rt_migration(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
 	struct task_struct *p;
@@ -661,6 +775,12 @@ static inline struct rt_rq *group_rt_rq(struct sched_rt_entity *rt_se)
 static void enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags);
 static void dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_rq가 root group인경우 top enqueue(+cpufreq_update_util 수행).
+ *   그렇지 않은 경우 rt_se로 enqueue
+ *   enqueue후 highest가 변경됫으면 reschedule을 수행한다.
+ */
 static void sched_rt_rq_enqueue(struct rt_rq *rt_rq)
 {
 	struct task_struct *curr = rq_of_rt_rq(rt_rq)->curr;
@@ -682,6 +802,11 @@ static void sched_rt_rq_enqueue(struct rt_rq *rt_rq)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - root group인 경우 top에서 dequeue 및 cpufreq_update_util 수행
+ *   그렇지 않은경우 rt_se를 dequeue한다.
+ */
 static void sched_rt_rq_dequeue(struct rt_rq *rt_rq)
 {
 	struct sched_rt_entity *rt_se;
@@ -698,24 +823,48 @@ static void sched_rt_rq_dequeue(struct rt_rq *rt_rq)
 		dequeue_rt_entity(rt_se, 0);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - throttled인지 확인하는데, boost상황이면 throttle이 아니라고 판단한다.
+ */
 static inline int rt_rq_throttled(struct rt_rq *rt_rq)
 {
 	return rt_rq->rt_throttled && !rt_rq->rt_nr_boosted;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * @return 1 : boost가 되있는 상황.
+ *             boost된 task가 있거나, task인데 boost인 상황.
+ */
 static int rt_se_boosted(struct sched_rt_entity *rt_se)
 {
 	struct rt_rq *rt_rq = group_rt_rq(rt_se);
 	struct task_struct *p;
 
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - group entity이면 boost된 task가 있는지로 판단한다. 
+ */
 	if (rt_rq)
 		return !!rt_rq->rt_nr_boosted;
 
 	p = rt_task_of(rt_se);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - 보통은 normal_prio와 prio랑은 같은데, 다를 경우 boost된 상황으로
+ *   판단한다.
+ */
 	return p->prio != p->normal_prio;
 }
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2023.02.18:
+ * - root domain에 참가한 cpu 목록.
+ */
 static inline const struct cpumask *sched_rt_period_mask(void)
 {
 	return this_rq()->rd->span;
@@ -1039,11 +1188,25 @@ static void balance_runtime(struct rt_rq *rt_rq)
 static inline void balance_runtime(struct rt_rq *rt_rq) {}
 #endif /* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 1. bw의 설정값(runtime)을 rt_rq에 설정한다
+ *   2. 동작중인 rt_rq들에 대해서 실행시간을 설정시간에 따라 감소한다.
+ *   3. 재계산된 실행시간에 따라 throttle을 푼다.
+ *   4. throttle을 풀거나 새로 들어온 rt_rq라면 enqueue한다.
+ *   5. rt 실행시간이 있거나, rt task가 있는경우, 새로 들어온 rt가 있는 
+ *      경우 timer를 재예약(return 0.) 한다.
+ *   6. rt 가 없거나 bw가 비활성화 된경우등은 timer를 끈다(return 1)
+ */
 static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 {
 	int i, idle = 1, throttled = 0;
 	const struct cpumask *span;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - this_rq의 root domain의 cpumask를 가져온다.
+ */
 	span = sched_rt_period_mask();
 #ifdef CONFIG_RT_GROUP_SCHED
 	/*
@@ -1055,6 +1218,20 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 	 * off to kill the perturbations it causes anyway.  Meanwhile,
 	 * this maintains functionality for boot and/or troubleshooting.
 	 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   FIXME: 격리된 CPU는 isolcpus이든 cpusets를 통해 격리되었는지 
+ *   여부에 관계없이 루트 작업 그룹을 떠나야 합니다. 타이머가 모든 
+ *   실행 대기열을 서비스하지 않는 CPU에서 실행되어 잠재적으로 다른 
+ *   CPU가 무기한 스로틀링되지 않도록 합니다. 격리가 실제로 필요한 경우 
+ *   사용자는 스로틀을 해제하여 발생하는 섭동을 제거합니다. 한편, 이것은 
+ *   부팅 및/또는 문제 해결을 위한 기능을 유지합니다.
+ *
+ * - @rt_b가 root_task_group의 rt bw이면 그냥 전체 cpu로 span을 정한다.
+ *   특정 상황에서 무기한 스로틀링이 발생할수 있어 이를 방지하기 위함
+ *   이라고 한다.
+ */
 	if (rt_b == &root_task_group.rt_bandwidth)
 		span = cpu_online_mask;
 #endif
@@ -1069,8 +1246,18 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 		 * can be time-consuming. Try to avoid it when possible.
 		 */
 		raw_spin_lock(&rt_rq->rt_runtime_lock);
+/*
+ * IAMROOT, 2023.02.18:
+ * - RT_RUNTIME_SHARE기능이 없고, rt_rq가 운영중인  상황에서
+ *   bw를 rt_rq에 충전한다.(무조건 bw와 설정시간을 동일하게 하는 개념.)
+ */
 		if (!sched_feat(RT_RUNTIME_SHARE) && rt_rq->rt_runtime != RUNTIME_INF)
 			rt_rq->rt_runtime = rt_b->rt_runtime;
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - 실행시간이 없고, task도 없는 경우엔 skip한다.
+ */
 		skip = !rt_rq->rt_time && !rt_rq->rt_nr_running;
 		raw_spin_unlock(&rt_rq->rt_runtime_lock);
 		if (skip)
@@ -1083,10 +1270,40 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 			u64 runtime;
 
 			raw_spin_lock(&rt_rq->rt_runtime_lock);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - throttle 된경우에만 balance_runtime을 수행한다.
+ */
 			if (rt_rq->rt_throttled)
 				balance_runtime(rt_rq);
 			runtime = rt_rq->rt_runtime;
+/*
+ * IAMROOT, 2023.02.18:
+ * - overrun * runtime 만큼 rt_time에서 뺀다.
+ * - 일반적인 상황(overrun = 1)
+ *   1) rt_time <= runtime 
+ *      설정된 시간을 다 못쓰거나 딱 맞춰서 다 쓴 상황.
+ *      처음부터 시작하는 개념으로 0으로 초기화.
+ *   2) rt_time > runtime
+ *      설정된 시간 이상 쓴상황. 다음 peroid에서 넘게 쓴시간을 남겨놓
+ *      는 개념이된다.
+ *
+ * - overrun이 1이 아닌상황(바쁜상황)
+ *   timer가 여러번 동작했어야됬는데 못하는 상황. runtime이 overrun횟수만
+ *   큼 계산이 됬어야됫므로 overrun을 runtime에 배수해서 계산한다.
+ */
 			rt_rq->rt_time -= min(rt_rq->rt_time, overrun*runtime);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt_time < runtime : 설정시간보다 적게 썻으므로 현재 throttle이 
+ *   아닌 상황이다.
+ * - 이전에 throttle이였고 남은 잔량이 runtime보다 작다면 
+ *   throttle을 풀어준다.
+ * - rt_throttled은 실행시간이 설정시간보다 많이 동작햇을 경우 set
+ *   됫을것이다.
+ */
 			if (rt_rq->rt_throttled && rt_rq->rt_time < runtime) {
 				rt_rq->rt_throttled = 0;
 				enqueue = 1;
@@ -1098,13 +1315,36 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 				 * and this unthrottle will get accounted as
 				 * 'runtime'.
 				 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   우리가 유휴 상태이고 깨어난(rt) 작업이 제한되면 
+ *   check_preempt_curr()는 skip_update를 설정하고 깨우기와 이 제한 해제 
+ *   사이의 시간은 '런타임'으로 간주됩니다.
+ *
+ * - curr가 idle인데 rt task가 있는 상황.
+ *   update_rq_clock을 idle task도 skip없이 동작시켜 schedule 시키겠다는 
+ *   의미이다.
+ */
 				if (rt_rq->rt_nr_running && rq->curr == rq->idle)
 					rq_clock_cancel_skipupdate(rq);
 			}
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt 실행시간이 있거나 rt task가 있으면 idle을 안시킨다.
+ *   (hrtimer 계속 동작)
+ */
 			if (rt_rq->rt_time || rt_rq->rt_nr_running)
 				idle = 0;
 			raw_spin_unlock(&rt_rq->rt_runtime_lock);
 		} else if (rt_rq->rt_nr_running) {
+/*
+ * IAMROOT, 2023.02.18:
+ * - 처음 시작하는 경우
+ * - rt실행시간이 없는데 rt가 있으면 idle을 안시킨다.
+ *   throttled이 안되있다면 enqueue
+ */
 			idle = 0;
 			if (!rt_rq_throttled(rt_rq))
 				enqueue = 1;
@@ -1112,14 +1352,27 @@ static int do_sched_rt_period_timer(struct rt_bandwidth *rt_b, int overrun)
 		if (rt_rq->rt_throttled)
 			throttled = 1;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - throttled이 풀리거나 아에 새로운 rt가 들어온경우 enqueue를 할 것이다.
+ */
 		if (enqueue)
 			sched_rt_rq_enqueue(rt_rq);
 		raw_spin_rq_unlock(rq);
 	}
 
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - bw가 비활성 상태면 timer를 종료시킨다.
+ */
 	if (!throttled && (!rt_bandwidth_enabled() || rt_b->rt_runtime == RUNTIME_INF))
 		return 1;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt task가 남아있는 경우 계속 bw를 수행해야된다.
+ */
 	return idle;
 }
 
@@ -1334,6 +1587,10 @@ dequeue_top_rt_rq(struct rt_rq *rt_rq)
 
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_rq의 count를 rq에 넣고, cpufreq uill을 수행한다.
+ */
 static void
 enqueue_top_rt_rq(struct rt_rq *rt_rq)
 {
@@ -1358,6 +1615,10 @@ enqueue_top_rt_rq(struct rt_rq *rt_rq)
 
 #if defined CONFIG_SMP
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - top rq이고, prio가 더 높은 경우에만 cpupri를 갱신한다.
+ */
 static void
 inc_rt_prio_smp(struct rt_rq *rt_rq, int prio, int prev_prio)
 {
@@ -1374,6 +1635,12 @@ inc_rt_prio_smp(struct rt_rq *rt_rq, int prio, int prev_prio)
 		cpupri_set(&rq->rd->cpupri, rq->cpu, prio);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - top rq이고, highest_prio가 변경된경우 cpupri를 갱신한다.
+ *   (prev_prio가 이전에 highest였을 경우 지금의 highest로 바꿔야
+ *   될수있으므로)
+ */
 static void
 dec_rt_prio_smp(struct rt_rq *rt_rq, int prio, int prev_prio)
 {
@@ -1400,6 +1667,11 @@ void dec_rt_prio_smp(struct rt_rq *rt_rq, int prio, int prev_prio) {}
 #endif /* CONFIG_SMP */
 
 #if defined CONFIG_SMP || defined CONFIG_RT_GROUP_SCHED
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - highest_prio 갱신 및 @rt_rq->rd의 cpupri 갱신
+ */
 static void
 inc_rt_prio(struct rt_rq *rt_rq, int prio)
 {
@@ -1411,6 +1683,12 @@ inc_rt_prio(struct rt_rq *rt_rq, int prio)
 	inc_rt_prio_smp(rt_rq, prio, prev_prio);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt가 있으면 highest_prio 비교 및 갱신
+ *   rt가 없으면 MAX_RT_PRIO - 1로 초기화.
+ * - @rt_rq->rd의 cpupri 갱신
+ */
 static void
 dec_rt_prio(struct rt_rq *rt_rq, int prio)
 {
@@ -1447,16 +1725,31 @@ static inline void dec_rt_prio(struct rt_rq *rt_rq, int prio) {}
 
 #ifdef CONFIG_RT_GROUP_SCHED
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - boost된 @rt_se인 경우라면 rt_se가 들어가는 상황이므로 boost entity를
+ *   증가시킨다.
+ * - tg(cgroup)일 경우 rt bw를 예약한다.
+ */
 static void
 inc_rt_group(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
 	if (rt_se_boosted(rt_se))
 		rt_rq->rt_nr_boosted++;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - group에 대한 bw를 예약한다.
+ */
 	if (rt_rq->tg)
 		start_rt_bandwidth(&rt_rq->tg->rt_bandwidth);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - boost된 @rt_se인 경우라면 rt_se가 빠지는 상황이므로 boost entity를
+ *   감소시킨다.
+ */
 static void
 dec_rt_group(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
@@ -1479,6 +1772,10 @@ void dec_rt_group(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq) {}
 
 #endif /* CONFIG_RT_GROUP_SCHED */
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - group이면 return rt_nr_running, task면 return 1.
+ */
 static inline
 unsigned int rt_se_nr_running(struct sched_rt_entity *rt_se)
 {
@@ -1490,6 +1787,10 @@ unsigned int rt_se_nr_running(struct sched_rt_entity *rt_se)
 		return 1;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - group이면 return rt_nr_running, task면 return 1.
+ */
 static inline
 unsigned int rt_se_rr_nr_running(struct sched_rt_entity *rt_se)
 {
@@ -1504,6 +1805,13 @@ unsigned int rt_se_rr_nr_running(struct sched_rt_entity *rt_se)
 	return (tsk->policy == SCHED_RR) ? 1 : 0;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * 1. 자신이 속한 @rt_rq에서 자신의 정보를 더한다.
+ * 2. cpupri 갱신
+ * 3. overload 갱신 (overload 설정 될수있다.)
+ * 4. boost 갱신(rt bw 예약 될수있다.)
+ */
 static inline
 void inc_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
@@ -1518,11 +1826,19 @@ void inc_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 	inc_rt_group(rt_se, rt_rq);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * 1. 자신이 속한 @rt_rq에서 자신의 정보를 뺀다.
+ * 2. cpupri 갱신
+ * 3. overload 갱신 (해제 될수있다.)
+ * 4. boost 갱신
+ */
 static inline
 void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
 {
 	WARN_ON(!rt_prio(rt_se_prio(rt_se)));
 	WARN_ON(!rt_rq->rt_nr_running);
+
 	rt_rq->rt_nr_running -= rt_se_nr_running(rt_se);
 	rt_rq->rr_nr_running -= rt_se_rr_nr_running(rt_se);
 
@@ -1536,6 +1852,17 @@ void dec_rt_tasks(struct sched_rt_entity *rt_se, struct rt_rq *rt_rq)
  *
  * assumes ENQUEUE/DEQUEUE flags match
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * @return true 
+ *             - DEQUEUE_SAVE와 DEQUEUE_MOVE가 동시에 존재
+ *             - DEQUEUE_SAVE가 없음.
+ *         false 
+ *             - DEQUEUE_MOVE를 제외한 DEQUEUE_SAVE가 있거나
+ *               DEQUEUE_SAVE + 알파가 있는 상태.
+ *
+ * - 설정으로 인해 dequeue되는 경우 return false.
+ */
 static inline bool move_entity(unsigned int flags)
 {
 	if ((flags & (DEQUEUE_SAVE | DEQUEUE_MOVE)) == DEQUEUE_SAVE)
@@ -1544,6 +1871,10 @@ static inline bool move_entity(unsigned int flags)
 	return true;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - list에서 빠지고, priority array에서 clear한다.
+ */
 static void __delist_rt_entity(struct sched_rt_entity *rt_se, struct rt_prio_array *array)
 {
 	list_del_init(&rt_se->run_list);
@@ -1554,6 +1885,11 @@ static void __delist_rt_entity(struct sched_rt_entity *rt_se, struct rt_prio_arr
 	rt_se->on_list = 0;
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - enqueue를 수행한다.
+ *   (move, on_list set, on_rq set, count, cpupri, overload, boost)
+ */
 static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 {
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
@@ -1567,12 +1903,27 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 	 * get throttled and the current group doesn't have any other
 	 * active members.
 	 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   제한된 경우 또는 비어 있는 경우 그룹을 대기열에 넣지 마십시오. 
+ *   후자는 하위 그룹이 제한되고 현재 그룹에 다른 활성 구성원이 없는 
+ *   경우 전자의 결과입니다.
+ *
+ * - group인경우, throttle상태거나 rt task가 없는상태면 @rt_se를 
+ *   enqueue를 안한다. 바쁘거나 동작시킬게 없기때문이다.
+ */
 	if (group_rq && (rt_rq_throttled(group_rq) || !group_rq->rt_nr_running)) {
 		if (rt_se->on_list)
 			__delist_rt_entity(rt_se, array);
 		return;
 	}
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - move로 인한 enqueue 상확인경우, head에 넣어야되면 head로, tail에
+ *   넣어야되면 tail로 넣는다.
+ */
 	if (move_entity(flags)) {
 		WARN_ON_ONCE(rt_se->on_list);
 		if (flags & ENQUEUE_HEAD)
@@ -1588,17 +1939,31 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 	inc_rt_tasks(rt_se, rt_rq);
 }
 
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - move 상황이라면 list에서 제거한다.
+ *   @rt_rq에서 @rt_se을 dequeue한다.(count, cpupri, overload, boost등)
+ */
 static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 {
 	struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 	struct rt_prio_array *array = &rt_rq->active;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - move로 인한 dequeue라면 자료구조에서 뺀다.
+ */
 	if (move_entity(flags)) {
 		WARN_ON_ONCE(!rt_se->on_list);
 		__delist_rt_entity(rt_se, array);
 	}
 	rt_se->on_rq = 0;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_se가 속한 @rt_rq에서 entity가 빠지는 상황에 따른 정보를 처리한다.
+ */
 	dec_rt_tasks(rt_se, rt_rq);
 }
 
@@ -1606,10 +1971,22 @@ static void __dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
  * Because the prio of an upper entry depends on the lower
  * entries, we must remove entries top - down.
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * - stack을 이용해 top-down식으로 dequeue한다.
+ *   priority에 따라서 상위에 영향을 주기 때문에 아에 관련 parent들에서 
+ *   빼버리는것이다. 위에서부터 아래로 순차적으로 dequeue한다.
+ * - @rt_se가 속한 최상위 rq에서 @rt_se관련 count를 뺀다.
+ */
 static void dequeue_rt_stack(struct sched_rt_entity *rt_se, unsigned int flags)
 {
 	struct sched_rt_entity *back = NULL;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 잠깐 보관을 위해 parent에 보관을 한다.(stack) 임시로 dequeue를 해야되는
+ *   상황에서 원래의 연결경로를 기억해야되기 때문이다.
+ */
 	for_each_sched_rt_entity(rt_se) {
 		rt_se->back = back;
 		back = rt_se;
@@ -1617,39 +1994,89 @@ static void dequeue_rt_stack(struct sched_rt_entity *rt_se, unsigned int flags)
 
 	dequeue_top_rt_rq(rt_rq_of_se(back));
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 위에서 bakup했던것을 최상위에서 내려오면서 dequeue한다.
+ */
 	for (rt_se = back; rt_se; rt_se = rt_se->back) {
 		if (on_rt_rq(rt_se))
 			__dequeue_rt_entity(rt_se, flags);
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - stack을 이용해 먼저 @rt_se를 dequeue한 후, 다시 enqueue한다.
+ *   (priority가 상위에 영향을 줄수 있기때문이다.)
+ */
 static void enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 {
 	struct rq *rq = rq_of_rt_se(rt_se);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - enqueue전에 dequeue를 한다.
+ *   enqueue되는 task의 priority에 따라 parent의 rt_se의 대표 priority의
+ *   가 변경 될 수 때문이다.
+ * - @rt_se가 속한 최상위 rq에서 @rt_se관련 count를 뺀다.
+ */
 	dequeue_rt_stack(rt_se, flags);
+/*
+ * IAMROOT, 2023.02.18:
+ * - down-top 으로 다시 enqueue한다.
+ */
 	for_each_sched_rt_entity(rt_se)
 		__enqueue_rt_entity(rt_se, flags);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - rq에서 @rt_se관련 count를 뺀다. dequeue할때 count를 뺏엇으니 다시
+ *   enqueue를 끝내고 다시 update해주는 개념이다.
+ */
 	enqueue_top_rt_rq(&rq->rt);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rt_se를 dequeue한다. 일단 stack을 사용해 @rt_se관련을 전부 dequeue
+ *   하고 enqueue를 할때는 group entity만 수행한다.
+ */
 static void dequeue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flags)
 {
 	struct rq *rq = rq_of_rt_se(rt_se);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - stack을 사용해 dequeue.
+ */
 	dequeue_rt_stack(rt_se, flags);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - rt task가 있는 group은 다시 enqueue한다.
+ */
 	for_each_sched_rt_entity(rt_se) {
 		struct rt_rq *rt_rq = group_rt_rq(rt_se);
 
 		if (rt_rq && rt_rq->rt_nr_running)
 			__enqueue_rt_entity(rt_se, flags);
 	}
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - dequeue_rt_stack에서 뺏던 top rq를 다시 여기서 갱신.
+ *   dequeue된 @rt_se에 대한 정보는 빠졋을것이다.
+ */
 	enqueue_top_rt_rq(&rq->rt);
 }
 
 /*
  * Adding/removing a task to/from a priority array:
+ */
+/*
+ * IAMROOT, 2023.02.18:
+ * - task를 enqueue 하고, task가 current가 아닌경우 pushable task로 
+ *   enqueue한다.
  */
 static void
 enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
@@ -1661,10 +2088,21 @@ enqueue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 
 	enqueue_rt_entity(rt_se, flags);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @p가 curr로 동작중이 아니고, 동작할수있는 cpu가 여러개라면 pushable
+ *   task로 넣어진다.
+ */
 	if (!task_current(rq, p) && p->nr_cpus_allowed > 1)
 		enqueue_pushable_task(rq, p);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 1. update_curr_rt(실행시간 관련 처리 및 resched_curr 수행 여부 확인)
+ *   2. @p의 dequeue 수행
+ *   3. @p를 pushable task에서 dequeue.
+ */
 static void dequeue_task_rt(struct rq *rq, struct task_struct *p, int flags)
 {
 	struct sched_rt_entity *rt_se = &p->rt;
@@ -1826,6 +2264,19 @@ static void check_preempt_equal_prio(struct rq *rq, struct task_struct *p)
 	resched_curr(rq);
 }
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @p에서 rt가 동작을 안하고 있고, @p가 @rq의 우선순위가 높은상황,
+ *   즉 rt task
+ * --- push / pull을 하는 상황 정리.
+ *  1. cpu에서 idle인 상황에서 pull
+ *  2. core에서 balance을 call한 경우 push / pull
+ *  3. sleep에서 깨어낫을때(woken) sleep에서 깨어난 task를 그냥 동작할지
+ *     push를 할지 선택.
+ *  4. balance_callback의 선택에 따른 처리.
+ *     __schedule() 함수에서 post처리에서 상황에 따라 push / pull 선택
+ * ---
+ */
 static int balance_rt(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 {
 
@@ -2043,6 +2494,10 @@ static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
 /* Only try algorithms three times */
 #define RT_MAX_TRIES 3
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - @p가 동작중이 아니고, @cpu에서 동작이 가능하다면 return 1.
+ */
 static int pick_rt_task(struct rq *rq, struct task_struct *p, int cpu)
 {
 	if (!task_running(rq, p) &&
@@ -2055,6 +2510,10 @@ static int pick_rt_task(struct rq *rq, struct task_struct *p, int cpu)
 /*
  * Return the highest pushable rq's task, which is suitable to be executed
  * on the CPU, NULL otherwise
+ */
+/*
+ * IAMROOT, 2023.02.18:
+ * - @rq에서 @cpu에서 동작할 수 있는 가장 highest pushable task를 가져온다.
  */
 static struct task_struct *pick_highest_pushable_task(struct rq *rq, int cpu)
 {
@@ -2385,6 +2844,14 @@ static struct task_struct *pick_next_pushable_task(struct rq *rq)
  *   우선 순위가 낮은 작업을 실행 중인 CPU로 마이그레이션할 수 있는지 
  *   확인합니다.
  * @pull push_rt_tasks에서는 fasle
+ * @return 1 : migrate를 한경우.
+ *         0 : migrate 못한 경우.
+ *
+ * - @rq에서 pushable task(next_task)를 고르고, push할 rq를 선택해서 
+ *   migrate 및 reschedule한다.
+ * - 만약 next_task가 migrate disable일 경우 현재 cpu의 curr를 migrate
+ *   시도한다.
+ * - migrate할 적합한 cpu가 없으면 안한다.
  */
 static int push_rt_task(struct rq *rq, bool pull)
 {
@@ -2409,15 +2876,18 @@ static int push_rt_task(struct rq *rq, bool pull)
 	if (!next_task)
 		return 0;
 
-/*
- * IAMROOT, 2023.02.11:
- * - TODO
- */
 retry:
 
 /*
  * IAMROOT, 2023.02.11:
- * - migrate가 안되는 tasdk들은
+ * - migrate가 안되는 task들은 현재 cpu에서 동작하게 해야된다.
+ *   즉 next_task는 현재 cpu에서 동작을 해야되는 상황이다.
+ *   이 상황에서 next_task대신에 curr를 migration할수있는지 검사 및 수행
+ *   한다.
+ *   curr를 migration을 할수 있으면 stop scheduler를 사용한다.
+ *
+ *   stopper - curr         - next_task
+ *            (migrate O)     (migrate X)
  */
 	if (is_migration_disabled(next_task)) {
 		struct task_struct *push_task = NULL;
@@ -2461,9 +2931,10 @@ retry:
 	}
 
 /*
- * IAMROOT, 2023.02.11:
- * - TODO
+ * IAMROOT, 2023.02.18:
+ * - next_task가 migrate가능한 상황.
  */
+
 	if (WARN_ON(next_task == rq->curr))
 		return 0;
 
@@ -2472,6 +2943,15 @@ retry:
 	 * higher priority than current. If that's the case
 	 * just reschedule current.
 	 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   next_task가 현재보다 더 높은 우선 순위로 미끄러졌을 가능성이 
+ *   있습니다. 그렇다면 현재 일정을 다시 잡으십시오.
+ *
+ * - 혹시라도 우선순위가 바뀌어서 next_task가 더 높아졌다면 그냥
+ *   reschedule한다.
+ */
 	if (unlikely(next_task->prio < rq->curr->prio)) {
 		resched_curr(rq);
 		return 0;
@@ -2482,6 +2962,10 @@ retry:
 
 	/* find_lock_lowest_rq locks the rq if found */
 	lowest_rq = find_lock_lowest_rq(next_task, rq);
+/*
+ * IAMROOT, 2023.02.18:
+ * - 한가한 cpu가 없다.
+ */
 	if (!lowest_rq) {
 		struct task_struct *task;
 		/*
@@ -2492,7 +2976,22 @@ retry:
 		 * run-queue and is also still the next task eligible for
 		 * pushing.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   find_lock_lowest_rq는 rq->lock을 해제하므로 next_task가 
+ *   마이그레이션되었을 가능성이 있습니다.
+ *
+ *   작업이 여전히 동일한 실행 대기열에 있고 여전히 푸시할 수 있는 다음 
+ *   작업인지 확인해야 합니다.
+ */
 		task = pick_next_pushable_task(rq);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - 한가한 cpu가 없는 상황에서 pushable task list에 push할게 안바뀐
+ *   상황. push를 할수 없는 상황이므로 out한다.
+ */
 		if (task == next_task) {
 			/*
 			 * The task hasn't migrated, and is still the next
@@ -2500,6 +2999,13 @@ retry:
 			 * to push it to.  Do not retry in this case, since
 			 * other CPUs will pull from us when ready.
 			 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   작업이 마이그레이션되지 않았고 여전히 다음으로 적합한 작업이지만 
+ *   푸시할 실행 대기열을 찾지 못했습니다. 준비가 되면 다른 CPU가 
+ *   우리에게서 끌어오므로 이 경우 재시도하지 마십시오.
+ */
 			goto out;
 		}
 
@@ -2511,10 +3017,21 @@ retry:
 		 * Something has shifted, try again.
 		 */
 		put_task_struct(next_task);
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - next_task로는 push할 rq를 못찾은 상황에서 다른 task가 pushable로
+ *   선택될수있는 상황. 새로 찾은 task로 next_task를 정하고 다시 시도한다.
+ */
 		next_task = task;
 		goto retry;
 	}
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - next_task를 migrate할 lowest_rq를 찾았다. lowest_rq로 migrate 및
+ *   reschedule한다.
+ */
 	deactivate_task(rq, next_task, 0);
 	set_task_cpu(next_task, lowest_rq->cpu);
 	activate_task(lowest_rq, next_task, 0);
@@ -2530,7 +3047,13 @@ out:
 
 /*
  * IAMROOT, 2023.02.11:
- * - TODO
+ * - @rq에서 pushable task(next_task)를 고르고, push할 rq를 선택해서 
+ *   migrate 및 reschedule한다.
+ * - 만약 next_task가 migrate disable일 경우 현재 cpu의 curr를 migrate
+ *   시도한다.
+ *
+ * - migrate할 적합한 cpu를 못찾을때까지 migratge를 수행한다.
+ *   false의미 : curr를 pull해야되는 상황에선 pull을 안한다.
  */
 static void push_rt_tasks(struct rq *rq)
 {
@@ -2757,7 +3280,7 @@ static void tell_cpu_to_push(struct rq *rq)
  *   실행되며 여기서 수행할 작업은 없습니다.
  *   그렇지 않으면 완료되고 ipi를 보내야 합니다.
  *
- * - rto_cpu < 0 : *IPI RT 푸시를 시작한 상태. 이 경우
+ * - rto_cpu < 0 : IPI RT 푸시를 시작한 상태. 이 경우
  *   cpu를 골라 온다.
  */
 	if (rq->rd->rto_cpu < 0)
@@ -2834,7 +3357,14 @@ void rto_push_irq_work_func(struct irq_work *work)
 
 /*
  * IAMROOT, 2023.02.11:
- * - 
+ * - ipi 지원
+ *   @this_rq에 push를 요청한다.
+ *
+ * - ipi 미지원
+ *   overload된 cpu들을 순회해가면서 highest pushable task를 선택해서
+ *   this_rq로 migrate한다.
+ *   만약에 migrate를 못하는 경우 해당 cpu의 curr를 stopper를 이용해서
+ *   push한다.
  */
 static void pull_rt_task(struct rq *this_rq)
 {
@@ -2870,6 +3400,11 @@ static void pull_rt_task(struct rq *this_rq)
 	}
 #endif
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - IPI feat를 안쓰는 상황.
+ * - overload된 cpu들을 순회한다.
+ */
 	for_each_cpu(cpu, this_rq->rd->rto_mask) {
 		if (this_cpu == cpu)
 			continue;
@@ -2883,6 +3418,19 @@ static void pull_rt_task(struct rq *this_rq)
 		 * logically higher, the src_rq will push this task away.
 		 * And if its going logically lower, we do not care
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   다음으로 높은 작업이 현재 작업보다 우선 순위가 낮은 것으로 알려진 
+ *   경우 src_rq->lock을 사용하지 마십시오.
+ *   정확해 보일 수 있지만 이 값이 논리적으로 더 높아지면 src_rq는 이 
+ *   작업을 밀어냅니다.
+ *   그리고 그것이 논리적으로 낮아진다면 우리는 상관하지 않습니다. 
+ *
+ * - 순회중인 cpu의 next가 현재 cpu의 curr보다 낮거나 같은경우 skip한다.
+ *   현재 cpu 에서 순회중읜 cpu의 next를 동작시킬때에는 당연히 curr보다
+ *   높은 우선순위를 가져와야 하기 때문이다.
+ */
 		if (src_rq->rt.highest_prio.next >=
 		    this_rq->rt.highest_prio.curr)
 			continue;
@@ -2892,6 +3440,14 @@ static void pull_rt_task(struct rq *this_rq)
 		 * double_lock_balance, and another CPU could
 		 * alter this_rq
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   잠재적으로 double_lock_balance에서 this_rq의 잠금을 해제할 수 
+ *   있으며 다른 CPU가 this_rq를 변경할 수 있습니다. 
+ *
+ * - curr보다 높은 순위의 task를 고를수있는 상황. double lock을 건다.
+ */
 		push_task = NULL;
 		double_lock_balance(this_rq, src_rq);
 
@@ -2899,12 +3455,21 @@ static void pull_rt_task(struct rq *this_rq)
 		 * We can pull only a task, which is pushable
 		 * on its rq, and no others.
 		 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - src_rq에서 가장 우선순위가 높은 pushable task를 얻어온다.
+ */
 		p = pick_highest_pushable_task(src_rq, this_cpu);
 
 		/*
 		 * Do we have an RT task that preempts
 		 * the to-be-scheduled task?
 		 */
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - lock걸고 다시한번 확인하는 상황이다.
+ */
 		if (p && (p->prio < this_rq->rt.highest_prio.curr)) {
 			WARN_ON(p == src_rq->curr);
 			WARN_ON(!task_on_rq_queued(p));
@@ -2917,12 +3482,29 @@ static void pull_rt_task(struct rq *this_rq)
 			 * p if it is lower in priority than the
 			 * current task on the run queue
 			 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   현재 CPU에서 실행 중인 것보다 p의 우선순위가 더 높을 가능성이 
+ *   있습니다.
+ *   이것은 단지 p가 깨어났고 일정을 잡을 기회가 없었다는 것입니다. 
+ *   실행 대기열의 현재 작업보다 우선 순위가 낮은 경우에만 p를 가져옵니다.
+ */
 			if (p->prio < src_rq->curr->prio)
 				goto skip;
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - p가 migrate disable인 상황이면 src_rq의 curr를 stop시키고 src_rq로
+ *   push 요청을 한다.
+ */
 			if (is_migration_disabled(p)) {
 				push_task = get_push_task(src_rq);
 			} else {
+/*
+ * IAMROOT, 2023.02.18:
+ * - 다른 cpu의 task를 this cpu로 꺼내온다.(pull)
+ */
 				deactivate_task(src_rq, p, 0);
 				set_task_cpu(p, this_cpu);
 				activate_task(this_rq, p, 0);
@@ -2934,10 +3516,20 @@ static void pull_rt_task(struct rq *this_rq)
 			 * in another runqueue. (low likelihood
 			 * but possible)
 			 */
+/*
+ * IAMROOT, 2023.02.18:
+ * - papago
+ *   다른 runqueue에 더 높은 우선 순위 작업이 있는 경우를 대비하여 
+ *   검색을 계속합니다. (가능성은 낮지만 가능).
+ */
 		}
 skip:
 		double_unlock_balance(this_rq, src_rq);
 
+/*
+ * IAMROOT, 2023.02.18:
+ * - 위에서 선택된 push_task는 다른 lowest rq를 가진 cpu로 push될것이다.
+ */
 		if (push_task) {
 			raw_spin_rq_unlock(this_rq);
 			stop_one_cpu_nowait(src_rq->cpu, push_cpu_stop,
@@ -2953,6 +3545,10 @@ skip:
 /*
  * If we are not running and we are not going to reschedule soon, we should
  * try to push tasks away now
+ */
+/*
+ * IAMROOT, 2023.02.18:
+ * - sleep에서 깨어낫을때 그냥 동작시킬지 push를 할지 선택한다.
  */
 static void task_woken_rt(struct rq *rq, struct task_struct *p)
 {
@@ -3024,6 +3620,10 @@ void __init init_sched_rt_class(void)
  * with RT tasks. In this case we try to push them off to
  * other runqueues.
  */
+/*
+ * IAMROOT, 2023.02.18:
+ * - ex) cfs -> rt
+ */
 static void switched_to_rt(struct rq *rq, struct task_struct *p)
 {
 	/*
@@ -3042,6 +3642,11 @@ static void switched_to_rt(struct rq *rq, struct task_struct *p)
 	 */
 	if (task_on_rq_queued(p)) {
 #ifdef CONFIG_SMP
+
+/*
+ * IAMROOT, 2023.02.18:
+ * - ex) [rt] [rt] [cfs] 인 상황에서 cfs -> rt로 바뀌는 상황.
+ */
 		if (p->nr_cpus_allowed > 1 && rq->rt.overloaded)
 			rt_queue_push_tasks(rq);
 #endif /* CONFIG_SMP */
