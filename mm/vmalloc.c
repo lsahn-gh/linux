@@ -981,6 +981,50 @@ find_va_links(struct vmap_area *va,
 	return link;
 }
 
+/*
+ * IAMROOT, 2023.02.17:
+ * - link의 next va를 기존 rtbree/list구조에서 가져온다.
+ *   link가 parent right에 있을 경우 link의 next는 parent의 next값이 된다.
+ *   link가 parent의 left에 있을경우 link의 next는 parent가 된다.
+ *   (rbtree의 구조상 이런 원리가 된다.)
+ *
+ * ex) 다음과 같은 rb tree가 있다고 가정한다.
+ *       53
+ *      /   \
+ *    38     70
+ *    / \    / \
+ *  30  39  66 87
+ *               \
+ *                90
+ *
+ * ex1) va가 67값이 들어올 경우
+ *        53
+ *      /    \
+ *    38      70
+ *    / \    /  \
+ *  30  39  66   87
+ *            \    \
+ *          (link)  90
+ *
+ *  link자리에 67이 위치하게 될것이다.
+ *  link의 parent은 66이고 66의 next는 위 트리에서 70이 된다.
+ *  67의 next는 66의 list를 통해 66->next = 70으로 이어져있을 것이므로
+ *  66->next를 통해 next를 얻어온다.
+ *  70의 값은 실제 link의 next값이 될것이다.
+ *
+ * ex2) va가 60값이 들어올 경우
+ *        53
+ *      /    \
+ *    38      70
+ *    / \    /  \
+ *  30  39  66   87
+ *          /      \
+ *       (link)     90
+ *
+ *  link자리에 60값이 위치하게 될것이다.
+ *  rbtree구조상 left에 위치하게되면 parent가 무조건 next값이 된다.
+ *  그래서 그냥 next 값으로 parent를 가져오는것이다.
+ */
 static __always_inline struct list_head *
 get_va_next_sibling(struct rb_node *parent, struct rb_node **link)
 {
@@ -992,7 +1036,14 @@ get_va_next_sibling(struct rb_node *parent, struct rb_node **link)
 		 * before merging or inserting is empty, i.e. it means
 		 * there is no free vmap space. Normally it does not
 		 * happen but we handle this case anyway.
-		 */
+	 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   병합 또는 삽입하기 전에 VA 이웃을 찾으려고 시도하는 red-black 트리는 
+ *   비어 있습니다. 즉, 사용 가능한 vmap 공간이 없음을 의미합니다. 
+ *   일반적으로 발생하지 않지만 어쨌든 이 경우를 처리합니다.
+ */
 		return NULL;
 
 	list = &rb_entry(parent, struct vmap_area, rb_node)->list;
@@ -1272,7 +1323,18 @@ insert_vmap_area_augment(struct vmap_area *va,
  */
 /*
  * IAMROOT, 2023.02.03:
- * - TODO
+ * - papago
+ *   할당 해제된 VA 메모리 청크를 이전 및 다음 사용 가능한 블록과 병합합니다.
+ *   병합이 완료되지 않으면 새로운 빈 영역이 삽입됩니다. VA가 병합된 경우 
+ *   해제됩니다.
+ *
+ *   범위가 겹치는 경우 NULL을 반환하고 WARN() 보고서를 반환할 수 있습니다. 
+ *   버그가 있는 동작임에도 불구하고 시스템은 살아 있고 계속 진행될 수 
+ *   있습니다.
+ *
+ * - @va의 next가 될 next va를 구하고, 해당 자리에 va를 추가한다.
+ *   이때 next, next->prev와 비교해서 merge가 가능하면 기존 next, next->prev
+ *   로 merge를 진행하고 address를 갱신한후 @va는 버린다.
  */
 static __always_inline struct vmap_area *
 merge_or_add_vmap_area(struct vmap_area *va,
@@ -1288,6 +1350,12 @@ merge_or_add_vmap_area(struct vmap_area *va,
 	 * Find a place in the tree where VA potentially will be
 	 * inserted, unless it is merged with its sibling/siblings.
 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   VA가 형제/형제와 병합되지 않는 한 잠재적으로 VA가 삽입될 
+ *   위치를 트리에서 찾으십시오.
+ */
 	link = find_va_links(va, root, NULL, &parent);
 	if (!link)
 		return NULL;
@@ -1295,6 +1363,11 @@ merge_or_add_vmap_area(struct vmap_area *va,
 	/*
 	 * Get next node of VA to check if merging can be done.
 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   병합이 가능한지 확인하기 위해 VA의 다음 노드를 가져옵니다. 
+ */
 	next = get_va_next_sibling(parent, link);
 	if (unlikely(next == NULL))
 		goto insert;
@@ -1308,6 +1381,12 @@ merge_or_add_vmap_area(struct vmap_area *va,
 	 */
 	if (next != head) {
 		sibling = list_entry(next, struct vmap_area, list);
+/*
+ * IAMROOT, 2023.02.17:
+ * - va와 next가 연속된 경우(va -> next 순서) 되므로 합친다.
+ *   next를 그대로 사용하고 va를 해제해버린다. next의 start만 갱신하면
+ *   merge가 될것이다.
+ */
 		if (sibling->va_start == va->va_end) {
 			sibling->va_start = va->va_start;
 
@@ -1328,6 +1407,10 @@ merge_or_add_vmap_area(struct vmap_area *va,
 	 *                  start            end
 	 */
 	if (next->prev != head) {
+/*
+ * IAMROOT, 2023.02.17:
+ * - next->prev와 va가 연속된 경우(next->prev -> va 순서) 되므로 합친다.
+ */
 		sibling = list_entry(next->prev, struct vmap_area, list);
 		if (sibling->va_end == va->va_start) {
 			/*
@@ -1337,9 +1420,18 @@ merge_or_add_vmap_area(struct vmap_area *va,
 			 * fully populated if a sibling's augmented value is
 			 * "normalized" because of rotation operations.
 			 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - 이전에 next와 merge가 된상황. next->prev와도 merge가 되는 상황이므로
+ *   next와도 merge한다.
+ */
 			if (merged)
 				unlink_va(va, root);
 
+/*
+ * IAMROOT, 2023.02.17:
+ * - next->prev를 사용하고 va를 지워버린다.
+ */
 			sibling->va_end = va->va_end;
 
 			/* Free vmap_area object. */
@@ -1352,6 +1444,10 @@ merge_or_add_vmap_area(struct vmap_area *va,
 	}
 
 insert:
+/*
+ * IAMROOT, 2023.02.17:
+ * - merge가 안된상황이므로 새로 추가한다.
+ */
 	if (!merged)
 		link_va(va, root, parent, link, head);
 
@@ -1991,6 +2087,9 @@ void set_iounmap_nonlazy(void)
  * lazy free 상태의 vmap area들을 모두 vmalloc 자료 구조의 free 영역을 
  * 관리하는 자료 구조(RB tree + list)로 옮기고 해당 영역에 대해 
  * 모든 inner-share cpu들에 대해 TLB flush를 수행한다.
+ *
+ * @return false : purge_vmap_area_list가 없는 경우
+ *         true  : tlb flush + purge를 수행한경우.
  */
 static bool __purge_vmap_area_lazy(unsigned long start, unsigned long end)
 {
@@ -2106,6 +2205,7 @@ static void purge_vmap_area_lazy(void)
  * IAMROOT, 2022.07.02: 
  * vmalloc 자료 구조에서 vmap_area 구조체를 unlink하고, 
  * purge용 rb tree와 list에 추가한다.
+ * (이때 purge에 연속된 va가 있다면 해당 va와 merge된다.)
  * 단 일정 수 이상의 lazy된 페이지들인 경우 한꺼번에 TLB flush 처리한다.
  */
 static void free_vmap_area_noflush(struct vmap_area *va)
@@ -2347,7 +2447,9 @@ static void *new_vmap_block(unsigned int order, gfp_t gfp_mask)
 
 /*
  * IAMROOT, 2023.02.03:
- * - TODO
+ * 1. vmap_blocks에서 @vb 제거
+ * 2. vb의 va를 vmap_area_root에서 삭제하고 purge_vmap_area_root에 넣어놓는다.
+ *    (lazy 시킨다.) lazy된 va가 많을경우 purge를 진행한다.
  */
 static void free_vmap_block(struct vmap_block *vb)
 {
@@ -2411,6 +2513,10 @@ static void purge_fragmented_blocks(int cpu)
 	}
 }
 
+/*
+ * IAMROOT, 2023.02.17:
+ * - 모든 cpu에 대해서 purge를 진행한다.
+ */
 static void purge_fragmented_blocks_allcpus(void)
 {
 	int cpu;
@@ -2509,7 +2615,18 @@ static void vb_free(unsigned long addr, unsigned long size)
 
 /*
  * IAMROOT, 2023.02.03:
- * - dirty값이 있는 경우 start, end를 갱신하며 flush를 set한다.
+ * --- chat openai ----
+ * - unmmap을 하는 memory를 왜 굳이 tlb flush를 하는 이유
+ *   메모리 매핑을 해제한 후 TLB를 플러시하는 이유는 오래된 항목이 제거되고 
+ *   동일한 가상 주소에 대한 후속 액세스로 인해 올바른 물리적 주소 매핑으로 
+ *   TLB 항목의 다시 로드를 트리거하는 페이지 오류가 발생하도록 하기 
+ *   위함입니다. 이 작업을 수행하지 않으면 잘못된 물리적 메모리 위치를 
+ *   가리키는 오래된 TLB 항목으로 인해 데이터 손상 또는 보안 취약성의 위험이 
+ *   있습니다.
+ * --------------------
+ * - lazy aliases(vbq->free)에 대한 unmap + @start ~ @end 범위에 대한
+ *   purge및 tlb flush를 수행한다.
+ * - free list에서 dirty값이 있는 경우 start, end를 갱신하며 flush를 set한다.
  *   frag block들에 대해서 purge를 수행하고, 수행후
  *   purge_vmap_area_list가 비엇고 flush set이라면 flush_tlb_kernel_range를
  *   수행한다.
@@ -2549,6 +2666,12 @@ static void _vm_unmap_aliases(unsigned long start, unsigned long end, int flush)
 
 	mutex_lock(&vmap_purge_lock);
 	purge_fragmented_blocks_allcpus();
+/*
+ * IAMROOT, 2023.02.17:
+ * - purge + tlb flush를 시도한다.
+ * - purge를 안했는데 , flush 요청이 있었다면 flush만을 해준다.
+ *   (purge를 했을경우 tlb flush도 하기 때문에 flush요청을 무시해도된다.)
+ */
 	if (!__purge_vmap_area_lazy(start, end) && flush)
 		flush_tlb_kernel_range(start, end);
 	mutex_unlock(&vmap_purge_lock);
@@ -2581,7 +2704,10 @@ static void _vm_unmap_aliases(unsigned long start, unsigned long end, int flush)
  *   vm_unmap_mapping은 이러한 모든 느린 매핑을 플러시합니다. 반환된 후에는 
  *   제어할 수 있는 페이지 중 vmap 계층의 별칭을 가진 페이지가 없는지 확인할 
  *   수 있습니다.
- * - TODO
+ *
+ * - 모든 vm영역에 대한 lazy aliases의 ummap을 수행한다.
+ *   한개도 unmap한개 없다면 tlb flush도 안하겠지만, 그렇지 않을 경우 purge를 
+ *   하고 tlb flush를 수행할것이다.
  */
 void vm_unmap_aliases(void)
 {
@@ -3046,7 +3172,7 @@ struct vm_struct *find_vm_area(const void *addr)
  */
 /*
  * IAMROOT, 2022.07.02: 
- * vmalloc 자료 구조에서 @addr 주소로 등록되어 있는 vmap_area를 찾은 후 
+ * - vmalloc 자료 구조에서 @addr 주소로 등록되어 있는 vmap_area를 찾은 후 
  * 연결된 vm_struct의 매핑들을 해제한다.
  */
 struct vm_struct *remove_vm_area(const void *addr)
@@ -3073,6 +3199,10 @@ struct vm_struct *remove_vm_area(const void *addr)
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @area의 pages에 대해서 set_direct_map을 호출하게 한다.
+ */
 static inline void set_area_direct_map(const struct vm_struct *area,
 				       int (*set_direct_map)(struct page *page))
 {
@@ -3087,7 +3217,29 @@ static inline void set_area_direct_map(const struct vm_struct *area,
 /* Handle removing and resetting vm mappings related to the vm_struct. */
 /*
  * IAMROOT, 2023.02.03:
- * - TODO
+ * --- chat open ai ---
+ * - direct map
+ *   직접 매핑은 물리적 메모리에 대한 직접 액세스를 제공하기 위해 운영 
+ *   체제에서 사용하는 메모리 관리 기술입니다. 직접 매핑 시스템에서 각 
+ *   메모리 주소는 중간 변환이나 매핑 없이 메인 메모리의 특정 물리적 주소에 
+ *   매핑됩니다. 이는 가상 메모리와 같은 다른 매핑 기술을 사용하는 
+ *   시스템보다 메모리 액세스를 더 빠르고 효율적으로 만듭니다.
+ *
+ *   Linux에서 커널은 직접 매핑 기술을 사용하여 전체 물리적 메모리를 커널의 
+ *   가상 주소 공간에 매핑함으로써 물리적 메모리에 대한 빠른 액세스를 
+ *   제공합니다. 이를 통해 커널은 주소 변환이나 페이지 오류의 오버헤드 없이 
+ *   빠르고 효율적으로 메모리에 액세스할 수 있습니다. Linux의 직접 매핑 
+ *   영역은 직접 메모리 액세스가 필요한 커널 데이터 구조 및 하드웨어 
+ *   장치를 매핑하는 데에도 사용됩니다. 
+ * --------------------
+ *  @area->addr vm_area mapping을 해제한다.
+ *  - @deallocate_pages == 0인 경우 
+ *    모든 vm영역에 대한 lazy aliases에 대해서 unmap을 수행한다.
+ *  - @deallocate_pages != 0인 경우
+ *    @area영역에 대해서 flush할 dmap 범위를 찾아 vm_unmap_aliases()에 
+ *    포함되도록 한다.
+ *    그런 다음 플러시 후 액세스가 있는 경우 캐시되지 않도록
+ *    dmap을 invalid로 설정한 다음 tlb flush후 default로 재설정한다.
  */
 static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 {
@@ -3107,6 +3259,13 @@ static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 	 * If not deallocating pages, just do the flush of the VM area and
 	 * return.
 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   페이지 할당을 해제하지 않으면 VM 영역을 플러시하고 반환하십시오.
+ * - dealloc 요청이 없었다면 모든 vm 영역에 대한 lazy aliases에 대해서 unmap을
+ *   수행한다.
+ */
 	if (!deallocate_pages) {
 		vm_unmap_aliases();
 		return;
@@ -3117,6 +3276,14 @@ static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 	 * map. Find the start and end range of the direct mappings to make sure
 	 * the vm_unmap_aliases() flush includes the direct map.
 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   실행이 여기에 도달하면 vm 매핑을 플러시하고 직접 매핑을 재설정합니다. 
+ *   vm_unmap_aliases() 플러시가 직접 매핑을 포함하는지 확인하기 위해 직접 
+ *   매핑의 시작 및 끝 범위를 찾습니다.
+ * - @area으 pages address로 unmap할 start, end 범위를 찾는다.
+ */
 	for (i = 0; i < area->nr_pages; i += 1U << page_order) {
 		unsigned long addr = (unsigned long)page_address(area->pages[i]);
 		if (addr) {
@@ -3134,6 +3301,36 @@ static void vm_remove_mappings(struct vm_struct *area, int deallocate_pages)
 	 * there are any accesses after the TLB flush, then flush the TLB and
 	 * reset the direct map permissions to the default.
 	 */
+/*
+ * IAMROOT, 2023.02.17:
+ * - papago
+ *   TLB 플러시 후 액세스가 있는 경우 캐시되지 않도록 직접 매핑을 잘못된 
+ *   것으로 설정한 다음 TLB를 플러시하고 직접 매핑 권한을 기본값으로 
+ *   재설정합니다.
+ * - chat open ai
+ *  직접 매핑이 먼저 invalid 상태로 설정되었다가 매핑 해제 후 default 상태로 
+ *  돌아가는 이유는 잠재적인 캐싱 문제를 방지하고 직접 매핑에 대한 페이지 
+ *  테이블 항목(PTE)이 적절하게 업데이트되고 무효화되도록 하기 위함입니다.
+ *
+ *  페이지 테이블 항목이 invalid되면(이 경우 PTE_VALID 비트를 지워서) 
+ *  더 이상 주소 변환에 사용할 수 없음을 의미합니다. 그러나 일부 프로세서 
+ *  또는 메모리 관리 장치(MMU)는 여전히 유효하지 않은 페이지 테이블 항목을 
+ *  캐시할 수 있으며, 이는 해당 가상 메모리 주소에 액세스하는 경우 불일치 및 
+ *  잘못된 매핑으로 이어질 수 있습니다. 
+ *
+ *  이를 방지하기 위해 캐시된 페이지 테이블 항목이 플러시되고 주소 변환에 
+ *  사용되지 않도록 직접 매핑이 먼저 유효하지 않은 상태로 설정됩니다. 매핑 
+ *  해제가 완료되면 주소 변환에 올바른 페이지 테이블 항목이 사용되도록 직접 
+ *  매핑이 기본 상태로 다시 설정됩니다.
+ *
+ *  이 프로세스는 메모리의 특정 영역에 액세스하기 위해 커널이 사용하는 특수 
+ *  유형의 매핑인 직접 매핑에만 적용됩니다. 다른 유형의 매핑에는 페이지 
+ *  테이블 항목을 업데이트하고 무효화하기 위한 요구 사항이 다를 수 있습니다. 
+ *
+ * -  page table entires 를 invalid로 변경 -> 
+ *    purge / tlb flush(memory mapping 해제) -> 
+ *    page table entires 를 write only로 변경. 
+ */
 	set_area_direct_map(area, set_direct_map_invalid_noflush);
 	_vm_unmap_aliases(start, end, flush_dmap);
 	set_area_direct_map(area, set_direct_map_default_noflush);
@@ -3171,7 +3368,10 @@ static void __vunmap(const void *addr, int deallocate_pages)
 	debug_check_no_obj_freed(area->addr, get_vm_area_size(area));
 
 	kasan_poison_vmalloc(area->addr, get_vm_area_size(area));
-
+/*
+ * IAMROOT, 2023.02.24:
+ * - unmaping 및 dmap flush
+ */
 	vm_remove_mappings(area, deallocate_pages);
 
 /*
@@ -3317,7 +3517,34 @@ EXPORT_SYMBOL(vfree);
  */
 /*
  * IAMROOT, 2023.02.03:
- * - TODO
+ * --- chat open ai ----
+ *  - interrupt중 메모리 해제를 하면 안되는 이유
+ *  인터럽트 내부의 메모리를 해제하면 시스템에 여러 가지 문제가 발생할 수 
+ *  있습니다. 인터럽트는 비동기적으로 발생하고 언제든지 발생할 수 있는 
+ *  이벤트로, 커널에서 정상적인 실행 흐름을 방해합니다. 따라서 인터럽트 
+ *  내부의 메모리를 해제하면 많은 문제가 발생할 수 있습니다.
+ *
+ *  첫째, 해제되는 메모리가 여전히 커널의 다른 부분이나 사용자 프로세스에서 
+ *  사용되고 있는 경합 상태로 이어질 수 있습니다. 메모리에 계속 액세스하는 
+ *  동안 메모리가 해제되면 메모리 손상이 발생하여 시스템 충돌 또는 데이터 
+ *  손실이 발생할 수 있습니다.
+ *
+ *  둘째, 메모리 할당 하위 시스템이 인터럽트 컨텍스트 내에서 메모리를 해제할 
+ *  때 발생하는 재진입 문제를 처리하도록 설계되지 않은 경우 인터럽트 내부의 
+ *  메모리를 해제하면 교착 상태가 발생할 수 있습니다. 이는 인터럽트 핸들러 
+ *  자체가 메모리를 할당해야 하는 경우 발생할 수 있습니다. 메모리가 해제될 
+ *  때까지 차단되기 때문에 인터럽트 핸들러가 반환될 때까지 메모리가 차단됩니다.
+ *  마지막으로 인터럽트 내부의 메모리를 해제하면 메모리를 해제하는 데 시간이 
+ *  오래 걸리는 프로세스가 될 수 있으므로 성능 문제가 발생할 수 있으며 
+ *  시스템의 정상 작동을 방해하지 않도록 인터럽트를 신속하게 처리해야 합니다.
+ *
+ *  이러한 이유로 인터럽트 내에서 메모리를 해제하는 것은 일반적으로 권장되지 
+ *  않습니다. 대신 커널 스레드나 작업 대기열을 사용하는 것과 같이 시스템이 
+ *  인터럽트 컨텍스트에 있지 않은 나중 시점으로 메모리 해제 작업을 연기하는 
+ *  것이 가장 좋습니다. 
+ * ---------------------
+ *
+ * - @addr의 mapping을 해제한다.
  */
 void vunmap(const void *addr)
 {

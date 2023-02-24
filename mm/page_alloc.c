@@ -7474,6 +7474,10 @@ unsigned long __get_free_pages(gfp_t gfp_mask, unsigned int order)
 }
 EXPORT_SYMBOL(__get_free_pages);
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - zerod page를 한개 할당해온다.
+ */
 unsigned long get_zeroed_page(gfp_t gfp_mask)
 {
 	return __get_free_pages(gfp_mask | __GFP_ZERO, 0);

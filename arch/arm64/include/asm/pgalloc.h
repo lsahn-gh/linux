@@ -29,6 +29,10 @@ static inline void __pud_populate(pud_t *pudp, phys_addr_t pmdp, pudval_t prot)
 	set_pud(pudp, __pud(__phys_to_pud_val(pmdp) | prot));
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - pudp entry에 pmdp 물리주소와 속성을 저장한다.
+ */
 static inline void pud_populate(struct mm_struct *mm, pud_t *pudp, pmd_t *pmdp)
 {
 	pudval_t pudval = PUD_TYPE_TABLE;
@@ -54,6 +58,10 @@ static inline void __p4d_populate(p4d_t *p4dp, phys_addr_t pudp, p4dval_t prot)
 	set_p4d(p4dp, __p4d(__phys_to_p4d_val(pudp) | prot));
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - p4dp entry에 pudp 물리주소와 속성을 저장한다.
+ */
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4dp, pud_t *pudp)
 {
 	p4dval_t p4dval = P4D_TYPE_TABLE;

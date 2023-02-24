@@ -24,6 +24,10 @@ bool can_set_direct_map(void)
 	return rodata_full || debug_pagealloc_enabled();
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - pte에 대해서 clear_mask에 대한건 clear하고 set_mask에 대한건 set한다.
+ */
 static int change_page_range(pte_t *ptep, unsigned long addr, void *data)
 {
 	struct page_change_data *cdata = data;
@@ -153,6 +157,11 @@ int set_memory_valid(unsigned long addr, int numpages, int enable)
 					__pgprot(PTE_VALID));
 }
 
+/*
+ * IAMROOT, 2023.02.17:
+ * - @page의 PTE_VALID를 clear한다.
+ *   page를 invalid로 하여 mmu에서 cache를 못하게 한다.
+ */
 int set_direct_map_invalid_noflush(struct page *page)
 {
 	struct page_change_data data = {
@@ -168,6 +177,11 @@ int set_direct_map_invalid_noflush(struct page *page)
 				   PAGE_SIZE, change_page_range, &data);
 }
 
+/*
+ * IAMROOT, 2023.02.17:
+ * - @page PTE_RDONLY를 clear하고 PTE_VALID, PTE_WRITE를 set한다.
+ *   memory mapping.
+ */
 int set_direct_map_default_noflush(struct page *page)
 {
 	struct page_change_data data = {

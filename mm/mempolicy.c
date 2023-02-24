@@ -2302,6 +2302,10 @@ EXPORT_SYMBOL(alloc_pages_vma);
  * flags are used.
  * Return: The page on success or NULL if allocation fails.
  */
+/*
+ * IAMROOT, 2023.02.24:
+ * - mempolicy의 mode에 따라 page를 할당해 온다.
+ */
 struct page *alloc_pages(gfp_t gfp, unsigned order)
 {
 	struct mempolicy *pol = &default_policy;

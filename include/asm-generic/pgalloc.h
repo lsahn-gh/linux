@@ -157,6 +157,10 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
  *
  * Return: pointer to the allocated memory or %NULL on error
  */
+/*
+ * IAMROOT, 2023.02.24:
+ * - zeroed page를 한개 가져온다.
+ */
 static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 {
 	gfp_t gfp = GFP_PGTABLE_USER;
@@ -167,6 +171,10 @@ static inline pud_t *pud_alloc_one(struct mm_struct *mm, unsigned long addr)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @pud를 해제한다.
+ */
 static inline void pud_free(struct mm_struct *mm, pud_t *pud)
 {
 	BUG_ON((unsigned long)pud & (PAGE_SIZE-1));
