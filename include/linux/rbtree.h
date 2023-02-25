@@ -115,6 +115,11 @@ static inline void rb_insert_color_cached(struct rb_node *node,
 }
 
 
+/*
+ * IAMROOT, 2023.02.25:
+ * - @node가 leftmost이면 삭제하고 next를 leftmost로 갱신하고 return
+ *   leftmost 가 아니면 삭제만 하고 NULL return
+ */
 static inline struct rb_node *
 rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)
 {

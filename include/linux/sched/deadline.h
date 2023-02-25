@@ -15,6 +15,10 @@ static inline int dl_prio(int prio)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.02.25:
+ * - dl 의 경우 prio = -1
+ */
 static inline int dl_task(struct task_struct *p)
 {
 	return dl_prio(p->prio);

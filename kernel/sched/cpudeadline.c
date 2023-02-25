@@ -171,6 +171,18 @@ int cpudl_find(struct cpudl *cp, struct task_struct *p,
  *
  * Returns: (void)
  */
+/*
+ * IAMROOT. 2023.02.25:
+ * - google-translate
+ *   cpudl_clear - cpudl max-heap에서 CPU 제거
+ *   @cp: cpudl max-heap 컨텍스트
+ *   @cpu:대상 CPU
+ *
+ *   참고: cpu_rq(cpu)->lock이 잠겨 있다고 가정
+ *
+ *   반환: (void)
+ *   - cpudl 자료구조 @cp에서 @cpu 삭제
+ */
 void cpudl_clear(struct cpudl *cp, int cpu)
 {
 	int old_idx, new_cpu;
@@ -187,6 +199,13 @@ void cpudl_clear(struct cpudl *cp, int cpu)
 		 * This could happen if a rq_offline_dl is
 		 * called for a CPU without -dl tasks running.
 		 */
+		/*
+		 * IAMROOT. 2023.02.25:
+		 * - google-translate
+		 *   old_idx가 유효하지 않은 경우 제거할 항목이 없습니다.
+		 *   이는 -dl 작업이 실행되지 않는 CPU에 대해 rq_offline_dl이
+		 *   호출되는 경우에 발생할 수 있습니다.
+		 */
 	} else {
 		new_cpu = cp->elements[cp->size - 1].cpu;
 		cp->elements[old_idx].dl = cp->elements[cp->size - 1].dl;
@@ -196,6 +215,10 @@ void cpudl_clear(struct cpudl *cp, int cpu)
 		cp->elements[cpu].idx = IDX_INVALID;
 		cpudl_heapify(cp, old_idx);
 
+		/*
+		 * IAMROOT, 2023.02.25:
+		 * - 삭제한 cpu를 free_cpus mask 에 설정
+		 */
 		cpumask_set_cpu(cpu, cp->free_cpus);
 	}
 	raw_spin_unlock_irqrestore(&cp->lock, flags);
@@ -210,6 +233,19 @@ void cpudl_clear(struct cpudl *cp, int cpu)
  * Notes: assumes cpu_rq(cpu)->lock is locked
  *
  * Returns: (void)
+ */
+/*
+ * IAMROOT. 2023.02.25:
+ * - google-translate
+ *   cpudl_set - cpudl max-heap 업데이트
+ *   @cp: cpudl max-heap 컨텍스트
+ *   @cpu: 대상 CPU
+ *   @dl: 이 CPU에 대한 새로운 가장 빠른 데드라인
+ *
+ *   참고: cpu_rq(cpu)->lock이 잠겨 있다고 가정
+ *
+ *   반환: (void)
+ *   - @cpu에 대한 가장 빠른 데드라인 @dl을 @cp 에 설정
  */
 void cpudl_set(struct cpudl *cp, int cpu, u64 dl)
 {

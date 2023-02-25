@@ -823,6 +823,35 @@ struct sched_dl_entity {
 	 * @dl_overrun tells if the task asked to be informed about runtime
 	 * overruns.
 	 */
+	/*
+	 * IAMROOT. 2023.02.25:
+	 * - google-translate
+	 *   일부 부울 플래그:
+	 *
+	 *   @dl_throttled는 런타임이 소진되었는지 알려줍니다. 그렇다면
+	 *   작업은 다음 번 dl_timer 실행 시 보충이 수행될 때까지 기다려야
+	 *   합니다.
+	 *   - 해당 periods에서 runtime이 소진되어 throttle 된 경우
+	 *
+	 *   @dl_boosted는 DI로 인해 부스트되었는지 여부를 알려줍니다. 그렇다면
+	 *   우리는 대역폭 시행 메커니즘 밖에 있는 것입니다(단, 중요한 섹션을 종료할
+	 *   때까지만).
+	 *   - 해당 periods에서 DI로 인해 부스트되었는지 여부
+	 *
+	 *   @dl_yielded는 작업이 마지막 작업 중에 사용 가능한 모든 런타임을
+	 *   소비하기 전에 CPU를 포기했는지 알려줍니다.
+	 *   - 해당 periods에서 runtime 소진전에 포기하고 양보한 경우
+;	 *
+	 *   @dl_non_contending은 작업이 활성
+	 *   사용률에 계속 기여하면서 비활성 상태인지 알려줍니다. 즉, 비활성 타이머가
+	 *   준비되었고 핸들러가 아직 실행되지 않았음을 나타냅니다. 이 플래그는 비활성 타이머
+	 *   핸들러와 웨이크업 코드 간의 경쟁 조건을 피하는 데 유용합니다.
+	 *   - TODO.
+	 *
+	 *   @dl_overrun은
+	 *   태스크가 런타임 오버런에 대한 정보를 요청했는지 여부를 알려줍니다.
+	 *   - 해당 periods에서 runtime 이상 동작하는 경우
+	 */
 	unsigned int			dl_throttled      : 1;
 	unsigned int			dl_yielded        : 1;
 	unsigned int			dl_non_contending : 1;

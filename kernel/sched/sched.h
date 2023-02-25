@@ -271,6 +271,21 @@ static inline void update_avg(u64 *avg, u64 sample)
  *
  * SUGOV stands for SchedUtil GOVernor.
  */
+/*
+ * IAMROOT. 2023.02.25:
+ * - google-translate
+ *   !! sched_setattr_nocheck()(커널) 전용!!
+ *
+ *   이것은 실제로 역겹다. :(
+ *
+ *   SCHED_DEADLINE 작업보다 schedutil kworker(s)를 더 높은 우선 순위로 만드는 데
+ *   사용되지만 여전히 휴면할 수 있습니다. 클록 주파수를 원자적으로 변경할 수 없는 플랫폼에서
+ *   필요합니다. 이러한 플랫폼에서 빠른 전환이 가능해지면 제거하십시오.
+ *
+ *   SUGOV 는 SchedUtil GOVernor 약자
+ *
+ *   - 마감시간에 관계없이 dl 중에서 무조건 먼저 우선 순위를 주고 싶은 경우
+ */
 #define SCHED_FLAG_SUGOV	0x10000000
 
 #define SCHED_DL_FLAGS (SCHED_FLAG_RECLAIM | SCHED_FLAG_DL_OVERRUN | SCHED_FLAG_SUGOV)
@@ -3039,6 +3054,10 @@ extern unsigned int sysctl_numa_balancing_scan_size;
  * Use hrtick when:
  *  - enabled by features
  *  - hrtimer is actually high res
+ */
+/*
+ * IAMROOT, 2023.02.25:
+ * - hres timer는 cfs, dl 에서 task의 runtime에 맞춰 hrtick이 딱맞게 발생하도록 한다.
  */
 static inline int hrtick_enabled(struct rq *rq)
 {

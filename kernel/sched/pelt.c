@@ -691,6 +691,18 @@ int update_rt_rq_load_avg(u64 now, struct rq *rq, int running)
  *   load_avg and runnable_avg are not supported and meaningless.
  *
  */
+/*
+ * IAMROOT. 2023.02.25:
+ * - google-translate
+ *   dl_rq:
+ *
+ *   util_sum = \Sum se->avg.util_sum 그러나 se->avg.util_sum은 추적되지
+ *   않습니다.
+ *   util_sum = cpu_scale * load_sum
+ *   runnable_sum = util_sum
+ *
+ *   load_avg 및 runnable_avg는 지원되지 않으며 의미가 없습니다.
+ */
 
 int update_dl_rq_load_avg(u64 now, struct rq *rq, int running)
 {
