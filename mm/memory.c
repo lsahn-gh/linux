@@ -2604,6 +2604,11 @@ int vm_iomap_memory(struct vm_area_struct *vma, phys_addr_t start, unsigned long
 }
 EXPORT_SYMBOL(vm_iomap_memory);
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @create 비어있는 page를 생성할지 말지를 판단.
+ *   page walk를 수행하며 최종 pte에 @fn을 호출하게한다.
+ */
 static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 				     unsigned long addr, unsigned long end,
 				     pte_fn_t fn, void *data, bool create,
@@ -2647,6 +2652,11 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @create 비어있는 page를 생성할지 말지를 판단.
+ *   page walk를 수행하며 최종 pte에 @fn을 호출하게한다.
+ */
 static int apply_to_pmd_range(struct mm_struct *mm, pud_t *pud,
 				     unsigned long addr, unsigned long end,
 				     pte_fn_t fn, void *data, bool create,
@@ -2685,6 +2695,11 @@ static int apply_to_pmd_range(struct mm_struct *mm, pud_t *pud,
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @create 비어있는 page를 생성할지 말지를 판단.
+ *   page walk를 수행하며 최종 pte에 @fn을 호출하게한다.
+ */
 static int apply_to_pud_range(struct mm_struct *mm, p4d_t *p4d,
 				     unsigned long addr, unsigned long end,
 				     pte_fn_t fn, void *data, bool create,
@@ -2721,6 +2736,11 @@ static int apply_to_pud_range(struct mm_struct *mm, p4d_t *p4d,
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @create 비어있는 page를 생성할지 말지를 판단.
+ *   page walk를 수행하며 최종 pte에 @fn을 호출하게한다.
+ */
 static int apply_to_p4d_range(struct mm_struct *mm, pgd_t *pgd,
 				     unsigned long addr, unsigned long end,
 				     pte_fn_t fn, void *data, bool create,
@@ -2757,6 +2777,11 @@ static int apply_to_p4d_range(struct mm_struct *mm, pgd_t *pgd,
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - @create 비어있는 page를 생성할지 말지를 판단.
+ *   page walk를 수행하며 최종 pte에 @fn을 호출하게한다.
+ */
 static int __apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 				 unsigned long size, pte_fn_t fn,
 				 void *data, bool create)
@@ -2797,6 +2822,14 @@ static int __apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 /*
  * Scan a region of virtual memory, filling in page tables as necessary
  * and calling a provided function on each leaf page table.
+ */
+/*
+ * IAMROOT, 2023.02.24:
+ * - papago
+ *   필요에 따라 페이지 테이블을 채우고 각 리프 페이지 테이블에서 제공된 
+ *   함수를 호출하여 가상 메모리 영역을 스캔합니다.
+ * - @mm의 범위에있는 addr을 size만큼 순회하며 해당 page들을
+ *   fn + data를 인자로 호출한다.
  */
 int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 			unsigned long size, pte_fn_t fn, void *data)
@@ -5054,6 +5087,10 @@ EXPORT_SYMBOL_GPL(handle_mm_fault);
  * Allocate p4d page table.
  * We've already handled the fast-path in-line.
  */
+/*
+ * IAMROOT, 2023.02.24:
+ * - p4d는 사용안하므로 아무것도 안한다.
+ */
 int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 {
 	p4d_t *new = p4d_alloc_one(mm, address);
@@ -5080,7 +5117,7 @@ int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 
 /*
  * IAMROOT, 2022.11.12:
- * - p4d에 연결(populate)한다.
+ * - @pud 생성 및 p4d에 연결(populate)한다.
  */
 int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 {
@@ -5090,6 +5127,11 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 
 	smp_wmb(); /* See comment in __pte_alloc */
 
+/*
+ * IAMROOT, 2023.02.24:
+ * - lock을 거는 사이에 이미 @p4d에 populate됬다면 free한다.
+ *   그게 아니면 populate한다.
+ */
 	spin_lock(&mm->page_table_lock);
 	if (!p4d_present(*p4d)) {
 		mm_inc_nr_puds(mm);
@@ -5105,6 +5147,10 @@ int __pud_alloc(struct mm_struct *mm, p4d_t *p4d, unsigned long address)
 /*
  * Allocate page middle directory.
  * We've already handled the fast-path in-line.
+ */
+/*
+ * IAMROOT, 2023.02.24:
+ * - __pud_alloc과 동일한 원리로 동작한다.
  */
 int __pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {

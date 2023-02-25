@@ -259,7 +259,9 @@
  */
 /*
  * IAMROOT, 2022.06.04:
- * - hardware mapping이 되있는지 확인.
+ * - PTE_VALID
+ *   hardware mapping이 되있는지 확인.
+ *   cpu가 접근 가능하게 한다는뜻.
  */
 #define PTE_VALID		(_AT(pteval_t, 1) << 0)
 #define PTE_TYPE_MASK		(_AT(pteval_t, 3) << 0)
