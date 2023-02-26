@@ -878,6 +878,12 @@ struct sched_dl_entity {
 	 * pi_se points to the donor, otherwise points to the dl_se it belongs
 	 * to (the original one/itself).
 	 */
+	/*
+	 * IAMROOT. 2023.02.27:
+	 * - google-translate
+	 *   우선 상속. DEADLINE 스케줄링 엔터티가 부스트되면 pi_se는 기증자를 가리키고,
+	 *   그렇지 않으면 그것이 속한 dl_se(원래 것/자체)를 가리킵니다.
+	 */
 	struct sched_dl_entity *pi_se;
 #endif
 };

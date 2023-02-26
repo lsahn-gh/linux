@@ -703,7 +703,6 @@ int update_rt_rq_load_avg(u64 now, struct rq *rq, int running)
  *
  *   load_avg 및 runnable_avg는 지원되지 않으며 의미가 없습니다.
  */
-
 int update_dl_rq_load_avg(u64 now, struct rq *rq, int running)
 {
 	if (___update_load_sum(now, &rq->avg_dl,

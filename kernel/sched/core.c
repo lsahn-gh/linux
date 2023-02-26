@@ -4804,7 +4804,7 @@ unsigned long to_ratio(u64 period, u64 runtime)
 		return 0;
 	/*
 	 * IAMROOT, 2023.02.25:
-	 * - (950000000 << 20 ) / 1000000000 = 996147
+	 * - ex. (950000000 << 20 ) / 1000000000 = 996147
 	 */
 	return div64_u64(runtime << BW_SHIFT, period);
 }

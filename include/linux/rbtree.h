@@ -32,6 +32,10 @@
 /* 'empty' nodes are nodes that are known not to be inserted in an rbtree */
 #define RB_EMPTY_NODE(node)  \
 	((node)->__rb_parent_color == (unsigned long)(node))
+/*
+ * IAMROOT, 2023.02.26:
+ * - @node의 __rb_parent_color를 @node로 설정하여 @node가 rbtree에 소속되지 않음을 표시
+ */
 #define RB_CLEAR_NODE(node)  \
 	((node)->__rb_parent_color = (unsigned long)(node))
 
@@ -117,8 +121,9 @@ static inline void rb_insert_color_cached(struct rb_node *node,
 
 /*
  * IAMROOT, 2023.02.25:
- * - @node가 leftmost이면 삭제하고 next를 leftmost로 갱신하고 return
- *   leftmost 가 아니면 삭제만 하고 NULL return
+ * - 1. @node가 leftmost이면 삭제예정이므로 leftmost를 next node로 갱신
+ *   2. @node를 rbtree에서 삭제
+ * - Return: @node == leftmost ? rb_next : NULL
  */
 static inline struct rb_node *
 rb_erase_cached(struct rb_node *node, struct rb_root_cached *root)

@@ -2,6 +2,15 @@
 
 #define IDX_INVALID		-1
 
+/*
+ * IAMROOT, 2023.02.27:
+ * - @dl: dl_rq의 earliest_dl.curr(leftmost deadline) 저장
+ * - @cpu : dl_rq의 cpu
+ * - @idx : cpudl elements 배열의 해당 cpu 설정에 대한 index
+ *          ex. idx가 2이면
+ *          elements[2].cpu - 2번 cpu
+ *          elements[2].dl 은 - 2번 cpu의 leftmost deadline
+ */
 struct cpudl_item {
 	u64			dl;
 	int			cpu;

@@ -545,7 +545,9 @@ static inline void dl_clear_overload(struct rq *rq)
 
 /*
  * IAMROOT, 2023.02.25:
- * - migration 조건이면 overload 설정 아니면 clear
+ * - migration 조건인데 overload 설정이 아니면 overload 설정
+ *   migration 조건이 아닌데 overload 설정이면 설정 clear
+ * - atomic operation을 줄이기 위한 코드 작성
  */
 static void update_dl_migration(struct dl_rq *dl_rq)
 {
@@ -584,6 +586,10 @@ static void dec_dl_migration(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 	update_dl_migration(dl_rq);
 }
 
+/*
+ * IAMROOT, 2023.02.27:
+ * - node to pushable dl task. node->pushable_dl_tasks의 container task
+ */
 #define __node_2_pdl(node) \
 	rb_entry((node), struct task_struct, pushable_dl_tasks)
 
@@ -611,8 +617,8 @@ static void enqueue_pushable_dl_task(struct rq *rq, struct task_struct *p)
 
 /*
  * IAMROOT, 2023.02.25:
- * - pushable_dl_tasks에서 해당 task 를 삭제하고 leftmost인 경우는
- *   earliest_dl.next 교체
+ * - pushable_dl_tasks_root에서 해당 task node를 삭제하고 leftmost인 경우는
+ *   dl_rq의 earliest_dl.next 교체
  */
 static void dequeue_pushable_dl_task(struct rq *rq, struct task_struct *p)
 {
@@ -626,8 +632,10 @@ static void dequeue_pushable_dl_task(struct rq *rq, struct task_struct *p)
 	leftmost = rb_erase_cached(&p->pushable_dl_tasks, root);
 	/*
 	 * IAMROOT, 2023.02.25:
-	 * - pushable_dl_tasks의 leftmost가 교체되었으므로
-	 *   earliest_dl.next(curr가 아님)를 교체한다
+	 * - pushable_dl_tasks_root의 leftmost가 교체되었으므로
+	 *   earliest_dl.next를 교체한다
+	 * - NOTE. earliest_dl.curr에는 dl_rq->root.rb_leftmost의
+	 *   deadline이 저장된다.
 	 */
 	if (leftmost)
 		dl_rq->earliest_dl.next = __node_2_pdl(leftmost)->dl.deadline;
@@ -1363,8 +1371,9 @@ static u64 grub_reclaim(u64 delta, struct rq *rq, struct sched_dl_entity *dl_se)
  * - google-translate
  *   현재 작업의 런타임 통계를 업데이트합니다(여전히 -deadline 작업이고 dl_rq에서
  *   제거되지 않은 경우).
+ *
  * - 1. delta_exec(이전 실행시간과 현재 시간차이) 계산
- *   2. delta_exec에 scale 적용
+ *   2. delta_exec에 scale 적용(grub 또는 cpu freq,capacity)
  *   3. runtime 계산(runtime -= delta_exec)
  *   4. runtime < 0 이면 dequeue task
  *   5. curr 가 leftmost가 아니면 reschedule
@@ -1400,7 +1409,6 @@ static void update_curr_dl(struct rq *rq)
 	 *   컨텍스트에서 소요된 시간 등 제외). 마감일은 대신 하드 월타임을 사용하여
 	 *   계산됩니다. 이것은 보다 자연스러운 해결책인 것처럼 보이지만 이 접근 방식의 전체
 	 *   결과는 추가 연구가 필요합니다.
-	 *   - irq 시간을 뺀 clock_task를 사용하는 것이 rt에서는 정확함
 	 */
 	now = rq_clock_task(rq);
 	delta_exec = now - curr->se.exec_start;
@@ -1421,12 +1429,29 @@ static void update_curr_dl(struct rq *rq)
 	schedstat_set(curr->se.statistics.exec_max,
 		      max(curr->se.statistics.exec_max, delta_exec));
 
+	/*
+	 * IAMROOT, 2023.02.26:
+	 * - se.sum_exec_runtime 에 delta_exec 누적
+	 * - curr의 thread_group_cputimer의 sum_exec_runtime 에 delta_exec 누적
+	 */
 	curr->se.sum_exec_runtime += delta_exec;
 	account_group_exec_runtime(curr, delta_exec);
 
+	/*
+	 * IAMROOT, 2023.02.26:
+	 * - 다음 delta_exec 계산을 위해 now(현재시간)를 exec_start에 저장
+	 */
 	curr->se.exec_start = now;
+	/*
+	 * IAMROOT, 2023.02.26:
+	 * - 해당 cgroup 에 delta_exec 누적
+	 */
 	cgroup_account_cputime(curr, delta_exec);
 
+	/*
+	 * IAMROOT, 2023.02.26:
+	 * - SCHED_FLAG_SUGOV flag 설정된 경우
+	 */
 	if (dl_entity_is_special(dl_se))
 		return;
 
@@ -1443,8 +1468,9 @@ static void update_curr_dl(struct rq *rq)
 	 *   GRUB에 참여하는 작업의 경우 GRUB-PA를 구현합니다. 여분의 회수된 대역폭은
 	 *   주파수를 낮추는 데 사용됩니다. 나머지는 여전히 현재 주파수와 CPU 최대 용량에
 	 *   따라 예약 매개변수를 확장해야 합니다.
-	 * - 유저 app에서 SCHED_FLAG_RECLAIM flag를 사용한 경우 grub_reclaim scale
-	 *   이 적용된 scaled_delta_exec 값을 가져온다
+	 *
+	 * - TODO. 유저 app에서 SCHED_FLAG_RECLAIM flag를 사용한 경우
+	 *   grub_reclaim scale 이 적용된 scaled_delta_exec 값을 가져온다
 	 */
 	if (unlikely(dl_se->flags & SCHED_FLAG_RECLAIM)) {
 		scaled_delta_exec = grub_reclaim(delta_exec,
@@ -1457,16 +1483,24 @@ static void update_curr_dl(struct rq *rq)
 		/*
 		 * IAMROOT, 2023.02.25:
 		 * - (((delta_exec * scale_freq) >> 10) * scale_cpu) >> 10
-		 * - scale이 적용된 1보다 작은 값
+		 * - cpu freq, capacity scale이 적용된 1보다 작은 값
 		 */
 		scaled_delta_exec = cap_scale(delta_exec, scale_freq);
 		scaled_delta_exec = cap_scale(scaled_delta_exec, scale_cpu);
 	}
 
+	/*
+	 * IAMROOT, 2023.02.26:
+	 * - runtime 에서 scale 이 적용된 delta_exec를 뺀다
+	 */
 	dl_se->runtime -= scaled_delta_exec;
 
 throttle:
 	if (dl_runtime_exceeded(dl_se) || dl_se->dl_yielded) {
+	/*
+	 * IAMROOT, 2023.02.27:
+	 * - runtime 을 모두 사용하였거나 양보한 경우
+	 */
 		dl_se->dl_throttled = 1;
 
 		/* If requested, inform the user about runtime overruns. */
@@ -1636,8 +1670,9 @@ static void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline)
 		entry = rb_entry(leftmost, struct sched_dl_entity, rb_node);
 		/*
 		 * IAMROOT, 2023.02.25:
-		 * - 이미 삭제 하였으므로 curr에는 다음 entity가 curr로 설정되어 있다.
-		 * - cpudl 자료구조에서 해당 cpu의 dl 값을 방금 교체한 leftmost
+		 * - runtime이 소진되어 rbtree에서 삭제하였으므로 dl_rq의 earliest
+		 *   deadline 설정을 다시 하여야 한다.
+		 * - cpudl 자료구조에서도 해당 cpu의 dl 값을 방금 교체한 leftmost
 		 *   entry의 dl로 설정
 		 */
 		dl_rq->earliest_dl.curr = entry->deadline;
@@ -1670,7 +1705,7 @@ void inc_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
  * IAMROOT, 2023.02.25:
  * - 1. dl_nr_running--
  *   2. rq->nr_running--
- *   3. earliest_dl.curr 와 rd의 cpudl deadline 갱신
+ *   3. dl_rq의 earliest_dl.curr 와 rd의 cpudl deadline 갱신
  *   4. overload 설정
  */
 static inline
@@ -1709,7 +1744,8 @@ static void __enqueue_dl_entity(struct sched_dl_entity *dl_se)
 /*
  * IAMROOT, 2023.02.25:
  * - 1. @dl_se를 dl_rq의 rbtree에서 삭제
- *   2. dec_dl_tasks
+ *      (rq->curr->dl_se->rb_node 를 rq->dl_rq->root->rb_root에서 삭제)
+ *   2. dec_dl_tasks 수행
  */
 static void __dequeue_dl_entity(struct sched_dl_entity *dl_se)
 {
@@ -2128,9 +2164,11 @@ static void put_prev_task_dl(struct rq *rq, struct task_struct *p)
 /*
  * IAMROOT. 2023.02.25:
  * - google-translate
- *   스케줄링 클래스의 작업을 치는 스케줄러 틱. 참고: 이 함수는 완전한 dynticks를
- *   따라가는 틱 오프로드에 의해 원격으로 호출될 수 있습니다. 따라서 로컬 가정을 할
- *   수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해 모든 항목에 액세스해야 합니다.
+ *   스케줄링 클래스의 작업을 치는 스케줄러 틱.
+ *
+ *   참고: 이 함수는 완전한 dynticks를 따라가는 틱 오프로드에 의해 원격으로 호출될 수
+ *   있습니다. 따라서 로컬 가정을 할 수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해
+ *   모든 항목에 액세스해야 합니다.
  */
 static void task_tick_dl(struct rq *rq, struct task_struct *p, int queued)
 {
@@ -2864,28 +2902,30 @@ next:
 static void init_dl_rq_bw_ratio(struct dl_rq *dl_rq)
 {
 	if (global_rt_runtime() == RUNTIME_INF) {
-/*
- * IAMROOT, 2022.11.26:
- * - throttle을 안하는경우
- */
+		/*
+		 * IAMROOT, 2023.02.26:
+		 * - throttle을 안하는경우
+		 * - bw_ratio : 1 << 8 = 256
+		 * - extra_bw : 1 << 20 = 1048576
+		 */
 		dl_rq->bw_ratio = 1 << RATIO_SHIFT;
 		dl_rq->extra_bw = 1 << BW_SHIFT;
 	} else {
-
-/*
- * IAMROOT, 2022.11.26:
- * - throttle을 하는 경우.
- */
 		/*
 		 * IAMROOT, 2023.02.26:
-		 * - ((1000000000 << 20) / 950000000) >> (20 - 8) = 269
+		 * - throttle을 하는 경우.
+		 * - bw_ratio :
+		 *   (global_rt_period << 20) / global_rt_runtime >> (BW_SHIFT -
+		 *   RATIO_SHIFT)
+		 *   ((1,000,000,000 << 20) / 950,000,000) >> (20 - 8) = 269
+		 *   NOTE: 원래 to_ratio 함수의 의도와 달리 runtime 과 period 인수를
+		 *   반대로하여 호출하고 있다.
+		 * - extra_bw :
+		 *   (global_rt_runtime << 20) / global_rt_period
+		 *   (950,000,000 << 20) / 1,000,000,000 = 996147
 		 */
 		dl_rq->bw_ratio = to_ratio(global_rt_runtime(),
 			  global_rt_period()) >> (BW_SHIFT - RATIO_SHIFT);
-		/*
-		 * IAMROOT, 2023.02.25:
-		 * (950000000 << 20) / 1000000000 = 996147
-		 */
 		dl_rq->extra_bw = to_ratio(global_rt_period(),
 						    global_rt_runtime());
 	}
