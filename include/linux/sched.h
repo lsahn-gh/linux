@@ -784,6 +784,14 @@ struct sched_dl_entity {
 	 * during sched_setattr(), they will remain the same until
 	 * the next sched_setattr().
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   원래 스케줄링 매개변수. sched_setattr() 동안 sched_attr에서 여기로 
+ *   복사되며 다음 sched_setattr()까지 동일하게 유지됩니다.
+ * - 설정 관련 매개변수.
+ * - dl_density = dl_runtime / dl_deadline을 미리 계산해놓은것.
+ */
 	u64				dl_runtime;	/* Maximum runtime for each instance	*/
 	u64				dl_deadline;	/* Relative deadline of each instance	*/
 	u64				dl_period;	/* Separation of two instances (period) */
@@ -795,6 +803,15 @@ struct sched_dl_entity {
 	 * they are continuously updated during task execution. Note that
 	 * the remaining runtime could be < 0 in case we are in overrun.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   실제 스케줄링 매개변수. 위의 값으로 초기화되며 태스크 실행 중에 
+ *   지속적으로 업데이트됩니다. 오버런이 발생하는 경우 남은 
+ *   런타임은 < 0일 수 있습니다.
+ *
+ * - runtime 관련 매개변수.
+ */
 	s64				runtime;	/* Remaining runtime for this instance	*/
 	u64				deadline;	/* Absolute deadline for this instance	*/
 	unsigned int			flags;		/* Specifying the scheduler behaviour	*/
@@ -883,6 +900,10 @@ struct sched_dl_entity {
 	 * - google-translate
 	 *   우선 상속. DEADLINE 스케줄링 엔터티가 부스트되면 pi_se는 기증자를 가리키고,
 	 *   그렇지 않으면 그것이 속한 dl_se(원래 것/자체)를 가리킵니다.
+   * - priority inversion
+   *   경우에 따라 priority가 다른 entity로 증가할수있다.
+   *   현재 entity가 inversion된 entity를 가리킨다.
+   *   아닐 경우 자기자신을 가리킨다.
 	 */
 	struct sched_dl_entity *pi_se;
 #endif

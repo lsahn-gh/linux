@@ -2165,6 +2165,11 @@ static void yield_task_rt(struct rq *rq)
 #ifdef CONFIG_SMP
 static int find_lowest_rq(struct task_struct *task);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @p를 어느 cpu에서 깨울건지 정한다.
+ *   @p를 @cpu에서 동작시킬수없는 상황이면 다른 적합한 cpu를 찾아 반환한다.
+ */
 static int
 select_task_rq_rt(struct task_struct *p, int cpu, int flags)
 {
@@ -2173,6 +2178,11 @@ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
 	bool test;
 
 	/* For anything but wake ups, just return the task_cpu */
+/*
+ * IAMROOT, 2023.03.04:
+ * - task가 있지만 sleep에서 깨어나는 경우거나 fork한 경우.
+ *   wakeup상황 or fork에서만 현재 함수를 호출한다.
+ */
 	if (!(flags & (WF_TTWU | WF_FORK)))
 		goto out;
 
@@ -2207,6 +2217,28 @@ select_task_rq_rt(struct task_struct *p, int cpu, int flags)
 	 * requirement of the task - which is only important on heterogeneous
 	 * systems like big.LITTLE.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   @p의 실행 대기열에 있는 현재 작업이 RT 작업이면 다른 실행 대기열에서 이 
+ *   RT 작업을 깨울 수 있는지 확인하십시오. 그렇지 않으면 단순히 현재 실행 
+ *   대기열에서 이 RT 작업을 시작하십시오.
+ *
+ *   우리는 runqueue의 과부하를 피하고 싶습니다. 깨운 작업의 우선 순위가 더 
+ *   높으면 이 CPU에 남게 되고 우선 순위가 낮은 작업은 다른 CPU로 옮겨야 
+ *   합니다.
+ *   이로 인해 하위 prio 작업이 캐시를 잃게 되더라도 CPU를 포기했기 때문에 더 
+ *   높은 작업을 반송하고 싶지는 않습니다. 아마도 잠금을 위해? 
+ *
+ *   동등한 우선 순위 작업의 경우 스케줄러가 정렬하도록 합니다. 
+ *
+ *   그렇지 않으면 연결된 RQ를 타고 가도록 놔두면 사후 스케줄 라우터가 선점된 
+ *   작업을 밀어낼 것입니다. 이 테스트는 낙관적입니다. 잘못되면 로드 밸런서가 
+ *   이를 분류해야 합니다.
+ *
+ *   작업 요구 사항에 맞는지 확인하기 위해 CPU 용량을 고려합니다. 이는 
+ *   big.LITTLE과 같은 이기종 시스템에서만 중요합니다.
+ */
 	test = curr &&
 	       unlikely(rt_task(curr)) &&
 	       (curr->nr_cpus_allowed < 2 || curr->prio <= p->prio);

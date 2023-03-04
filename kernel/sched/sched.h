@@ -290,6 +290,10 @@ static inline void update_avg(u64 *avg, u64 sample)
 
 #define SCHED_DL_FLAGS (SCHED_FLAG_RECLAIM | SCHED_FLAG_DL_OVERRUN | SCHED_FLAG_SUGOV)
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - specail entity인지 확인.
+ */
 static inline bool dl_entity_is_special(struct sched_dl_entity *dl_se)
 {
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDUTIL
@@ -301,6 +305,10 @@ static inline bool dl_entity_is_special(struct sched_dl_entity *dl_se)
 
 /*
  * Tells if entity @a should preempt entity @b.
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - special 이거나 a < b 라면(a의 만료시간이 더 짧다면) return true.
  */
 static inline bool
 dl_entity_preempt(struct sched_dl_entity *a, struct sched_dl_entity *b)
@@ -416,6 +424,20 @@ static inline bool __dl_overflow(struct dl_bw *dl_b, unsigned long cap,
  * The function will return true if the CPU original capacity of the
  * @cpu scaled by SCHED_CAPACITY_SCALE >= runtime/deadline ratio of the
  * task and false otherwise.
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   CPU 원래 용량과 작업의 런타임/데드라인 비율을 고려하여 @cpu에서 실행하기 
+ *   위한 작업 @p의 적합성을 확인합니다.
+ *
+ *   함수는 SCHED_CAPACITY_SCALE로 조정된 @cpu의 원래 CPU 용량 >= 작업의 
+ *   런타임/데드라인 비율이면 true를 반환하고 그렇지 않으면 false를 
+ *   반환합니다.
+ *
+ * - big cpu인 경우 cap은 높고, little은 작을 것이다.
+ *   deadline에 cpu cap을 적용해서, dl_runtime을 해소할수있는 @cpu라면
+ *   return true.
  */
 static inline bool dl_task_fits_capacity(struct task_struct *p, int cpu)
 {
@@ -2526,6 +2548,10 @@ static inline int task_on_rq_migrating(struct task_struct *p)
 /* Wake flags. The first three directly map to some SD flag value */
 #define WF_EXEC     0x02 /* Wakeup after exec; maps to SD_BALANCE_EXEC */
 #define WF_FORK     0x04 /* Wakeup after fork; maps to SD_BALANCE_FORK */
+/*
+ * IAMROOT, 2023.03.04:
+ * - try to wakeup
+ */
 #define WF_TTWU     0x08 /* Wakeup;            maps to SD_BALANCE_WAKE */
 
 #define WF_SYNC     0x10 /* Waker goes to sleep after wakeup */
@@ -3077,6 +3103,10 @@ static inline int hrtick_enabled_fair(struct rq *rq)
 	return hrtick_enabled(rq);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - HRTICK_DL을 지원한다면 hrtick을 enable한다.
+ */
 static inline int hrtick_enabled_dl(struct rq *rq)
 {
 	if (!sched_feat(HRTICK_DL))

@@ -49,6 +49,11 @@ static inline struct sched_dl_entity *pi_of(struct sched_dl_entity *dl_se)
 	return dl_se->pi_se;
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 자기자신이면 boost(priority inversion)이 안된상태(pi_se 주석참고).
+ *   이므로 자기자신과 비교해서 boost여부를 판단한다.
+ */
 static inline bool is_dl_boosted(struct sched_dl_entity *dl_se)
 {
 	return pi_of(dl_se) != dl_se;
@@ -152,6 +157,10 @@ static inline bool dl_bw_visited(int cpu, u64 gen)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @dl_rq에 dl_bw를 running_bw로 추가한다.
+ */
 static inline
 void __add_running_bw(u64 dl_bw, struct dl_rq *dl_rq)
 {
@@ -179,6 +188,10 @@ void __sub_running_bw(u64 dl_bw, struct dl_rq *dl_rq)
 	cpufreq_update_util(rq_of_dl_rq(dl_rq), 0);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @dl_rq의 this_bw에 dl_bw를 추가한다.
+ */
 static inline
 void __add_rq_bw(u64 dl_bw, struct dl_rq *dl_rq)
 {
@@ -202,6 +215,10 @@ void __sub_rq_bw(u64 dl_bw, struct dl_rq *dl_rq)
 	SCHED_WARN_ON(dl_rq->running_bw > dl_rq->this_bw);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @dl_rq의 this bw에 @dl_se의 bw를 추가한다.
+ */
 static inline
 void add_rq_bw(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 {
@@ -216,6 +233,10 @@ void sub_rq_bw(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 		__sub_rq_bw(dl_se->dl_bw, dl_rq);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @dl_rq의 running_bw에 @dl_bw을 추가한다.
+ */
 static inline
 void add_running_bw(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 {
@@ -353,6 +374,19 @@ static void dl_change_utilization(struct task_struct *p, u64 new_bw)
  *   비활성 타이머를 준비함). task_contending() 함수는 작업이 깨어날 때 호출되며
  *   작업이 여전히 "ACTIVE 비경합" 상태인지 확인합니다(두 번째 경우 running_bw를
  *   업데이트함).
+ *
+ * - 1) active contending +- t >= 0-lag -> 3) inactive
+ *                        |
+ *                        +- t < 0-lag  -> 2) active non contending 
+ *                                             |
+ *                                             +-- timer -> 3) inactive
+ *
+ * - contending task인 경우 진입하여 0-lag을 계산한다.
+ *   1. 0-lag < 0
+ *      inactive로 전환한다.
+ *   2. 0-lag >= 0
+ *      non contending으로 전환하고 inactive timer를 0-lag후에 동작하도록 
+ *      예약한다.
  */
 static void task_non_contending(struct task_struct *p)
 {
@@ -366,14 +400,28 @@ static void task_non_contending(struct task_struct *p)
 	 * If this is a non-deadline task that has been boosted,
 	 * do nothing
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - dl task가 아니게됬다. return.
+ */
 	if (dl_se->dl_runtime == 0)
 		return;
 
 	if (dl_entity_is_special(dl_se))
 		return;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 이미 non contending인데 이 함수를 호출하는건 잘못된것이다.
+ */
 	WARN_ON(dl_se->dl_non_contending);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 0-lag 계산.
+ *   runtime == 0에 가까울수록 deadline값에 가까워진다.
+ *   runtime이 클수록 dealine에서 멀어지거나 0, 음수가 된다.
+ */
 	zerolag_time = dl_se->deadline -
 		 div64_long((dl_se->runtime * dl_se->dl_period),
 			dl_se->dl_runtime);
@@ -388,9 +436,19 @@ static void task_non_contending(struct task_struct *p)
 	 * If the "0-lag time" already passed, decrease the active
 	 * utilization now, instead of starting a timer
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - 1. zerolag_time < 0  or inactive timer가 가동중 
+ *   active contending -> inactive
+ */
 	if ((zerolag_time < 0) || hrtimer_active(&dl_se->inactive_timer)) {
 		if (dl_task(p))
 			sub_running_bw(dl_se, dl_rq);
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - 종료중인 task에 대한 처리.
+ */
 		if (!dl_task(p) || READ_ONCE(p->__state) == TASK_DEAD) {
 			struct dl_bw *dl_b = dl_bw_of(task_cpu(p));
 
@@ -405,11 +463,20 @@ static void task_non_contending(struct task_struct *p)
 		return;
 	}
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - zerolag_time >= 0 : active contending -> active non contending
+ *                                            + inactive_timer 예약.
+ */
 	dl_se->dl_non_contending = 1;
 	get_task_struct(p);
 	hrtimer_start(timer, ns_to_ktime(zerolag_time), HRTIMER_MODE_REL_HARD);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - task가 contending상태로 전환한다.
+ */
 static void task_contending(struct sched_dl_entity *dl_se, int flags)
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
@@ -418,12 +485,56 @@ static void task_contending(struct sched_dl_entity *dl_se, int flags)
 	 * If this is a non-deadline task that has been boosted,
 	 * do nothing
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - 더이상 deadline이 아니다. return.
+ */
 	if (dl_se->dl_runtime == 0)
 		return;
 
 	if (flags & ENQUEUE_MIGRATED)
 		add_rq_bw(dl_se, dl_rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ *             +-- else문 진입시점.
+ *             |              
+ *             v                +------------------+
+ *             wakeup           |    ACTIVE        |
+ *          +------------------>+   contending     |
+ *          | add_running_bw    |                  |
+ *          |                   +----+------+------+
+ *          |                        |      ^
+ *          |                dequeue |      |
+ * +--------+-------+                |      |
+ * |                |   t >= 0-lag   |      | wakeup <--- if문 진입시점.
+ * |    INACTIVE    |<---------------+      |
+ * |                | sub_running_bw |      |
+ * +--------+-------+                |      |
+ *          ^                        |      |
+ *          |              t < 0-lag |      |
+ *          |                        |      |
+ *          |                        V      |
+ *          |                   +----+------+------+
+ *          | sub_running_bw    |    ACTIVE        |
+ *          +-------------------+                  |
+ *            inactive timer    |  non contending  |
+ *            fired             +------------------+
+ *
+ * - 1) active contending +- t >= 0-lag -> 3) inactive
+ *                        |
+ *                        +- t < 0-lag  -> 2) active non contending 
+ *                                             |
+ *                                             +-- timer -> 3) inactive
+ *
+ * - task가 sleep이고, 2) active non contending 상태로 
+ *   이때 task가 깨어나서 진입하면 다음과 같이 동작한다.
+ *
+ *   1. contending 상태가 되므로 non_contending을 0으로 한다.
+ *   2. inactive timer가 동작중일수있다.
+ *      (active non conteding에서 inactive로 될수있는 상황)
+ *      active contending으로 전환해야되니 timer를 취소한다.
+ */
 	if (dl_se->dl_non_contending) {
 		dl_se->dl_non_contending = 0;
 		/*
@@ -433,6 +544,15 @@ static void task_contending(struct sched_dl_entity *dl_se, int flags)
 		 * will not touch the rq's active utilization,
 		 * so we are still safe.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   타이머 핸들러가 현재 실행 중이고 타이머를 취소할 수 없는 경우 
+ *   inactive_task_timer()는 dl_not_contending이 설정되지 않았음을 
+ *   확인하고 rq의 활성 사용률을 건드리지 않으므로 여전히 안전합니다.
+ *
+ * - 0-lag timer 취소
+ */
 		if (hrtimer_try_to_cancel(&dl_se->inactive_timer) == 1)
 			put_task_struct(dl_task_of(dl_se));
 	} else {
@@ -443,6 +563,16 @@ static void task_contending(struct sched_dl_entity *dl_se, int flags)
 		 * when the "inactive timer" fired).
 		 * So, add it back.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   dl_non_contending이 설정되지 않았기 때문에 작업의 사용률은 이미 
+ *   active 사용률에서 제거되었습니다(작업이 차단되었을 때, 비활성 
+ *   타이머가 실행되었을 때).
+ *   다시 추가하십시오.
+ * - task block이거나 invactive timer가 동작했을때.(3번 구간) running_bw를 증가 
+ *   시켜준다.
+ */
 		add_running_bw(dl_se, dl_rq);
 	}
 }
@@ -562,6 +692,11 @@ static void update_dl_migration(struct dl_rq *dl_rq)
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 1. nr migrate 증가.
+ *   2. overloaded 갱신.
+ */
 static void inc_dl_migration(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 {
 	struct task_struct *p = dl_task_of(dl_se);
@@ -601,6 +736,11 @@ static inline bool __pushable_less(struct rb_node *a, const struct rb_node *b)
 /*
  * The list of pushable -deadline task is not a plist, like in
  * sched_rt.c, it is an rb-tree with tasks ordered by deadline.
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - dl pushable에 @p를 추가한다.(deadline 정렬)
+ *   leftmost가 갱신됫으면 2번째 빠른 deadline을 earlist_dl next로 갱신한다.
  */
 static void enqueue_pushable_dl_task(struct rq *rq, struct task_struct *p)
 {
@@ -643,6 +783,11 @@ static void dequeue_pushable_dl_task(struct rq *rq, struct task_struct *p)
 	RB_CLEAR_NODE(&p->pushable_dl_tasks);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - pushable을 할 task가 있으면 return 1
+ *   아니면 return 0.
+ */
 static inline int has_pushable_dl_tasks(struct rq *rq)
 {
 	return !RB_EMPTY_ROOT(&rq->dl.pushable_dl_tasks_root.rb_root);
@@ -650,6 +795,10 @@ static inline int has_pushable_dl_tasks(struct rq *rq)
 
 static int push_dl_task(struct rq *rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @rq가 online이고, @prev가 deadline이면 return true.
+ */
 static inline bool need_pull_dl_task(struct rq *rq, struct task_struct *prev)
 {
 	return rq->online && dl_task(prev);
@@ -676,6 +825,11 @@ static inline void deadline_queue_pull_task(struct rq *rq)
 
 static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - pushable 요청.
+ * - PASS
+ */
 static struct rq *dl_task_offline_migration(struct rq *rq, struct task_struct *p)
 {
 	struct rq *later_rq = NULL;
@@ -802,11 +956,31 @@ static void check_preempt_curr_dl(struct rq *rq, struct task_struct *p, int flag
  * one, and to (try to!) reconcile itself with its own scheduling
  * parameters.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   새 인스턴스가 시작되고 있음을 명시적으로 알리고 있으며 이는 다음을 
+ *   의미합니다.
+ * - 엔터티의 절대 기한은 현재 시간 + 상대 기한에 있어야 합니다.
+ * - 엔티티의 런타임은 최대값으로 설정되어야 합니다.
+ *
+ *   이러한 이벤트를 지정하는 기능은 -deadline 엔터티가 자신의 동작을 스케줄러의 
+ *   동작과 동기화하고(시도!) 자신의 스케줄링 매개변수로 조정하려고 할 
+ *   때마다(시도!) 유용합니다.
+ *
+ * - 새로 시작하는 dl에 대한 초기화이다.
+ * - dl_runtime, dl_deadline을 runtime, deadline으로 설정한다.
+ */
 static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 새로 setup하는 상황인데 boost되있거나 만료가 안된 deadline이면 말이 
+ *   안되는 상황이다. 이를 한번검사한다.
+ */
 	WARN_ON(is_dl_boosted(dl_se));
 	WARN_ON(dl_time_before(rq_clock(rq), dl_se->deadline));
 
@@ -815,6 +989,12 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
 	 * the deadline timer handler will take care of properly recharging
 	 * the runtime and postponing the deadline
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   우리는 마감 타이머와 경쟁하고 있습니다. 따라서 기한 타이머 핸들러가 
+ *   런타임을 적절하게 재충전하고 기한을 연기하기 때문에 아무것도 하지 마십시오. 
+ */
 	if (dl_se->dl_throttled)
 		return;
 
@@ -823,6 +1003,12 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
 	 * future; in fact, we must consider execution overheads (time
 	 * spent on hardirq context, etc.).
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   우리는 일반 벽시계 시간을 사용하여 미래의 마감일을 설정합니다. 실제로 
+ *   우리는 실행 오버헤드(hardirq 컨텍스트에 소요된 시간 등)를 고려해야 합니다.
+ */
 	dl_se->deadline = rq_clock(rq) + dl_se->dl_deadline;
 	dl_se->runtime = dl_se->dl_runtime;
 }
@@ -845,6 +1031,33 @@ static inline void setup_new_dl_entity(struct sched_dl_entity *dl_se)
  * could happen are, typically, a entity voluntarily trying to overcome its
  * runtime, or it just underestimated it during sched_setattr().
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   순수한 EDF(Earliest Deadline First) 스케줄링은 엔티티가 선언한 
+ *   것보다 더 오래 지속되어 런타임이 소진될 가능성을 처리하지 않습니다.
+ *
+ *   여기서 우리는 런타임 오버런을 가능하게 만드는 데 관심이 있지만 다른 
+ *   모든 엔터티의 일정에 영향을 미치기 위해 오작동하는 엔터티를 원하지 
+ *   않습니다.
+ *   따라서 각 엔터티를 자체 대역폭 내로 제한하기 위해 
+ *   CBS(Constant Bandwidth Server)라는 예산 책정 전략이 사용됩니다.
+ *
+ *   이 기능은 이를 정확히 처리하고 엔터티의 런타임이 보충될 때 기한도 
+ *   연기되도록 합니다. 이렇게 하면 초과 실행 엔터티가 시스템의 다른 
+ *   엔터티를 방해할 수 없고 마감일을 놓치게 할 수 없습니다. 이러한 
+ *   종류의 오버런이 발생할 수 있는 이유는 일반적으로 엔터티가 자발적으로 
+ *   런타임을 극복하려고 시도하거나 sched_setattr() 중에 런타임을 과소 
+ *   평가했기 때문입니다.
+ *
+ * - period마다 동작하는 timer에 의한 replenish로 수행된다.
+ * - 여러개의 task가 있을경우, 일반적으로 max runtime에 의해 나뉘어져 
+ *   실행되서 서로 경쟁을 안할것이다.
+ *   하지만 경우에 따라 서로 경쟁을 하게 되는 상황이 발생하게 되는게 
+ *   그거에 대한 처리를 수행한다.
+ *
+ * - runtime보충 및 deadline 갱신. yield, throttle flag 초기화.
+ */
 static void replenish_dl_entity(struct sched_dl_entity *dl_se)
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
@@ -856,11 +1069,28 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
 	 * This could be the case for a !-dl task that is boosted.
 	 * Just go with full inherited parameters.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이것은 부스트된 !-dl task의 경우일 수 있습니다.
+ *   전체 상속 매개 변수를 사용하십시오.
+ * - 누군가 갑자기 바꿔서 dl이 아니게 된상황이다.
+ */
 	if (dl_se->dl_deadline == 0) {
+/*
+ * IAMROOT, 2023.03.04:
+ * - pi부스트 중인경우 pi의 deadline을 가져온다. 그렇지 않으면
+ *   자기꺼(boost중이 아니면 pi는 자기자신을 가리키므로)를 가져온다.
+ * - rt mutex등 이유로 pi가 생긴 경우에 대한 처리.
+ */
 		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
 		dl_se->runtime = pi_of(dl_se)->dl_runtime;
 	}
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - yield중이면 runtime을 없애서 강제로 보충하게 한다.
+ */
 	if (dl_se->dl_yielded && dl_se->runtime > 0)
 		dl_se->runtime = 0;
 
@@ -870,6 +1100,15 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
 	 * handling of situations where the runtime overrun is
 	 * arbitrary large.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   엔터티에 사용할 수 있는 런타임을 얻을 때까지 기한을 계속 미루고 
+ *   있습니다. 이렇게 하면 런타임 오버런이 임의로 큰 상황을 올바르게 
+ *   처리할 수 있습니다.
+ * - runtime이 양수가 될때까지 계속 보충해준다.
+ *   여러 period만큼 overrun이 될수있었기 때문에 while로 보충한다.
+ */
 	while (dl_se->runtime <= 0) {
 		dl_se->deadline += pi_of(dl_se)->dl_period;
 		dl_se->runtime += pi_of(dl_se)->dl_runtime;
@@ -884,6 +1123,17 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
 	 * resetting the deadline and the budget of the
 	 * entity.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이 시점에서 데드라인은 rq->clock과 관련하여 실제로 미래여야 합니다. 
+ *   그렇지 않다면 어떤 이유에서인지 너무 뒤처져 있는 것입니다! 어쨌든 
+ *   사용자 공간에 경고를 한 후에도 엔터티의 기한과 예산을 재설정하여 
+ *   작업을 계속 실행하려고 합니다.
+ *
+ * - 보충을 해서 runtime은 양수가 됬지만 deadline이 과거인 경우에 대한
+ *   예외 처리. 현재 시각을 기준으로 다시 세팅한다.
+ */
 	if (dl_time_before(dl_se->deadline, rq_clock(rq))) {
 		printk_deferred_once("sched: DL replenish lagged too much\n");
 		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
@@ -920,6 +1170,40 @@ static void replenish_dl_entity(struct sched_dl_entity *dl_se)
  * task with deadline equal to period this is the same of using
  * dl_period instead of dl_deadline in the equation above.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   여기에서 --at time t-- 엔터티(아마 [재]활성화되거나 일반적으로 큐에 추가됨)가 
+ *   할당된 대역폭을 _초과하지 않고_ 남은 런타임과 현재 기한을 사용할 수 있는지 
+ *   확인합니다(함수는 다음과 같은 경우 true를 반환합니다. 할 수 없습니다). 실제로
+ *   CBS 규칙 중 하나를 적용하고 있습니다.
+ *   작업이 깨어날 때 잔여 기한을 초과한 잔여 런타임이 할당된 대역폭에 맞으면 
+ *   시스템의 일정 가능성을 방해하지 않고 현재(절대) 기한과 잔여 예산을 유지할 수 
+ *   있습니다. 그렇지 않으면 런타임을 다시 채우고 기한을 미래의 기간으로 설정해야 
+ *   합니다. 작업의 현재(절대적인) 기한을 유지하면 다른 작업에 대한 약속이 깨질 
+ *   수 있기 때문입니다(Documentation/scheduler/sched-deadline.rst 참조).
+ *   추가 정보).
+ *
+ *   이 함수는 다음과 같은 경우 true를 반환합니다.
+ *
+ *   runtime / (deadline - t) > dl_runtime / dl_deadline ,
+ *
+ *   다른말로 말하자면, 현재 매개변수를 재활용할 수 없습니다.
+ *
+ *   대역폭 검사는 기한에 맞춰 수행됩니다. 기한이 기간과 같은 작업의 경우 이는 
+ *   위의 방정식에서 dl_deadline 대신 dl_period를 사용하는 것과 동일합니다.
+ *
+ * - 설정된 런타임 비율에 비해 남은 런타임 비율이 크면 overflow라고 판단한다.
+ *
+ *   남은 런타임     설정 런타임 
+ *   -----------  >  --------------
+ *   남은 시간       설정 deadline
+ *
+ * - 곱셈을 하기 때문에 us로 down scale하여 계산한다.
+ * - runtime에 비해 시간이 많이 소모되면 overflow가 된다.
+ * - overflow가 된다는건 결국 만료시간 이내에 runtime이 소모되기 힘든 상황을
+ *   의미한다.(runtime이 소모되지 않고 시간이 계속 흐르는 상태)
+ */
 static bool dl_entity_overflow(struct sched_dl_entity *dl_se, u64 t)
 {
 	u64 left, right;
@@ -942,6 +1226,24 @@ static bool dl_entity_overflow(struct sched_dl_entity *dl_se, u64 t)
 	 * of anything below microseconds resolution is actually fiction
 	 * (but still we want to give the user that illusion >;).
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   왼쪽과 오른쪽은 나눗셈 대신 곱셈을 사용하기 위해 약간 섞은 후 위 방정식의 
+ *   양면입니다.
+ *
+ *   두 가지 곱셈에 포함된 시간 값은 절대 값이 아닙니다. dl_deadline 및 
+ *   dl_runtime은 각 인스턴스의 상대적 데드라인 및 최대 런타임이고, runtime은 
+ *   마지막 인스턴스에 남은 런타임이며 (deadline - t)는 t가 rq->clock이므로 
+ *   (절대) 데드라인까지 남은 시간입니다. 두 경우 모두 u64 유형의 오버플로가 
+ *   발생할 가능성이 매우 낮더라도 이러한 위험을 전혀 피하고 싶기 때문에 여기서는 
+ *   규모를 줄입니다. 10으로 축소한다는 것은 세분성을 1us로 줄이는 것을 
+ *   의미합니다. 이것은 단지 참/거짓 검사일 뿐이고 어쨌든 마이크로초 이하의 
+ *   해상도를 생각하는 것은 실제로 허구이기 때문에 괜찮습니다(하지만 여전히 
+ *   사용자에게 환상을 주고 싶습니다 >;).
+ *
+ * - t 
+ */
 	left = (pi_of(dl_se)->dl_deadline >> DL_SCALE) * (dl_se->runtime >> DL_SCALE);
 	right = ((dl_se->deadline - t) >> DL_SCALE) *
 		(pi_of(dl_se)->dl_runtime >> DL_SCALE);
@@ -967,6 +1269,28 @@ static bool dl_entity_overflow(struct sched_dl_entity *dl_se, u64 t)
  * [1] Luca Abeni, Giuseppe Lipari, and Juri Lelli. 2015. Constant
  * bandwidth server revisited. SIGBED Rev. 11, 4 (January 2015), 19-24.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   개정된 웨이크업 규칙[1]: 자체 일시 중단 작업의 경우 작업의 실행 시간과 
+ *   기한을 다시 초기화하는 대신 수정된 깨우기 규칙은 작업의 실행 시간을 조정하여 
+ *   작업이 밀도를 초과하지 않도록 합니다.
+ *
+ *   추리: 다음과 같은 경우 작업이 밀도를 초과할 수 있습니다.
+ *    runtime / (deadline - t) > dl_runtime / dl_deadline
+ *
+ *   런타임은 다음과 같이 조정할 수 있습니다.
+ *     runtime = (dl_runtime / dl_deadline) * (deadline - t)
+ *
+ *  이러한 방식으로 런타임은 작업이 규칙을 위반하지 않고 사용할 수 있는 최대 
+ *  밀도와 동일합니다.
+ *
+ *  [1] Luca Abeni, Giuseppe Lipari, and Juri Lelli. 2015. Constant
+ *  bandwidth server revisited. SIGBED Rev. 11, 4 (January 2015), 19-24.
+ *
+ * - original cbs가 아닌 task가 overflow등의 상황에서 runtime을 
+ *   재충전해야될때에는 특정 비율에 맞춰 재충전한다.
+ */
 static void
 update_dl_revised_wakeup(struct sched_dl_entity *dl_se, struct rq *rq)
 {
@@ -978,6 +1302,16 @@ update_dl_revised_wakeup(struct sched_dl_entity *dl_se, struct rq *rq)
 	 *
 	 * See update_dl_entity() comments for further details.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   작업에 deadline < period이 있고 기한이 과거인 경우 이 확인 전에 이미 
+ *   제한되어야 합니다.
+ *
+ *   자세한 내용은 update_dl_entity() 주석을 참조하십시오.
+ *
+ * - runtime = dl_runtime / dl_deadline * (deadline - t)
+ */
 	WARN_ON(dl_time_before(dl_se->deadline, rq_clock(rq)));
 
 	dl_se->runtime = (dl_se->dl_density * laxity) >> BW_SHIFT;
@@ -993,6 +1327,21 @@ update_dl_revised_wakeup(struct sched_dl_entity *dl_se, struct rq *rq)
  * update_dl_entity() to know more about such restrictions.
  *
  * The dl_is_implicit() returns true if the task has an implicit deadline.
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   기한과 관련하여 암시적 기한이 있는 작업에는 상대 기한 == 상대 기간이 
+ *   있습니다. 기한이 제한된 작업은 상대 기한 <= 상대 기간을 가집니다.
+ *
+ *   제한된 기한 작업을 지원합니다. 그러나 암시적 기한이 없는 작업에만 
+ *   적용되는 몇 가지 제한 사항이 있습니다. 이러한 제한 사항에 대한 
+ *   자세한 내용은 update_dl_entity()를 참조하십시오.
+ *
+ *   작업에 암시적 기한이 있는 경우 dl_is_implicit()는 true를 반환합니다.
+ *
+ * - 일반적인 deadline인지 확인한다. ( dl_deadline == dl_period)
+ * - 특정 task에 임의적인 우선순위를 안준경우이다.
  */
 static inline bool dl_is_implicit(struct sched_dl_entity *dl_se)
 {
@@ -1029,14 +1378,59 @@ static inline bool dl_is_implicit(struct sched_dl_entity *dl_se)
  * Please refer to the comments update_dl_revised_wakeup() function to find
  * more about the Revised CBS rule.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   deadline 엔터티가 실행 대기열에 배치되면 해당 런타임 및 deadline을 업데이트해야 할 
+ *   수 있습니다. 이것은 CBS 깨우기 규칙에 의해 수행됩니다. 두 가지 다른 규칙이 
+ *   있습니다. 1) original CBS 2) Revisited CBS.
+ *
+ *   task이 새 period을 시작하는 경우 original CBS가 사용됩니다. 이 경우 런타임이 
+ *   보충되고 새로운 절대 deadline이 설정됩니다.
+ *
+ *   task이 다음 period이 시작되기 전에 대기열에 있는 경우 남은 런타임과 deadline을 
+ *   사용하면 엔터티가 오버플로될 수 있습니다. 런타임 오버플로에 대한 자세한 
+ *   내용은 dl_entity_overflow()를 참조하십시오. 이러한 경우가 감지되면 런타임 
+ *   및 데드라인을 업데이트해야 합니다. 
+ *
+ *   task에 implicit deadline(즉, deadline == period)이 있는 경우 Original CBS가 
+ *   적용됩니다. 이전 사례에서와 같이 런타임이 보충되고 새로운 절대 deadline이 
+ *   설정됩니다.
+ *
+ *   그러나 deadline이 정해져 있다고 하는 deadline < period이 있는 task에 대해서는 
+ *   Original CBS가 제대로 작동하지 않습니다. Original CBS를 적용하면 deadline이
+ *   제한된 task이 일정 period 동안 런타임/deadline을 실행할 수 있습니다.
+ *   deadline < period을 사용하면 task이 런타임/period 허용 대역폭을 초과하여 승인 
+ *   테스트를 중단합니다.
+ *
+ *   이러한 오작동을 방지하기 위해 Revisited CBS는 런타임 오버플로가 감지될 때 
+ *   제한된 deadline task에 사용됩니다. Revisited CBS에서는 새로운 절대 deadline을 
+ *   보충하고 설정하는 대신 task의 남은 런타임을 줄여 런타임 오버플로를 
+ *   방지합니다. 개정된 CBS 규칙에 대한 자세한 내용은 주석 
+ *   update_dl_revised_wakeup() 함수를 참조하십시오.
+ *
+ * - 만료 or overflow인 dl에 대해서 implicit dl task인 경우 일반적인 
+ *   충전(original cbs)를 사용한다
+ * - implicit dl이 아니고, overflow인 경우 revised wakeup방식으로 충전한다.
+ */
 static void update_dl_entity(struct sched_dl_entity *dl_se)
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - deadline이 만료되엇거나 overflow라면 
+ */
 	if (dl_time_before(dl_se->deadline, rq_clock(rq)) ||
 	    dl_entity_overflow(dl_se, rq_clock(rq))) {
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - constrained task이고 (즉 별도의 dealine설정이 있는),
+ *   마감이 아닌 overflow만 된 상황이며, 부스트중이 아니라면
+ *   revisited cbs를 사용해서 충전한다.
+ */
 		if (unlikely(!dl_is_implicit(dl_se) &&
 			     !dl_time_before(dl_se->deadline, rq_clock(rq)) &&
 			     !is_dl_boosted(dl_se))) {
@@ -1044,11 +1438,22 @@ static void update_dl_entity(struct sched_dl_entity *dl_se)
 			return;
 		}
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - original CBS로 사용한다.
+ */
 		dl_se->deadline = rq_clock(rq) + pi_of(dl_se)->dl_deadline;
 		dl_se->runtime = pi_of(dl_se)->dl_runtime;
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - period의 절대값을 구한다
+ *   deadline = time_stamp + dl_deadline 
+ *   return = time_stamp + dl_deadline - dl_deadline + dl_period
+ *          = time_stamp + dl_period
+ */
 static inline u64 dl_next_period(struct sched_dl_entity *dl_se)
 {
 	return dl_se->deadline - dl_se->dl_deadline + dl_se->dl_period;
@@ -1073,6 +1478,13 @@ static inline u64 dl_next_period(struct sched_dl_entity *dl_se)
  *
  *   호출자가 타이머가 실제로 시작되었는지 여부를 아는 것이 중요합니다
  *   (즉, 보충 순간이 미래 또는 과거임).
+ *
+ * - +---------+-----+
+ *   | runtime |     |
+ *   +---------+-----+
+ *                   ^next period
+ *   runtime이 다 소모됬으면 next period때 hrtimer가 깨어나도록 예약한다.
+ *   (dl_task_timer)
  */
 static int start_dl_timer(struct task_struct *p)
 {
@@ -1089,6 +1501,13 @@ static int start_dl_timer(struct task_struct *p)
 	 * that it is actually coming from rq->clock and not from
 	 * hrtimer's time base reading.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - act   : dl의 next period의 시각.
+ * - now   : timer에 따른 현재 시각.
+ * - delta : rq에 기록한 time stamp와 current time의 차이.
+ * - act갱신 : next period + (rq에 기록한 시각으로부터 지난 시각)
+ */
 	act = ns_to_ktime(dl_next_period(dl_se));
 	now = hrtimer_cb_get_time(timer);
 	delta = ktime_to_ns(now) - rq_clock(rq);
@@ -1138,6 +1557,25 @@ static int start_dl_timer(struct task_struct *p)
  * updating (and the queueing back to dl_rq) will be done by the
  * next call to enqueue_task_dl().
  */
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago 
+ *   이것은 대역폭 적용 타이머 콜백입니다. 여기서 타이머가 실행 중이라는 
+ *   사실은 작업이 제한되고 런타임 보충이 필요하기 때문에 작업이 dl_rq에 
+ *   없다는 것을 알 수 있습니다.
+ *
+ *   그러나 실제로 수행하는 작업은 작업이 활성 상태이거나(rq에 있음) 
+ *   dequeue_task_dl() 호출에 의해 제거되었다는 사실에 따라 달라집니다. 
+ *   전자의 경우 런타임 보충을 실행하고 작업을 dl_rq에 다시 추가해야 
+ *   합니다. 후자의 경우, 우리는 dl_throttled를 지우는 것 외에는 아무 
+ *   것도 하지 않기 때문에 런타임 및 데드라인 업데이트(및 dl_rq로 다시 
+ *   대기하는 것)는 다음에 enqueue_task_dl()을 호출할 때 완료됩니다.
+ *
+ * - update_curr_dl을 통해서 매 period마다 호출된다.
+ * - 소모된 런타임을 보충한다.
+ *   다시 enqueue시킨다.
+ */
 static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 {
 	struct sched_dl_entity *dl_se = container_of(timer,
@@ -1160,6 +1598,10 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * The task might have been boosted by someone else and might be in the
 	 * boosting/deboosting path, its not throttled.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - 이미 부스트되있다면 enqueue되있기 때문에 다시 enqueue를 할 필요 없다.
+ */
 	if (is_dl_boosted(dl_se))
 		goto unlock;
 
@@ -1167,6 +1609,10 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * Spurious timer due to start_dl_timer() race; or we already received
 	 * a replenishment from rt_mutex_setprio().
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - spurious timer에 대한 처리.
+ */
 	if (!dl_se->dl_throttled)
 		goto unlock;
 
@@ -1187,17 +1633,36 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * We can be both throttled and !queued. Replenish the counter
 	 * but do not enqueue -- wait for our wakeup to do that.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - throttled이 발생됬을때 위의 주석과 같은 형태에 의해 dequeue된 
+ *   상태이다.
+ * - throttle이 되서 들어온 시점에서, dequeue가 되있다면(sleep 한 task)
+ *   throttle이 아닌 정말 sleep이 된 task이다.
+ *   이 경우 enqueue할 필요도 없으므로 runtime보충만 하고 wakeup할때까지
+ *   끝낸다.
+ */
 	if (!task_on_rq_queued(p)) {
 		replenish_dl_entity(dl_se);
 		goto unlock;
 	}
 
 #ifdef CONFIG_SMP
+/*
+ * IAMROOT, 2023.03.04:
+ * - cpu scheduler가 off인 상태. 다른 cpu rq로 migration 한다.
+ */
 	if (unlikely(!rq->online)) {
 		/*
 		 * If the runqueue is no longer available, migrate the
 		 * task elsewhere. This necessarily changes rq.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   실행 대기열을 더 이상 사용할 수 없는 경우 작업을 다른 곳으로 
+ *   마이그레이션하십시오. 이것은 필연적으로 rq를 변경합니다.
+ */
 		lockdep_unpin_lock(__rq_lockp(rq), rf.cookie);
 		rq = dl_task_offline_migration(rq, p);
 		rf.cookie = lockdep_pin_lock(__rq_lockp(rq));
@@ -1208,10 +1673,23 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 		 * have that locked, proceed as normal and enqueue the task
 		 * there.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이제 작업이 새 RQ로 마이그레이션되고 잠겼으므로 정상적으로 진행하고 
+ *   거기에 작업을 대기열에 넣습니다.
+ */
 	}
 #endif
 
 	enqueue_task_dl(rq, p, ENQUEUE_REPLENISH);
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - rq->curr가 dl이면 @p와 비교해 급한것으로 resched한다.
+ *   그게 아니면 deadline인 p가 무조건 높을것이므로 reschedule하면 @p로
+ *   바뀔것이다.
+ */
 	if (dl_task(rq->curr))
 		check_preempt_curr_dl(rq, p, 0);
 	else
@@ -1222,11 +1700,24 @@ static enum hrtimer_restart dl_task_timer(struct hrtimer *timer)
 	 * Queueing this task back might have overloaded rq, check if we need
 	 * to kick someone away.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이 작업을 다시 대기열에 넣으면 rq가 과부하되었을 수 있습니다. 
+ *   누군가를 쫓아내야 하는지 확인하십시오.
+ * - pushable 할 task가 있는지 확ㅇ니한다.
+ */
 	if (has_pushable_dl_tasks(rq)) {
 		/*
 		 * Nothing relies on rq->lock after this, so its safe to drop
 		 * rq->lock.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이 이후에는 rq->lock에 의존하는 것이 없으므로 rq->lock을 삭제하는 
+ *   것이 안전합니다.
+ */
 		rq_unpin_lock(rq, &rf);
 		push_dl_task(rq);
 		rq_repin_lock(rq, &rf);
@@ -1240,11 +1731,21 @@ unlock:
 	 * This can free the task_struct, including this hrtimer, do not touch
 	 * anything related to that after this.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이것은 이 hrtimer를 포함하여 task_struct를 해제할 수 있습니다. 이 
+ *   이후에는 그와 관련된 어떤 것도 건드리지 마십시오.
+ */
 	put_task_struct(p);
 
 	return HRTIMER_NORESTART;
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - dl_task_timer로 설정한다.
+ */
 void init_dl_task_timer(struct sched_dl_entity *dl_se)
 {
 	struct hrtimer *timer = &dl_se->dl_timer;
@@ -1271,15 +1772,53 @@ void init_dl_task_timer(struct sched_dl_entity *dl_se)
  * task and set the replenishing timer to the begin of the next period,
  * unless it is boosted.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   활성화하는 동안 CBS는 현재 task의 runtime 및 기간을 재사용할 수 
+ *   있는지 확인합니다. task의 기한이 지난 경우 CBS는 runtime을 사용할 수 
+ *   없으므로 task을 보충합니다.
+ *   이 규칙은 암시적 기한 task(기한 == 기간)에 적합하며 CBS는 
+ *   암시적 기한 task을 위해 설계되었습니다. 그러나 기한이 throttle된 
+ *   task(기한 < 기간)은 기한 이후이지만 다음 기간 전에 깨어날 수 
+ *   있습니다. 이 경우 task을 보충하면 runtime/마감 시간 동안 실행할 수 
+ *   있습니다. 이 경우 마감일 < 기간과 같이 CBS는 task이 runtime/기간 
+ *   이상 실행되도록 합니다. 매우 로드된 시스템에서 이것은 도미노 효과를 
+ *   일으켜 다른 task이 마감일을 놓치게 만들 수 있습니다.
+ *
+ *   이 문제를 방지하려면 기한 후 다음 기간 이전에 throttle된 기한 task을 
+ *   활성화할 때 task을 조절하고 보충 타이머가 부스트되지 않는 한 다음 
+ *   기간의 시작으로 설정합니다.
+ *
+ * - implicit task가 아닌 경우에, system이 부하인 상황에서 task들의 실해이
+ *   점점 뒤로 밀리다가 마감을 놓치게 될수있다.
+ *   이를 방지하기 위해 runtime을 아에 새로 시작한다.
+ */
 static inline void dl_check_constrained_dl(struct sched_dl_entity *dl_se)
 {
 	struct task_struct *p = dl_task_of(dl_se);
 	struct rq *rq = rq_of_dl_rq(dl_rq_of_se(dl_se));
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 마감시간 < 현재시간 < 다음 마감시간의 범위인지 확인한다.
+ */
 	if (dl_time_before(dl_se->deadline, rq_clock(rq)) &&
 	    dl_time_before(rq_clock(rq), dl_next_period(dl_se))) {
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - boost가 동작하면 return.
+ *   boost가 동작안하고 있다면, timer를 동작시킨다.
+ *   timer동작을 실패했으면 빠져나간다.
+ */
 		if (unlikely(is_dl_boosted(dl_se) || !start_dl_timer(p)))
 			return;
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - timer가동. throttle 설정 및 runtime을 보충을 위해 초기화.
+ */
 		dl_se->dl_throttled = 1;
 		if (dl_se->runtime > 0)
 			dl_se->runtime = 0;
@@ -1512,7 +2051,8 @@ throttle:
 		/*
 		 * IAMROOT, 2023.02.25:
 		 * - boosted 되었으면 enqueue
-		 *   boosted 되지 않았으면 dl_timer를 가동.
+		 *   boosted 되지 않았으면 dl_timer를 가동 시도. 만익 dl_timer
+		 *   start를 실패했으면(start하기 너무 짧은 간격) 즉시 enqueue한다.
 		 */
 		if (unlikely(is_dl_boosted(dl_se) || !start_dl_timer(curr)))
 			enqueue_task_dl(rq, curr, ENQUEUE_REPLENISH);
@@ -1627,6 +2167,12 @@ void init_dl_inactive_task_timer(struct sched_dl_entity *dl_se)
 
 #ifdef CONFIG_SMP
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 1. earliest_dl 갱신.
+ *   2. cpupri를 deadline의 갱신.
+ *   3. cpudl 설정.
+ */
 static void inc_dl_deadline(struct dl_rq *dl_rq, u64 deadline)
 {
 	struct rq *rq = rq_of_dl_rq(dl_rq);
@@ -1687,6 +2233,15 @@ static inline void dec_dl_deadline(struct dl_rq *dl_rq, u64 deadline) {}
 
 #endif /* CONFIG_SMP */
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 1. dl nr 증가
+ *   2. earliest_dl 갱신.
+ *   3. cpupri를 deadline의 갱신.
+ *   4. cpudl 설정.
+ *   5. nr migrate 증가.
+ *   6. overloaded 갱신.
+ */
 static inline
 void inc_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 {
@@ -1725,11 +2280,20 @@ void dec_dl_tasks(struct sched_dl_entity *dl_se, struct dl_rq *dl_rq)
 #define __node_2_dle(node) \
 	rb_entry((node), struct sched_dl_entity, rb_node)
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - deadline으로 비교한다.
+ */
 static inline bool __dl_less(struct rb_node *a, const struct rb_node *b)
 {
 	return dl_time_before(__node_2_dle(a)->deadline, __node_2_dle(b)->deadline);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @dl_se를 dl rq에 추가한다. deadline으로 정렬된다.
+ *   dl task 추가대한 매개변수값을 갱신한다.
+ */
 static void __enqueue_dl_entity(struct sched_dl_entity *dl_se)
 {
 	struct dl_rq *dl_rq = dl_rq_of_se(dl_se);
@@ -1761,6 +2325,18 @@ static void __dequeue_dl_entity(struct sched_dl_entity *dl_se)
 	dec_dl_tasks(dl_se, dl_rq);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - flag에 따라 다음을 수행하고 enqueue 한다.
+ * - ENQUEUE_WAKEUP
+ *   task가 wakeup인 경우의 보충상황.
+ *   active contending상태가 된다. (task_contending() 내부 주석참고).
+ *   runtime, deadline을 리필한다.(revised cbs 보충이 추가되었다.)
+ * - ENQUEUE_REPLENISH
+ *   timer에 의한 runtime 보충상황. runtime, deadline을 리필한다.
+ * - ENQUEUE_RESTORE 이고 deadline이 만료라면.
+ *   new dl이라는 의미로 판단하여 새로 설정한다.
+ */
 static void
 enqueue_dl_entity(struct sched_dl_entity *dl_se, int flags)
 {
@@ -1771,6 +2347,12 @@ enqueue_dl_entity(struct sched_dl_entity *dl_se, int flags)
 	 * parameters of the task might need updating. Otherwise,
 	 * we want a replenishment of its runtime.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   깨우기 또는 새 인스턴스인 경우 작업의 예약 매개변수를 업데이트해야 할 수 
+ *   있습니다. 그렇지 않으면 런타임을 보충해야 합니다.
+ */
 	if (flags & ENQUEUE_WAKEUP) {
 		task_contending(dl_se, flags);
 		update_dl_entity(dl_se);
@@ -1790,6 +2372,16 @@ static void dequeue_dl_entity(struct sched_dl_entity *dl_se)
 	__dequeue_dl_entity(dl_se);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - enqueue를 수행한다
+ *   1. boost, throttle에 대한 처리
+ *   2. dl task가 아니게 된것에 대한 처리.
+ *   3. dl task 개수등의 매갭변수 갱신
+ *   4. this_bw, running_bw의 적산.
+ *   5. task contending 처리
+ *   6. throttle 설정 및 @flags에 따른 runtime / deadline갱신
+ */
 static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (is_dl_boosted(&p->dl)) {
@@ -1805,12 +2397,40 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		 *
 		 * In this case, the boost overrides the throttle.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   스레드 런타임의 오버런 감지 지연으로 인해 스레드가 런타임이 음수인 
+ *   rt 뮤텍스에서 휴면 상태가 되는 경우가 있습니다. 결과적으로 스레드가 
+ *   제한됩니다.
+ *
+ *   뮤텍스를 기다리는 동안 이 스레드는 PI를 통해 부스트될 수 있으므로 
+ *   스레드가 동시에 스로틀링되고 부스트됩니다.
+ *
+ *   이 경우 부스트가 스로틀을 무시합니다.
+ *
+ * - boost + throttle
+ *   주석의 상황 정리 
+ *   1. overrun 상태이지만 확인이 안된상태(overrun 감지 지연)
+ *   2. runtime이 -가 되면서 sleep이 됨.
+ *   3. sleep을 기다리는 동안 pi를 통해 부스트 될수있음.
+ *   4. 위의 상황에 의해 thread가 동시에 throttle되면서 boost도 된다.
+ *   이 경우 boost가 throttle을 무시한다.
+ *
+ * - 위의 경우에 replenish 취소 및 throttle 상태를 0으로 갱신.
+ */
 		if (p->dl.dl_throttled) {
 			/*
 			 * The replenish timer needs to be canceled. No
 			 * problem if it fires concurrently: boosted threads
 			 * are ignored in dl_task_timer().
 			 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   보충 타이머를 취소해야 합니다. 동시에 발생해도 문제 없습니다.
+ *   향상된 스레드는 dl_task_timer()에서 무시됩니다.
+ */
 			hrtimer_try_to_cancel(&p->dl.dl_timer);
 			p->dl.dl_throttled = 0;
 		}
@@ -1824,6 +2444,17 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		 * being boosted again with no means to replenish the runtime and clear
 		 * the throttle.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   디부스트될 !SCHED_DEADLINE 작업이 있지만 그렇게 하는 동안 런타임을 
+ *   초과하는 특별한 경우입니다. 이후에 원래 스케줄링 클래스로 돌아가므로 
+ *   보충할 필요가 없습니다. 스로틀링된 경우 플래그를 지워야 합니다. 
+ *   그렇지 않으면 작업이 다시 부스트된 후 런타임을 보충하고 스로틀을 
+ *   지울 수단 없이 스로틀링된 상태로 깨어날 수 있습니다.
+ *
+ * - dl task가 갑자기 아니게 된경우. throttle을 0으로 하고 return.
+ */
 		p->dl.dl_throttled = 0;
 		BUG_ON(!is_dl_boosted(&p->dl) || flags != ENQUEUE_REPLENISH);
 		return;
@@ -1835,10 +2466,28 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 	 * If that is the case, the task will be throttled and
 	 * the replenishment timer will be set to the next period.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   제한된 기한 작업이 기한 이후이지만 다음 기간 이전에 활성화되었는지 
+ *   확인하십시오.  이 경우 작업이 제한되고 보충 타이머가 다음 기간으로 
+ *   설정됩니다.
+ *
+ * - throttle이 아니고, implicit dl이 아니라면 runtime초기화 및 throttle 
+ *   설정 여부를 판단한다.
+ */
 	if (!p->dl.dl_throttled && !dl_is_implicit(&p->dl))
 		dl_check_constrained_dl(&p->dl);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - group간의 migrate or 설정중인 경우 rq의 this_bw와 running_bw에
+ *   task의 bw를 추가한다.
+ * - migrate중이므로 bw를 옮겨가는 rq에 추가해주는 개념.
+ *   그 전에 dequeue할때는 해당 rq에서 빠졋을것이다.
+ */
 	if (p->on_rq == TASK_ON_RQ_MIGRATING || flags & ENQUEUE_RESTORE) {
+
 		add_rq_bw(&p->dl, &rq->dl);
 		add_running_bw(&p->dl, &rq->dl);
 	}
@@ -1855,7 +2504,27 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 	 * be counted in the active utilization; hence, we need to call
 	 * add_running_bw().
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   p가 제한되면 대기열에 넣지 않습니다. 사실, 예산이 소진되면 보충이 
+ *   필요하고, 이제 rq에 있기 때문에 bw timere cb(분명히 아직 
+ *   실행되지 않음)이 이를 처리합니다.
+ *   그러나 활성 사용률은 작업이 실행 대기열에 있는지 여부에 따라 
+ *   달라지지 않습니다(그러나 작업 상태에 따라 달라집니다. GRUB 용어로는 
+ *   비활성 대 활성 경합).
+ *   즉, 작업이 제한되더라도 해당 사용률은 활성 사용률로 계산되어야 
+ *   합니다. 따라서 add_running_bw()를 호출해야 합니다.
+ *
+ * - throttle중인데 enqueue를 시키면안된다.(replenish인 경우는 보충하러
+ *   call한것이므로 제외.)
+ */
 	if (p->dl.dl_throttled && !(flags & ENQUEUE_REPLENISH)) {
+/*
+ * IAMROOT, 2023.03.04:
+ * - task가 wakeup인 경우 active contending상태가 된다.
+ *   (task_contending() 내부 주석참고).
+ */
 		if (flags & ENQUEUE_WAKEUP)
 			task_contending(&p->dl, flags);
 
@@ -1864,6 +2533,10 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 
 	enqueue_dl_entity(&p->dl, flags);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - curr가 아니고, migrate할 cpu가 있으면 pushable을 시도한다.
+ */
 	if (!task_current(rq, p) && p->nr_cpus_allowed > 1)
 		enqueue_pushable_dl_task(rq, p);
 }
@@ -1931,6 +2604,11 @@ static void yield_task_dl(struct rq *rq)
 
 static int find_later_rq(struct task_struct *task);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @p를 어느 cpu에서 깨울건지 정한다.
+ *   @p를 @cpu에서 동작시킬수없는 상황이면 다른 적합한 cpu를 찾아 반환한다.
+ */
 static int
 select_task_rq_dl(struct task_struct *p, int cpu, int flags)
 {
@@ -1938,9 +2616,18 @@ select_task_rq_dl(struct task_struct *p, int cpu, int flags)
 	bool select_rq;
 	struct rq *rq;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - task가 있지만 sleep에서 깨어나는 경우.
+ *   wakeup상황에서만 현재 함수를 호출한다.
+ */
 	if (!(flags & WF_TTWU))
 		goto out;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 일단 @cpu로 rq를 정한다.
+ */
 	rq = cpu_rq(cpu);
 
 	rcu_read_lock();
@@ -1955,6 +2642,20 @@ select_task_rq_dl(struct task_struct *p, int cpu, int flags)
 	 * other hand, if it has a shorter deadline, we
 	 * try to make it stay here, it might be important.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   -deadline 작업을 처리하는 경우 해당 작업을 깨울 위치를 결정해야 합니다.
+ *   더 늦은 기한이 있고 이 rq의 현재 작업이 이동할 수 없는 경우(깨어 있는 
+ *   작업이 이동할 수 있는 경우!) 다른 곳으로 보내는 것이 좋습니다. 반면 
+ *   마감일이 더 짧다면 여기에 머물게 하려고 노력하는 것이 중요할 수 있습니다.
+ *
+ * - curr가 dl이고, @p가 다른 cpu에서 동작가능하고
+ *   1. 현재 cpu에서만 curr가 동작 가능
+ *   2. @curr가 더 @p보다 더 급한 마감.
+ *
+ *   이면 select_rq는 true가 된다. 즉 @p를 다른 cpu로 옮겨야되는 상황이다.
+ */
 	select_rq = unlikely(dl_task(curr)) &&
 		    (curr->nr_cpus_allowed < 2 ||
 		     !dl_entity_preempt(&p->dl, &curr->dl)) &&
@@ -1964,10 +2665,19 @@ select_task_rq_dl(struct task_struct *p, int cpu, int flags)
 	 * Take the capacity of the CPU into account to
 	 * ensure it fits the requirement of the task.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - HMP까지 고려해야되면 고려한다. @cpu에 적합하지않으면 떠나야된다.
+ */
 	if (static_branch_unlikely(&sched_asym_cpucapacity))
 		select_rq |= !dl_task_fits_capacity(p, cpu);
 
 	if (select_rq) {
+/*
+ * IAMROOT, 2023.03.04:
+ * - 찾는다. 가장 만료시간이 느리고 적합한 cpu를 찾았고, @p의 만료시간이
+ *   target보다 급하거나, target에 dl이 없다면 target으로 전환한다.
+ */
 		int target = find_later_rq(p);
 
 		if (target != -1 &&
@@ -2014,6 +2724,16 @@ static void migrate_task_rq_dl(struct task_struct *p, int new_cpu __maybe_unused
 	raw_spin_rq_unlock(rq);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 다음과 같은경우엔 reschedule 안한다.
+ *   1. @curr가 현재 cpu에서만 돌수있으면 
+ *   2. @curr에 적합한 cpudl을 못찾으면.
+ *   3. @p가 여러군데 cpu에서 돌수있고, 다른 cpudl에서 돌수있는 상황
+ *
+ * - curr가 현재 cpu가 아닌 다른 cpu에서 돌수있고, @p가 현재 cpu에서만 돌수
+ *   있는 상황이면 curr를 reschedule한다.
+ */
 static void check_preempt_equal_dl(struct rq *rq, struct task_struct *p)
 {
 	/*
@@ -2035,8 +2755,26 @@ static void check_preempt_equal_dl(struct rq *rq, struct task_struct *p)
 	resched_curr(rq);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - @p에서 dl가 동작을 안하고 있고, @p가 @rq의 우선순위가 높은상황,
+ *   즉 dl task
+ * --- push / pull을 하는 상황 정리.
+ *  1. cpu에서 idle인 상황에서 pull
+ *  2. core에서 balance을 call한 경우 push / pull
+ *  3. sleep에서 깨어낫을때(woken) sleep에서 깨어난 task를 그냥 동작할지
+ *     push를 할지 선택.
+ *  4. balance_callback의 선택에 따른 처리.
+ *     __schedule() 함수에서 post처리에서 상황에 따라 push / pull 선택
+ * ---
+ */
 static int balance_dl(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 {
+/*
+ * IAMROOT, 2023.03.04:
+ * - @p가 아직 rq에 없고, @rq(현재 task)보다 @p가(요청한 task) 
+ *   deadline이면 pull작업을 수행한다.
+ */
 	if (!on_dl_rq(&p->dl) && need_pull_dl_task(rq, p)) {
 		/*
 		 * This is OK, because current is on_cpu, which avoids it being
@@ -2044,6 +2782,13 @@ static int balance_dl(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 		 * disabled avoiding further scheduler activity on it and we've
 		 * not yet started the picking loop.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   current는 on_cpu이므로 부하 분산 및 선점/IRQ가 추가 스케줄러 활동을 
+ *   방지하기 위해 여전히 비활성화되어 있고 아직 선택 루프를 시작하지 
+ *   않았기 때문에 괜찮습니다.
+ */
 		rq_unpin_lock(rq, rf);
 		pull_dl_task(rq);
 		rq_repin_lock(rq, rf);
@@ -2056,6 +2801,12 @@ static int balance_dl(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 /*
  * Only called when both the current and waking task are -deadline
  * tasks.
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - @p가 curr보다 더 만료시간이 급한 deadline이라면 reschedule 요청한다.
+ *   만약 deadline같다면 cpudl을 통해서 curr가 resched 가능여부를 확인해
+ *   수행한다.
  */
 static void check_preempt_curr_dl(struct rq *rq, struct task_struct *p,
 				  int flags)
@@ -2070,6 +2821,12 @@ static void check_preempt_curr_dl(struct rq *rq, struct task_struct *p,
 	 * In the unlikely case current and p have the same deadline
 	 * let us try to decide what's the best thing to do...
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - deadline이 동일한 상황에서 curr가 reschedule이 없다면
+ *   (reschedule 요청이 있다면 이미 누군가 햇으므로 할필요가없다는것.)
+ *   curr를 다른 cpu로 reschedule할수있는지 찾아서 가능하면 수행한다.
+ */
 	if ((p->dl.deadline == rq->curr->dl.deadline) &&
 	    !test_tsk_need_resched(rq->curr))
 		check_preempt_equal_dl(rq, p);
@@ -2077,6 +2834,11 @@ static void check_preempt_curr_dl(struct rq *rq, struct task_struct *p,
 }
 
 #ifdef CONFIG_SCHED_HRTICK
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - dl hrtick을 runtime이후에 동작한다.
+ */
 static void start_hrtick_dl(struct rq *rq, struct task_struct *p)
 {
 	hrtick_start(rq, p->dl.runtime);
@@ -2169,6 +2931,12 @@ static void put_prev_task_dl(struct rq *rq, struct task_struct *p)
  *   참고: 이 함수는 완전한 dynticks를 따라가는 틱 오프로드에 의해 원격으로 호출될 수
  *   있습니다. 따라서 로컬 가정을 할 수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해
  *   모든 항목에 액세스해야 합니다.
+ *
+ * - runtime관련 수행
+ *   (runtime 갱싱, throttle, reschedule, dequeue, enqueue등)
+ * - rt bw rt_time 갱신.
+ * - loadavg 갱신
+ * - dl hrtick수행 여부확인.
  */
 static void task_tick_dl(struct rq *rq, struct task_struct *p, int queued)
 {
@@ -2186,6 +2954,10 @@ static void task_tick_dl(struct rq *rq, struct task_struct *p, int queued)
 	 *   런타임이 있는 경우에도 update_curr_dl()로 인해 더 이상 leftmost 작업이
 	 *   아닐 수 있습니다. 이 경우 NEED_RESCHED가 설정되고 schedule()은
 	 *   다음 작업을 위해 새로운 hrtick을 시작합니다.
+	 *
+	 * - hrtick을 지원하는 상황에서 queue에 들어가있고, 제일빠른 task인데
+	 *   runtime이 남아있다면(계속 동작을해야되는 상태)
+	 *   hrtick을 예약한다.
 	 */
 	if (hrtick_enabled_dl(rq) && queued && p->dl.runtime > 0 &&
 	    is_leftmost(p, &rq->dl))
@@ -2216,6 +2988,10 @@ static int pick_dl_task(struct rq *rq, struct task_struct *p, int cpu)
 /*
  * Return the earliest pushable rq's task, which is suitable to be executed
  * on the CPU, NULL otherwise:
+ */
+/*
+ * IAMROOT, 2023.03.04:
+ * - pick_highest_pushable_task() 참고.
  */
 static struct task_struct *pick_earliest_pushable_dl_task(struct rq *rq, int cpu)
 {
@@ -2329,6 +3105,11 @@ static int find_later_rq(struct task_struct *task)
 }
 
 /* Locks the rq it finds */
+/*
+ * IAMROOT, 2023.03.04:
+ * - later rq를 찾아 doublelock을 한후 return한다.
+ *   rt측의 find_lock_lowest_rq()와 비슷한 방법으루 수행한다.
+ */
 static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 {
 	struct rq *later_rq = NULL;
@@ -2411,6 +3192,14 @@ static struct task_struct *pick_next_pushable_dl_task(struct rq *rq)
  * can be sent to some other CPU where they can preempt
  * and start executing.
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   이 rq에서 실행되지 않는 -deadline 작업을 선점하고 실행을 시작할 수 있는 
+ *   다른 CPU로 보낼 수 있는지 확인하십시오.
+ *
+ * - push_rt_task()와 비슷한 방법으로 동작한다.
+ */
 static int push_dl_task(struct rq *rq)
 {
 	struct task_struct *next_task;
@@ -2436,6 +3225,14 @@ retry:
 	 * can move away, it makes sense to just reschedule
 	 * without going further in pushing next_task.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   next_task가 rq->curr를 선점하고 rq->curr이 멀리 이동할 수 있는 경우 
+ *   next_task를 더 이상 푸시하지 않고 일정을 다시 잡는 것이 좋습니다.
+ * - curr가 dl이고, next가 curr보다 더 급한경우, curr를 reschedule 요청하여
+ *   next로 전환되도록한다.
+ */
 	if (dl_task(rq->curr) &&
 	    dl_time_before(next_task->dl.deadline, rq->curr->dl.deadline) &&
 	    rq->curr->nr_cpus_allowed > 1) {
@@ -2502,6 +3299,10 @@ static void push_dl_tasks(struct rq *rq)
 		;
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - pull_rt_task() 참조
+ */
 static void pull_dl_task(struct rq *this_rq)
 {
 	int this_cpu = this_rq->cpu, cpu;
@@ -2517,8 +3318,18 @@ static void pull_dl_task(struct rq *this_rq)
 	 * Match the barrier from dl_set_overloaded; this guarantees that if we
 	 * see overloaded we must also see the dlo_mask bit.
 	 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - papago
+ *   dl_set_overloaded의 장벽을 일치시킵니다. 이는 오버로드된 것을 볼 경우
+ *   dlo_mask 비트도 확인해야 함을 보장합니다.
+ */
 	smp_rmb();
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - overload된 cpu들을 순회하면서 가장 급한 task를 찾아와서
+ */
 	for_each_cpu(cpu, this_rq->rd->dlo_mask) {
 		if (this_cpu == cpu)
 			continue;
@@ -2529,6 +3340,10 @@ static void pull_dl_task(struct rq *this_rq)
 		 * It looks racy, abd it is! However, as in sched_rt.c,
 		 * we are fine with this.
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - 순회중인 src_rq보다 this가 더 급하면 skip한다.
+ */
 		if (this_rq->dl.dl_nr_running &&
 		    dl_time_before(this_rq->dl.earliest_dl.curr,
 				   src_rq->dl.earliest_dl.next))
@@ -2545,6 +3360,10 @@ static void pull_dl_task(struct rq *this_rq)
 		if (src_rq->dl.dl_nr_running <= 1)
 			goto skip;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 가장 급한 pushable dl task를 얻어온다.
+ */
 		p = pick_earliest_pushable_dl_task(src_rq, this_cpu);
 
 		/*
@@ -2552,6 +3371,10 @@ static void pull_dl_task(struct rq *this_rq)
 		 *  - it preempts our current (if there's one),
 		 *  - it will preempt the last one we pulled (if any).
 		 */
+/*
+ * IAMROOT, 2023.03.04:
+ * - 제일 급한 dl task를 찾아서 기록한다. 찾으면 resched true.
+ */
 		if (p && dl_time_before(p->dl.deadline, dmin) &&
 		    (!this_rq->dl.dl_nr_running ||
 		     dl_time_before(p->dl.deadline,
@@ -2582,6 +3405,10 @@ static void pull_dl_task(struct rq *this_rq)
 skip:
 		double_unlock_balance(this_rq, src_rq);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - curr를 옮겨야하는경우 stop후 옮긴다.
+ */
 		if (push_task) {
 			raw_spin_rq_unlock(this_rq);
 			stop_one_cpu_nowait(src_rq->cpu, push_cpu_stop,

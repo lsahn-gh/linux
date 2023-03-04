@@ -7,6 +7,13 @@
  * - cpupri는 번호가 높을수록 우선순위가 높다.
  */
 #define CPUPRI_INVALID		-1
+
+/*
+ * IAMROOT, 2023.03.04:
+ * - CPUPRI 0      : CFS, RT0(RT0 p->prio == 99)
+ *   CPURPI 1 ~ 99 : RT1 ~ RT99(RT99 p->prio = 0)
+ *   CPUPRI 100    : deadline(deadline p->prio = -1)
+ */
 #define CPUPRI_NORMAL		 0
 /* values 1-99 are for RT1-RT99 priorities */
 #define CPUPRI_HIGHER		100
