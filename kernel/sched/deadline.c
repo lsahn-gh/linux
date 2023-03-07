@@ -1507,6 +1507,14 @@ static int start_dl_timer(struct task_struct *p)
  * - now   : timer에 따른 현재 시각.
  * - delta : rq에 기록한 time stamp와 current time의 차이.
  * - act갱신 : next period + (rq에 기록한 시각으로부터 지난 시각)
+ *
+ * - delta를 별도로 구해 더해주는 이유:
+ *   스케줄러에서 사용하는 시간인 런큐 클럭(rq->clock)은 현재 시각을 의미하긴
+ *   하지만 클럭의 현재 시간을 가져와서 갱신하여 사용한다. 이 값은 로드 평균을
+ *   산출한 기간등의 계산을 정확하게 하기 위해 해당 시점에서 갱신되어 사용한다.
+ *   따라서 아래 코드에서 사용하는 rq_clock()은 갱신된 시점의 약각 과거 
+ *   시각이므로 지금 타이머 H/W를 사용하려는 현재 시각과 약간의 차이가 발생한다.
+ *   따라서 이를 보정하기 위해 delta를 산출하여 보정해야 한다.
  */
 	act = ns_to_ktime(dl_next_period(dl_se));
 	now = hrtimer_cb_get_time(timer);
