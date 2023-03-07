@@ -784,6 +784,15 @@ struct sched_dl_entity {
 	 * during sched_setattr(), they will remain the same until
 	 * the next sched_setattr().
 	 */
+/*
+ * IAMROOT, 2023.02.27:
+ * - dl_runtime
+ *   최악의 경우 매 dl_period마다 최대 실행될 수 있는 시간.
+ * - dl_deadline
+ *   일반적으로 dl_period와 같지만, 따로 설정할 경우 dl_period 이내에
+ *   또 마감시간을 두는 개념.
+ *                 
+ */
 	u64				dl_runtime;	/* Maximum runtime for each instance	*/
 	u64				dl_deadline;	/* Relative deadline of each instance	*/
 	u64				dl_period;	/* Separation of two instances (period) */

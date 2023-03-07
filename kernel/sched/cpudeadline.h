@@ -10,6 +10,7 @@
  *          ex. idx가 2이면
  *          elements[2].cpu - 2번 cpu
  *          elements[2].dl 은 - 2번 cpu의 leftmost deadline
+ * - heap의 node.
  */
 struct cpudl_item {
 	u64			dl;
@@ -25,6 +26,10 @@ struct cpudl {
 	raw_spinlock_t		lock;
 	int			size;
 	cpumask_var_t		free_cpus;
+/*
+ * IAMROOT, 2023.03.03:
+ * - heap으로 관리.
+ */
 	struct cpudl_item	*elements;
 };
 

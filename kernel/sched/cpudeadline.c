@@ -207,6 +207,11 @@ void cpudl_clear(struct cpudl *cp, int cpu)
 		 *   호출되는 경우에 발생할 수 있습니다.
 		 */
 	} else {
+/*
+ * IAMROOT, 2023.03.03:
+ * - heap 자료구조의 삭제방식대로 수행한다.
+ *   마지막 node를 삭제되는 node에 위치시키고 정렬한다.
+ */
 		new_cpu = cp->elements[cp->size - 1].cpu;
 		cp->elements[old_idx].dl = cp->elements[cp->size - 1].dl;
 		cp->elements[old_idx].cpu = new_cpu;

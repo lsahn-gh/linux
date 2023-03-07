@@ -8,6 +8,11 @@
 
 #define MAX_DL_PRIO		0
 
+/*
+ * IAMROOT, 2023.02.27:
+ * @return 1 : dl prio
+ * @prio가 dl인지 판단한다. dl 의 경우 prio = -1 이다.
+ */
 static inline int dl_prio(int prio)
 {
 	if (unlikely(prio < MAX_DL_PRIO))
@@ -17,6 +22,7 @@ static inline int dl_prio(int prio)
 
 /*
  * IAMROOT, 2023.02.25:
+ * @return 1 : dl task
  * - dl 의 경우 prio = -1
  */
 static inline int dl_task(struct task_struct *p)

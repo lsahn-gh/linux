@@ -2651,6 +2651,7 @@ extern const u32		sched_prio_to_wmult[40];
  *
  *   "check_preempt_curr" is a pointer to a function that is called to check 
  *   whether the current task should be preempted by a higher-priority task.
+ *   - 자신보다 우선순위가 높은게 있으면 바꾼다.
  *
  *   "pick_next_task" is a pointer to a function that is used to select 
  *   the next task to run on a CPU. 
@@ -2660,9 +2661,13 @@ extern const u32		sched_prio_to_wmult[40];
  *
  *   "set_next_task" is a pointer to a function that is called to set the 
  *   next task to run on a CPU. 
+ *   - ex) A -> B task로 변경되는과정.
+ *   B를 선택(pick_next_task) -> curr(A)를 정리(put_prev_task) ->
+ *   B를 curr로 변경(set_next_task)
  *
  *   "balance" is a pointer to a function that is used to balance the load 
  *   across different CPUs in a system. 
+ *   - load balance 수행.
  *
  *   "select_task_rq" is a pointer to a function that is used to select the 
  *   runqueue on which a task should be queued. 
@@ -2681,26 +2686,32 @@ extern const u32		sched_prio_to_wmult[40];
  *
  *   "rq_online" is a pointer to a function that is called when a runqueue 
  *   becomes available for scheduling.
+ *   - cpu on시 동작
  *
  *   "rq_offline" is a pointer to a function that is called when a runqueue 
  *   becomes unavailable for scheduling.
+ *   - cpu off시 동작
  *
  *   "find_lock_rq" is a pointer to a function that is used to find and lock 
  *   the runqueue on which a task is queued.
  *
  *   "task_tick" is a pointer to a function that is called when a task is 
  *   selected to run on a CPU.
+ *   - schedule tick.
  *
  *   "task_fork" is a pointer to a function that is called when a new task 
  *   is forked. 
+ *   - fork 될때.
  *
  *   "task_dead" is a pointer to a function that is called when a task exits.
  *
  *   "switched_from" is a pointer to a function that is called when a task 
  *   is switched from one CPU to another.
+ *   - 스케쥴러가 바뀔때.
  *
  *   "switched_to" is a pointer to a function that is called when a task is 
  *   switched to a new CPU. 
+ *   - 스케쥴러가 바뀔때.
  *
  *   "prio_changed" is a pointer to a function that is called when the 
  *   priority of a task changes.

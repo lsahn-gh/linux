@@ -1450,7 +1450,8 @@ static void update_curr_dl(struct rq *rq)
 
 	/*
 	 * IAMROOT, 2023.02.26:
-	 * - SCHED_FLAG_SUGOV flag 설정된 경우
+	 * - SCHED_FLAG_SUGOV flag 설정된 경우 reschedule을 안한다. 
+	 *   (current를 그대로사용한다.)
 	 */
 	if (dl_entity_is_special(dl_se))
 		return;
