@@ -19,6 +19,9 @@
  *   0..MAX_RT_PRIO-1이며 SCHED_NORMAL/SCHED_BATCH 작업은
  *   MAX_RT_PRIO..MAX_PRIO-1 범위에 있습니다. 우선 순위 값은 반전됩니다.
  *   낮은 p->prio 값은 높은 우선 순위를 의미합니다.
+ *
+ * - 0 ~ 99    : RT
+ *   100 ~ 139 : CFS
  */
 #define MAX_RT_PRIO		100
 

@@ -22,7 +22,8 @@ static inline int dl_prio(int prio)
 
 /*
  * IAMROOT, 2023.02.25:
- * @return 1 : dl task
+ * @return 1 : is dl task.
+ *         0 : dl task아님.
  * - dl 의 경우 prio = -1
  */
 static inline int dl_task(struct task_struct *p)
@@ -30,6 +31,12 @@ static inline int dl_task(struct task_struct *p)
 	return dl_prio(p->prio);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * @return true  ------+------+---->
+ *                     a      b
+ * @return false 그외
+ */
 static inline bool dl_time_before(u64 a, u64 b)
 {
 	return (s64)(a - b) < 0;

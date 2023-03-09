@@ -2238,6 +2238,8 @@ EXPORT_SYMBOL_GPL(hrtimer_init);
 
 /*
  * IAMROOT, 2022.09.24:
+ * @return true : running active
+ *         false : inactive
  * - @timer가 queue에 있거나 running중인지 확인한다.
  */
 bool hrtimer_active(const struct hrtimer *timer)

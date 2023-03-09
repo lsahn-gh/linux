@@ -105,6 +105,11 @@ static inline struct sched_clock_data *cpu_sdc(int cpu)
 	return &per_cpu(sched_clock_data, cpu);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - arm은 항상 stable이다.(x86때문에 존재하는것.)
+ *   return true.
+ */
 int sched_clock_stable(void)
 {
 	return static_branch_likely(&__sched_clock_stable);
@@ -386,6 +391,10 @@ u64 sched_clock_cpu(int cpu)
 }
 EXPORT_SYMBOL_GPL(sched_clock_cpu);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - arm은 항상 stable이다. 아무것도 안하고 return.
+ */
 void sched_clock_tick(void)
 {
 	struct sched_clock_data *scd;

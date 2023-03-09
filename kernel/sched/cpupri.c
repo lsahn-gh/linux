@@ -27,18 +27,18 @@
 /*
  * p->rt_priority   p->prio   newpri   cpupri
  *
- *				  -1       -1 (CPUPRI_INVALID)
+ *				              -1       -1(CPUPRI_INVALID)
  *
- *				  99        0 (CPUPRI_NORMAL)
+ *			0(RT0)   99       99       0(CPUPRI_NORMAL)
  *
- *		1        98       98        1
+ *		    1(RT1)   98       98        1
  *	      ...
  *	       49        50       50       49
  *	       50        49       49       50
  *	      ...
- *	       99         0        0       99
+ *	       99(RT99)   0        0       99
  *
- *				 100	  100 (CPUPRI_HIGHER)
+ *				             100	  100 (CPUPRI_HIGHER)
  */
 /*
  * IAMROOT, 2023.02.11:
@@ -48,7 +48,7 @@
  * ----
  * - 옛날에는 102개 체재 였다(idle이란게 있었다.). 지금은 idle이 빠져 
  *   101개 체재가 됬다.
- *   101개 체재에선 RT100을 NORMAL과 동일하게 처리한다.
+ *   101개 체재에선 RT0을 NORMAL과 동일하게 처리한다.
  */
 static int convert_prio(int prio)
 {
@@ -70,7 +70,7 @@ static int convert_prio(int prio)
 	case MAX_RT_PRIO:
 /*
  * IAMROOT, 2023.02.11:
- * - deadline 용인듯 싶다.
+ * - deadline용
  */
 		cpupri = CPUPRI_HIGHER;		/* 100 */
 		break;

@@ -101,6 +101,11 @@ static void cpudl_heapify(struct cpudl *cp, int idx)
 		cpudl_heapify_down(cp, idx);
 }
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - heapify 자료구조의 0번째. 즉 가장 deadline이 높은 cpu.
+ *   (마감시간이 가장 많이남은)
+ */
 static inline int cpudl_maximum(struct cpudl *cp)
 {
 	return cp->elements[0].cpu;
@@ -114,26 +119,53 @@ static inline int cpudl_maximum(struct cpudl *cp)
  *
  * Returns: int - CPUs were found
  */
+/*
+ * IAMROOT, 2023.03.04:
+ * @return 1. 동작할수있는 cpu를 찾았다. HMP면 cpu cap까지 고려한다.
+ *         0: 못찾았다.
+ */
 int cpudl_find(struct cpudl *cp, struct task_struct *p,
 	       struct cpumask *later_mask)
 {
 	const struct sched_dl_entity *dl_se = &p->dl;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - free_cpu에서 @p->cpus_mask와 겹치는게 있으면 later_mask에 기록한다.
+ */
 	if (later_mask &&
 	    cpumask_and(later_mask, cp->free_cpus, &p->cpus_mask)) {
 		unsigned long cap, max_cap = 0;
 		int cpu, max_cpu = -1;
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - HMP 모드가 아니면 그냥 cpu범위를 찾은것으로 성공 return.
+ */
 		if (!static_branch_unlikely(&sched_asym_cpucapacity))
 			return 1;
 
 		/* Ensure the capacity of the CPUs fits the task. */
+/*
+ * IAMROOT, 2023.03.04:
+ * - HMP를 고려해서 한번더 찾는다.
+ *   각 cpu성능을 대비해 @p의 runtime이 deadline이내에 처리가 될수있는
+ *   적합한 cpu인지 검사한다.
+ */
 		for_each_cpu(cpu, later_mask) {
 			if (!dl_task_fits_capacity(p, cpu)) {
+/*
+ * IAMROOT, 2023.03.04:
+ * - cpu가 dl처리에 부적합한경우 clear시킨다.
+ */
 				cpumask_clear_cpu(cpu, later_mask);
 
 				cap = capacity_orig_of(cpu);
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 모든 cpu가 적합하지 않은것을 대비해 max만을 기록해놓는 작업을 한다.
+ */
 				if (cap > max_cap ||
 				    (cpu == task_cpu(p) && cap == max_cap)) {
 					max_cap = cap;
@@ -142,6 +174,10 @@ int cpudl_find(struct cpudl *cp, struct task_struct *p,
 			}
 		}
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - 못찾았으면 기록한 max cpu로 기록한다.
+ */
 		if (cpumask_empty(later_mask))
 			cpumask_set_cpu(max_cpu, later_mask);
 
@@ -151,6 +187,11 @@ int cpudl_find(struct cpudl *cp, struct task_struct *p,
 
 		WARN_ON(best_cpu != -1 && !cpu_present(best_cpu));
 
+/*
+ * IAMROOT, 2023.03.04:
+ * - bestcpu에서 @p를 동작시킬수있고, 만료시각이 cp보다 전의 시간이면 
+ *   동작시킬수있다.
+ */
 		if (cpumask_test_cpu(best_cpu, &p->cpus_mask) &&
 		    dl_time_before(dl_se->deadline, cp->elements[0].dl)) {
 			if (later_mask)

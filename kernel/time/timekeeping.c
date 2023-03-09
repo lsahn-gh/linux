@@ -397,7 +397,7 @@ static inline u64 timekeeping_delta_to_ns(const struct tk_read_base *tkr, u64 de
 
 /*
  * IAMROOT, 2022.09.24:
- * - tkr에 저장된 시간을오부터 지나간 시간(ns)를 알아온다.
+ * - tkr에 저장된 시간으로부터 지나간 시간(ns)를 알아온다.
  * - delta = now(clock을 callback에서 읽음) - old(tkr에 있는값)
  *   delta를 ns로 변환하여 return.
  */
