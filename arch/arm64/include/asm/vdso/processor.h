@@ -15,6 +15,7 @@
  *
  * - 현재까지 출시된 ARM64 core들은 single hw thread per core 이므로 
  *   nop와 거의 유사할 것이라 추측함.
+ * - busy wait
  */
 static inline void cpu_relax(void)
 {

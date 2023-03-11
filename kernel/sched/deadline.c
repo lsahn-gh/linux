@@ -387,6 +387,8 @@ static void dl_change_utilization(struct task_struct *p, u64 new_bw)
  *   2. 0-lag >= 0
  *      non contending으로 전환하고 inactive timer를 0-lag후에 동작하도록 
  *      예약한다.
+ * - ACTIVE(non contending)을 둔 이유는?
+ *   0-lag 범위안에있는 non contending 상태를 ACTIVE load로 취급한다.
  */
 static void task_non_contending(struct task_struct *p)
 {
@@ -1753,6 +1755,7 @@ unlock:
 /*
  * IAMROOT, 2023.03.04:
  * - dl_task_timer로 설정한다.
+ * - runtime 만료시 예약.  period 만료시 호출
  */
 void init_dl_task_timer(struct sched_dl_entity *dl_se)
 {
@@ -1863,7 +1866,7 @@ extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
 /*
  * IAMROOT. 2023.02.25:
  * - google-translate
- *   이 함수는 GRUB 계정 규칙을 구현합니다. GRUB 재확보 알고리즘에 따르면 런타임은
+ *   이 함수는 GRUB account를 구현합니다. GRUB reclaim 알고리즘에 따르면 런타임은
  *   "dq = -dt"가 아니라
  *   "dq = -max{u / Umax, (1 - Uinact - Uextra)} dt"로
  *   감소합니다. 여기서 u는 작업의 활용도, Umax는 회수 가능한 최대 활용도, Uinact는
@@ -1888,6 +1891,7 @@ extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
  *
  *   system 기준 bw(BW_UNIT) - (사용하지 않은 bw)의 방법으로 구한다.
  *
+ * - SKIP.
  */
 static u64 grub_reclaim(u64 delta, struct rq *rq, struct sched_dl_entity *dl_se)
 {
@@ -2042,7 +2046,7 @@ static void update_curr_dl(struct rq *rq)
 	 *   주파수를 낮추는 데 사용됩니다. 나머지는 여전히 현재 주파수와 CPU 최대 용량에
 	 *   따라 예약 매개변수를 확장해야 합니다.
 	 *
-	 * - TODO. 유저 app에서 SCHED_FLAG_RECLAIM flag를 사용한 경우
+	 * - 유저 app에서 SCHED_FLAG_RECLAIM flag를 사용한 경우
 	 *   grub_reclaim scale 이 적용된 scaled_delta_exec 값을 가져온다
 	 */
 	if (unlikely(dl_se->flags & SCHED_FLAG_RECLAIM)) {
@@ -2553,6 +2557,7 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
  * - throttle중인데 enqueue를 시키면안된다.(replenish인 경우는 보충하러
  *   call한것이므로 제외.)
  */
+
 	if (p->dl.dl_throttled && !(flags & ENQUEUE_REPLENISH)) {
 /*
  * IAMROOT, 2023.03.04:

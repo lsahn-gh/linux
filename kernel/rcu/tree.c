@@ -4293,6 +4293,16 @@ void rcu_cpu_starting(unsigned int cpu)
  * from the outgoing CPU rather than from the cpuhp_step mechanism.
  * This is because this function must be invoked at a precise location.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   발신 함수에는 더 이상 RCU가 필요하지 않으므로 rcu_node 트리의 ->qsmaskinitnext
+ *   비트 마스크에서 제거하십시오.
+ *
+ *   이 함수는 cpuhp_step 메커니즘이 아니라 나가는
+ *   CPU에서 직접 호출된다는 점에서 특별합니다. 정확한 위치에서 이 함수를 호출해야
+ *   하기 때문입니다.
+ */
 void rcu_report_dead(unsigned int cpu)
 {
 	unsigned long flags;

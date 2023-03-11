@@ -752,6 +752,10 @@ static void tick_nohz_stop_idle(struct tick_sched *ts, ktime_t now)
 	sched_clock_idle_wakeup_event();
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - idle_entrytime, idle_active 설정
+ */
 static void tick_nohz_start_idle(struct tick_sched *ts)
 {
 	ts->idle_entrytime = ktime_get();
@@ -867,6 +871,10 @@ static inline bool local_timer_softirq_pending(void)
 	return local_softirq_pending() & BIT(TIMER_SOFTIRQ);
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - TODO
+ */
 static ktime_t tick_nohz_next_event(struct tick_sched *ts, int cpu)
 {
 	u64 basemono, next_tick, next_tmr, next_rcu, delta, expires;
@@ -1085,6 +1093,14 @@ static void tick_nohz_full_update_tick(struct tick_sched *ts)
 	__tick_nohz_full_update_tick(ts, ktime_get());
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - nohz idle 모드로 진입할 수 있는 상태이면 true, 아래 조건이면 false
+ *   1. NOHZ_MODE_INACTIVE 설정인 경우
+ *   2. schedule 요청이 있는 경우
+ *   3. softirq 요청이 있는 경우
+ *   4. tick_do_timer_cpu 인 경우
+ */
 static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 {
 	/*
@@ -1094,12 +1110,25 @@ static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 	 * this here the jiffies might be stale and do_timer() never
 	 * invoked.
 	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   이 CPU가 오프라인이고 jiffies를 업데이트하는 CPU인 경우 할당을 포기하고 다음에
+	 *   틱 타이머를 실행하는 CPU에서 가져오도록 합니다. 여기에 드롭하지 않으면 jiffies가
+	 *   오래되어 do_timer()가 호출되지 않을 수 있습니다.
+	 */
 	if (unlikely(!cpu_online(cpu))) {
 		if (cpu == tick_do_timer_cpu)
 			tick_do_timer_cpu = TICK_DO_TIMER_NONE;
 		/*
 		 * Make sure the CPU doesn't get fooled by obsolete tick
 		 * deadline if it comes back online later.
+		 */
+		/*
+		 * IAMROOT. 2023.03.11:
+		 * - google-translate
+		 *   CPU가 나중에 다시 온라인 상태가 되면 오래된 틱 데드라인에
+		 *   속지 않도록 하십시오.
 		 */
 		ts->next_tick = 0;
 		return false;
@@ -1139,6 +1168,10 @@ static bool can_stop_idle_tick(int cpu, struct tick_sched *ts)
 	return true;
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - TODO.
+ */
 static void __tick_nohz_idle_stop_tick(struct tick_sched *ts)
 {
 	ktime_t expires;
@@ -1147,6 +1180,12 @@ static void __tick_nohz_idle_stop_tick(struct tick_sched *ts)
 	/*
 	 * If tick_nohz_get_sleep_length() ran tick_nohz_next_event(), the
 	 * tick timer expiration time is known already.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   tick_nohz_get_sleep_length()가 tick_nohz_next_event()를 실행했다면
+	 *   틱 타이머 만료 시간은 이미 알려져 있습니다.
 	 */
 	if (ts->timer_expires_base)
 		expires = ts->timer_expires;
@@ -1179,6 +1218,13 @@ static void __tick_nohz_idle_stop_tick(struct tick_sched *ts)
  *
  * When the next event is more than a tick into the future, stop the idle tick
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   tick_nohz_idle_stop_tick - idle 작업에서 idle 틱 중지
+ *
+ *   다음 이벤트가 미래의 틱 이상인 경우 idle 틱 중지
+ */
 void tick_nohz_idle_stop_tick(void)
 {
 	__tick_nohz_idle_stop_tick(this_cpu_ptr(&tick_cpu_sched));
@@ -1198,6 +1244,13 @@ void tick_nohz_idle_retain_tick(void)
  * tick_nohz_idle_enter - prepare for entering idle on the current CPU
  *
  * Called when we start the idle loop.
+ */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   tick_nohz_idle_enter - 현재 CPU에서 유휴 진입 준비 유휴 루프를 시작할 때
+ *   호출됩니다.
+ * - ts 의 inidle, idle_entrytime, idle_active 설정
  */
 void tick_nohz_idle_enter(void)
 {

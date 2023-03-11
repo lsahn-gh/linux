@@ -107,6 +107,16 @@ static int find_deepest_state(struct cpuidle_driver *drv,
  * state with exit latency within @latency_limit_ns (override governors going
  * forward), or do not override governors if it is zero.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   cpuidle_use_deepest_state - 거버너 오버라이드 모드를 설정/해제합니다.
+ *   @latency_limit_ns: 유휴 상태 종료 대기 시간 제한(또는 0인 경우 재정의 없음).
+ *
+ *   @latency_limit_ns가 0이 아닌 경우 @latency_limit_ns 내에서 종료
+ *   대기 시간이 있는 가장 깊은 유휴 상태를 사용하도록 현재 CPU를 설정하거나(앞으로
+ *   거버너 재정의) 0인 경우 거버너를 재정의하지 마십시오.
+ */
 void cpuidle_use_deepest_state(u64 latency_limit_ns)
 {
 	struct cpuidle_device *dev;
@@ -173,6 +183,16 @@ static void enter_s2idle_proper(struct cpuidle_driver *drv,
  * If there are states with the ->enter_s2idle callback, find the deepest of
  * them and enter it with frozen tick.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   cpuidle_enter_s2idle - 유휴 일시 중단에 적합한 유휴 상태를 입력합니다.
+ *   @drv: 주어진 CPU에 대한 cpuidle 드라이버.
+ *   @dev: 주어진 CPU에 대한 cpuidle장치.
+ *
+ *   ->enter_s2idle 콜백이 있는 상태가 있는 경우 가장 깊은 상태를 찾아 고정된
+ *   틱으로 입력합니다.
+ */
 int cpuidle_enter_s2idle(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 {
 	int index;
@@ -181,6 +201,12 @@ int cpuidle_enter_s2idle(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 	 * Find the deepest state with ->enter_s2idle present, which guarantees
 	 * that interrupts won't be enabled when it exits and allows the tick to
 	 * be frozen safely.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   ->enter_s2idle이 존재하는 가장 깊은 상태를 찾으십시오. 이는 종료될 때
+	 *   인터럽트가 활성화되지 않고 틱이 안전하게 동결되도록 합니다.
 	 */
 	index = find_deepest_state(drv, dev, U64_MAX, 0, true);
 	if (index > 0) {

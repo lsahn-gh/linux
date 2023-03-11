@@ -48,6 +48,14 @@ static atomic_t num_active_cpus = ATOMIC_INIT(0);
  * Emit a CPU event on a CPU core, which will trigger a
  * bound LED to turn on or turn off.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   ledtrig_cpu - CPU 이벤트를 트리거로 내보냅니다.
+ *   @ledevt: 내보낼 CPU 이벤트
+ *
+ *   CPU 코어에서 CPU 이벤트를 내보냅니다. 그러면 바인딩된 LED가 켜지거나 꺼집니다.
+ */
 void ledtrig_cpu(enum cpu_led_event ledevt)
 {
 	struct led_trigger_cpu *trig = this_cpu_ptr(&cpu_trig);
