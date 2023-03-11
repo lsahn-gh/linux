@@ -25,6 +25,20 @@
  * If this function wakes up a task, it executes a full memory barrier before
  * accessing the task state.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   complete: - 이 완료를 기다리고 있는 단일 스레드에 신호를 보냅니다.
+ *   @x: 이 특정 완료 상태를 보유합니다.
+ *
+ *   이것은 이 완료를 기다리고 있는 단일 스레드를 깨울
+ *   것입니다. 스레드는 대기 중인 순서대로 깨어납니다.
+ *
+ *   complete_all(), wait_for_completion() 및 관련 루틴도 참조하십시오.
+ *
+ *   이 함수가 작업을 깨우면 작업 상태에 액세스하기 전에 전체 메모리 장벽을 실행합니다.
+ * - x->done++
+ */
 void complete(struct completion *x)
 {
 	unsigned long flags;

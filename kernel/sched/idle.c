@@ -52,6 +52,10 @@ static int __init cpu_idle_nopoll_setup(char *__unused)
 __setup("hlt", cpu_idle_nopoll_setup);
 #endif
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - cpu 전원을 꺼지 않고 reschedule 요청이 있을때 까지 계속 polling
+ */
 static noinline int __cpuidle cpu_idle_poll(void)
 {
 	trace_cpu_idle(0, smp_processor_id());
@@ -85,6 +89,10 @@ void __weak arch_cpu_idle(void)
  * default_idle_call - Default CPU idle routine.
  *
  * To use when the cpuidle framework cannot be used.
+ */
+/*
+ * IAMROOT, 2023.03.11:
+ * - cpuidle 드라이버가 없을때 동작하는 함수. (wfi 로 대기)
  */
 void __cpuidle default_idle_call(void)
 {
@@ -167,6 +175,43 @@ static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
  * set, and it returns with polling set.  If it ever stops polling, it
  * must clear the polling bit.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   cpuidle_idle_call - 주 idle function
+ *
+ *   참고: 여기서 잠금이나 세마포어를 사용해서는 안 됩니다.
+ *
+ *   TIF_POLLING_NRFLAG를 지원하는 아키텍처에서 폴링 세트로 호출되고 폴링
+ *   세트로 반환됩니다. 폴링이 중지되면 폴링 비트를 지워야 합니다.
+ */
+/*
+ * IAMROOT, 2023.03.11:
+ * - min-residency-us : 최소 상주 시간. 켜진후 꺼지기 전까지 최소 유지해야할 시간
+ * - rk3399.rtsi
+ *   idle-states {
+ *			entry-method = "psci";
+ *
+ *			CPU_SLEEP: cpu-sleep {
+ *				compatible = "arm,idle-state";
+ *				local-timer-stop;
+ *				arm,psci-suspend-param = <0x0010000>;
+ *				entry-latency-us = <120>;
+ *				exit-latency-us = <250>;
+ *				min-residency-us = <900>;
+ *			};
+ *
+ *			CLUSTER_SLEEP: cluster-sleep {
+ *				compatible = "arm,idle-state";
+ *				local-timer-stop;
+ *				arm,psci-suspend-param = <0x1010000>;
+ *				entry-latency-us = <400>;
+ *				exit-latency-us = <500>;
+ *				min-residency-us = <2000>;
+ *			};
+ *		};
+ *
+ */
 static void cpuidle_idle_call(void)
 {
 	struct cpuidle_device *dev = cpuidle_get_device();
@@ -177,6 +222,12 @@ static void cpuidle_idle_call(void)
 	 * Check if the idle task must be rescheduled. If it is the
 	 * case, exit the function after re-enabling the local irq.
 	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   유휴 작업을 다시 예약해야 하는지 확인합니다. 이 경우 로컬 irq를 다시
+	 *   활성화한 후 기능을 종료하십시오.
+	 */
 	if (need_resched()) {
 		local_irq_enable();
 		return;
@@ -186,6 +237,12 @@ static void cpuidle_idle_call(void)
 	 * The RCU framework needs to be told that we are entering an idle
 	 * section, so no more rcu read side critical sections and one more
 	 * step to the grace period
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   RCU 프레임워크는 우리가 유휴 섹션에 들어가고 있다는 것을 알려야 합니다. 따라서
+	 *   rcu는 더 이상 중요한 섹션을 읽지 않고 유예 기간에 한 단계 더 있습니다.
 	 */
 
 	if (cpuidle_not_available(drv, dev)) {
@@ -203,6 +260,16 @@ static void cpuidle_idle_call(void)
 	 * available.  Possibly also suspend the local tick and the entire
 	 * timekeeping to prevent timer interrupts from kicking us out of idle
 	 * until a proper wakeup interrupt happens.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   Suspend-to-idle("s2idle")은 모든 사용자 공간이 정지되고 모든 I/O 장치가 일시
+	 *   중단되고 여기와 인터럽트(있는 경우)에서만 활동이 발생하는 시스템 상태입니다. 이
+	 *   경우 cpuidle 거버너를 우회하고 사용 가능한 가장 깊은 유휴 상태로 바로
+	 *   이동합니다. 적절한 웨이크업 인터럽트가 발생할 때까지 타이머 인터럽트가 유휴
+	 *   상태에서 벗어나는 것을 방지하기 위해 로컬 틱과 전체 타임키핑을 일시 중지할 수도
+	 *   있습니다.
 	 */
 
 	if (idle_should_enter_s2idle() || dev->forced_idle_latency_limit_ns) {
@@ -258,6 +325,13 @@ exit_idle:
  *
  * Called with polling cleared.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   일반 유휴 루프 구현
+ *
+ *   폴링이 지워진 상태로 호출됩니다.
+ */
 static void do_idle(void)
 {
 	int cpu = smp_processor_id();
@@ -274,6 +348,13 @@ static void do_idle(void)
 	 * rq->idle). This means that, if rq->idle has the polling bit set,
 	 * then setting need_resched is guaranteed to cause the CPU to
 	 * reschedule.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   아치에 폴링 비트가 있는 경우 불변성을 유지합니다. 일정이 지정되지 않은 경우(즉,
+	 *   rq->curr != rq->idle인 경우) 폴링 비트는 명확합니다. 즉, rq->idle에 폴링 비트가
+	 *   설정되어 있으면 need_resched를 설정하면 CPU가 다시 일정을 잡게 됩니다.
 	 */
 
 	__current_set_polling();
@@ -298,6 +379,14 @@ static void do_idle(void)
 		 * detected in the wakeup from idle path that the tick
 		 * broadcast device expired for us, we don't want to go deep
 		 * idle as we know that the IPI is going to arrive right away.
+		 */
+		/*
+		 * IAMROOT. 2023.03.11:
+		 * - google-translate
+		 *   폴링 모드에서는 인터럽트와 스핀을 다시 활성화합니다. 또한
+		 *   틱 브로드캐스트 장치가 만료된 유휴 경로에서 깨어남을 감지한 경우
+		 *   IPI가 바로 도착할 것이라는 것을 알기 때문에 깊은 유휴 상태로
+		 *   가고 싶지 않습니다.
 		 */
 		if (cpu_idle_force_poll || tick_check_broadcast_expired()) {
 			tick_nohz_idle_restart_tick();
@@ -395,6 +484,12 @@ void play_idle_precise(u64 duration_ns, u64 latency_ns)
 }
 EXPORT_SYMBOL_GPL(play_idle_precise);
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - boot up 마지막에서 호출된다.
+ *   cpu 0 : start_kernel -> arch_call_rest_init -> rest_init 에서 호출
+ *   그외 cpu : secondary_start_kernel 에서 호출
+ */
 void cpu_startup_entry(enum cpuhp_state state)
 {
 	arch_cpu_idle_prepare();
@@ -476,6 +571,15 @@ dequeue_task_idle(struct rq *rq, struct task_struct *p, int flags)
  * goes along full dynticks. Therefore no local assumption can be made
  * and everything must be accessed through the @rq and @curr passed in
  * parameters.
+ */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   스케줄링 클래스의 작업을 치는 스케줄러 틱.
+ *
+ *   참고: 이 함수는 완전한 dynticks를
+ *   따라가는 틱 오프로드에 의해 원격으로 호출될 수 있습니다. 따라서 로컬 가정을 할
+ *   수 없으며 매개 변수에 전달된 @rq 및 @curr를 통해 모든 항목에 액세스해야 합니다.
  */
 static void task_tick_idle(struct rq *rq, struct task_struct *curr, int queued)
 {

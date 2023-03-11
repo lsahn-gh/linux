@@ -809,6 +809,15 @@ struct cpumask *tick_get_broadcast_oneshot_mask(void)
  * to avoid a deep idle transition as we are about to get the
  * broadcast IPI right away.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   인터럽트가 비활성화된 상태에서 유휴 상태가 되기 전에 호출됩니다. 다른 코어의
+ *   브로드캐스트 이벤트가 발생하려고 하는지 여부를
+ *   확인합니다. tick_broadcast_oneshot_control()에서 감지했습니다. 호출 사이트는
+ *   브로드캐스트 IPI를 바로 얻으려고 할 때 깊은 유휴 전환을 피하기 위해 이것을
+ *   사용할 수 있습니다.
+ */
 int tick_check_broadcast_expired(void)
 {
 	return cpumask_test_cpu(smp_processor_id(), tick_broadcast_force_mask);

@@ -343,6 +343,11 @@ atomic_andnot(int i, atomic_t *v)
 	arch_atomic_andnot(i, v);
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - *v &= ~i.  v 값에서 i bit clear
+ * - Return : 연산전의 v 값
+ */
 static __always_inline int
 atomic_fetch_andnot(int i, atomic_t *v)
 {

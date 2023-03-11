@@ -2937,7 +2937,11 @@ extern int push_cpu_stop(void *arg);
 
 #endif
 
-#ifdef CONFIG_CPU_IDLE
+#ifdef CONFIG_CPU_IDLE				\
+/*
+ * IAMROOT, 2023.03.11:
+ * - rq의 idle_state 구조체 변수를 @idle_state로 설정
+ */
 static inline void idle_set_state(struct rq *rq,
 				  struct cpuidle_state *idle_state)
 {

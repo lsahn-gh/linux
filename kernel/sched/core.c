@@ -9728,6 +9728,10 @@ void sched_setnuma(struct task_struct *p, int nid)
  * Ensure that the idle task is using init_mm right before its CPU goes
  * offline.
  */
+/*
+ * IAMROOT, 2023.03.11:
+ * - mm 스위칭은 init_mm으로 전환(ttbr0를 통한 커널에서 user access 금지)
+ */
 void idle_task_exit(void)
 {
 	struct mm_struct *mm = current->active_mm;
@@ -9740,6 +9744,10 @@ void idle_task_exit(void)
 		finish_arch_post_lock_switch();
 	}
 
+	/*
+	 * IAMROOT, 2023.03.11:
+	 * - #ifndef CONFIG_SHADOW_CALL_STACK 이면 NOP
+	 */
 	scs_task_reset(current);
 	/* finish_cpu(), as ran on the BP, will clean up the active_mm state */
 }

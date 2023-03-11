@@ -45,6 +45,14 @@ struct cpuidle_state_usage {
 #endif
 };
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - 디바이스 트리에서 아래 변수를 가져옮.
+ *   1. "entry-latency-us" + "exit-latency-us" => idle_state->exit_latency
+ *      또는 "wakeup-latency-us" => idle_state->exit_latency
+ *   2. "min-residency-us" => idle_state->target_residency
+ *   3. "local-timer-stop" 이 존재하면 CPUIDLE_FLAG_TIMER_STOP flags 설정
+ */
 struct cpuidle_state {
 	char		name[CPUIDLE_NAME_LEN];
 	char		desc[CPUIDLE_DESC_LEN];
@@ -56,6 +64,10 @@ struct cpuidle_state {
 	int		power_usage; /* in mW */
 	unsigned int	target_residency; /* in US */
 
+	/*
+	 * IAMROOT, 2023.03.11:
+	 * - enter 연결함수: psci_enter_idle_state
+	 */
 	int (*enter)	(struct cpuidle_device *dev,
 			struct cpuidle_driver *drv,
 			int index);
@@ -69,6 +81,18 @@ struct cpuidle_state {
 	 *
 	 * This callback may point to the same function as ->enter if all of
 	 * the above requirements are met by it.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   CPU는 로컬 틱 또는 전체 시간 유지가 일시 중단된 상태에서 ->enter_s2idle을
+	 *   실행하므로 어느 시점에서든(일시적으로라도) 인터럽트를 다시 활성화하거나 클록
+	 *   이벤트 장치의 상태를 변경하려고 시도해서는 안 됩니다.
+	 *
+	 *   이 콜백은 위의 모든 요구
+	 *   사항이 충족되는 경우 -> enter와 동일한 기능을 가리킬 수 있습니다.
+	 *
+	 * - enter_s2idle 연결 함수: psci_enter_s2idle_domain_idle_state
 	 */
 	int (*enter_s2idle)(struct cpuidle_device *dev,
 			    struct cpuidle_driver *drv,
