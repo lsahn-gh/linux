@@ -1875,10 +1875,32 @@ extern bool sched_rt_bandwidth_account(struct rt_rq *rt_rq);
  *   rq->dl.bw_ratio를 곱하고 RATIO_SHIFT만큼 오른쪽으로 이동합니다. delta는 64비트
  *   변수이므로 오버플로가 발생하려면 해당 값이 2^(64 - 20 - 8)보다 커야 하며, 이는
  *   64초 이상입니다. 따라서 오버플로는 여기서 문제가 되지 않습니다.
- * - TODO.
+ * --- GRUB ---
+ *  - Documentation/scheduler/sched-deadline.rst 참고
+ *  - Greedy Reclamation of Unused Bandwidth
+ * ------------
+ *   @return delta * min : 사용하지 않은 bw가 너무 많은 경우.
+ *   @return delta * (system에서 사용한 bw) 
+ * - runtime을 차감할때, delta를 배율로 차감하는데, 이때 차감되는 정도를 결정하여
+ *   return한다.
+ *   이때 차감되는 정도는 system에서 사용한 bw를 의미하여,
+ * - @rq가 사용중인 bw을 가 적으면 적은값, 많으면 많은값을 return할 것이다.
+ *
+ *   system 기준 bw(BW_UNIT) - (사용하지 않은 bw)의 방법으로 구한다.
+ *
  */
 static u64 grub_reclaim(u64 delta, struct rq *rq, struct sched_dl_entity *dl_se)
 {
+
+/*
+ * IAMROOT, 2023.03.11:
+ * - extra_bw
+ *   해당 dl이 더 bw를 더 사용할수 있게하는 보너스.
+ * - u_inact
+ *   사용하지 않은 bw
+ * - u_act_min
+ *   할당되어야 할 최소 bw
+ */
 	u64 u_inact = rq->dl.this_bw - rq->dl.running_bw; /* Utot - Uact */
 	u64 u_act;
 	u64 u_act_min = (dl_se->dl_bw * rq->dl.bw_ratio) >> RATIO_SHIFT;
@@ -1900,6 +1922,10 @@ static u64 grub_reclaim(u64 delta, struct rq *rq, struct sched_dl_entity *dl_se)
 	 *   u_inact + rq->dl.extra_bw는 1 *보다 클 수 있습니다.
 	 *   (따라서 1 - u_inact - rq->dl.extra_bw는 음수가 되어 잘못된 결과를
 	 *   초래합니다.)
+	 *
+	 * - 사용되지 않은 bw(u_inact) + 추가 bw(extra_bw) 이 너무 큰값을 가졌다면,
+	 *   즉 bw를 너무 적게 썻으면 min을 배율로 한다.
+	 *   그게 아니면 system에서 사용중인 bw를 배율로하여 그만큼 차감하게한다.
 	 */
 	if (u_inact + rq->dl.extra_bw > BW_UNIT - u_act_min)
 		u_act = u_act_min;
