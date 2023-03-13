@@ -1100,6 +1100,10 @@ static inline bool cpu_dying(unsigned int cpu)
 
 #endif /* NR_CPUS > 1 */
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - 스케쥴러가 동작하지 않음(cpu_online_mask 에 설정되지 않았다)
+ */
 #define cpu_is_offline(cpu)	unlikely(!cpu_online(cpu))
 
 #if NR_CPUS <= BITS_PER_LONG

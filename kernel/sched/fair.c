@@ -12359,6 +12359,14 @@ static bool update_nohz_stats(struct rq *rq)
  * can be a simple update of blocked load or a complete load balance with
  * tasks movement depending of flags.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   모든 유휴 CPU에 대한 로드 밸런스를 실행하는 내부 기능. 로드 균형은 차단된 로드의
+ *   간단한 업데이트이거나 플래그에 따라 작업 이동이 있는 전체 로드 균형일 수
+ *   있습니다.
+ * - TODO.
+ */
 static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 			       enum cpu_idle_type idle)
 {
@@ -12474,6 +12482,13 @@ static bool nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
  * Check if we need to run the ILB for updating blocked load before entering
  * idle state.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   유휴 상태에 들어가기 전에 차단된 로드를 업데이트하기 위해 ILB를 실행해야 하는지
+ *   확인합니다.
+ * - NOHZ_NEWILB_KICK 설정은 newidle_balance -> nohz_newidle_balance 함수에서 한다.
+ */
 void nohz_run_idle_balance(int cpu)
 {
 	unsigned int flags;
@@ -12483,6 +12498,12 @@ void nohz_run_idle_balance(int cpu)
 	/*
 	 * Update the blocked load only if no SCHED_SOFTIRQ is about to happen
 	 * (ie NOHZ_STATS_KICK set) and will do the same.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   SCHED_SOFTIRQ가 발생하지 않을 경우에만(예: NOHZ_STATS_KICK 설정)
+	 *   차단된 로드를 업데이트하고 동일한 작업을 수행합니다.
 	 */
 	if ((flags == NOHZ_NEWILB_KICK) && !need_resched())
 		_nohz_idle_balance(cpu_rq(cpu), NOHZ_STATS_KICK, CPU_IDLE);

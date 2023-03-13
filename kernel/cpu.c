@@ -59,6 +59,26 @@
  * @done_up:	Signal completion to the issuer of the task for cpu-up
  * @done_down:	Signal completion to the issuer of the task for cpu-down
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   struct cpuhp_cpu_state - Per cpu hotplug 상태 저장소
+ *   @state: 현재 cpu 상태
+ *   @target: 대상 상태
+ *   @fail: 현재 CPU 핫플러그 콜백 상태
+ *   @thread: 핫플러그 스레드에 대한 포인터
+ *   @should_run: 스레드가 실행해야 함
+ *   @rollback: 롤백 수행
+ *   @single: 단일 콜백 호출
+ *   @bringup: 단일 콜백 불러오기 또는 해제 선택기
+ *   @cpu: CPU 번호
+ *   @node: 원격 CPU 노드; 다중 인스턴스의 경우 설치/제거에 대한 단일 항목 콜백 수행
+ *   @last: 다중 인스턴스 롤백의 경우 우리가 얼마나 멀리 있는지 기억하십시오.
+ *   @cb_state: 단일 콜백의 상태(설치/제거)
+ *   @result: 작업 결과
+ *   @done_up: cpu-up 작업 발행자에게 완료 신호
+ *   @done_down: cpu-down 작업 발행자에게 완료 신호
+ */
 struct cpuhp_cpu_state {
 	enum cpuhp_state	state;
 	enum cpuhp_state	target;
@@ -1080,6 +1100,11 @@ static void cpuhp_complete_idle_dead(void *arg)
 	complete_ap_thread(st, false);
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - 1. CPUHP_AP_IDLE_DEAD state 설정
+ *   2. st->done_down->done++
+ */
 void cpuhp_report_idle_dead(void)
 {
 	struct cpuhp_cpu_state *st = this_cpu_ptr(&cpuhp_state);
@@ -1302,6 +1327,18 @@ void notify_cpu_starting(unsigned int cpu)
  * hotplug thread of the upcoming CPU up and then delegates the rest of the
  * online bringup to the hotplug thread.
  */
+/*
+ * IAMROOT. 2023.03.11:
+ * - google-translate
+ *   유휴 작업에서 호출됩니다. 다음 CPU의 핫플러그 스레드를 가져오는 제어 작업을
+ *   깨우고 나머지 온라인 가져오기를 핫플러그 스레드에 위임합니다.
+ * - 1. stopper enable
+ *   2. state 변경(CPUHP_AP_ONLINE_IDLE)
+ *   3. cpuhp_cpu_state->done_up->done++
+ *
+ * - CPUHP_BRINGUP_CPU 상태에서 wait 를 호출하여 기다리다가 이 함수에서
+ *   상태를 CPUHP_AP_ONLINE_IDLE로 변경하고 complete 처리 한다.
+ */
 void cpuhp_online_idle(enum cpuhp_state state)
 {
 	struct cpuhp_cpu_state *st = this_cpu_ptr(&cpuhp_state);
@@ -1313,6 +1350,12 @@ void cpuhp_online_idle(enum cpuhp_state state)
 	/*
 	 * Unpart the stopper thread before we start the idle loop (and start
 	 * scheduling); this ensures the stopper task is always available.
+	 */
+	/*
+	 * IAMROOT. 2023.03.11:
+	 * - google-translate
+	 *   유휴 루프를 시작하고 일정을 시작하기 전에 스토퍼 스레드를 분리합니다. 이렇게
+	 *   하면 스토퍼 작업을 항상 사용할 수 있습니다.
 	 */
 	stop_machine_unpark(smp_processor_id());
 
