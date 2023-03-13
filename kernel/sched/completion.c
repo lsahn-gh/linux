@@ -11,6 +11,19 @@
  * typically be used for exclusion which gives rise to priority inversion.
  * Waiting for completion is a typically sync point, but not an exclusion point.
  */
+/*
+ * IAMROOT. 2023.03.12:
+ * - google-translate
+ *   일반 wait-for-completion 핸들러.
+ *
+ *   wait_for_completion 은 default blocks 인 반면 세마포어는 default non-block
+ *   이라는 점에서 세마포어와 다릅니다. 인터페이스는 또한 세마포어에 대해 완전히 자연스럽지
+ *   않은 여러 대기 스레드를 '완료'하는 것을 쉽게 만듭니다.
+ *
+ *   그러나 더 중요한 것은 프리미티브가 사용법을 문서화한다는
+ *   것입니다. 세마포어는 일반적으로 우선 순위 반전을 일으키는 제외에
+ *   사용됩니다. 완료 대기는 일반적으로 동기화 지점이지만 제외 지점은 아닙니다.
+ */
 #include "sched.h"
 
 /**
@@ -37,7 +50,8 @@
  *   complete_all(), wait_for_completion() 및 관련 루틴도 참조하십시오.
  *
  *   이 함수가 작업을 깨우면 작업 상태에 액세스하기 전에 전체 메모리 장벽을 실행합니다.
- * - x->done++
+ * - 1. x->done++
+ *   2. &x->wait 에 연결된 task 대상으로 try_to_wake_up
  */
 void complete(struct completion *x)
 {
@@ -81,6 +95,15 @@ void complete_all(struct completion *x)
 }
 EXPORT_SYMBOL(complete_all);
 
+/*
+ * IAMROOT, 2023.03.13:
+ * - complete,complete_all 이 호출(x->done++) 되었거나, timeout 이 발생할 때까지
+ *   schedule 을 호출
+ * - NOTE. swait(simple wait queue) 사용으로 변경된 이유는 PREEMPT_RT 커널에서
+ *   문제가 있기 때문이다. 아래 커밋 참조.
+ *   a5c6234e10280b3ec65e2410ce34904a2580e5f8
+ *   completion: Use simple wait queues
+ */
 static inline long __sched
 do_wait_for_common(struct completion *x,
 		   long (*action)(long), long timeout, int state)
@@ -125,6 +148,11 @@ __wait_for_common(struct completion *x,
 	return timeout;
 }
 
+/*
+ * IAMROOT, 2023.03.13:
+ * - wait_for_completion 에서 호출되어 schedule_timeout callback 함수
+ *   매개변수에 추가
+ */
 static long __sched
 wait_for_common(struct completion *x, long timeout, int state)
 {
@@ -141,11 +169,22 @@ wait_for_common_io(struct completion *x, long timeout, int state)
  * wait_for_completion: - waits for completion of a task
  * @x:  holds the state of this particular completion
  *
- * This waits to be signaled for completion of a specific task. It is NOT
+ * this waits to be signaled for completion of a specific task. It is NOT
  * interruptible and there is no timeout.
  *
  * See also similar routines (i.e. wait_for_completion_timeout()) with timeout
  * and interrupt capability. Also see complete().
+ */
+/*
+ * IAMROOT. 2023.03.13:
+ * - google-translate
+ *   wait_for_completion: - 작업 완료를 기다립니다.
+ *   @x: 이 특정 완료 상태를 유지합니다.
+ *
+ *   특정 작업 완료 신호를 대기합니다. 중단할 수 없으며 시간 초과가 없습니다.
+ *
+ *   시간 초과 및 인터럽트 기능이 있는 유사한 루틴(예: wait_for_completion_timeout())도
+ *   참조하십시오. 완료()도 참조하십시오.
  */
 void __sched wait_for_completion(struct completion *x)
 {

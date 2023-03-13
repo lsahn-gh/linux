@@ -2464,6 +2464,34 @@ static void process_timeout(struct timer_list *t)
  * jiffies will be returned. In all cases the return value is guaranteed
  * to be non-negative.
  */
+/*
+ * IAMROOT. 2023.03.13:
+ * - google-translate
+ *   schedule_timeout - 제한 시간까지 잠자기
+ *   @timeout: 시간 제한 값(jiffies)
+ *
+ *   @timeout jiffies가 경과할 때까지 현재 작업을 잠자기 상태로 만듭니다. 함수 동작은 현재
+ *   작업 상태에 따라 다릅니다(set_current_state() 설명 참조):
+ *
+ *   %TASK_RUNNING - 스케줄러가 호출되지만 작업이 전혀 잠들지 않습니다. 이는
+ *   sched_submit_work()가 %TASK_RUNNING 상태의 작업에 대해 아무 작업도 수행하지
+ *   않기 때문에 발생합니다.
+ *
+ *   %TASK_UNINTERRUPTIBLE - 현재 작업이 명시적으로 깨어나지 않는 한(예:
+ *   wake_up_process()에 의해) 루틴이 반환되기 전에 최소한 @timeout jiffies가
+ *   통과하도록 보장됩니다.
+ *
+ *   %TASK_INTERRUPTIBLE - 현재 작업에 신호가 전달되거나 현재 작업이 명시적으로
+ *   깨어난 경우 루틴이 일찍 반환될 수 있습니다.
+ *
+ *   이 루틴이 반환되면 현재 태스크 상태는 %TASK_RUNNING이 됩니다.
+ *
+ *   %MAX_SCHEDULE_TIMEOUT의 @timeout 값을 지정하면 제한 시간 제한 없이 CPU를
+ *   멀리 예약합니다. 이 경우 반환 값은 %MAX_SCHEDULE_TIMEOUT입니다.
+ *
+ *   타이머가 만료되면 0을 반환합니다. 그렇지 않으면 jiffies의 남은 시간이 반환됩니다.
+ *   모든 경우에 반환 값은 음수가 아님이 보장됩니다.
+ */
 signed long __sched schedule_timeout(signed long timeout)
 {
 	struct process_timer timer;
@@ -2479,6 +2507,14 @@ signed long __sched schedule_timeout(signed long timeout)
 		 * but I' d like to return a valid offset (>=0) to allow
 		 * the caller to do everything it want with the retval.
 		 */
+		/*
+		 * IAMROOT. 2023.03.13:
+		 * - google-translate
+		 *   이 두 가지 특별한 경우는 발신자에게 편안함을 주는 데 유용합니다.
+		 *   더 이상은 없습니다. 음수 값 중 하나에서 MAX_SCHEDULE_TIMEOUT을
+		 *   취할 수 있지만 호출자가 retval로 원하는 모든 작업을 수행할 수 있도록
+		 *   유효한 오프셋(>=0)을 반환하고 싶습니다.
+		 */
 		schedule();
 		goto out;
 	default:
@@ -2488,6 +2524,14 @@ signed long __sched schedule_timeout(signed long timeout)
 		 * for a negative retval of schedule_timeout() (since it
 		 * should never happens anyway). You just have the printk()
 		 * that will tell you if something is gone wrong and where.
+		 */
+		/*
+		 * IAMROOT. 2023.03.13:
+		 * - google-translate
+		 *   편집증의 또 다른 비트. 커널의 어떤 부분도 schedule_timeout()의
+		 *   음수 retval에 대한 검사를 수행하지 않기 때문에 retval은 0이 됩니다
+		 *   (어쨌든 발생해서는 안 되기 때문에). 뭔가 잘못되었는지, 어디에서
+		 *   문제가 발생했는지 알려주는 printk()가 있습니다.
 		 */
 		if (timeout < 0) {
 			printk(KERN_ERR "schedule_timeout: wrong timeout "

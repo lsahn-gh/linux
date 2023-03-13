@@ -19,6 +19,17 @@ EXPORT_SYMBOL(__init_swait_queue_head);
  * If for some reason it would return 0, that means the previously waiting
  * task is already running, so it will observe condition true (or has already).
  */
+/*
+ * IAMROOT. 2023.03.12:
+ * - google-translate
+ *   wake_up_state() 반환 값에 대한 것; 나는 우리가 그것을 무시할 수 있다고 생각합니다.
+ *
+ *   어떤 이유로 0을 반환하면 이전에 대기 중인 작업이 이미 실행 중임을
+ *   의미하므로 조건이 true(또는 이미 있음)를 관찰합니다.
+ *
+ * - swait_queue_head(@q) 에 연결된 첫번째 swait_queue의 *task 멤버를 대상으로
+ *   try_to_wake_up 실행후 swait_queue는 삭제
+ */
 void swake_up_locked(struct swait_queue_head *q)
 {
 	struct swait_queue *curr;
@@ -82,6 +93,11 @@ void swake_up_all(struct swait_queue_head *q)
 }
 EXPORT_SYMBOL(swake_up_all);
 
+/*
+ * IAMROOT, 2023.03.13:
+ * - 1. 현재 task를 swake_queue의 task로 설정
+ *   2. swake_queue를 swake_queue_head의 마지막에 연결
+ */
 void __prepare_to_swait(struct swait_queue_head *q, struct swait_queue *wait)
 {
 	wait->task = current;
