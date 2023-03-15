@@ -755,6 +755,7 @@ static void tick_nohz_stop_idle(struct tick_sched *ts, ktime_t now)
 /*
  * IAMROOT, 2023.03.11:
  * - idle_entrytime, idle_active 설정
+ *   cpu가 tick idle mode active됬다는 의미.
  */
 static void tick_nohz_start_idle(struct tick_sched *ts)
 {
@@ -1250,7 +1251,7 @@ void tick_nohz_idle_retain_tick(void)
  * - google-translate
  *   tick_nohz_idle_enter - 현재 CPU에서 유휴 진입 준비 유휴 루프를 시작할 때
  *   호출됩니다.
- * - ts 의 inidle, idle_entrytime, idle_active 설정
+ * - idle mode로 설정 및 tick idle active 표시를 한다.
  */
 void tick_nohz_idle_enter(void)
 {
@@ -1404,6 +1405,10 @@ static void tick_nohz_account_idle_time(struct tick_sched *ts,
 		account_idle_ticks(ticks);
 }
 
+/*
+ * IAMROOT, 2023.03.15:
+ * - TODO
+ */
 void tick_nohz_idle_restart_tick(void)
 {
 	struct tick_sched *ts = this_cpu_ptr(&tick_cpu_sched);

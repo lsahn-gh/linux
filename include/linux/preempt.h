@@ -302,6 +302,10 @@ do { \
 #undef preempt_check_resched
 #endif
 
+/*
+ * IAMROOT, 2023.03.15:
+ * - curr에 대해 resched 요청
+ */
 #define preempt_set_need_resched() \
 do { \
 	set_preempt_need_resched(); \

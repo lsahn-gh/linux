@@ -817,6 +817,10 @@ struct cpumask *tick_get_broadcast_oneshot_mask(void)
  *   확인합니다. tick_broadcast_oneshot_control()에서 감지했습니다. 호출 사이트는
  *   브로드캐스트 IPI를 바로 얻으려고 할 때 깊은 유휴 전환을 피하기 위해 이것을
  *   사용할 수 있습니다.
+ *
+ * @return 1 : ipi가 올수있다
+ *         0 : nothing
+ * - tick_broadcast_force_mask를 읽어 IPI가 올지를 예상한다.
  */
 int tick_check_broadcast_expired(void)
 {

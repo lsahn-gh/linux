@@ -12389,18 +12389,39 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 	 * setting the flag, we are sure to not clear the state and not
 	 * check the load of an idle cpu.
 	 */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   이 업데이트 후 유휴 로드가 없다고 가정하고 has_blocked 플래그를
+ *   지웁니다. CPU가 중간에 유휴 상태가 되면 has_blocked 플래그를 설정하고
+ *   유휴 로드의 또 다른 업데이트를 트리거합니다.
+ *   유휴 상태가 된 CPU는 플래그를 설정하기 전에 idle_cpus_mask에
+ *   추가되므로 상태를 지우지 않고 유휴 CPU의 부하를 확인하지 않습니다.
+ */
 	WRITE_ONCE(nohz.has_blocked, 0);
 
 	/*
 	 * Ensures that if we miss the CPU, we must see the has_blocked
 	 * store from nohz_balance_enter_idle().
 	 */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   CPU를 놓치면 nohz_balance_enter_idle()에서 has_blocked 저장소를
+ *   확인해야 합니다.
+ */
 	smp_mb();
 
 	/*
 	 * Start with the next CPU after this_cpu so we will end with this_cpu and let a
 	 * chance for other idle cpu to pull load.
 	 */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   this_cpu 이후의 다음 CPU로 시작하여 this_cpu로 끝나고 다른 유휴 CPU가
+ *   로드를 풀 수 있도록 합니다.
+ */
 	for_each_cpu_wrap(balance_cpu,  nohz.idle_cpus_mask, this_cpu+1) {
 		if (!idle_cpu(balance_cpu))
 			continue;
@@ -12410,6 +12431,12 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 		 * work being done for other CPUs. Next load
 		 * balancing owner will pick it up.
 		 */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   이 CPU에 작업이 있으면 다른 CPU에 대해 수행 중인 로드 밸런싱 작업을
+ *   중지합니다. 다음 로드 밸런싱 소유자가 선택합니다.
+ */
 		if (need_resched()) {
 			has_blocked_load = true;
 			goto abort;
@@ -12445,6 +12472,12 @@ static void _nohz_idle_balance(struct rq *this_rq, unsigned int flags,
 	 * When the CPU is attached to null domain for ex, it will not be
 	 * updated.
 	 */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   next_balance는 필요할 때만 업데이트됩니다. 
+ *   예를 들어 CPU가 null 도메인에 연결되면 업데이트되지 않습니다.
+ */
 	if (likely(update_next_balance))
 		nohz.next_balance = next_balance;
 
@@ -12493,6 +12526,11 @@ void nohz_run_idle_balance(int cpu)
 {
 	unsigned int flags;
 
+/*
+ * IAMROOT, 2023.03.15:
+ * - NOHZ_STATS_KICK이 있는경우 flags에 NOHZ_STATS_KICK이 담기면서
+ *   nohz_flags에서 지워진다.
+ */
 	flags = atomic_fetch_andnot(NOHZ_NEWILB_KICK, nohz_flags(cpu));
 
 	/*

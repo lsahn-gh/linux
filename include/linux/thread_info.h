@@ -169,6 +169,8 @@ static inline int test_ti_thread_flag(struct thread_info *ti, int flag)
 
 /*
  * IAMROOT, 2023.01.07:
+ * @return 1 : TIF_NEED_RESCHED이 curr에 있는 경우.
+ *         0 : 없는경우.
  * - current_thread_info에 TIF_NEED_RESCHED이 있는지 확인한다.
  */
 #define tif_need_resched() test_thread_flag(TIF_NEED_RESCHED)

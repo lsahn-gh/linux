@@ -649,6 +649,21 @@ static noinstr void rcu_eqs_enter(bool user)
  * If you add or remove a call to rcu_idle_enter(), be sure to test with
  * CONFIG_RCU_EQS_DEBUG=y.
  */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *   rcu_idle_enter - 현재 CPU가 유휴 상태에 있음을 RCU에 알립니다.
+ *
+ *   유휴 모드, 즉 -leave- RCU 읽기 측 임계 섹션이 발생할 수 있는 모드로
+ *   들어갑니다. (RCU 읽기 측 임계 섹션은 유휴 상태의 irq 핸들러에서
+ *   발생할 수 있지만 irq_enter() 및 irq_exit()에 의해 처리될 가능성이
+ *   있습니다.)
+ *
+ *   rcu_idle_enter()에 대한 호출을 추가하거나 제거하는 경우
+ *   CONFIG_RCU_EQS_DEBUG=y로 테스트해야 합니다.
+ *
+ * - TODO
+ */
 void rcu_idle_enter(void)
 {
 	lockdep_assert_irqs_disabled();
@@ -893,6 +908,18 @@ static void noinstr rcu_eqs_exit(bool user)
  *
  * If you add or remove a call to rcu_idle_exit(), be sure to test with
  * CONFIG_RCU_EQS_DEBUG=y.
+ */
+/*
+ * IAMROOT, 2023.03.15:
+ * - papago
+ *  rcu_idle_exit - RCU에 현재 CPU가 유휴 상태임을 알립니다.
+ *
+ *  유휴 모드 종료, 즉 -enter- RCU 읽기 측 임계 섹션이 발생할 수 있는 모드.
+ *
+ *  rcu_idle_exit()에 대한 호출을 추가하거나 제거하는 경우
+ *  CONFIG_RCU_EQS_DEBUG=y로 테스트해야 합니다.
+ *
+ * - TODO
  */
 void rcu_idle_exit(void)
 {

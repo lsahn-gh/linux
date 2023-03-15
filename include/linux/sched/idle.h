@@ -56,6 +56,10 @@ static inline bool __must_check current_clr_polling_and_test(void)
 }
 
 #else
+/*
+ * IAMROOT, 2023.03.15:
+ * - arm은 할게 없다.
+ */
 static inline void __current_set_polling(void) { }
 static inline void __current_clr_polling(void) { }
 

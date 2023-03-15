@@ -3433,6 +3433,12 @@ extern void cfs_bandwidth_usage_dec(void);
 
 #define NOHZ_BALANCE_KICK	BIT(NOHZ_BALANCE_KICK_BIT)
 #define NOHZ_STATS_KICK		BIT(NOHZ_STATS_KICK_BIT)
+/*
+ * IAMROOT, 2023.03.15:
+ * - new idle balance.
+ *   set : nohz_newidle_balance()
+ *   unset : nohz_run_idle_balance()
+ */
 #define NOHZ_NEWILB_KICK	BIT(NOHZ_NEWILB_KICK_BIT)
 
 #define NOHZ_KICK_MASK	(NOHZ_BALANCE_KICK | NOHZ_STATS_KICK)

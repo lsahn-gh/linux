@@ -2533,6 +2533,11 @@ static inline int rwlock_needbreak(rwlock_t *lock)
 #endif
 }
 
+/*
+ * IAMROOT, 2023.03.15:
+ * @return 1 : TIF_NEED_RESCHED이 curr에 있는 경우.
+ *         0 : 없는경우.
+ */
 static __always_inline bool need_resched(void)
 {
 	return unlikely(tif_need_resched());

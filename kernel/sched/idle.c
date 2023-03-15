@@ -22,6 +22,37 @@ void sched_idle_set_state(struct cpuidle_state *idle_state)
 	idle_set_state(this_rq(), idle_state);
 }
 
+/*
+ * IAMROOT, 2023.03.15:
+ * --- chat gpt ----
+ * - cpu_idle_force_poll
+ *  Linux 커널에서 cpu_idle_force_poll은 CPU가 유휴 상태일 때 깊은 유휴 
+ *  상태가 아닌 폴링 모드로 전환해야 하는지 여부를 결정하는 플래그입니다.
+ *
+ *  CPU가 유휴 상태일 때 커널은 에너지를 절약하고 열을 줄이는 저전력 상태로
+ *  전환하도록 선택할 수 있습니다. 그러나 일부 CPU는 깊은 유휴 상태를
+ *  지원하지 않거나 이러한 상태를 자주 시작하고 종료할 때 성능이 저하될 수
+ *  있습니다. 이러한 경우 커널은 폴링 모드에 들어갈 수 있습니다. 이 모드에서는
+ *  CPU가 깊은 유휴 상태에 들어가는 대신 인터럽트가 도착하기를 기다리는
+ *  루프에서 회전합니다.
+ *
+ *  cpu_idle_force_poll 플래그는 커널이 CPU가 깊은 유휴 상태로 들어가는 데
+ *  문제가 있음을 감지하면 true로 설정됩니다. 이는 CPU가 자주 중단되는 경우,
+ *  짧은 대기 시간이 필요한 작업을 실행하는 경우 또는 CPU가 깊은 유휴 상태를
+ *  지원하지 않는 경우에 발생할 수 있습니다. 이 플래그가 설정되면 커널은 깊은
+ *  유휴 상태 대신 폴링 모드로 들어가 성능을 개선하고 에너지 소비를 줄이는 데
+ *  도움이 될 수 있습니다.
+ *
+ *  그러나 폴링 모드는 CPU가 실제로 유휴 상태가 아니며 여전히 에너지를
+ *  소비하기 때문에 상당한 양의 전력을 소비할 수 있다는 점에 유의해야 합니다.
+ *  또한 커널은 전원을 절약하기 위해 오랜 시간 동안 인터럽트가 없으면 폴링
+ *  모드를 종료하고 깊은 유휴 상태로 들어갈 수 있습니다. 따라서 
+ *  cpu_idle_force_poll의 사용은 깊은 유휴 상태의 잠재적인 에너지 절약과
+ *  균형을 이루어야 합니다. 
+ * -----------------
+ * - != 0
+ *   deep idle에 진입하지 말아야되는 상황.
+ */
 static int __read_mostly cpu_idle_force_poll;
 
 void cpu_idle_poll_ctrl(bool enable)
@@ -54,7 +85,8 @@ __setup("hlt", cpu_idle_nopoll_setup);
 
 /*
  * IAMROOT, 2023.03.11:
- * - cpu 전원을 꺼지 않고 reschedule 요청이 있을때 까지 계속 polling
+ * - cpu 전원을 꺼지 않고 poll에 진입을 했어야되는 원인이 해결될때까지
+ *   (reschedule 요청, force poll 상황, ipi 예상)계속 polling한다.
  */
 static noinline int __cpuidle cpu_idle_poll(void)
 {
@@ -358,6 +390,10 @@ static void do_idle(void)
 	 */
 
 	__current_set_polling();
+/*
+ * IAMROOT, 2023.03.15:
+ * - idle mode 진입 및 idle tick active 됨을 표시한다.
+ */
 	tick_nohz_idle_enter();
 
 	while (!need_resched()) {
@@ -365,6 +401,10 @@ static void do_idle(void)
 
 		local_irq_disable();
 
+/*
+ * IAMROOT, 2023.03.15:
+ * - cpu가 offline이면 cpu die로 진입한다.
+ */
 		if (cpu_is_offline(cpu)) {
 			tick_nohz_idle_stop_tick();
 			cpuhp_report_idle_dead();
@@ -387,6 +427,11 @@ static void do_idle(void)
 		 *   틱 브로드캐스트 장치가 만료된 유휴 경로에서 깨어남을 감지한 경우
 		 *   IPI가 바로 도착할 것이라는 것을 알기 때문에 깊은 유휴 상태로
 		 *   가고 싶지 않습니다.
+		 * - 1. cpu_idle_force_poll != 0
+		 *     deep idle에 진입하지 말아야되는 상황
+		 *   2. tick_check_broadcast_expired() != 0
+		 *     ipi가 this cpu에 올거라고 예상되는 상황
+		 *   즉 deep sleep을 안해야되는 상황에서 poll로 idle을 돈다.
 		 */
 		if (cpu_idle_force_poll || tick_check_broadcast_expired()) {
 			tick_nohz_idle_restart_tick();
