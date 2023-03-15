@@ -278,12 +278,39 @@ static bool cpuhp_is_ap_state(enum cpuhp_state state)
 	return state > CPUHP_BRINGUP_CPU && state != CPUHP_TEARDOWN_CPU;
 }
 
+/*
+ * IAMROOT, 2023.03.13:
+ * - __cpuhp_kick_ap, bringup_wait_for_ap, takedown_cpu 에서 호출
+ * - Ex. bringup_wait_for_ap 쪽에서 호출 예
+ *   bringup_cpu -> bringup_wait_for_ap -> wait_for_ap_thread ->
+ *   wait_for_completion ->
+ *   wait_for_common(x, MAX_SCHEDULE_TIMEOUT, TASK_UNINTERRUPTIBLE) ->
+ *   __wait_for_common(x, schedule_timeout, timeout, state) ->
+ *   do_wait_for_common(x, action, timeout, state) ->
+ *   schedule_timeout(MAX_SCHEDULE_TIMEOUT) -> schedule() ->
+ *   __schedule(SM_NONE) ->
+ *   deactivate_task(rq, prev, DEQUEUE_SLEEP | DEQUEUE_NOCLOCK) ->
+ *   pick_next_task -> context_switch
+ *   현재 task 는 deactivate 되고 교체되어 CPUHP_AP_ONLINE_IDLE 상태가 될때까지
+ *   wait 하게 된다.
+ */
 static inline void wait_for_ap_thread(struct cpuhp_cpu_state *st, bool bringup)
 {
 	struct completion *done = bringup ? &st->done_up : &st->done_down;
 	wait_for_completion(done);
 }
 
+/*
+ * IAMROOT, 2023.03.11:
+ * - 1. bringup 여부에 따라 completion 의 done++
+ *      ex. if bringup == true st->done_up->done++ else st->done_down->done++
+ *   2. try_to_wake_up
+ * -  rest_init 또는 secondary_start_kernel -> cpu_startup_entry(CPUHP_ONLINE) ->
+ *    cpuhp_online_idle(CPUHP_AP_ONLINE_IDLE) -> complete_ap_thread(st, true)
+ *    complete -> try_to_wake_up
+ * - CPUHP_AP_ONLINE_IDLE 상태에 도달했으므로 wait_for_ap_thread 에서 wait 중인
+ *   task를 깨운다.
+ */
 static inline void complete_ap_thread(struct cpuhp_cpu_state *st, bool bringup)
 {
 	struct completion *done = bringup ? &st->done_up : &st->done_down;
@@ -1335,6 +1362,7 @@ void notify_cpu_starting(unsigned int cpu)
  * - 1. stopper enable
  *   2. state 변경(CPUHP_AP_ONLINE_IDLE)
  *   3. cpuhp_cpu_state->done_up->done++
+ *   4. try_to_wake_up
  *
  * - CPUHP_BRINGUP_CPU 상태에서 wait 를 호출하여 기다리다가 이 함수에서
  *   상태를 CPUHP_AP_ONLINE_IDLE로 변경하고 complete 처리 한다.
