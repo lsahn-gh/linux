@@ -292,6 +292,10 @@ static inline bool pm_suspend_no_platform(void)
 }
 
 /* Suspend-to-idle state machnine. */
+/*
+ * IAMROOT, 2023.03.16:
+ * - s2idle_state 주석 참고.
+ */
 enum s2idle_states {
 	S2IDLE_STATE_NONE,      /* Not suspended/suspending. */
 	S2IDLE_STATE_ENTER,     /* Enter suspend-to-idle. */
@@ -300,6 +304,10 @@ enum s2idle_states {
 
 extern enum s2idle_states __read_mostly s2idle_state;
 
+/*
+ * IAMROOT, 2023.03.16:
+ * - s2idle에 이미 진입하고 있는지 확인한다.
+ */
 static inline bool idle_should_enter_s2idle(void)
 {
 	return unlikely(s2idle_state == S2IDLE_STATE_ENTER);

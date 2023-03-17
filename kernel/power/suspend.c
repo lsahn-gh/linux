@@ -75,6 +75,41 @@ static const struct platform_suspend_ops *suspend_ops;
 static const struct platform_s2idle_ops *s2idle_ops;
 static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
 
+/*
+ * IAMROOT, 2023.03.16:
+ * --- chat openai ----
+ * s2idle_state는 S2idle(suspend-to-idle) 저전력 유휴 상태에서 시스템의
+ * 현재 상태를 나타냅니다.
+ *
+ * S2idle 상태는 저전력 유휴 상태로, 시스템이 전력을 절약하면서 사용자 입력에
+ * 일정 수준의 응답성을 유지합니다. 이 상태에서 시스템은 사용자 활동에 응답하여
+ * 전체 전원 모드로 빠르게 다시 전환할 수 있습니다. 이것은 suspend-to-RAM 또는
+ * suspend-to-disk와 같은 더 깊은 유휴 상태와는 대조적으로, 깨우고 정상 작동을
+ * 재개하는 데 더 오랜 시간이 필요합니다.
+ *
+ * S2Idle(suspend-to-idle) 기능의 세 가지 가능한 상태를 정의합니다.
+ * 이 기능은 웨이크업 시간이 빠른 최신 시스템에 최적화된 저전력 절전
+ * 모드입니다. 상태는 다음과 같습니다.
+ *
+ * S2IDLE_STATE_NONE: 이 상태는 시스템이 일시 중지 또는 일시 중단되지
+ * 않았음을 나타냅니다. 즉, 시스템이 정상 작동 상태에 있습니다.
+ *
+ * S2IDLE_STATE_ENTER: 이 상태는 시스템이 S2Idle 상태로 들어가고 있음을
+ * 나타냅니다. 이것은 시스템이 일정 시간 동안 유휴 상태이고 커널이 에너지를
+ * 절약하기 위해 시스템을 저전력 절전 모드로 전환하기로 결정할 때 발생합니다.
+ *
+ * S2IDLE_STATE_WAKE: 이 상태는 시스템이 S2Idle 상태에서 깨어나고 있음을
+ * 나타냅니다. 이는 시스템이 정상 작동을 재개해야 하는 인터럽트 또는 기타
+ * 이벤트가 발생할 때 발생합니다.
+ *
+ * 이러한 상태는 커널에서 S2Idle 기능과 관련하여 시스템의 현재 상태를
+ * 추적하는 데 사용됩니다. 그렇게 함으로써 커널은 S2Idle 상태에 들어가고
+ * 나가는 적절한 작업을 수행할 수 있을 뿐만 아니라 시스템이 S2Idle 상태에
+ * 있는 동안 발생하는 인터럽트 및 기타 이벤트를 처리할 수 있습니다.
+ *
+ *
+ * --------------------
+ */
 enum s2idle_states __read_mostly s2idle_state;
 static DEFINE_RAW_SPINLOCK(s2idle_lock);
 

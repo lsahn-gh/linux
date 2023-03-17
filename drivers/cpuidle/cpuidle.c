@@ -192,6 +192,8 @@ static void enter_s2idle_proper(struct cpuidle_driver *drv,
  *
  *   ->enter_s2idle 콜백이 있는 상태가 있는 경우 가장 깊은 상태를 찾아 고정된
  *   틱으로 입력합니다.
+ *
+ * - ING
  */
 int cpuidle_enter_s2idle(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 {

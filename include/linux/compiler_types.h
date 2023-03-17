@@ -230,6 +230,11 @@ struct ftrace_likely_data {
 #endif
 
 /* Section for code which can't be instrumented at all */
+/*
+ * IAMROOT, 2023.03.16:
+ * - debug설정을 안쓴다는것. debug로 인해 kernel 실행이 안될수있는
+ *   함수에 사용해여 debug에 영향이 안가게한다.
+ */
 #define noinstr								\
 	noinline notrace __attribute((__section__(".noinstr.text")))	\
 	__no_kcsan __no_sanitize_address __no_profile __no_sanitize_coverage

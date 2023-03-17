@@ -62,11 +62,18 @@ static inline bool __must_check current_clr_polling_and_test(void)
  */
 static inline void __current_set_polling(void) { }
 static inline void __current_clr_polling(void) { }
-
+/*
+ * IAMROOT, 2023.03.16:
+ * - resched 요청있으면 return true.
+ */
 static inline bool __must_check current_set_polling_and_test(void)
 {
 	return unlikely(tif_need_resched());
 }
+/*
+ * IAMROOT, 2023.03.16:
+ * - resched 요청있으면 return true.
+ */
 static inline bool __must_check current_clr_polling_and_test(void)
 {
 	return unlikely(tif_need_resched());

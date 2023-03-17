@@ -20,9 +20,26 @@
  * flags. Keeping to this order makes it easier for entry.S to know which
  * exceptions should be unmasked.
  */
+/*
+ * IAMROOT, 2023.03.16:
+ * - papago
+ *   Aarch64에는 'daif' 레지스터에 디버그, 비동기(serror), 인터럽트 및 
+ *   FIQ 예외와 같은 마스킹 플래그가 있습니다. 우리는 'daif'에서
+ *   그것들을 마스킹하고 마스킹 해제합니다.
+ *   order:
+ *   디버그 예외를 마스킹하면 다른 모든 예외도 마스킹됩니다. SError
+ *   마스킹은 IRQ/FIQ를 마스킹하지만 디버그 예외는 마스킹하지 않습니다.
+ *   IRQ 및 FIQ는 항상 함께 마스킹 및 마스킹 해제되며 다른 플래그에 대한
+ *   부작용이 없습니다. 이 순서를 유지하면 entry.S가 마스크를 해제해야
+ *   하는 예외를 더 쉽게 알 수 있습니다. 
+ */
 
 /*
  * CPU interrupt mask handling.
+ */
+/*
+ * IAMROOT, 2023.03.16:
+ * - irq enable
  */
 static inline void arch_local_irq_enable(void)
 {

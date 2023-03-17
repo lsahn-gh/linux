@@ -128,6 +128,10 @@ void __weak arch_cpu_idle(void)
  */
 void __cpuidle default_idle_call(void)
 {
+/*
+ * IAMROOT, 2023.03.16:
+ * - reschedule 요청이 있면 irq enable후 빠져나간다.
+ */
 	if (current_clr_polling_and_test()) {
 		local_irq_enable();
 	} else {
@@ -144,6 +148,17 @@ void __cpuidle default_idle_call(void)
 		 * rcu_idle_enter() relies on lockdep IRQ state, so switch that
 		 * last -- this is very similar to the entry code.
 		 */
+/*
+ * IAMROOT, 2023.03.16:
+ * - papago
+ *   arch_cpu_idle()은 IRQ를 활성화해야 하지만 RCU 및 추적
+ *   때문에 그렇게 할 수 없습니다.
+ *
+ *   여기에서 추적 IRQ를 활성화한 다음 RCU를 끄고 arch_cpu_idle()이
+ *   raw_local_irq_enable()을 사용하도록 합니다. rcu_idle_enter()는
+ *   lockdep IRQ 상태에 의존하므로 마지막으로 전환합니다.
+ *   이것은 진입 코드와 매우 유사합니다.
+ */
 		trace_hardirqs_on_prepare();
 		lockdep_hardirqs_on_prepare(_THIS_IP_);
 		rcu_idle_enter();
@@ -157,6 +172,25 @@ void __cpuidle default_idle_call(void)
 		 * will cause tracing, which needs RCU. Jump through hoops to
 		 * make it 'work'.
 		 */
+/*
+ * IAMROOT, 2023.03.16:
+ * - papago.
+ *   좋아요, IRQ는 여기서 활성화되지만, RCU는 IRQ를 다시 켜려면
+ *   비활성화해야 합니다.. 재미있는 것은 IRQ를 비활성화하면 추적이
+ *   발생하여 RCU가 필요하다는 것입니다. '작동'하려면 후프를
+ *   통과하십시오.
+ * ---- chat openai -----
+ * - hoops의 의미.
+ *   주석의 맥락에서 "후프스"는 "장애물" 또는 "어려움"을 의미하는
+ *   은유적 용어입니다. 주석은 RCU에 대한 인터럽트를 비활성화해야
+ *   할 필요성, 추적을 위해 인터럽트를 활성화해야 할 필요성,
+ *   인터럽트를 비활성화하면 추적이 발생한다는 사실 사이에 복잡한
+ *   상호 작용이 있다고 설명하고 있습니다. "jump through hoops"라는
+ *   문구는 이러한 장애물을 탐색하고 모든 것이 올바르게 작동하도록
+ *   하기 위해 취해야 하는 몇 가지 단계 또는 해결 방법이 있음을
+ *   의미합니다. 
+ * ----------------------
+ */
 		raw_local_irq_disable();
 		lockdep_hardirqs_off(_THIS_IP_);
 		rcu_idle_exit();
@@ -168,6 +202,10 @@ void __cpuidle default_idle_call(void)
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.17:
+ * - ING
+ */
 static int call_cpuidle_s2idle(struct cpuidle_driver *drv,
 			       struct cpuidle_device *dev)
 {
@@ -275,6 +313,7 @@ static void cpuidle_idle_call(void)
 	 * - google-translate
 	 *   RCU 프레임워크는 우리가 유휴 섹션에 들어가고 있다는 것을 알려야 합니다. 따라서
 	 *   rcu는 더 이상 중요한 섹션을 읽지 않고 유예 기간에 한 단계 더 있습니다.
+	 * - cpuidle이 활성화 안된경우 wfi만 한번하고 끝낸다.
 	 */
 
 	if (cpuidle_not_available(drv, dev)) {
@@ -302,8 +341,14 @@ static void cpuidle_idle_call(void)
 	 *   이동합니다. 적절한 웨이크업 인터럽트가 발생할 때까지 타이머 인터럽트가 유휴
 	 *   상태에서 벗어나는 것을 방지하기 위해 로컬 틱과 전체 타임키핑을 일시 중지할 수도
 	 *   있습니다.
+	 *
+	 * - cpuidle 상태를 선택해야되는 상황이다. s2idle enter 중이거나
+	 *   forced_idle_latency_limit_ns가 있다면.
+	 *   1. s2idle enter 상황이면 s2idle일때의 cpuidle call을 하는 방법을 택해본다.
+	 *      만약 실패했다면 max_latency_ns을 max로 설정해 무조건 최소값만 선택되게 한다.
+	 *   2. forced_idle_latency_limit_ns이 있다면 그 값으로 max를 설정한다.
+	 *   그후 선택된 값으로 deepest state를 고르고 해당 state로 cpu idle을 설정한다.
 	 */
-
 	if (idle_should_enter_s2idle() || dev->forced_idle_latency_limit_ns) {
 		u64 max_latency_ns;
 
@@ -449,6 +494,14 @@ static void do_idle(void)
 	 * This is required because for polling idle loops we will not have had
 	 * an IPI to fold the state for us.
 	 */
+/*
+ * IAMROOT, 2023.03.16:
+ * - papago
+ *   우리는 위의 루프에서 벗어났기 때문에 TIF_NEED_RESCHED가 설정되어야 한다는
+ *   것을 알고 이를 PREEMPT_NEED_RESCHED로 전파합니다.
+ *
+ *   이는 유휴 루프를 폴링하기 위해 상태를 접을 IPI가 없기 때문에 필요합니다.
+ */
 	preempt_set_need_resched();
 	tick_nohz_idle_exit();
 	__current_clr_polling();

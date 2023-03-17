@@ -29,13 +29,17 @@
  *   마스킹을 지원하는 경우 PMR에서 인터럽트가 마스킹되지 않도록 추가 작업을 수행해야
  *   합니다(인터럽트 컨트롤러에서 깨우기 신호를 차단하면 코어가 깨어나지 않기
  *   때문입니다).
+ * - interrupt wait를 하면서 idle을 한다.
  */
 void noinstr cpu_do_idle(void)
 {
 	struct arm_cpuidle_irq_context context;
 
 	arm_cpuidle_save_irq_context(&context);
-
+/*
+ * IAMROOT, 2023.03.16:
+ * - idle전, memory를 동기화한다.
+ */
 	dsb(sy);
 	wfi();
 
@@ -45,12 +49,21 @@ void noinstr cpu_do_idle(void)
 /*
  * This is our default idle handler.
  */
+/*
+ * IAMROOT, 2023.03.16:
+ * - idle. idle끝나고 irq enable.
+ */
 void noinstr arch_cpu_idle(void)
 {
 	/*
 	 * This should do all the clock switching and wait for interrupt
 	 * tricks
 	 */
+/*
+ * IAMROOT, 2023.03.16:
+ * - papago
+ *   이것은 모든 클럭 전환을 수행하고 인터럽트 트릭을 기다려야 합니다. 
+ */
 	cpu_do_idle();
 	raw_local_irq_enable();
 }
