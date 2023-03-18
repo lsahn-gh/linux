@@ -83,9 +83,7 @@ static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
  *
  * S2idle 상태는 저전력 유휴 상태로, 시스템이 전력을 절약하면서 사용자 입력에
  * 일정 수준의 응답성을 유지합니다. 이 상태에서 시스템은 사용자 활동에 응답하여
- * 전체 전원 모드로 빠르게 다시 전환할 수 있습니다. 이것은 suspend-to-RAM 또는
- * suspend-to-disk와 같은 더 깊은 유휴 상태와는 대조적으로, 깨우고 정상 작동을
- * 재개하는 데 더 오랜 시간이 필요합니다.
+ * 전체 전원 모드로 빠르게 다시 전환할 수 있습니다.
  *
  * S2Idle(suspend-to-idle) 기능의 세 가지 가능한 상태를 정의합니다.
  * 이 기능은 웨이크업 시간이 빠른 최신 시스템에 최적화된 저전력 절전
@@ -107,8 +105,104 @@ static DECLARE_SWAIT_QUEUE_HEAD(s2idle_wait_head);
  * 나가는 적절한 작업을 수행할 수 있을 뿐만 아니라 시스템이 S2Idle 상태에
  * 있는 동안 발생하는 인터럽트 및 기타 이벤트를 처리할 수 있습니다.
  *
+ * ---- Documentation/admin-guide/pm/sleep-states.rst ----
+ * - s2idle (suspend-to-idle)
+ *   이는 일반, 순수 소프트웨어, 시스템 일시 중단의 경량 
+ *   변형입니다(S2I 또는 S2Idle이라고도 함). 사용자 공간을 동결하고 시간 
+ *   기록을 중단하고 모든 I/O 장치를 저전력 상태(작동 상태에서 사용 가능한 
+ *   것보다 더 낮은 전력)로 전환하여 런타임 유휴 상태에 비해 더 많은 
+ *   에너지를 절약할 수 있습니다. 시스템이 일시 중단된 동안 가장 깊은 
+ *   유휴 상태에 있는 시간입니다.
  *
- * --------------------
+ *   시스템은 대역 내 인터럽트에 의해 이 상태에서 깨어나므로 이론적으로 
+ *   작동 상태에서 인터럽트를 생성할 수 있는 모든 장치를 S2Idle용 웨이크업 
+ *   장치로 설정할 수 있습니다. 
+ *
+ *   이 상태는 :ref:`standby <standby>` 또는 :ref:`suspend-to-RAM <s2ram>`을 
+ *   지원하지 않는 플랫폼에서 사용할 수 있습니다. 재개 대기 시간 감소를 
+ *   제공합니다. :c:macro:`CONFIG_SUSPEND` 커널 구성 옵션이 설정되어 있으면 
+ *   항상 지원됩니다.
+ *
+ * - s2ram (suspend-to-ram)
+ *   이 상태(STR 또는 S2RAM이라고도 함)는 지원되는 경우 메모리를 제외하고 
+ *   시스템의 모든 것이 저전력 상태로 전환되므로 상당한 에너지 절감 효과를 
+ *   제공합니다. 내용물. 대기 <대기>'에 들어갈 때 수행되는 모든 단계는 
+ *   S2RAM으로 전환하는 동안에도 수행됩니다. 플랫폼 기능에 따라 추가 작업이 
+ *   발생할 수 있습니다. 특히, ACPI 기반 시스템에서 커널은 S2RAM 전환 중 
+ *   마지막 단계로 플랫폼 펌웨어(BIOS)에 제어권을 넘기고 그 결과 일반적으로 
+ *   커널이 직접 제어하지 않는 일부 하위 수준 구성 요소의 전원이 꺼집니다.
+ *
+ *   장치 및 CPU의 상태는 메모리에 저장되고 유지됩니다. 모든 장치가 일시 
+ *   중단되고 저전력 상태로 전환됩니다. 많은 경우에 모든 주변 장치 버스는 
+ *   S2RAM에 진입할 때 전력이 손실되므로 장치는 "켜짐" 상태로의 전환을 
+ *   처리할 수 있어야 합니다.  
+ *
+ *   ACPI 기반 시스템에서 S2RAM은 플랫폼 펌웨어에서 시스템을 재개하기 위해 
+ *   최소한의 부트스트래핑 코드가 필요합니다. 다른 플랫폼에서도 마찬가지일 
+ *   수 있습니다.
+ *
+ *   S2RAM에서 시스템을 깨울 수 있는 장치 세트는 일반적으로 일시 중지에서 
+ *   유휴 <s2idle>` 및 대기 <standby>`에 비해 줄어들며 플랫폼에 의존해야 할 
+ *   수도 있습니다. 웨이크업 기능을 적절하게 설정하기 위해.
+ *
+ *   S2RAM은 :c:macro:`CONFIG_SUSPEND` 커널 구성 옵션이 설정되고 이에 대한 
+ *   지원이 코어 시스템 일시 중지 하위 시스템이 있는 플랫폼에서 등록된 경우 
+ *   지원됩니다. ACPI 기반 시스템에서는 ACPI에서 정의한 S3 시스템 상태에 
+ *   매핑됩니다. 
+ *
+ * - standby
+ *   지원되는 경우 이 상태는 작동 상태로의 비교적 간단한 전환을 제공하면서 
+ *   중간 정도의 실질적인 에너지 절감 효과를 제공합니다. 작동 상태가 
+ *   손실되지 않으므로(시스템 코어 로직이 전원을 유지함) 시스템이 중단된
+ *   위치로 충분히 쉽게 돌아갈 수 있습니다.  사용자 공간 정지, 시간 기록 
+ *   일시 중단 및 모든 I/O 장치를 저전력 상태로 전환하는 것 외에도 유휴 
+ *   일시 중단 <s2idle>`에 대해서도 수행되며 부팅되지 않는 CPU는 오프라인 
+ *   상태가 되며 모두 로우 상태가 됩니다. -레벨 시스템 기능은 이 상태로 
+ *   전환하는 동안 일시 중지됩니다. 이러한 이유로 일시 중단에서 유휴
+ *   <s2idle>`에 비해 더 많은 에너지를 절약할 수 있어야 하지만 재개 대기
+ *   시간은 일반적으로 해당 상태보다 큽니다.
+ *
+ *   이 상태에서 시스템을 깨울 수 있는 장치 집합은 일반적으로
+ *   'suspend-to-idle <s2idle>'에 비해 줄어들며 깨우기 기능을 적절하게
+ *   설정하기 위해 플랫폼에 의존해야 할 수도 있습니다.
+ *
+ *   이 상태는 :c:macro:`CONFIG_SUSPEND` 커널 구성 옵션이 설정되고 이에 
+ *   대한 지원이 코어 시스템 일시 중지 하위 시스템이 있는 플랫폼에서 등록된
+ *   경우에 지원됩니다. ACPI 기반 시스템에서 이 상태는 ACPI에서 정의한 S1 
+ *   시스템 상태에 매핑됩니다. 
+ *
+ * - 절전 진입 및 복귀 속도 
+ *   s2idle > standby > s2ram > s2disk
+ * ---  sysfs -------
+ * - sysfs에서 확인 및 진입방법
+ *   - s2idle
+ *		/sys/power/state		freeze
+ *		/sys/power/mem_sleep	s2idle 로 변경 후 /sys/power/state mem 입력.
+ *   - standby
+ *		/sys/power/state		standby
+ *		/sys/power/mem_sleep	shallow 로 변경 후 /sys/power/state mem 입력.
+ *   - s2ram
+ *		/sys/power/mem_sleep	deep 로 변경후 /sys/power/state mem 입력.
+ *   - s2disk
+ *      /sys/power/state		disk 
+ *      /sys/power/disk에 선택된 설정이 동작한다.
+ *      (shutdown, reboot, suspend, test_resume)
+ * - 사용예 
+ *  1. 
+ *   KVM /sys/power$ echo reboot > disk 
+ *   KVM /sys/power$ cat disk 
+ *   shutdown [reboot] suspend test_resume
+ *  2. 
+ *  KVM /sys/power$ echo disk > state 
+ *  [   87.915123] PM: hibernation: hibernation entry
+ *
+ *  3. 
+ *  KVM /sys/power$ cat mem_sleep 
+ *  [s2idle] 
+ *  KVM /sys/power$ echo mem > state 
+ *  [  153.478136] PM: suspend entry (s2idle)
+ * ----------------------------------------------------------
+ *
  */
 enum s2idle_states __read_mostly s2idle_state;
 static DEFINE_RAW_SPINLOCK(s2idle_lock);

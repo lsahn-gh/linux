@@ -172,6 +172,16 @@ void cpuidle_coupled_parallel_barrier(struct cpuidle_device *dev, atomic_t *a)
  *
  * Returns true if the target state is coupled with cpus besides this one
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   cpuidle_state_is_coupled - 상태가 결합 세트의 일부인지 확인합니다.
+ *   @drv: 플랫폼용 struct cpuidle_driver.
+ *   @state: drv->states에서 대상 상태의 인덱스 대상 상태가 이 이외의 
+ *   cpus와 결합된 경우 true를 반환합니다.
+ *
+ * @return true. CPUIDLE_FLAG_COUPLED 존재.(multiple cpu. cluster)
+ */
 bool cpuidle_state_is_coupled(struct cpuidle_driver *drv, int state)
 {
 	return drv->states[state].flags & CPUIDLE_FLAG_COUPLED;
@@ -467,6 +477,30 @@ static bool cpuidle_coupled_any_pokes_pending(struct cpuidle_coupled *coupled)
  * interrupts while preparing for idle, and it will always return with
  * interrupts enabled.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   cpuidle_enter_state_coupled - cpus가 연결된 상태로 들어가려고 시도합니다.
+ *   @dev: 현재 CPU에 대한 struct cpuidle_device.
+ *   @drv: 플랫폼용 struct cpuidle_driver.
+ *   @next_state: drv->states에서 요청된 상태의 인덱스.
+ *
+ *   결합된 cpus와 협력하여 대상 상태로 진입합니다. 이것은 2단계 
+ *   프로세스입니다. 첫 번째 단계에서 CPU는 독립적으로 작동하며 완전히 
+ *   다른 시간에 cpuidle_enter_state_coupled를 호출할 수 있습니다.
+ *   가능한 한 많은 전력을 절약하기 위해 이 함수를 호출하는 첫 번째 CPU는
+ *   중간 상태(cpuidle_device의 안전 상태)로 이동하고 다른 모든 CPU가 
+ *   이 함수를 호출할 때까지 기다립니다. 연결된 모든 CPU가 유휴 상태가 되면 
+ *   두 번째 단계가 시작됩니다. 연결된 각 CPU는 모든 CPU가 target_state를 
+ *   호출할 것이라고 보장할 때까지 회전합니다.
+ *
+ *   이 함수는 인터럽트를 비활성화한 상태에서 호출해야 합니다. 유휴 상태를
+ *   준비하는 동안 인터럽트를 활성화할 수 있으며 항상 인터럽트가 활성화된 
+ *   상태로 반환됩니다.
+ *
+ * - coupled된(power domain, cluster 단위의) cpu들을 더 깊게 잠들게 한다.
+ * - PASS
+ */
 int cpuidle_enter_state_coupled(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int next_state)
 {
@@ -502,6 +536,14 @@ reset:
 	 * exiting the waiting state due to an interrupt and
 	 * decrementing waiting_count, see comment below.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   이것이 대기 상태로 들어가는 마지막 CPU인 경우 다른 모든 CPU를 대기 
+ *   상태에서 빼내어 더 깊은 상태로 들어갈 수 있도록 합니다. 이것은 
+ *   인터럽트로 인해 대기 상태를 종료하는 CPU 중 하나와 Waiting_count 감소와 
+ *   경쟁할 수 있습니다. 아래 설명을 참조하십시오.
+ */
 	if (w == coupled->online_count) {
 		cpumask_set_cpu(dev->cpu, &cpuidle_coupled_poked);
 		cpuidle_coupled_poke_others(dev->cpu, coupled);
@@ -516,6 +558,14 @@ retry:
 	 * but the first of the two to arrive could skip the loop without
 	 * processing the pokes from the last to arrive.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   단일 CPU에 허용되는 가장 깊은 상태를 사용하여 결합된 모든 CPU가 유휴 
+ *   상태가 될 때까지 기다립니다. 이것이 Poking CPU가 아닌 경우, 두 개의 
+ *   CPU가 동시에 대기 루프에 도착할 수 있는 경쟁을 피하기 위해 떠나기 전에 
+ *   최소한 한 번의 Poke를 기다리십시오. 마지막부터 도착.
+ */
 	while (!cpuidle_coupled_cpus_waiting(coupled) ||
 			!cpumask_test_cpu(dev->cpu, &cpuidle_coupled_poked)) {
 		if (cpuidle_coupled_clear_pokes(dev->cpu))
@@ -546,6 +596,12 @@ retry:
 	 * Make sure final poke status for this cpu is visible before setting
 	 * cpu as ready.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   설정하기 전에 이 CPU의 최종 poke 상태가 보이는지 확인하십시오. 
+ *   cpu가 준비되었습니다.
+ */
 	smp_wmb();
 
 	/*
@@ -556,7 +612,16 @@ retry:
 	 * spin until either all cpus have incremented the ready counter, or
 	 * another cpu leaves idle and decrements the waiting counter.
 	 */
-
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   연결된 모든 CPU는 아마도 유휴 상태일 것입니다. 다른 CPU 중 하나가 방금 
+ *   활성화되었을 가능성이 적습니다. 준비 카운트를 증가시키고 연결된 모든 
+ *   CPU가 카운터를 증가시킬 때까지 회전합니다. CPU가 준비 카운터를 
+ *   증가시키면 유휴를 중단할 수 없으며 모든 CPU가 준비 카운터를 
+ *   증가시키거나 다른 CPU가 유휴 상태를 유지하고 대기 카운터를 감소시킬 
+ *   때까지 회전해야 합니다.
+ */
 	cpuidle_coupled_set_ready(coupled);
 	while (!cpuidle_coupled_cpus_ready(coupled)) {
 		/* Check if any other cpus bailed out of idle. */
@@ -570,6 +635,11 @@ retry:
 	/*
 	 * Make sure read of all cpus ready is done before reading pending pokes
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   보류 중인 pokes를 읽기 전에 모든 CPU 준비 읽기가 완료되었는지 확인하십시오.
+ */
 	smp_rmb();
 
 	/*
@@ -582,6 +652,17 @@ retry:
 	 * it, and it's too late to turn on interrupts here, so reset the
 	 * coupled idle state of all cpus and retry.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   이 CPU가 모든 CPU가 대기 중임을 확인한 후 CPU가 유휴 상태를 떠났다가 
+ *   다시 들어갈 가능성이 적습니다. 유휴 상태로 다시 들어간 CPU는 이 CPU에 
+ *   찌르기를 보냈을 것이며 이는 준비 루프 이후에 여전히 보류 중일 것입니다. 
+ *   보류 중인 인터럽트는 깊은 유휴 상태에 들어갈 때 인터럽트 컨트롤러에 
+ *   의해 손실될 수 있습니다. 인터럽트를 켜고 처리하지 않고 보류 중인 
+ *   인터럽트를 지우는 것은 불가능하며 여기에서 인터럽트를 켜기에는 너무 
+ *   늦었으므로 모든 CPU의 연결된 유휴 상태를 재설정하고 다시 시도하십시오.
+ */
 	if (cpuidle_coupled_any_pokes_pending(coupled)) {
 		cpuidle_coupled_set_done(dev->cpu, coupled);
 		/* Wait for all cpus to see the pending pokes */
@@ -611,6 +692,21 @@ out:
 	 * interrupts disabled, but won't cause problems for drivers that
 	 * exit with interrupts enabled.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   일반 cpuidle 상태는 irqs가 활성화된 상태로 반환될 것으로 예상됩니다.
+ *   이는 유휴 상태에서 벗어나게 하는 인터럽트를 수신하는 CPU가 유휴 입력 
+ *   기능을 종료하고 ready_count를 감소시키기 전에 해당 인터럽트를 처리하는 
+ *   비효율성을 초래합니다. 다른 모든 CPU는 인터럽트를 처리하는 CPU를 
+ *   기다리며 회전해야 합니다. 드라이버가 인터럽트가 비활성화된 상태로 
+ *   돌아오면 다른 모든 CPU는 회전하지 않고 안전한 유휴 상태로 되돌아가 
+ *   전력을 절약합니다.
+ *
+ *   여기에서 local_irq_enable을 호출하면 인터럽트가 비활성화된 상태로 
+ *   결합된 상태가 반환될 수 있지만 인터럽트가 활성화된 상태에서 종료되는 
+ *   드라이버에는 문제가 발생하지 않습니다.
+ */
 	local_irq_enable();
 
 	/*
@@ -618,6 +714,13 @@ out:
 	 * a cpu exits and re-enters the ready state because this cpu has
 	 * already decremented its waiting_count.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   연결된 모든 CPU가 유휴 상태에서 벗어날 때까지 기다리십시오. 이 CPU는 
+ *   이미 wait_count를 줄였기 때문에 CPU가 종료했다가 다시 준비 상태로 
+ *   들어갈 위험이 없습니다.
+ */
 	while (!cpuidle_coupled_no_cpus_ready(coupled))
 		cpu_relax();
 

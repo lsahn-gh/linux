@@ -1302,6 +1302,10 @@ void clock_was_set_delayed(void)
  * or in the case of s2idle from tick_unfreeze() to ensure that the
  * hrtimers are up to date.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - hrtimer retrigger
+ */
 void hrtimers_resume_local(void)
 {
 	lockdep_assert_irqs_disabled();

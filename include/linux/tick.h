@@ -96,10 +96,23 @@ static inline void tick_broadcast_force(void)
 {
 	tick_broadcast_control(TICK_BROADCAST_FORCE);
 }
+
+/*
+ * IAMROOT, 2023.03.18:
+ * @return 0   : 성공
+ *         < 0 : c3 stop 미지원이나 못한 경우.
+ * - tick device에서 c3 stop을 지원한다면 tick deviec를 정지시키고 
+ *   oneshot wakeup device에서 해당 cpu를 깨우게 맡긴다.
+ */
 static inline int tick_broadcast_enter(void)
 {
 	return tick_broadcast_oneshot_control(TICK_BROADCAST_ENTER);
 }
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - braodcast에서 exit.
+ */
 static inline void tick_broadcast_exit(void)
 {
 	tick_broadcast_oneshot_control(TICK_BROADCAST_EXIT);
@@ -190,6 +203,11 @@ static inline bool tick_nohz_full_enabled(void)
  * Check if a CPU is part of the nohz_full subset. Arrange for evaluating
  * the cpu expression (typically smp_processor_id()) _after_ the static
  * key.
+ */
+/*
+ * IAMROOT, 2023.03.18:
+ * - nohz full이 enable이 되있고, @_cpu가 tick_nohz_full_mask에 포함된다면
+ *   return true.
  */
 #define tick_nohz_full_cpu(_cpu) ({					\
 	bool __ret = false;						\

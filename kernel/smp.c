@@ -681,6 +681,11 @@ static void flush_smp_call_function_queue(bool warn_cpu_offline)
 		      smp_processor_id(), CFD_SEQ_HDLEND);
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - softirq가 pending되있었다면 실행한다.
+ * - TODO
+ */
 void flush_smp_call_function_from_idle(void)
 {
 	unsigned long flags;

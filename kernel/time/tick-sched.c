@@ -725,12 +725,23 @@ static void tick_nohz_update_jiffies(ktime_t now)
 /*
  * Updates the per-CPU time idle statistics counters
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - @ts->idle_active에 iowait상황에 따른 시간 가산후 idle_entrytime을 갱신한다.
+ */
 static void
 update_ts_time_stats(int cpu, struct tick_sched *ts, ktime_t now, u64 *last_update_time)
 {
 	ktime_t delta;
 
 	if (ts->idle_active) {
+/*
+ * IAMROOT, 2023.03.18:
+ * - iowait cpu 
+ *   before idle entrytime을 iowait_sleeptime에 가산
+ * - 그게 아니면
+ *   before idle entrytime을 idle_sleeptime에 가산
+ */
 		delta = ktime_sub(now, ts->idle_entrytime);
 		if (nr_iowait_cpu(cpu) > 0)
 			ts->iowait_sleeptime = ktime_add(ts->iowait_sleeptime, delta);
@@ -744,6 +755,10 @@ update_ts_time_stats(int cpu, struct tick_sched *ts, ktime_t now, u64 *last_upda
 
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - nohz 시스템에서 stop idle에 대한 사후 처리를 한다.
+ */
 static void tick_nohz_stop_idle(struct tick_sched *ts, ktime_t now)
 {
 	update_ts_time_stats(smp_processor_id(), ts, now, NULL);
@@ -845,6 +860,10 @@ u64 get_cpu_iowait_time_us(int cpu, u64 *last_update_time)
 }
 EXPORT_SYMBOL_GPL(get_cpu_iowait_time_us);
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick nohz timer  cancle후 restart.
+ */
 static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
 {
 	hrtimer_cancel(&ts->sched_timer);
@@ -864,6 +883,11 @@ static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
 	 * Reset to make sure next tick stop doesn't get fooled by past
 	 * cached clock deadline.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   다음 틱 중지가 캐시된 클록 데드라인을 지나서 속지 않도록 재설정하십시오.
+ */
 	ts->next_tick = 0;
 }
 
@@ -1035,6 +1059,10 @@ static void tick_nohz_stop_tick(struct tick_sched *ts, int cpu)
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - timer stop 
+ */
 static void tick_nohz_retain_tick(struct tick_sched *ts)
 {
 	ts->timer_expires_base = 0;
@@ -1050,6 +1078,10 @@ static void tick_nohz_stop_sched_tick(struct tick_sched *ts, int cpu)
 }
 #endif /* CONFIG_NO_HZ_FULL */
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - @now로 tick을 update 및 tick_nohz_restart.
+ */
 static void tick_nohz_restart_sched_tick(struct tick_sched *ts, ktime_t now)
 {
 	/* Update jiffies first */
@@ -1070,6 +1102,10 @@ static void tick_nohz_restart_sched_tick(struct tick_sched *ts, ktime_t now)
 	tick_nohz_restart(ts, now);
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - 기본 config에 NO HZ FULL이 포함되잇진 않는다.
+ */
 static void __tick_nohz_full_update_tick(struct tick_sched *ts,
 					 ktime_t now)
 {
@@ -1231,6 +1267,10 @@ void tick_nohz_idle_stop_tick(void)
 	__tick_nohz_idle_stop_tick(this_cpu_ptr(&tick_cpu_sched));
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick nohz idle 에서 tick을 유지한다.
+ */
 void tick_nohz_idle_retain_tick(void)
 {
 	tick_nohz_retain_tick(this_cpu_ptr(&tick_cpu_sched));
@@ -1310,6 +1350,15 @@ bool tick_nohz_idle_got_tick(void)
  *
  * Called from power state control code with interrupts disabled
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   tick_nohz_get_next_hrtimer - 먼저 만료되는 hrtimer 또는 틱의 다음
+ *   만료 시간을 반환합니다. 틱이 중지된 경우 다음 hrtimer를 반환합니다.
+ *   인터럽트가 비활성화된 전원 상태 제어 코드에서 호출됩니다. 
+ *
+ * - 가장 먼저 완료될 시간을 알아온다.
+ */
 ktime_t tick_nohz_get_next_hrtimer(void)
 {
 	return __this_cpu_read(tick_cpu_device.evtdev)->next_event;
@@ -1383,6 +1432,10 @@ unsigned long tick_nohz_get_idle_calls(void)
 	return ts->idle_calls;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - idle이 종료되는 시각을 기록한다.
+ */
 static void tick_nohz_account_idle_time(struct tick_sched *ts,
 					ktime_t now)
 {
@@ -1420,6 +1473,10 @@ void tick_nohz_idle_restart_tick(void)
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick nohz restart를 수행한다.
+ */
 static void tick_nohz_idle_update_tick(struct tick_sched *ts, ktime_t now)
 {
 	if (tick_nohz_full_cpu(smp_processor_id()))
@@ -1436,6 +1493,16 @@ static void tick_nohz_idle_update_tick(struct tick_sched *ts, ktime_t now)
  * Restart the idle tick when the CPU is woken up from idle
  * This also exit the RCU extended quiescent state. The CPU
  * can use RCU again after this function is called.
+ */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   tick_nohz_idle_exit - 유휴 작업에서 유휴 틱을 다시 시작합니다.
+ *   CPU가 유휴 상태에서 깨어날 때 유휴 틱을 다시 시작합니다. 
+ *   이것은 또한 RCU 확장 정지 상태를 종료합니다. CPU는 이 함수가 
+ *   호출된 후 RCU를 다시 사용할 수 있습니다.
+ *
+ * - idle이 끝나면서 nohz에서 해야될일을 수행한다.
  */
 void tick_nohz_idle_exit(void)
 {

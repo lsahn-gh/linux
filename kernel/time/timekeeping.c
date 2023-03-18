@@ -1780,6 +1780,11 @@ void timekeeping_inject_sleeptime64(const struct timespec64 *delta)
 /**
  * timekeeping_resume - Resumes the generic timekeeping subsystem.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - linux timer enable
+ * - PASS`
+ */
 void timekeeping_resume(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;
@@ -1842,6 +1847,11 @@ void timekeeping_resume(void)
 	timerfd_resume();
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - linux system이 관리하는 time을 멈춘다.
+ * - PASS
+ */
 int timekeeping_suspend(void)
 {
 	struct timekeeper *tk = &tk_core.timekeeper;

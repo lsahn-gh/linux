@@ -7228,6 +7228,20 @@ EXPORT_SYMBOL(schedule);
  * schedule_idle() is similar to schedule_preempt_disable() except that it
  * never enables preemption because it does not call sched_submit_work().
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   synchronize_rcu_tasks()는 모든 작업이 실행 대기열을 떠났거나 사용자
+ *   공간으로 이동했는지 확인하여 어떤 작업도 선점된 상태(비자발적으로
+ *   예약됨)에 걸리지 않도록 합니다.
+ *   유휴 작업은 어느 쪽도 수행하지 않으므로 선점되어서는 안 
+ *   됩니다(비자발적으로 스케줄 아웃).
+ *
+ *   schedule_idle()은 sched_submit_work()를 호출하지 않기 때문에 선점을 
+ *   활성화하지 않는다는 점을 제외하면 schedule_preempt_disable()과 유사합니다.
+ *
+ * - 자발적 schedule을 뜻하는 SM_NONE을 들고 schedule한다.
+ */
 void __sched schedule_idle(void)
 {
 	/*
@@ -7237,6 +7251,14 @@ void __sched schedule_idle(void)
 	 * current task can be in any other state. Note, idle is always in the
 	 * TASK_RUNNING state.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   이것은 작업이 TASK_RUNNING 상태일 때 해당 함수가 nop이기 때문에 유휴 
+ *   작업이 수행하는 sched_submit_work() 호출을 건너뛰기 때문에 현재 작업이 
+ *   다른 상태에 있을 수 있는 곳에서 사용되지 않는지 확인하세요. 유휴 상태는 
+ *   항상 TASK_RUNNING 상태입니다.
+ */
 	WARN_ON_ONCE(current->__state);
 	do {
 		__schedule(SM_NONE);

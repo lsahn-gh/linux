@@ -1003,6 +1003,10 @@ static void broadcast_shutdown_local(struct clock_event_device *bc,
 	clockevents_switch_state(dev, CLOCK_EVT_STATE_SHUTDOWN);
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - TODO
+ */
 static int ___tick_broadcast_oneshot_control(enum tick_broadcast_state state,
 					     struct tick_device *td,
 					     int cpu)
@@ -1141,6 +1145,16 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * @return < 0 : @td나 wd둘중하나이상이 oneshot이 아니다.
+ *         0   : 아래 주석 참고
+ * - TICK_BROADCAST_ENTER
+ *   @dev의 oneshot은 정지, @wd는 oneshot으로 하여 next_event로 program한다.
+ *   즉 @dev의 next_event시간에 @cpu를 깨우두록 @wd에서 요청을 한다.
+ * - TICK_BROADCAST_EXIT
+ *   @wd가 oneshot이 아닌지만 확인한다.
+ */
 static int tick_oneshot_wakeup_control(enum tick_broadcast_state state,
 				       struct tick_device *td,
 				       int cpu)
@@ -1170,14 +1184,31 @@ static int tick_oneshot_wakeup_control(enum tick_broadcast_state state,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * @return 0 : 성공
+ *
+ * - @state가 TICK_BROADCAST_ENTER일 경우 this cpu가 next_event에 일어나도록
+ *   oneshot wakeup device에 맡겨 깨우도록 한다.
+ *   wakeup device가 없거나 oneshot이 아닌 경우 braodcast를 통해서 시도해본다.
+ */
 int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
 {
 	struct tick_device *td = this_cpu_ptr(&tick_cpu_device);
 	int cpu = smp_processor_id();
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - @state가 TICK_BROADCAST_ENTER인 경우 wakeup device에 next_event에 
+ *   this cpu가 깨우도록 한다.
+ */
 	if (!tick_oneshot_wakeup_control(state, td, cpu))
 		return 0;
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - 위에서 실행이 안된경우. 즉 oneshot이 아닌 경우 braodcast로 동작한다.
+ */
 	if (tick_broadcast_device.evtdev)
 		return ___tick_broadcast_oneshot_control(state, td, cpu);
 
@@ -1185,6 +1216,10 @@ int __tick_broadcast_oneshot_control(enum tick_broadcast_state state)
 	 * If there is no broadcast or wakeup device, tell the caller not
 	 * to go into deep idle.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - broadcast도 아니고 wakeup oneshot device도 아닌 경우.
+ */
 	return -EBUSY;
 }
 

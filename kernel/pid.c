@@ -45,6 +45,10 @@
 #include <net/sock.h>
 #include <uapi/linux/pidfd.h>
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - numbers를 tag찍고 들어가면 struct pid가 보인다.
+ */
 struct pid init_struct_pid = {
 	.count		= REFCOUNT_INIT(1),
 	.tasks		= {

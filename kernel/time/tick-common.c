@@ -664,6 +664,21 @@ out_bc:
  * required here because the local clock event device cannot go away
  * under us.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *  tick_broadcast_oneshot_control - 브로드캐스트 원샷 모드 시작/종료 
+ *  @state: 대상 상태(들어가기/나가기) 시스템은 영향을 받는 장치가 중지될 
+ *  수 있는 상태에 들어가거나 나갑니다. 성공 시 0을 반환하고, CPU가 웨이크업을 
+ *  브로드캐스트하는 데 사용되는 경우 -EBUSY를 반환합니다.
+ *
+ *  인터럽트가 비활성화된 상태에서 호출되므로 로컬 시계 이벤트 장치가 우리 
+ *  아래에서 사라질 수 없기 때문에 clockevents_lock이 필요하지 않습니다.
+ *
+ *  - @state가 TICK_BROADCAST_ENTER이라면 C3STOP을 지원 한다면 정지를 시킨후 
+ *  oneshot wakeup device에 next_event에 this cpu를 깨우도록 맡긴다. 
+ *  그게 아니면 braodcast에서 맡겨 본다.
+ */
 int tick_broadcast_oneshot_control(enum tick_broadcast_state state)
 {
 	struct tick_device *td = this_cpu_ptr(&tick_cpu_device);
@@ -721,6 +736,10 @@ void tick_shutdown(unsigned int cpu)
  *
  * No locks required. Nothing can change the per cpu device.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick device를 멈춘다.
+ */
 void tick_suspend_local(void)
 {
 	struct tick_device *td = this_cpu_ptr(&tick_cpu_device);
@@ -735,12 +754,21 @@ void tick_suspend_local(void)
  *
  * No locks required. Nothing can change the per cpu device.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick device enable.
+ */
 void tick_resume_local(void)
 {
 	struct tick_device *td = this_cpu_ptr(&tick_cpu_device);
 	bool broadcast = tick_resume_check_broadcast();
 
 	clockevents_tick_resume(td->evtdev);
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick device는 처음에 periodic으로 동작하다 oneshot으로 변경된다.
+ *   그에 따른 처리들.
+ */
 	if (!broadcast) {
 		if (td->mode == TICKDEV_MODE_PERIODIC)
 			tick_setup_periodic(td->evtdev, 0);
@@ -798,11 +826,32 @@ static unsigned int tick_freeze_depth;
  * Call with interrupts disabled.  Must be balanced with %tick_unfreeze().
  * Interrupts must not be enabled before the subsequent %tick_unfreeze().
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   tick_freeze - 로컬 틱 및 (아마도) 시간 기록을 중지합니다.
+ *
+ *   이것이 기능을 실행하는 마지막 온라인 CPU인지 확인하고 그렇다면 
+ *   시간 기록을 일시 중단합니다. 그렇지 않으면 로컬 틱을 일시 중지합니다.
+ *
+ *   인터럽트가 비활성화된 상태에서 호출합니다. %tick_unfreeze()로 균형을 
+ *   맞춰야 합니다.
+ *
+ *   후속 %tick_unfreeze() 전에 인터럽트를 활성화하면 안 됩니다.
+ *
+ *  - 기본적으로 local tick device를 멈춰 sched tick을 정지시킨다.
+ *    만약 모든 cpu가 멈추게되면 system을 suspend한다.
+ */
 void tick_freeze(void)
 {
 	raw_spin_lock(&tick_freeze_lock);
 
 	tick_freeze_depth++;
+/*
+ * IAMROOT, 2023.03.18:
+ * - tick freez가 전체 cpu인경우 system을 suspend한다. 그게 아니면
+ *   local cpu만 suspend한다.
+ */
 	if (tick_freeze_depth == num_online_cpus()) {
 		trace_suspend_resume(TPS("timekeeping_freeze"),
 				     smp_processor_id(), true);
@@ -824,6 +873,11 @@ void tick_freeze(void)
  *
  * Call with interrupts disabled.  Must be balanced with %tick_freeze().
  * Interrupts must not be enabled after the preceding %tick_freeze().
+ */
+/*
+ * IAMROOT, 2023.03.18:
+ * - 기본적으로 local tick device를 resume 하여 sched tick을 다시 start한다.
+ *   만약 모든 cpu가 freeze였으면 system resume한다.
  */
 void tick_unfreeze(void)
 {

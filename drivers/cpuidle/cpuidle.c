@@ -74,6 +74,18 @@ int cpuidle_play_dead(void)
 	return -ENODEV;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * @forbidden_flags 해당 flag가 지정되면 건너 뛴다.
+ * @return 0    : 조건에 맞는 C state 못찾음
+ *         != 0 : 조건에 맞는 C state index.
+ *
+ * - 인자 조건에 맞는 최대 exit_latency_ns를 구해서 해당 C state index를
+ *   return 한다.
+ *   max_latency_ns값이 U64_MAX가 아니라면 < max_latency_ns의 이내의 범위에서
+ *   최대 값을 찾는다.
+ * - s2idle이 true라면 s2idle에서 사용할수있는 C state를 찾는다.
+ */
 static int find_deepest_state(struct cpuidle_driver *drv,
 			      struct cpuidle_device *dev,
 			      u64 max_latency_ns,
@@ -136,6 +148,12 @@ void cpuidle_use_deepest_state(u64 latency_limit_ns)
  *
  * Return: the index of the deepest available idle state.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * @return 0    : 조건에 맞는 C state 못찾음
+ *         != 0 : 조건에 맞는 C state index.
+ * - @latency_limit_ns 이내의 C state idx를 구한다.
+ */
 int cpuidle_find_deepest_state(struct cpuidle_driver *drv,
 			       struct cpuidle_device *dev,
 			       u64 latency_limit_ns)
@@ -144,6 +162,12 @@ int cpuidle_find_deepest_state(struct cpuidle_driver *drv,
 }
 
 #ifdef CONFIG_SUSPEND
+/*
+ * IAMROOT, 2023.03.18:
+ * - @index의 cpudile state를 가져와 enter_s2idle(deep sleep)을 수행한다.
+ * - deel sleep전후로 sched timer를 off / on(or system suspend, resume)한다.
+ * - 깨어난 이후에는 deep sleep의 기간누적시키고 발생 빈도를 증가시킨다.
+ */
 static void enter_s2idle_proper(struct cpuidle_driver *drv,
 				struct cpuidle_device *dev, int index)
 {
@@ -161,6 +185,10 @@ static void enter_s2idle_proper(struct cpuidle_driver *drv,
 	stop_critical_timings();
 	if (!(target_state->flags & CPUIDLE_FLAG_RCU_IDLE))
 		rcu_idle_enter();
+/*
+ * IAMROOT, 2023.03.18:
+ * - 여기서 deepsleep에 들어간다.
+ */
 	target_state->enter_s2idle(dev, drv, index);
 	if (WARN_ON_ONCE(!irqs_disabled()))
 		local_irq_disable();
@@ -193,7 +221,10 @@ static void enter_s2idle_proper(struct cpuidle_driver *drv,
  *   ->enter_s2idle 콜백이 있는 상태가 있는 경우 가장 깊은 상태를 찾아 고정된
  *   틱으로 입력합니다.
  *
- * - ING
+ * - @return 0    : s2idle로 동작하는 C state를 못찾음.
+ *   @return != 0 : s2idle로 동작하는 C state중에서 최대 latency ms state.
+ * - s2idle로 동작할 수 있는 최대 latency ms를 가진 C state찾는다.
+ *   찾은 경우 deep sleep을 하고 마친 후에는 irq를 enable한다.
  */
 int cpuidle_enter_s2idle(struct cpuidle_driver *drv, struct cpuidle_device *dev)
 {
@@ -225,6 +256,12 @@ int cpuidle_enter_s2idle(struct cpuidle_driver *drv, struct cpuidle_device *dev)
  * @drv: cpuidle driver for this cpu
  * @index: index into the states table in @drv of the state to enter
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - c state @index에 해당하는 idle을 수행하고 통계를 계산한다.
+ * - broadcast인 경우 wakeup oneshot device에 맡기는걸 시도하여
+ *   CPUIDLE_FLAG_TIMER_STOP이 없는 c state index를 새로 찾아본다.
+ */
 int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 			int index)
 {
@@ -239,9 +276,28 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	 * local timer will be shut down.  If a local timer is used from another
 	 * CPU as a broadcast timer, this call may fail if it is not available.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   로컬 타이머가 종료되므로 브로드캐스트 타이머로 전환하도록 시간
+ *   프레임워크에 알립니다. 로컬 타이머가 다른 CPU에서 브로드캐스트
+ *   타이머로 사용되는 경우 이 호출을 사용할 수 없으면 이 호출이 실패할 
+ *   수 있습니다.
+ *
+ * - broadcast라면, timer stop을 하고 oneshot wakeup device or
+ *   broadcast devie에 this cpu를 next_event에 깨우도록 요청한다.
+ */
 	if (broadcast && tick_broadcast_enter()) {
+/*
+ * IAMROOT, 2023.03.18:
+ * - CPUIDLE_FLAG_TIMER_STOP가 제외된 exit_latency_ns이내의 c state를 찾는다.
+ */
 		index = find_deepest_state(drv, dev, target_state->exit_latency_ns,
 					   CPUIDLE_FLAG_TIMER_STOP, false);
+/*
+ * IAMROOT, 2023.03.18:
+ * - 못찾앗으면 default idle로 동작하고 끝낸다.
+ */
 		if (index < 0) {
 			default_idle_call();
 			return -EBUSY;
@@ -262,6 +318,11 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	stop_critical_timings();
 	if (!(target_state->flags & CPUIDLE_FLAG_RCU_IDLE))
 		rcu_idle_enter();
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - c state index에 따른 idle상태에 진입한다.
+ */
 	entered_state = target_state->enter(dev, drv, index);
 	if (!(target_state->flags & CPUIDLE_FLAG_RCU_IDLE))
 		rcu_idle_exit();
@@ -272,8 +333,17 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	trace_cpu_idle(PWR_EVENT_EXIT, dev->cpu);
 
 	/* The cpu is no longer idle or about to enter idle. */
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - 이제 idle이 끝났으므로 null로 설정한다.
+ */
 	sched_idle_set_state(NULL);
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - broadcast였지만 위에서 전환이 실패한경우.
+ */
 	if (broadcast) {
 		if (WARN_ON_ONCE(!irqs_disabled()))
 			local_irq_disable();
@@ -284,6 +354,10 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	if (!cpuidle_state_is_coupled(drv, index))
 		local_irq_enable();
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - idle이 끝난후, idle이 동장했던 entered_state에 대한 통계처리를 진행한다.
+ */
 	if (entered_state >= 0) {
 		s64 diff, delay = drv->states[entered_state].exit_latency_ns;
 		int i;
@@ -324,6 +398,10 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 			}
 		}
 	} else {
+/*
+ * IAMROOT, 2023.03.18:
+ * - 실패 통계 처리
+ */
 		dev->last_residency_ns = 0;
 		dev->states_usage[index].rejected++;
 	}
@@ -344,6 +422,24 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
  * 'false' boolean value if the scheduler tick should not be stopped before
  * entering the returned state.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   cpuidle_select - 유휴 상태를 선택하도록 cpuidle 프레임워크에 요청합니다.
+ *   @drv: cpuidle 드라이버.
+ *   @dev: cpuidle 장치.
+ *   @stop_tick: 틱 중지 여부 표시.
+ *
+ *   유휴 상태의 인덱스를 반환합니다. 반환 값은 음수가 아니어야 합니다.
+ *
+ *   반환된 상태에 들어가기 전에 스케줄러 틱이 중지되지 않아야 하는 경우
+ *   @stop_tick이 가리키는 메모리 위치는 'false' 부울 값으로 기록될 것으로 예상됩니다.
+ *
+ * - curr governor에서 cpuidle을 고른다. 주석에 따르면 schedule tick이 중지되지
+ *   않아야되는 경우 stop_tick은 false로 업데이트 된다.
+ * - curr governor에서 cpuidle state를 골라서 return한다.
+ * - ex) menu_select
+ */
 int cpuidle_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		   bool *stop_tick)
 {
@@ -360,6 +456,10 @@ int cpuidle_select(struct cpuidle_driver *drv, struct cpuidle_device *dev,
  * Returns the index in the idle state, < 0 in case of error.
  * The error code depends on the backend driver
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - c state index해 당하는 idle을 수행한다.
+ */
 int cpuidle_enter(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		  int index)
 {
@@ -371,13 +471,33 @@ int cpuidle_enter(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 	 * useful for consumers outside cpuidle, we rely on that the governor's
 	 * ->select() callback have decided, whether to stop the tick or not.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   먼저 만료되는 것이 무엇이든 다음 틱 또는 다음 타이머 이벤트가 되는 
+ *   다음 hrtimer를 저장합니다. 또한 이 데이터를 cpuidle 외부의 
+ *   소비자에게 유용하게 만들기 위해 우리는 거버너의 ->select() 콜백이 틱 
+ *   중지 여부를 결정했는지에 의존합니다.
+ *
+ * - 가장 먼저 완료될 시간을 dev->next_hrtimer에 저장한다.
+ *   idle을 중에 next_hrtimer가 oneshot wakeup device나 braodcast들에 의해 
+ *   next_hrtimer에 this cpu가 깨어나어 처리하게 할 것이다.
+ */
 	WRITE_ONCE(dev->next_hrtimer, tick_nohz_get_next_hrtimer());
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - c state index에 해당하는 idle을 수행하고 통계를 작성한다.
+ */
 	if (cpuidle_state_is_coupled(drv, index))
 		ret = cpuidle_enter_state_coupled(dev, drv, index);
 	else
 		ret = cpuidle_enter_state(dev, drv, index);
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - 깨어나면 next_timer을 초기화한다.
+ */
 	WRITE_ONCE(dev->next_hrtimer, 0);
 	return ret;
 }
@@ -389,6 +509,12 @@ int cpuidle_enter(struct cpuidle_driver *drv, struct cpuidle_device *dev,
  * @dev  : the cpuidle device
  * @index: the index in the idle state table
  *
+ */
+/*
+ * IAMROOT, 2023.03.18:
+ * - curr governor에서 reflect callback을 호출한다.
+ *   idle 끝난 직후 기록 및 처리.
+ *   ex) menu_reflect
  */
 void cpuidle_reflect(struct cpuidle_device *dev, int index)
 {

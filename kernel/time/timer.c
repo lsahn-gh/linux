@@ -2267,6 +2267,10 @@ u64 get_next_timer_interrupt(unsigned long basej, u64 basem)
  *
  * Called with interrupts disabled
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - standard의 idle을 false로 하여 nohz를 푼다.
+ */
 void timer_clear_idle(void)
 {
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
@@ -2277,6 +2281,13 @@ void timer_clear_idle(void)
 	 * sending the IPI a few instructions smaller for the cost of taking
 	 * the lock in the exit from idle path.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   우리는 이것을 잠금 해제합니다. 최악의 결과는 무의미한 IPI를 보내는 원격 
+ *   인큐(enqueue)이지만, 잠금을 사용하면 유휴 경로에서 종료할 때 잠금을 사용하는 
+ *   비용에 비해 IPI를 보내는 데 필요한 몇 가지 명령이 더 작아집니다. 
+ */
 	base->is_idle = false;
 }
 #endif

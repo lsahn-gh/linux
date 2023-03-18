@@ -17,6 +17,10 @@ extern char __cpuidle_text_start[], __cpuidle_text_end[];
  * sched_idle_set_state - Record idle state for the current CPU.
  * @idle_state: State to record.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - this rq의 현재 idle state를 @idle_state로 설정한다.
+ */
 void sched_idle_set_state(struct cpuidle_state *idle_state)
 {
 	idle_set_state(this_rq(), idle_state);
@@ -55,6 +59,10 @@ void sched_idle_set_state(struct cpuidle_state *idle_state)
  */
 static int __read_mostly cpu_idle_force_poll;
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - cpuidle을 poll force 하기 위한 enalbe / disable
+ */
 void cpu_idle_poll_ctrl(bool enable)
 {
 	if (enable) {
@@ -66,6 +74,10 @@ void cpu_idle_poll_ctrl(bool enable)
 }
 
 #ifdef CONFIG_GENERIC_IDLE_POLL_SETUP
+/*
+ * IAMROOT, 2023.03.18:
+ * - cpuidle을 poll force 시킨다.
+ */
 static int __init cpu_idle_poll_setup(char *__unused)
 {
 	cpu_idle_force_poll = 1;
@@ -74,6 +86,10 @@ static int __init cpu_idle_poll_setup(char *__unused)
 }
 __setup("nohlt", cpu_idle_poll_setup);
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - cpuidle의 poll force를 disable 한다.
+ */
 static int __init cpu_idle_nopoll_setup(char *__unused)
 {
 	cpu_idle_force_poll = 0;
@@ -111,6 +127,11 @@ void __weak arch_cpu_idle_prepare(void) { }
 void __weak arch_cpu_idle_enter(void) { }
 void __weak arch_cpu_idle_exit(void) { }
 void __weak arch_cpu_idle_dead(void) { }
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - idle을 한다해도 deep sleep 하지 않기 위한 방식. 
+ */
 void __weak arch_cpu_idle(void)
 {
 	cpu_idle_force_poll = 1;
@@ -204,7 +225,8 @@ void __cpuidle default_idle_call(void)
 
 /*
  * IAMROOT, 2023.03.17:
- * - ING
+ * - reschedule 요청있으면 return busy.
+ *   그게 아니면 deep sleep을 수행한다.
  */
 static int call_cpuidle_s2idle(struct cpuidle_driver *drv,
 			       struct cpuidle_device *dev)
@@ -215,6 +237,11 @@ static int call_cpuidle_s2idle(struct cpuidle_driver *drv,
 	return cpuidle_enter_s2idle(drv, dev);
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - reschedule 요청이 있으면 잠들지 않고 return busy.
+ *   @next_state해 해당하는 idle을 수행한다.
+ */
 static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		      int next_state)
 {
@@ -222,6 +249,10 @@ static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 	 * The idle task must be scheduled, it is pointless to go to idle, just
 	 * update no idle residency and return.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - reschedule 요청이 있으면 return busy
+ */
 	if (current_clr_polling_and_test()) {
 		dev->last_residency_ns = 0;
 		local_irq_enable();
@@ -233,6 +264,16 @@ static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 	 * This function will block until an interrupt occurs and will take
 	 * care of re-enabling the local interrupts
 	 */
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   governor 결정에 의해 이전에 반환된 유휴 상태를 입력합니다.
+ *   이 기능은 인터럽트가 발생할 때까지 차단되며 로컬 인터럽트를 다시
+ *   활성화합니다. 
+ *
+ * - @next_state해 해당하는 idle을 수행한다.
+ */
 	return cpuidle_enter(drv, dev, next_state);
 }
 
@@ -257,6 +298,7 @@ static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
  */
 /*
  * IAMROOT, 2023.03.11:
+ * - devicetree/bindings/arm/idle-states.yaml 참고
  * - min-residency-us : 최소 상주 시간. 켜진후 꺼지기 전까지 최소 유지해야할 시간
  * - rk3399.rtsi
  *   idle-states {
@@ -281,6 +323,14 @@ static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
  *			};
  *		};
  *
+ * - 1. resched 요청이 있으면 irq enable후 return.
+ *   2. cpuidle driver가 없으면 default idle(wfi) 수행후 return.
+ *   3. suspend-to-idle상황인 경우 s2idle을 지원하는 cpuidle state를 선택해서
+ *      idle 수행.
+ *   4. forced_idle_latency_limit_ns가 있는 경우 이 값을 max로 하여 cpuidle state
+ *      를 선택해서 idle 수행.
+ *   5. 일반적인 경우(윗 상황 들이 아닌 경우) curr governor를 통해서 cpuidle state
+ *      를 찾아서 idle 수행.
  */
 static void cpuidle_idle_call(void)
 {
@@ -313,7 +363,7 @@ static void cpuidle_idle_call(void)
 	 * - google-translate
 	 *   RCU 프레임워크는 우리가 유휴 섹션에 들어가고 있다는 것을 알려야 합니다. 따라서
 	 *   rcu는 더 이상 중요한 섹션을 읽지 않고 유예 기간에 한 단계 더 있습니다.
-	 * - cpuidle이 활성화 안된경우 wfi만 한번하고 끝낸다.
+	 * - cpuidle이 활성화 안됫거나 driver가 없는경우 wfi만 한번하고 끝낸다.
 	 */
 
 	if (cpuidle_not_available(drv, dev)) {
@@ -354,17 +404,31 @@ static void cpuidle_idle_call(void)
 
 		if (idle_should_enter_s2idle()) {
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - deep sleep을 수행한다. 수행이 됬으면 goto exit_idle.
+ *   그게 아니면 최대 sleep으로 cpuidle state를 검색한다.
+ */
 			entered_state = call_cpuidle_s2idle(drv, dev);
 			if (entered_state > 0)
 				goto exit_idle;
 
 			max_latency_ns = U64_MAX;
 		} else {
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - forced_idle_latency_limit_ns이하의 cpuidle state로 검색한다.
+ */
 			max_latency_ns = dev->forced_idle_latency_limit_ns;
 		}
 
 		tick_nohz_idle_stop_tick();
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - max_latency_ns이내의 c state를 골라서 idle을 수행한다.
+ */
 		next_state = cpuidle_find_deepest_state(drv, dev, max_latency_ns);
 		call_cpuidle(drv, dev, next_state);
 	} else {
@@ -373,6 +437,12 @@ static void cpuidle_idle_call(void)
 		/*
 		 * Ask the cpuidle framework to choose a convenient idle state.
 		 */
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - curr governor에서 c state를 구해온다. 만약 tick을 멈추지 말아야되면 stop_tick
+ *   이 false로 update되있을 것이다.
+ */
 		next_state = cpuidle_select(drv, dev, &stop_tick);
 
 		if (stop_tick || tick_nohz_tick_stopped())
@@ -380,6 +450,10 @@ static void cpuidle_idle_call(void)
 		else
 			tick_nohz_idle_retain_tick();
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - governor에서 선택된 state로 cpuidle을 수행한다.
+ */
 		entered_state = call_cpuidle(drv, dev, next_state);
 		/*
 		 * Give the governor an opportunity to reflect on the outcome
@@ -408,6 +482,14 @@ exit_idle:
  *   일반 유휴 루프 구현
  *
  *   폴링이 지워진 상태로 호출됩니다.
+ *
+ * - 0. resched 요청이 있으면 idle에 진입안하고 자발적 schedule을 수행하러간다.,
+ *   1. cpu가 offline이라면 cpu die로 진입한다.
+ *   2. polling을 해야된다면 cpu_relax()를 polling을 해야되는 원인이 풀릴때까지 
+ *      수행한다.
+ *   3. 그게 아니면 cpuidle driver를 사용해서 idle을 수행한다.
+ *   4. idle이 끝난후 pending된것들을 처리한다.
+ *   5. 그 후 자발적 reschedule한다.
  */
 static void do_idle(void)
 {
@@ -481,6 +563,10 @@ static void do_idle(void)
 		if (cpu_idle_force_poll || tick_check_broadcast_expired()) {
 			tick_nohz_idle_restart_tick();
 			cpu_idle_poll();
+/*
+ * IAMROOT, 2023.03.18:
+ * - poll이 아니면 cpuidle state를 선택해 idle을 수행한다.
+ */
 		} else {
 			cpuidle_idle_call();
 		}
@@ -501,6 +587,8 @@ static void do_idle(void)
  *   것을 알고 이를 PREEMPT_NEED_RESCHED로 전파합니다.
  *
  *   이는 유휴 루프를 폴링하기 위해 상태를 접을 IPI가 없기 때문에 필요합니다.
+ *
+ * - idle이 끝나서 resched을 한번 한다.
  */
 	preempt_set_need_resched();
 	tick_nohz_idle_exit();
@@ -511,12 +599,25 @@ static void do_idle(void)
 	 * need_resched() is set while polling is set. That means that clearing
 	 * polling needs to be visible before doing these things.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papago
+ *   폴링이 설정되어 있는 동안 need_resched()가 설정되면 sched_ttwu_pending()을 
+ *   호출하고 일정을 변경할 것을 약속합니다. 이는 이러한 작업을 수행하기 전에 폴링 
+ *   지우기가 표시되어야 함을 의미합니다.
+ */
 	smp_mb__after_atomic();
 
 	/*
 	 * RCU relies on this call to be done outside of an RCU read-side
 	 * critical section.
 	 */
+/*
+ * IAMROOT, 2023.03.18:
+ * - papgo 
+ *   RCU는 RCU 읽기측 중요 섹션 외부에서 수행되는 이 호출에 의존합니다.
+ * - 여러 pending에 대해(softirq등) 처리한다.
+ */
 	flush_smp_call_function_from_idle();
 	schedule_idle();
 
@@ -587,6 +688,8 @@ EXPORT_SYMBOL_GPL(play_idle_precise);
  * - boot up 마지막에서 호출된다.
  *   cpu 0 : start_kernel -> arch_call_rest_init -> rest_init 에서 호출
  *   그외 cpu : secondary_start_kernel 에서 호출
+ * - idle로 진입전 online이 되기 위한 @state처리를 하고 idle을 수행하며
+ *   resched을 기다린다.
  */
 void cpu_startup_entry(enum cpuhp_state state)
 {
@@ -601,6 +704,7 @@ void cpu_startup_entry(enum cpuhp_state state)
  */
 
 #ifdef CONFIG_SMP
+
 static int
 select_task_rq_idle(struct task_struct *p, int cpu, int flags)
 {
@@ -634,6 +738,14 @@ static void set_next_task_idle(struct rq *rq, struct task_struct *next, bool fir
 }
 
 #ifdef CONFIG_SMP
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - start_kernel()->rest_init()->kernel_init thread생성
+ *   kernel_init -> kernel_init_freeable() -> smp_init()-> 
+ *   idle_threads_init()->idle_init() - cpu for돌면서 fork_idle()->init_idle()에서
+ *   idle이 설정됬다. 즉 booting cpu에 의해 각 cpu마다 idle task가 한개씩 생성된다.
+ */
 static struct task_struct *pick_task_idle(struct rq *rq)
 {
 	return rq->idle;

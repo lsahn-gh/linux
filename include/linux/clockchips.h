@@ -60,7 +60,8 @@ enum clock_event_state {
 /*
  * IAMROOT, 2022.12.03:
  * - C3
- *   clock 절전기능. 전원은 끄지 않고 clock만 멈추는 기능.
+ *   struct cpuidle_state 주석 참고
+ *   clock 절전.
  */
 # define CLOCK_EVT_FEAT_C3STOP		0x000008
 /*

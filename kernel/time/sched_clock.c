@@ -405,6 +405,8 @@ void __init generic_sched_clock_init(void)
  *   이 함수는 sched_clock()의 크리티컬 섹션에서만 호출해야 합니다.
  *   'epoch_cyc'의 올바른 복사본을 관찰하기 위해 중요한 섹션 끝에 있는
  *   read_seqcount_retry()에 의존합니다.
+ *
+ * - suspend시 사용하는 clock read.
  */
 static u64 notrace suspended_sched_clock_read(void)
 {
@@ -413,6 +415,11 @@ static u64 notrace suspended_sched_clock_read(void)
 	return cd.read_data[seq & 1].epoch_cyc;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - sched clock timer를 멈추면서 callback을 suspended_sched_clock_read로
+ *   바꾼다.
+ */
 int sched_clock_suspend(void)
 {
 	struct clock_read_data *rd = &cd.read_data[0];
@@ -424,6 +431,11 @@ int sched_clock_suspend(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.03.18:
+ * - sched clock timer를 다시 동작시키면서 callback을
+ *   cd.actual_read_sched_clock로 변경한다.
+ */
 void sched_clock_resume(void)
 {
 	struct clock_read_data *rd = &cd.read_data[0];

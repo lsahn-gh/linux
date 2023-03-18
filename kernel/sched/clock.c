@@ -441,6 +441,10 @@ EXPORT_SYMBOL_GPL(sched_clock_idle_sleep_event);
 /*
  * We just idled; resync with ktime.
  */
+/*
+ * IAMROOT, 2023.03.18:
+ * - arm64는 stable clock이다. return.
+ */
 void sched_clock_idle_wakeup_event(void)
 {
 	unsigned long flags;

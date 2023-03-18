@@ -47,6 +47,38 @@ struct cpuidle_state_usage {
 
 /*
  * IAMROOT, 2023.03.11:
+ * ----- c state -------
+ *  Intel의 C State
+ *
+ *  Intel에서 제조한 프로세서는 절전 모드에서 세 가지 C-state (C1, C2, C3)를 
+ *  지원합니다.
+ *
+ *  C1 상태는 "Auto Halt" 또는 "MWAIT"라고도 불리며, 프로세서가 대기하면서 
+ *  최소한의 전력을 소비하도록 하는 가장 간단한 절전 모드입니다. 프로세서는 
+ *  일시 중지되어 있지만, 빠른 복귀를 위해 기다리고 있는 시스템 이벤트를 
+ *  감지합니다.
+ *
+ *  C2 상태는 "Stop-Clock" 또는 "HALT"라고도 불리며, 프로세서의 클럭을 
+ *  중지하고 캐시를 비우는 것을 포함하여 C1보다 더 많은 전력을 절약합니다. 
+ *  프로세서는 일시 중지 상태이지만, C1보다 더 많은 시간을 소비하므로 
+ *  기다리고 있는 이벤트를 탐지하기 위해 더 많은 시간이 걸립니다.
+ *
+ *  C3 상태는 "Deep Sleep" 또는 "Sleep"라고도 불리며, 프로세서의 코어 전압과 
+ *  클럭을 낮추어서 더 많은 전력을 절약합니다. C3 상태는 대개 C2보다 더 깊은
+ *  수면 상태이며, 프로세서는 기다리고 있는 이벤트를 탐지하기 위해 C2보다
+ *  더 많은 시간이 걸립니다.
+ *
+ *  이 세 가지 C-state는 프로세서가 실행되는 로드와 같은 여러 가지 요소에 
+ *  따라 다릅니다. 예를 들어, 높은 로드를 처리하는 경우 C1 상태가 더 많이
+ *  사용됩니다. 그러나 낮은 로드를 처리하는 경우에는 C3 상태가 더 많이
+ *  사용됩니다.
+ *
+ *  - C1 : core 정지 
+ *    C2 : c1 + cache clear
+ *    C3 : C2 + 전압 다운. option으로 timer off. 최대 절전
+ *    C5 : core 전원 off
+ * ---------------------
+ *
  * - 디바이스 트리에서 아래 변수를 가져옮.
  *   1. "entry-latency-us" + "exit-latency-us" => idle_state->exit_latency
  *      또는 "wakeup-latency-us" => idle_state->exit_latency
@@ -102,7 +134,17 @@ struct cpuidle_state {
 /* Idle State Flags */
 #define CPUIDLE_FLAG_NONE       	(0x00)
 #define CPUIDLE_FLAG_POLLING		BIT(0) /* polling state */
+/*
+ * IAMROOT, 2023.03.18:
+ * - cluster로 묶은 cpu.
+ */
 #define CPUIDLE_FLAG_COUPLED		BIT(1) /* state applies to multiple cpus */
+
+/*
+ * IAMROOT, 2023.03.18:
+ * - dt 
+ *   local-timer-stop prop
+ */
 #define CPUIDLE_FLAG_TIMER_STOP 	BIT(2) /* timer is stopped on this state */
 #define CPUIDLE_FLAG_UNUSABLE		BIT(3) /* avoid using this state */
 #define CPUIDLE_FLAG_OFF		BIT(4) /* disable this state by default */
@@ -121,6 +163,10 @@ struct cpuidle_device {
 	ktime_t			next_hrtimer;
 
 	int			last_state_idx;
+/*
+ * IAMROOT, 2023.03.18:
+ * - 마지막에 했던 idle시간. 실패했을 경우 0
+ */
 	u64			last_residency_ns;
 	u64			poll_limit_ns;
 	u64			forced_idle_latency_limit_ns;
