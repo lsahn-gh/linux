@@ -1010,8 +1010,7 @@ void wake_q_add_safe(struct wake_q_head *head, struct task_struct *task)
 
 /*
  * IAMROOT, 2023.02.11:
- * - TODO
- *   @head의 task들를 깨운다.
+ * - @head의 task들를 깨운다.
  */
 void wake_up_q(struct wake_q_head *head)
 {
@@ -4523,6 +4522,10 @@ bool try_invoke_on_locked_down_task(struct task_struct *p, bool (*func)(struct t
  * Return: 1 if the process was woken up, 0 if it was already running.
  *
  * This function executes a full memory barrier before accessing the task state.
+ */
+/*
+ * IAMROOT, 2023.03.25:
+ * - TODO. 잠든 task @p를 깨운다.
  */
 int wake_up_process(struct task_struct *p)
 {

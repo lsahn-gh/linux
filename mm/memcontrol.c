@@ -3193,6 +3193,16 @@ out:
  *
  * Returns 0 on success, an error code on failure.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * __memcg_kmem_charge_page: kmem 페이지를 현재 메모리 cgroup에 청구
+ * @page: 청구할 페이지
+ * @gfp: 회수 모드
+ * @order: 할당 순서
+ *
+ * 성공 시 0을 반환하고 실패 시 오류 코드를 반환합니다.
+ */
 int __memcg_kmem_charge_page(struct page *page, gfp_t gfp, int order)
 {
 	struct obj_cgroup *objcg;

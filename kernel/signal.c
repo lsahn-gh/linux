@@ -123,11 +123,22 @@ static bool sig_ignored(struct task_struct *t, int sig, bool force)
  * Re-calculate pending state from the set of locally pending
  * signals, globally pending signals, and blocked signals.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 로컬 보류 신호, 전역 보류 신호 및 차단된 신호 세트에서 보류 상태를 다시
+ * 계산합니다.
+ * - 전체 signal 중에서 @signal 에는 있고 @blocked에는 없으면 pending으로 간주한다
+ */
 static inline bool has_pending_signals(sigset_t *signal, sigset_t *blocked)
 {
 	unsigned long ready;
 	long i;
 
+	/*
+	 * IAMROOT, 2023.03.25:
+	 * - 64bit = case 1, 32bit = case2
+	 */
 	switch (_NSIG_WORDS) {
 	default:
 		for (i = _NSIG_WORDS, ready = 0; --i >= 0 ;)
@@ -151,6 +162,11 @@ static inline bool has_pending_signals(sigset_t *signal, sigset_t *blocked)
 
 #define PENDING(p,b) has_pending_signals(&(p)->signal, (b))
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - TIF_SIGPENDING flag를 설정할 수 있는 경우의 조건을 재계산 해서 @t에 설정한다
+ * - Return: TIF_SIGPENDING flag가 설정된 경우 true 아니면 false
+ */
 static bool recalc_sigpending_tsk(struct task_struct *t)
 {
 	if ((t->jobctl & (JOBCTL_PENDING_MASK | JOBCTL_TRAP_FREEZE)) ||
@@ -166,6 +182,13 @@ static bool recalc_sigpending_tsk(struct task_struct *t)
 	 * when it's possible the current syscall is returning -ERESTART*.
 	 * So we don't clear it here, and only callers who know they should do.
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 다른 스레드에서 플래그를 지우거나 현재 시스템 호출이 -ERESTART*를 반환하는 것이
+	 * 가능할 때 현재에서 플래그를 지우면 안 됩니다. 따라서 여기에서는 이를 지우지 않고
+	 * 수행해야 한다는 것을 알고 있는 발신자만 지웁니다.
+	 */
 	return false;
 }
 
@@ -179,6 +202,12 @@ void recalc_sigpending_and_wake(struct task_struct *t)
 		signal_wake_up(t, 0);
 }
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - current task가 sigpending 상태가 아니면서 freezing이 가능하지 않은 경우
+ *   TIF_SIGPENDING flag 제거
+ * - NOTE. recalc_sigpending_tsk에서는 TIF_SIGPENDING flag 설정
+ */
 void recalc_sigpending(void)
 {
 	if (!recalc_sigpending_tsk(current) && !freezing(current))

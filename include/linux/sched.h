@@ -1568,6 +1568,10 @@ struct task_struct {
  *   nid형태로 기록한다.
  */
 	short				il_prev;
+	/*
+	 * IAMROOT, 2023.03.25:
+	 * - pref_node_fork : fork 시 어느 node로 갈 것인가
+	 */
 	short				pref_node_fork;
 #endif
 #ifdef CONFIG_NUMA_BALANCING

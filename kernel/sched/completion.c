@@ -103,6 +103,7 @@ EXPORT_SYMBOL(complete_all);
  *   문제가 있기 때문이다. 아래 커밋 참조.
  *   a5c6234e10280b3ec65e2410ce34904a2580e5f8
  *   completion: Use simple wait queues
+ * - Return: 남은 timeout. 단 0일 경우는 1로 변경해서 반환
  */
 static inline long __sched
 do_wait_for_common(struct completion *x,

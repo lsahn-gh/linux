@@ -67,6 +67,10 @@ void print_stop_info(const char *log_lvl, struct task_struct *task)
 static DEFINE_MUTEX(stop_cpus_mutex);
 static bool stop_cpus_in_progress;
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - @nr_todo설정및, completion 구조체를 초기화한다
+ */
 static void cpu_stop_init_done(struct cpu_stop_done *done, unsigned int nr_todo)
 {
 	memset(done, 0, sizeof(*done));
@@ -78,6 +82,7 @@ static void cpu_stop_init_done(struct cpu_stop_done *done, unsigned int nr_todo)
 /*
  * IAMROOT, 2023.02.11:
  * - @done에 대해서 complete를 해준다.
+ * - 요청 cpu 수(nr_todo)만큼 작업이 끝나면 complete 호출
  */
 static void cpu_stop_signal_done(struct cpu_stop_done *done)
 {
@@ -87,8 +92,8 @@ static void cpu_stop_signal_done(struct cpu_stop_done *done)
 
 /*
  * IAMROOT, 2023.02.11:
- * - @work에 @stopper->works를 추가한다.
- *   @wakeq에 @stopper task를 추가한다.
+ * - @work->list를 @stopper->works에 추가한다.
+ *   @wakeq에 @stopper->thread 를 추가한다.
  */
 static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
 					struct cpu_stop_work *work,
@@ -101,8 +106,9 @@ static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
 /* queue @work to @stopper.  if offline, @work is completed immediately */
 /*
  * IAMROOT, 2023.02.11:
- * - stop queue work에 @work를 넣고 깨운다.
- *   동작중인 task를 강제로 stop시키고 빼오기 위함이다
+ * - 1. @work->list와 per_cpu stopper 를 stopper->works와 wakeq에 추가
+ *   2. stopper를 깨워서 @work의 fn을 처리한다.
+ * - Return: stopper->enabled
  */
 static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
 {
@@ -225,6 +231,10 @@ notrace void __weak stop_machine_yield(const struct cpumask *cpumask)
 }
 
 /* This is the cpu_stop function which stops the CPU. */
+/*
+ * IAMROOT, 2023.03.25:
+ * - @data의 fn을 호출(msdata->fn(msdata->data))
+ */
 static int multi_cpu_stop(void *data)
 {
 	struct multi_stop_data *msdata = data;
@@ -417,6 +427,11 @@ bool stop_one_cpu_nowait(unsigned int cpu, cpu_stop_fn_t fn, void *arg,
 	return cpu_stop_queue_work(cpu, work_buf);
 }
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - stopper가 enable 된 경우 work를 추가 하고 stopper 를 깨워서 work를 처리하게 한다.
+ * - Return: 한개 이상의 stopper 가 enabled 인 경우 true
+ */
 static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 				 cpu_stop_fn_t fn, void *arg,
 				 struct cpu_stop_done *done)
@@ -429,6 +444,12 @@ static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 	 * Disable preemption while queueing to avoid getting
 	 * preempted by a stopper which might wait for other stoppers
 	 * to enter @fn which can lead to deadlock.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 교착 상태로 이어질 수 있는 다른 스토퍼가 @fn에 들어갈 때까지 기다릴 수 있는
+	 * 스토퍼에 의해 선점되지 않도록 대기열에 있는 동안 선점을 비활성화합니다.
 	 */
 	preempt_disable();
 	stop_cpus_in_progress = true;
@@ -449,6 +470,11 @@ static bool queue_stop_cpus_work(const struct cpumask *cpumask,
 	return queued;
 }
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - 1. done 구조체 초기화
+ *   2. cpumask에 해당하는 stopper를 깨우고 fn 수행후 완료되면 함수를 빠져 나온다.
+ */
 static int __stop_cpus(const struct cpumask *cpumask,
 		       cpu_stop_fn_t fn, void *arg)
 {
@@ -488,6 +514,36 @@ static int __stop_cpus(const struct cpumask *cpumask,
  * -ENOENT if @fn(@arg) was not executed at all because all cpus in
  * @cpumask were offline; otherwise, 0 if all executions of @fn
  * returned 0, any non zero return value if any returned non zero.
+ */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * stop_cpus - 다중 cpus 중지
+ * @cpumask: 중지할 cpus
+ * @fn: 실행할 함수:
+ * @arg: @fn에 대한 인수
+ *
+ * @cpumask의 온라인 cpus에서 @fn(@arg)을 실행합니다. 각 대상 CPU에서
+ * @fn은 CPU의 작업을 선점하고 독점하는 우선 순위가 가장 높은 프로세스 컨텍스트에서
+ * 실행됩니다. 이 함수는 모든 실행이 완료된 후 반환됩니다.
+ *
+ * 이 함수는 @fn이 완료될 때까지 @cpumask의 CPU가 온라인 상태를 유지하도록 보장하지
+ * 않습니다. 일부 CPU가 중간에 다운되면 CPU에서 실행이 부분적으로 또는 완전히 다른 CPU에서
+ * 발생할 수 있습니다. @fn은 이에 대비하거나 호출자가 이 기능이 완료될 때까지 CPU가 온라인
+ * 상태를 유지하도록 해야 합니다.
+ *
+ * 모든 stop_cpus() 호출은 @fn이 모든 CPU가 실행을 시작할 때까지 안전하게 기다릴 수
+ * 있도록 직렬화됩니다.
+ *
+ * 컨텍스트:
+ * 잘 수 있습니다.
+ *
+ * 반환값:
+ * -ENOENT @cpumask의 모든 CPU가 오프라인 상태였기 때문에 @fn(@arg)이 전혀 실행되지
+ * 않은 경우; 그렇지 않으면 @fn의 모든 실행이 0을 반환하면 0, 0이 아닌 값을 반환하면 0이
+ * 아닌 값을 반환합니다.
+ *
+ * - NOTE. CONTEXT가 잠들수 있다는 의미는 전달된 fn에서 sleep api를 사용할 수 있다는 의미
  */
 static int stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
 {
@@ -643,6 +699,12 @@ int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 		 * early in boot before stop_machine() has been
 		 * initialized.
 		 */
+		/*
+		 * IAMROOT. 2023.03.25:
+		 * - google-translate
+		 * stop_machine()이 초기화되기 전에 부팅 초기에 stop_machine()이
+		 * 호출되는 경우를 처리합니다.
+		 */
 		unsigned long flags;
 		int ret;
 
@@ -658,12 +720,16 @@ int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 
 	/* Set the initial state and stop all online cpus. */
 	set_state(&msdata, MULTI_STOP_PREPARE);
+	/*
+	 * IAMROOT, 2023.03.25:
+	 * - stopper thread 는 multi_cpu_stop 함수를 통해서 msdata->fn을 호출한다
+	 */
 	return stop_cpus(cpu_online_mask, multi_cpu_stop, &msdata);
 }
 
 /*
  * IAMROOT, 2022.02.17:
- * - @cpus들을 멈추고 @fn을 workqueue로 실행후 완료될때까지 기다린다.
+ * - @cpus들을 멈추고 @fn을 stopper thread 에서 호출하여 실행후 완료될때까지 기다린다.
  */
 int stop_machine(cpu_stop_fn_t fn, void *data, const struct cpumask *cpus)
 {

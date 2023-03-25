@@ -360,6 +360,12 @@ static int kthread(void *_create)
 }
 
 /* called from kernel_clone() to get node information for about to be created task */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 생성할 작업에 대한 노드 정보를 얻기 위해 kernel_clone()에서 호출
+ * - NUMA 설정인 경우는 kthread_task 인 경우만 pref_node_fork 선택
+ */
 int tsk_fork_get_node(struct task_struct *tsk)
 {
 #ifdef CONFIG_NUMA

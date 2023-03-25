@@ -81,6 +81,15 @@ static inline void complete_release(struct completion *x) {}
  * This inline function will initialize a dynamically created completion
  * structure.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * init_completion - 동적으로 할당된 완료 초기화
+ * @x: 초기화될 완료 구조에 대한 포인터
+ *
+ * 이 인라인 함수는 동적으로 생성된 완료 구조를 초기화합니다.
+ * - done 과 swait queue 초기화
+ */
 static inline void init_completion(struct completion *x)
 {
 	x->done = 0;

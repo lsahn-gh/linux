@@ -37,6 +37,32 @@
  * very specific realtime constraints -- it is best to stick with the regular
  * wait queues in most cases.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 단순 대기 대기열은 의미상 일반 대기 대기열(wait.h)과 매우 다릅니다. 가장 중요한
+ * 차이점은 단순 waitqueue가 결정론적 동작을 허용한다는 것입니다. IOW는 IRQ 및 잠금
+ * 유지 시간이 엄격하게 제한되어 있습니다.
+ *
+ * 주로 이것은 두 가지에 의해 달성됩니다. 먼저 IRQ에서 swake_up_all을 비활성화하지 않고
+ * 깨어날 때마다 잠금을 해제하여 우선 순위가 더 높은 작업을 실행할 기회를 제공합니다.
+ *
+ * 둘째, 우리는 다른 waitqueue 코드의 많은 기능을 삭제해야 했습니다. 특히:
+ *
+ * - INTERRUPTIBLE 및 UNINTERRUPTIBLE 혼합은 동일한 대기 대기열에서 잠자고 있습니다.
+ *   올바른 슬리퍼 상태에 대한 O(n) 조회를 피하기 위해 모든 웨이크업은 TASK_NORMAL입니다.
+ *
+ * - !exclusive 모드; O(n) 웨이크업으로 이어지기 때문에 모든 것이 배타적입니다. 따라서
+ *   swake_up_one은 _one_ waiter만 깨울 것입니다.
+ *
+ * - 사용자 정의 깨우기 콜백 기능; 랜덤 코드에 대해 어떠한 보증도 할 수 없기 때문입니다. 이를
+ *   통해 RT에서 swait를 사용할 수 있으므로 원시 스핀록을 swait 큐 헤드에 사용할 수
+ *   있습니다.
+ *
+ * 이들의 부작용으로; 데이터 구조는 더 임시적이지만 더 얇습니다. 위의
+ * 모든 경우에 간단한 대기 대기열은 매우 특정한 실시간 제약 조건에서만 _오직_
+ * 사용해야 합니다. 대부분의 경우 일반 대기 대기열을 사용하는 것이 가장 좋습니다.
+ */
 
 struct task_struct;
 
@@ -50,6 +76,12 @@ struct swait_queue {
 	struct list_head	task_list;
 };
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - #define 대문자 : 컴파일 타임에 할당
+ *   #define 소문자 : 동적 할당
+ * - 위는 일반적 사용법이다.
+ */
 #define __SWAITQUEUE_INITIALIZER(name) {				\
 	.task		= current,					\
 	.task_list	= LIST_HEAD_INIT((name).task_list),		\
@@ -69,6 +101,10 @@ struct swait_queue {
 extern void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 				    struct lock_class_key *key);
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - @q(swait queue 리스트)를 초기화 한다
+ */
 #define init_swait_queue_head(q)				\
 	do {							\
 		static struct lock_class_key __key;		\

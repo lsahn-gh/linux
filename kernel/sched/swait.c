@@ -4,6 +4,10 @@
  */
 #include "sched.h"
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - q->task_list 초기화
+ */
 void __init_swait_queue_head(struct swait_queue_head *q, const char *name,
 			     struct lock_class_key *key)
 {
@@ -139,6 +143,11 @@ long prepare_to_swait_event(struct swait_queue_head *q, struct swait_queue *wait
 }
 EXPORT_SYMBOL(prepare_to_swait_event);
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - 깨어난 current task 상태를 TASK_RUNNING으로 설정하고
+ *   swait queue 에서 제거
+ */
 void __finish_swait(struct swait_queue_head *q, struct swait_queue *wait)
 {
 	__set_current_state(TASK_RUNNING);

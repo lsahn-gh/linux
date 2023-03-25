@@ -166,6 +166,10 @@ void __weak arch_release_task_struct(struct task_struct *tsk)
 #ifndef CONFIG_ARCH_TASK_STRUCT_ALLOCATOR
 static struct kmem_cache *task_struct_cachep;
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - kmem_cache task 구조체를 할당받아옮.
+ */
 static inline struct task_struct *alloc_task_struct_node(int node)
 {
 	return kmem_cache_alloc_node(task_struct_cachep, GFP_KERNEL, node);
@@ -212,12 +216,21 @@ static int free_vm_stack_cache(unsigned int cpu)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - task 용 커널 stack을 할당 받는다
+ */
 static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 {
 #ifdef CONFIG_VMAP_STACK
 	void *stack;
 	int i;
 
+	/*
+	 * IAMROOT, 2023.03.25:
+	 * - 2개의 percpu cached_stacks에서 할당하고 실패할 경우 아래 vmalloc으로
+	 *   할당
+	 */
 	for (i = 0; i < NR_CACHED_STACKS; i++) {
 		struct vm_struct *s;
 
@@ -242,6 +255,12 @@ static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 	 * so memcg accounting is performed manually on assigning/releasing
 	 * stacks to tasks. Drop __GFP_ACCOUNT.
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 할당된 스택은 캐시되고 나중에 새 스레드에 의해 재사용되므로 스택을 작업에
+	 * 할당/해제할 때 memcg 계정이 수동으로 수행됩니다. __GFP_ACCOUNT를 삭제합니다.
+	 */
 	stack = __vmalloc_node_range(THREAD_SIZE, THREAD_ALIGN,
 				     VMALLOC_START, VMALLOC_END,
 				     THREADINFO_GFP & ~__GFP_ACCOUNT,
@@ -252,6 +271,12 @@ static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 	 * We can't call find_vm_area() in interrupt context, and
 	 * free_thread_stack() can be called in interrupt context,
 	 * so cache the vm_struct.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 인터럽트 컨텍스트에서 find_vm_area()를 호출할 수 없으며 인터럽트 컨텍스트에서
+	 * free_thread_stack()을 호출할 수 있으므로 vm_struct를 캐시합니다.
 	 */
 	if (stack) {
 		tsk->stack_vm_area = find_vm_area(stack);
@@ -270,6 +295,11 @@ static unsigned long *alloc_thread_stack_node(struct task_struct *tsk, int node)
 #endif
 }
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - 반납시 cached_stacks 에 반납을 하고 cached_stacks 이 모두 차 있는 경우
+ *   vfree를 통해 반납한다.
+ */
 static inline void free_thread_stack(struct task_struct *tsk)
 {
 #ifdef CONFIG_VMAP_STACK
@@ -401,6 +431,10 @@ static void account_kernel_stack(struct task_struct *tsk, int account)
 	}
 }
 
+/*
+ * IAMROOT, 2023.03.25:
+ * - cgroup memcg에서 설정한 메모리 한도 초과시 에러 발생시키는 목적
+ */
 static int memcg_charge_kernel_stack(struct task_struct *tsk)
 {
 #ifdef CONFIG_VMAP_STACK
@@ -1935,6 +1969,15 @@ static void copy_oom_score_adj(u64 clone_flags, struct task_struct *tsk)
  * parts of the process environment (as per the clone
  * flags). The actual kick-off is left to the caller.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 이렇게 하면 이전 프로세스의 복사본으로 새 프로세스가 생성되지만 실제로는 아직
+ * 시작되지 않습니다.
+ *
+ * 레지스터와 프로세스 환경의 모든 해당 부분을 복제 플래그에
+ * 따라 복사합니다. 실제 킥오프는 호출자에게 맡겨집니다.
+ */
 static __latent_entropy struct task_struct *copy_process(
 					struct pid *pid,
 					int trace,
@@ -1952,6 +1995,11 @@ static __latent_entropy struct task_struct *copy_process(
 	 * Don't allow sharing the root directory with processes in a different
 	 * namespace
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 다른 네임스페이스의 프로세스와 루트 디렉토리 공유를 허용하지 않음
+	 */
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
 
@@ -1962,6 +2010,12 @@ static __latent_entropy struct task_struct *copy_process(
 	 * Thread groups must share signals as well, and detached threads
 	 * can only be started up within the thread group.
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 스레드 그룹도 신호를 공유해야 하며 분리된 스레드는 스레드 그룹 내에서만 시작할
+	 * 수 있습니다.
+	 */
 	if ((clone_flags & CLONE_THREAD) && !(clone_flags & CLONE_SIGHAND))
 		return ERR_PTR(-EINVAL);
 
@@ -1969,6 +2023,12 @@ static __latent_entropy struct task_struct *copy_process(
 	 * Shared signal handlers imply shared VM. By way of the above,
 	 * thread groups also imply shared VM. Blocking this case allows
 	 * for various simplifications in other code.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 공유 신호 핸들러는 공유 VM을 의미합니다. 위의 방식으로 스레드 그룹은 공유 VM도
+	 * 의미합니다. 이 경우를 차단하면 다른 코드에서 다양한 단순화가 가능합니다.
 	 */
 	if ((clone_flags & CLONE_SIGHAND) && !(clone_flags & CLONE_VM))
 		return ERR_PTR(-EINVAL);
@@ -1979,6 +2039,13 @@ static __latent_entropy struct task_struct *copy_process(
 	 * multi-rooted process trees, prevent global and container-inits
 	 * from creating siblings.
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * global init의 형제는 부모(swapper)에 의해 회수되지 않기 때문에 종료 시 좀비로
+	 * 남아 있습니다. 이 문제를 해결하고 다중 루트 프로세스 트리를 방지하려면 전역 및
+	 * 컨테이너 초기화가 형제를 생성하지 않도록 합니다.
+	 */
 	if ((clone_flags & CLONE_PARENT) &&
 				current->signal->flags & SIGNAL_UNKILLABLE)
 		return ERR_PTR(-EINVAL);
@@ -1986,6 +2053,12 @@ static __latent_entropy struct task_struct *copy_process(
 	/*
 	 * If the new process will be in a different pid or user namespace
 	 * do not allow it to share a thread group with the forking task.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 새 프로세스가 다른 pid 또는 사용자 네임스페이스에 있는 경우 포크 작업과 스레드
+	 * 그룹을 공유하지 않도록 합니다.
 	 */
 	if (clone_flags & CLONE_THREAD) {
 		if ((clone_flags & (CLONE_NEWUSER | CLONE_NEWPID)) ||
@@ -1996,6 +2069,12 @@ static __latent_entropy struct task_struct *copy_process(
 	/*
 	 * If the new process will be in a different time namespace
 	 * do not allow it to share VM or a thread group with the forking task.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 새 프로세스가 다른 시간 네임스페이스에 있을 경우 포크 작업과 VM 또는 스레드
+	 * 그룹을 공유하도록 허용하지 마십시오.
 	 */
 	if (clone_flags & (CLONE_THREAD | CLONE_VM)) {
 		if (nsp->time_ns != nsp->time_ns_for_children)
@@ -2008,6 +2087,12 @@ static __latent_entropy struct task_struct *copy_process(
 		 *   reuse it later for CLONE_PIDFD.
 		 * - CLONE_THREAD is blocked until someone really needs it.
 		 */
+		/*
+		 * IAMROOT. 2023.03.25:
+		 * - google-translate
+		 * - CLONE_DETACHED는 나중에 CLONE_PIDFD에 재사용할 수 있도록 차단됩니다.
+		 * - CLONE_THREAD는 누군가가 정말로 필요로 할 때까지 차단됩니다.
+		 */
 		if (clone_flags & (CLONE_DETACHED | CLONE_THREAD))
 			return ERR_PTR(-EINVAL);
 	}
@@ -2017,6 +2102,13 @@ static __latent_entropy struct task_struct *copy_process(
 	 * before the fork happens.  Collect up signals sent to multiple
 	 * processes that happen during the fork and delay them so that
 	 * they appear to happen after the fork.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 분기가 발생하기 전에 이 지점 이전에 수신된 모든 신호를 강제로 전달합니다. 포크
+	 * 중에 발생하는 여러 프로세스로 전송되는 신호를 수집하고 지연시켜 포크 이후에
+	 * 발생하는 것처럼 보이도록 합니다.
 	 */
 	sigemptyset(&delayed.signal);
 	INIT_HLIST_NODE(&delayed.node);
@@ -2039,6 +2131,11 @@ static __latent_entropy struct task_struct *copy_process(
 		 * Mark us an IO worker, and block any signal that isn't
 		 * fatal or STOP
 		 */
+		/*
+		 * IAMROOT. 2023.03.25:
+		 * - google-translate
+		 * 우리를 IO 작업자로 표시하고 치명적이지 않거나 중지되지 않은 신호를 차단하십시오.
+		 */
 		p->flags |= PF_IO_WORKER;
 		siginitsetinv(&p->blocked, sigmask(SIGKILL)|sigmask(SIGSTOP));
 	}
@@ -2048,6 +2145,13 @@ static __latent_entropy struct task_struct *copy_process(
 	 * to any of the bad_fork_* labels. This is to avoid freeing
 	 * p->set_child_tid which is (ab)used as a kthread's data pointer for
 	 * kernel threads (PF_KTHREAD).
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 이것은 free_task()를 호출하기 전에, 즉 bad_fork_* 레이블로 점프하기 전에
+	 * _반드시_ 발생합니다. 이는 커널 스레드(PF_KTHREAD)에 대한 kthread의 데이터
+	 * 포인터로 (ab) 사용되는 p->set_child_tid를 해제하는 것을 방지하기 위한 것입니다.
 	 */
 	p->set_child_tid = (clone_flags & CLONE_CHILD_SETTID) ? args->child_tid : NULL;
 	/*
@@ -2079,6 +2183,13 @@ static __latent_entropy struct task_struct *copy_process(
 	 * If multiple threads are within copy_process(), then this check
 	 * triggers too late. This doesn't hurt, the check is only there
 	 * to stop root fork bombs.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 여러 스레드가 copy_process() 내에 있으면 이 확인이 너무 늦게
+	 * 트리거됩니다. 이것은 아프지 않습니다. 확인은 루트 포크 폭탄을 중지하기 위한
+	 * 것입니다.
 	 */
 	retval = -EAGAIN;
 	if (data_race(nr_threads >= max_threads))
@@ -2548,6 +2659,15 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
  *
  * args->exit_signal is expected to be checked for sanity by the caller.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 자, 이것이 메인 포크 루틴입니다.
+ *
+ * 프로세스를 복사하고 성공하면 시작하고 필요한 경우 VM을 사용하여 완료될 때까지 기다립니다.
+ *
+ * args->exit_signal은 호출자가 정상인지 확인해야 합니다.
+ */
 pid_t kernel_clone(struct kernel_clone_args *args)
 {
 	u64 clone_flags = args->flags;
@@ -2566,6 +2686,16 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	 * here has the advantage that we don't need to have a separate helper
 	 * to check for legacy clone().
 	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 레거시 clone() 호출의 경우 CLONE_PIDFD는 parent_tid 인수를 사용하여 pidfd를
+	 * 반환합니다. 따라서 CLONE_PIDFD와 CLONE_PARENT_SETTID는 상호
+	 * 배타적입니다. clone3()을 통해 CLONE_PIDFD는 struct clone_args에서 별도의
+	 * 필드를 키웠고 둘 다 동일한 메모리 위치를 가리키도록 하는 것은 여전히 ​​이치에 맞지
+	 * 않습니다. 여기서 이 확인을 수행하면 레거시 clone()을 확인하기 위해 별도의
+	 * 도우미가 필요하지 않다는 이점이 있습니다.
+	 */
 	if ((args->flags & CLONE_PIDFD) &&
 	    (args->flags & CLONE_PARENT_SETTID) &&
 	    (args->pidfd == args->parent_tid))
@@ -2576,6 +2706,13 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	 * called from kernel_thread or CLONE_UNTRACED is explicitly
 	 * requested, no event is reported; otherwise, report if the event
 	 * for the type of forking is enabled.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * ptracer에 보고할 이벤트와 보고할 이벤트를 결정합니다. kernel_thread에서
+	 * 호출되거나 CLONE_UNTRACED가 명시적으로 요청되면 이벤트가 보고되지
+	 * 않습니다. 그렇지 않으면 분기 유형에 대한 이벤트가 활성화되었는지 보고합니다.
 	 */
 	if (!(clone_flags & CLONE_UNTRACED)) {
 		if (clone_flags & CLONE_VFORK)
@@ -2598,6 +2735,12 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	/*
 	 * Do this prior waking up the new thread - the thread pointer
 	 * might get invalid after that point, if the thread exits quickly.
+	 */
+	/*
+	 * IAMROOT. 2023.03.25:
+	 * - google-translate
+	 * 새 스레드를 깨우기 전에 이 작업을 수행하십시오. 스레드가 빨리 종료되면 해당 지점
+	 * 이후에 스레드 포인터가 유효하지 않게 될 수 있습니다.
 	 */
 	trace_sched_process_fork(current, p);
 
@@ -2674,6 +2817,11 @@ SYSCALL_DEFINE0(vfork)
 
 #ifdef __ARCH_WANT_SYS_CLONE
 #ifdef CONFIG_CLONE_BACKWARDS
+/*
+ * IAMROOT, 2023.03.25:
+ * - fork, clone, pthread_create 가 glibc를 통해서 아래 sys_clone을 호출한다.
+ *   pthread_create CLONE_VM flag 가 추가된다.
+ */
 SYSCALL_DEFINE5(clone, unsigned long, clone_flags, unsigned long, newsp,
 		 int __user *, parent_tidptr,
 		 unsigned long, tls,

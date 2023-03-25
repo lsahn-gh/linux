@@ -1122,6 +1122,15 @@ arch_atomic_sub_and_test(int i, atomic_t *v)
  * returns true if the result is 0, or false for all other
  * cases.
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * arch_atomic_dec_and_test - 감소 및 테스트
+ * @v: atomic_t 유형의 포인터
+ *
+ * 원자적으로 @v를 1씩 감소시키고 결과가 0이면 true를 반환하고 다른 모든 경우에는 false를
+ * 반환합니다.
+ */
 static __always_inline bool
 arch_atomic_dec_and_test(atomic_t *v)
 {

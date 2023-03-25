@@ -19,6 +19,11 @@ EXPORT_SYMBOL(system_freezing_cnt);
 /* indicate whether PM freezing is in effect, protected by
  * system_transition_mutex
  */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * PM 고정이 적용되는지 여부를 표시하고 system_transition_mutex에 의해 보호됨
+ */
 bool pm_freezing;
 bool pm_nosig_freezing;
 
@@ -33,6 +38,18 @@ static DEFINE_SPINLOCK(freezer_lock);
  * and tests whether @p needs to enter and stay in frozen state.  Can be
  * called under any context.  The freezers are responsible for ensuring the
  * target tasks see the updated state.
+ */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * frozen_slow_path - 작업을 frozen해야 하는지 여부를 테스트하기 위한 느린 경로
+ * @p: 테스트할 작업
+ *
+ * 이 함수는 system_freezing_cnt가 0이 아닌 경우 frozen()에 의해
+ * 호출되고 @p가 frozen 상태에 들어가고 유지해야 하는지 여부를 테스트합니다. 모든
+ * 컨텍스트에서 호출할 수 있습니다. Freezer는 대상 작업이 업데이트된 상태를
+ * 확인하도록 하는 역할을 합니다.
+ * - Return: freeze 가능 하면 true
  */
 bool freezing_slow_path(struct task_struct *p)
 {
@@ -53,6 +70,11 @@ bool freezing_slow_path(struct task_struct *p)
 EXPORT_SYMBOL(freezing_slow_path);
 
 /* Refrigerator is place where frozen processes are stored :-). */
+/*
+ * IAMROOT. 2023.03.25:
+ * - google-translate
+ * 냉장고는 냉동 공정을 보관하는 곳입니다 :-).
+ */
 bool __refrigerator(bool check_kthr_stop)
 {
 	/* Hmm, should we be allowed to suspend when there are realtime
