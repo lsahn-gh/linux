@@ -30,6 +30,11 @@
  * - page가 가리키는 memory를 memset한다.
  */
 #define clear_page(page)	memset((page), 0, PAGE_SIZE)
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - 통으로 복사한다.
+ */
 #define copy_page(to,from)	memcpy((to), (from), PAGE_SIZE)
 
 #define clear_user_page(page, vaddr, pg)	clear_page(page)

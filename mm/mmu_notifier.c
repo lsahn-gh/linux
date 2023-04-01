@@ -533,6 +533,10 @@ static int mn_hlist_invalidate_range_start(
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - 
+ */
 int __mmu_notifier_invalidate_range_start(struct mmu_notifier_range *range)
 {
 	struct mmu_notifier_subscriptions *subscriptions =

@@ -249,6 +249,23 @@ error:
  *
  * Call commit_creds() or abort_creds() to clean up.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   prepare_creds - 수정할 새 자격 증명 세트를 준비합니다.
+ *
+ *   수정할 새 작업 자격 증명 세트를 준비합니다. 작업의 cred는 일반적으로 직접 
+ *   수정하면 안 되므로 이 함수는 호출자가 수정한 다음 commit_creds()를 호출하여 
+ *   커밋하는 새 복사본을 준비하는 데 사용됩니다.
+ *
+ *   준비에는 수정을 위해 객관적인 신임장 사본을 만드는 작업이 포함됩니다.
+ *
+ *   성공하면 새 자격 증명에 대한 포인터를 반환하고 그렇지 않으면 NULL을 
+ *   반환합니다.
+ *
+ *   정리하려면 commit_creds() 또는 abort_creds()를 호출하십시오.
+ * - creds에 대한 준비 처리.
+ */
 struct cred *prepare_creds(void)
 {
 	struct task_struct *task = current;
@@ -337,6 +354,18 @@ struct cred *prepare_exec_creds(void)
  * The new process gets the current process's subjective credentials as its
  * objective and subjective credentials
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   fork()에 의해 생성된 새 프로세스에 대한 자격 증명을 복사합니다.
+ *
+ *   가능하면 공유하지만 경우에 따라 새로운 세트를 생성해야 합니다. 
+ *
+ *   새 프로세스는 현재 프로세스의 주관적 자격 증명을 객관적이고 주관적인 자격 
+ *   증명으로 가져옵니다. 
+ *
+ * - cred에 대한 값 초기화.
+ */
 int copy_creds(struct task_struct *p, unsigned long clone_flags)
 {
 	struct cred *new;
@@ -362,6 +391,10 @@ int copy_creds(struct task_struct *p, unsigned long clone_flags)
 		return 0;
 	}
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - 자격증명관련 초기화.
+ */
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;

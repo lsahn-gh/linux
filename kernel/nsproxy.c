@@ -148,6 +148,11 @@ out_ns:
  * called from clone.  This now handles copy for nsproxy and all
  * namespaces therein.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - @flags에 따라 namespace가 별도로 필요한경우 new ns를 만든다.
+ *   그게 아니면 old에서 ref up만한다.
+ */
 int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 {
 	struct nsproxy *old_ns = tsk->nsproxy;
@@ -171,6 +176,15 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 	 * means share undolist with parent, so we must forbid using
 	 * it along with CLONE_NEWIPC.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   CLONE_NEWIPC는 실행 취소 목록에서 분리되어야 합니다.
+ *   새 ipc 네임스페이스로 전환한 후 이전 네임스페이스의 세마포어 
+ *   배열에 연결할 수 없습니다. 클론 용어로 CLONE_SYSVSEM은 부모와 
+ *   공유 취소 목록을 의미하므로 CLONE_NEWIPC와 함께 사용하는 것을 
+ *   금지해야 합니다.
+ */
 	if ((flags & (CLONE_NEWIPC | CLONE_SYSVSEM)) ==
 		(CLONE_NEWIPC | CLONE_SYSVSEM))
 		return -EINVAL;

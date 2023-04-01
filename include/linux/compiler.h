@@ -211,6 +211,17 @@ void ftrace_likely_update(struct ftrace_likely_data *f, int val,
  * This macro *does not* affect normal code generation, but is a hint
  * to tooling that data races here are to be ignored.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago 
+ *   data_race - 의도적인 데이터 경쟁을 포함하는 것으로 표현식을 표시합니다.
+ *   이 data_race() 매크로는 데이터 경쟁을 용서해야 하는 상황에 유용합니다. 
+ *   한 가지 예는 공유 변수에 액세스하지만 핵심 동기화 설계의 일부가 아닌 진단 
+ *   코드입니다.
+ *
+ *   이 매크로는 정상적인 코드 생성에 영향을 미치지 *않지만* 여기서 데이터 
+ *   경합을 무시해야 한다는 도구에 대한 힌트입니다.
+ */
 #define data_race(expr)							\
 ({									\
 	__unqual_scalar_typeof(({ expr; })) __v = ({			\

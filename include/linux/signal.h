@@ -245,6 +245,10 @@ static inline void siginitset(sigset_t *set, unsigned long mask)
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - PASS
+ */
 static inline void siginitsetinv(sigset_t *set, unsigned long mask)
 {
 	set->sig[0] = ~mask;
@@ -260,6 +264,10 @@ static inline void siginitsetinv(sigset_t *set, unsigned long mask)
 
 #endif /* __HAVE_ARCH_SIG_SETOPS */
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - sig pending 초기화.
+ */
 static inline void init_sigpending(struct sigpending *sig)
 {
 	sigemptyset(&sig->signal);

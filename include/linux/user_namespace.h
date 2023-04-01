@@ -120,6 +120,10 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid);
 struct ucounts * __must_check get_ucounts(struct ucounts *ucounts);
 void put_ucounts(struct ucounts *ucounts);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @type에 대한 ucount를 읽어온다.
+ */
 static inline long get_ucounts_value(struct ucounts *ucounts, enum ucount_type type)
 {
 	return atomic_long_read(&ucounts->ucount[type]);

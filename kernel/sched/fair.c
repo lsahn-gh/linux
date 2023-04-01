@@ -1019,6 +1019,10 @@ static unsigned long task_h_load(struct task_struct *p);
 static unsigned long capacity_of(int cpu);
 
 /* Give new sched_entity start runnable values to heavy its load in infant time */
+/*
+ * IAMROOT, 2023.04.01:
+ * - task인 경우에만 full load로 수행한다. 그렇지 않은 경우 0으로 시작한다.
+ */
 void init_entity_runnable_average(struct sched_entity *se)
 {
 	struct sched_avg *sa = &se->avg;
@@ -1031,6 +1035,14 @@ void init_entity_runnable_average(struct sched_entity *se)
 	 * Group entities are initialized with zero load to reflect the fact that
 	 * nothing has been attached to the task group yet.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   작업은 full load 로 초기화되어 실제 로드 수준으로 안정화될 때까지 무거운 
+ *   작업으로 표시됩니다.
+ *   그룹 엔터티는 작업 그룹에 아직 아무 것도 연결되지 않았다는 사실을 반영하기 
+ *   위해 로드가 없는 상태로 초기화됩니다.
+ */
 	if (entity_is_task(se))
 		sa->load_avg = scale_load_down(se->load.weight);
 

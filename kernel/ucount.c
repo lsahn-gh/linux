@@ -18,9 +18,18 @@ struct ucounts init_ucounts = {
 static struct hlist_head ucounts_hashtable[(1 << UCOUNTS_HASHTABLE_BITS)];
 static DEFINE_SPINLOCK(ucounts_lock);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - hash key는 uid + ns로 만든다
+ */
 #define ucounts_hashfn(ns, uid)						\
 	hash_long((unsigned long)__kuid_val(uid) + (unsigned long)(ns), \
 		  UCOUNTS_HASHTABLE_BITS)
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - ns, uid에 해당하는 hash entry를 가져온다.
+ */
 #define ucounts_hashentry(ns, uid)	\
 	(ucounts_hashtable + ucounts_hashfn(ns, uid))
 
@@ -131,6 +140,10 @@ void retire_userns_sysctls(struct user_namespace *ns)
 #endif
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @hashent에서 uid에 해당하는 ns가 있는지 확인한다.
+ */
 static struct ucounts *find_ucounts(struct user_namespace *ns, kuid_t uid, struct hlist_head *hashent)
 {
 	struct ucounts *ucounts;
@@ -159,6 +172,10 @@ struct ucounts *get_ucounts(struct ucounts *ucounts)
 	return ucounts;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @ns, @uid에 대한 ucounts를 얻어온다. 없으면 할당한다.
+ */
 struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 {
 	struct hlist_head *hashent = ucounts_hashentry(ns, uid);
@@ -167,6 +184,10 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 
 	spin_lock_irq(&ucounts_lock);
 	ucounts = find_ucounts(ns, uid, hashent);
+/*
+ * IAMROOT, 2023.04.01:
+ * - 못찾았으면 할당후 hash에 넣는다.
+ */
 	if (!ucounts) {
 		spin_unlock_irq(&ucounts_lock);
 
@@ -179,6 +200,12 @@ struct ucounts *alloc_ucounts(struct user_namespace *ns, kuid_t uid)
 		atomic_set(&new->count, 1);
 
 		spin_lock_irq(&ucounts_lock);
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - lock을 풀고 할당을 하는 그사이에 이미 누가 할당을 했으면 free를 하고,
+ *   그게 아니면 hash에 추가한다.
+ */
 		ucounts = find_ucounts(ns, uid, hashent);
 		if (ucounts) {
 			kfree(new);
@@ -222,6 +249,13 @@ static inline bool atomic_long_inc_below(atomic_long_t *v, int u)
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @ns, @uid에 대한 ucounts를 얻오고, @type에대한 ucount를 
+ *   연결된 ucounts를 iterate하며 max값을 검사하고 증가시킨다.
+ *   max값을 마지막까지 검사성공하며 count를 증가했다면 ucounts를 return.
+ *   아니면 복구후 return NULL.
+ */
 struct ucounts *inc_ucount(struct user_namespace *ns, kuid_t uid,
 			   enum ucount_type type)
 {
@@ -333,6 +367,12 @@ unwind:
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * @return true @type에 대한 count가 @max를 넘는 경우.
+ *              ucounts의 namespace의 type에 설정된 max를 넘는 경우.
+ * 그 외에는 return false.
+ */
 bool is_ucounts_overlimit(struct ucounts *ucounts, enum ucount_type type, unsigned long max)
 {
 	struct ucounts *iter;

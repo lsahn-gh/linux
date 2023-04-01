@@ -236,6 +236,11 @@ static inline void __nocfi cpu_replace_ttbr1(pgd_t *pgdp)
  */
 void check_and_switch_context(struct mm_struct *mm);
 
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - context id 초기화.
+ */
 #define init_new_context(tsk, mm) init_new_context(tsk, mm)
 static inline int
 init_new_context(struct task_struct *tsk, struct mm_struct *mm)

@@ -1164,6 +1164,11 @@ struct task_struct {
 	unsigned int			personality;
 
 	/* Scheduler bits, serialized by scheduler locks: */
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - fork시 schedule reset에 대한 여부.
+ */
 	unsigned			sched_reset_on_fork:1;
 /*
  * IAMROOT, 2023.01.26:
@@ -1399,6 +1404,11 @@ struct task_struct {
 #endif
 
 	/* Namespaces: */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 소속된 namespace proxy.
+ *   init task의 경우 init_nsproxy
+ */
 	struct nsproxy			*nsproxy;
 
 	/* Signal handlers: */
@@ -2661,6 +2671,10 @@ static inline void rseq_preempt(struct task_struct *t)
 }
 
 /* rseq_migrate() requires preemption to be disabled. */
+/*
+ * IAMROOT, 2023.04.01:
+ * - PASS
+ */
 static inline void rseq_migrate(struct task_struct *t)
 {
 	__set_bit(RSEQ_EVENT_MIGRATE_BIT, &t->rseq_event_mask);

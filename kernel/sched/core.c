@@ -1511,6 +1511,10 @@ static inline unsigned int uclamp_none(enum uclamp_id clamp_id)
 	return SCHED_CAPACITY_SCALE;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - 인자에따른 uclamp값 설정.
+ */
 static inline void uclamp_se_set(struct uclamp_se *uc_se,
 				 unsigned int value, bool user_defined)
 {
@@ -2170,6 +2174,10 @@ static void __setscheduler_uclamp(struct task_struct *p,
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @p의 uclamp에 대한 값 초기화.
+ */
 static void uclamp_fork(struct task_struct *p)
 {
 	enum uclamp_id clamp_id;
@@ -2859,6 +2867,10 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 	__do_set_cpus_allowed(p, new_mask, 0);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - child의 user_cpus_ptr을 새로 할당해주고 parent의 data를 복사해준다.
+ */
 int dup_user_cpus_ptr(struct task_struct *dst, struct task_struct *src,
 		      int node)
 {
@@ -4696,6 +4708,19 @@ int sysctl_schedstats(struct ctl_table *table, int write, void *buffer,
 /*
  * fork()/clone()-time setup:
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 1. @p초기화.
+ *   2. __state를 TASK_NEW로 설정.
+ *   3. current의 normal_prio를 사용한다.
+ *   4. uclamp관련 초기화.
+ *   5. sched_reset_on_fork가 set되잇을경우 schedule 관련값 reset.
+ *   6. schedule class 지정
+ *   7. load avg full load로 시작
+ *   8. task_fork callback 수행
+ *   9. on_cpu는 0으로 시작.
+ *   10. task cpu 지정.
+ */
 int sched_fork(unsigned long clone_flags, struct task_struct *p)
 {
 	unsigned long flags;
@@ -4706,18 +4731,37 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 * nobody will actually run it, and a signal or other external
 	 * event cannot wake it up and insert it on the runqueue either.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *  여기에서 프로세스를 NEW로 표시합니다. 이렇게 하면 아무도 실제로 
+ *  실행하지 않으며 신호 또는 기타 외부 이벤트가 이를 깨우거나 실행 
+ *  대기열에 삽입할 수 없습니다.
+ */
 	p->__state = TASK_NEW;
 
 	/*
 	 * Make sure we do not leak PI boosting priority to the child.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - fork를 하고 있는 task의 priority를 사용한다.
+ */
 	p->prio = current->normal_prio;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - uclamp값들은 상속하지 않고 초기화한다.
+ */
 	uclamp_fork(p);
 
 	/*
 	 * Revert to default priority/policy on fork if requested.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - forck시 schedule를 reset해야되는경우이를 수행한다.
+ */
 	if (unlikely(p->sched_reset_on_fork)) {
 		if (task_has_dl_policy(p) || task_has_rt_policy(p)) {
 			p->policy = SCHED_NORMAL;
@@ -4736,6 +4780,10 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 		p->sched_reset_on_fork = 0;
 	}
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - dl는 fork 불가. 그외에는 prio에 따른 schedule class를 가져온다.
+ */
 	if (dl_prio(p->prio))
 		return -EAGAIN;
 	else if (rt_prio(p->prio))
@@ -4743,6 +4791,11 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	else
 		p->sched_class = &fair_sched_class;
 
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - load avg를 full load로 설정한다.
+ */
 	init_entity_runnable_average(&p->se);
 
 	/*
@@ -4752,13 +4805,29 @@ int sched_fork(unsigned long clone_flags, struct task_struct *p)
 	 *
 	 * Silence PROVE_RCU.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   자식은 아직 pid-hash에 있지 않으므로 cgroup 연결 레이스가 없으며 
+ *   cgroup_fork()가 sched_fork() 전에 실행되기 때문에 cgroup이 이 자식에 
+ *   고정됩니다.
+ */
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	rseq_migrate(p);
 	/*
 	 * We're setting the CPU for the first time, we don't migrate,
 	 * so use __set_task_cpu().
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 현재 cpu로 설정한다.
+ */
 	__set_task_cpu(p, smp_processor_id());
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - fork callback이 있으면 수행한다.
+ */
 	if (p->sched_class->task_fork)
 		p->sched_class->task_fork(p);
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);

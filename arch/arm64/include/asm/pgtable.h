@@ -117,6 +117,10 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
  *   pfn과 속성 prot를 결합하여 pte 디스크립터를 만들어 반환한다.
  */
 #define pte_pfn(pte)		(__pte_to_phys(pte) >> PAGE_SHIFT)
+/*
+ * IAMROOT, 2023.04.01:
+ * - @pfn에 대한 pte entry 값 return.
+ */
 #define pfn_pte(pfn,prot)	\
 	__pte(__phys_to_pte_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
 
@@ -234,6 +238,10 @@ static inline pte_t pte_mkwrite(pte_t pte)
 	return pte;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - dirty clear, rd set.
+ */
 static inline pte_t pte_mkclean(pte_t pte)
 {
 	pte = clear_pte_bit(pte, __pgprot(PTE_DIRTY));
@@ -256,6 +264,10 @@ static inline pte_t pte_mkdirty(pte_t pte)
 	return pte;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - write를 지우고 read를 set한다.
+ */
 static inline pte_t pte_wrprotect(pte_t pte)
 {
 	/*
@@ -270,6 +282,10 @@ static inline pte_t pte_wrprotect(pte_t pte)
 	return pte;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - access flag clear.
+ */
 static inline pte_t pte_mkold(pte_t pte)
 {
 	return clear_pte_bit(pte, __pgprot(PTE_AF));
@@ -745,6 +761,10 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
  * Conversion functions: convert a page and protection to a page entry,
  * and a page entry and page directory to the page they refer to.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - @page + @prot에 대한 pte entry return.
+ */
 #define mk_pte(page,prot)	pfn_pte(page_to_pfn(page),prot)
 
 #if CONFIG_PGTABLE_LEVELS > 2
@@ -1067,6 +1087,10 @@ static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
  * dirty status (PTE_DBM && !PTE_RDONLY) to the software PTE_DIRTY bit.
  */
 #define __HAVE_ARCH_PTEP_SET_WRPROTECT
+/*
+ * IAMROOT, 2023.04.01:
+ * - write protect를 건다(write clear, read set)
+ */
 static inline void ptep_set_wrprotect(struct mm_struct *mm, unsigned long address, pte_t *ptep)
 {
 	pte_t old_pte, pte;
@@ -1110,10 +1134,23 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 #define __SWP_OFFSET_SHIFT	(__SWP_TYPE_BITS + __SWP_TYPE_SHIFT)
 #define __SWP_OFFSET_MASK	((1UL << __SWP_OFFSET_BITS) - 1)
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - val값에서 type을 추출한다.
+ */
 #define __swp_type(x)		(((x).val >> __SWP_TYPE_SHIFT) & __SWP_TYPE_MASK)
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - val값에서 offset 추출.
+ */
 #define __swp_offset(x)		(((x).val >> __SWP_OFFSET_SHIFT) & __SWP_OFFSET_MASK)
 #define __swp_entry(type,offset) ((swp_entry_t) { ((type) << __SWP_TYPE_SHIFT) | ((offset) << __SWP_OFFSET_SHIFT) })
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pte를 swp_entry로 형변환.
+ */
 #define __pte_to_swp_entry(pte)	((swp_entry_t) { pte_val(pte) })
 #define __swp_entry_to_pte(swp)	((pte_t) { (swp).val })
 

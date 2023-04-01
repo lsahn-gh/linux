@@ -714,8 +714,16 @@ struct mm_struct {
 		struct user_namespace *user_ns;
 
 		/* store ref to file /proc/<pid>/exe symlink points to */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 일반적으로 process의 bin path
+ */
 		struct file __rcu *exe_file;
 #ifdef CONFIG_MMU_NOTIFIER
+/*
+ * IAMROOT, 2023.04.01:
+ * - notify. 주로 hypervisor.
+ */
 		struct mmu_notifier_subscriptions *notifier_subscriptions;
 #endif
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS

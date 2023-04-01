@@ -278,6 +278,10 @@ struct mmu_notifier_range {
 	void *owner;
 };
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - notify가 있는지 확인한다.
+ */
 static inline int mm_has_notifiers(struct mm_struct *mm)
 {
 	return unlikely(mm->notifier_subscriptions);
@@ -448,12 +452,21 @@ static inline void mmu_notifier_change_pte(struct mm_struct *mm,
 		__mmu_notifier_change_pte(mm, address, pte);
 }
 
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - mmu의 변경사항에 대해 notify로 등록된게 있으면 호출한다.
+ */
 static inline void
 mmu_notifier_invalidate_range_start(struct mmu_notifier_range *range)
 {
 	might_sleep();
 
 	lock_map_acquire(&__mmu_notifier_invalidate_range_start_map);
+/*
+ * IAMROOT, 2023.04.01:
+ * - notify가 있으면 
+ */
 	if (mm_has_notifiers(range->mm)) {
 		range->flags |= MMU_NOTIFIER_RANGE_BLOCKABLE;
 		__mmu_notifier_invalidate_range_start(range);
@@ -510,7 +523,10 @@ static inline void mmu_notifier_subscriptions_destroy(struct mm_struct *mm)
 		__mmu_notifier_subscriptions_destroy(mm);
 }
 
-
+/*
+ * IAMROOT, 2023.04.01:
+ * - @rnage에 인자값들을 설정한다.
+ */
 static inline void mmu_notifier_range_init(struct mmu_notifier_range *range,
 					   enum mmu_notifier_event event,
 					   unsigned flags,

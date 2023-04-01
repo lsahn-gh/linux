@@ -4287,6 +4287,10 @@ hugetlb_install_page(struct vm_area_struct *vma, pte_t *ptep, unsigned long addr
 	SetHPageMigratable(new_page);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - PASS
+ */
 int copy_hugetlb_page_range(struct mm_struct *dst, struct mm_struct *src,
 			    struct vm_area_struct *vma)
 {

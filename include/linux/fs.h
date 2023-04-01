@@ -570,6 +570,10 @@ static inline int mapping_deny_writable(struct address_space *mapping)
 		0 : -EBUSY;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - write able.
+ */
 static inline void mapping_allow_writable(struct address_space *mapping)
 {
 	atomic_inc(&mapping->i_mmap_writable);

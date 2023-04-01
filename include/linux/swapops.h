@@ -24,6 +24,10 @@
 #define SWP_OFFSET_MASK	((1UL << SWP_TYPE_SHIFT) - 1)
 
 /* Clear all flags but only keep swp_entry_t related information */
+/*
+ * IAMROOT, 2023.04.01:
+ * - arm64의 경우 별 동작안한다. 
+ */
 static inline pte_t pte_swp_clear_flags(pte_t pte)
 {
 	if (pte_swp_soft_dirty(pte))
@@ -35,6 +39,12 @@ static inline pte_t pte_swp_clear_flags(pte_t pte)
 
 /*
  * Store a type+offset into a swp_entry_t in an arch-independent format
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - swap type, swap offset값으로 swap val값을 생성한다.
+ * - arch independent format 
+ *   type과 offset만으로 만드는 format을 의미한다.
  */
 static inline swp_entry_t swp_entry(unsigned long type, pgoff_t offset)
 {
@@ -71,6 +81,10 @@ static inline int is_swap_pte(pte_t pte)
 /*
  * Convert the arch-dependent pte representation of a swp_entry_t into an
  * arch-independent swp_entry_t.
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - @pte로 swp entry를 가져온다.
  */
 static inline swp_entry_t pte_to_swp_entry(pte_t pte)
 {
@@ -117,6 +131,10 @@ static inline swp_entry_t make_writable_device_private_entry(pgoff_t offset)
 	return swp_entry(SWP_DEVICE_WRITE, offset);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - device private entry인지 확인한다.
+ */
 static inline bool is_device_private_entry(swp_entry_t entry)
 {
 	int type = swp_type(entry);
@@ -138,6 +156,10 @@ static inline swp_entry_t make_writable_device_exclusive_entry(pgoff_t offset)
 	return swp_entry(SWP_DEVICE_EXCLUSIVE_WRITE, offset);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - deivce exclusive type인지 확인.
+ */
 static inline bool is_device_exclusive_entry(swp_entry_t entry)
 {
 	return swp_type(entry) == SWP_DEVICE_EXCLUSIVE_READ ||
@@ -191,6 +213,10 @@ static inline bool is_writable_device_exclusive_entry(swp_entry_t entry)
 #endif /* CONFIG_DEVICE_PRIVATE */
 
 #ifdef CONFIG_MIGRATION
+/*
+ * IAMROOT, 2023.04.01:
+ * - migrate entry인지 판단한다.
+ */
 static inline int is_migration_entry(swp_entry_t entry)
 {
 	return unlikely(swp_type(entry) == SWP_MIGRATION_READ ||
@@ -389,6 +415,11 @@ static inline void num_poisoned_pages_inc(void)
 
 #if defined(CONFIG_MEMORY_FAILURE) || defined(CONFIG_MIGRATION) || \
     defined(CONFIG_DEVICE_PRIVATE)
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - type이 MAX_SWAPFILES값 이상이면 swap entry가 아니라고 판단한다.
+ */
 static inline int non_swap_entry(swp_entry_t entry)
 {
 	return swp_type(entry) >= MAX_SWAPFILES;
