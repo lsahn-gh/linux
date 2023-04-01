@@ -413,3 +413,7 @@
 - 2023.03.25, Zoom 온라인(5명 참석)
 - fork(copy_process)
 
+### 97주차
+- 2023.04.01, Zoom 온라인(6명 참석)
+- fork(copy_process)
+
