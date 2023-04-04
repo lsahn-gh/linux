@@ -34,6 +34,11 @@ static inline void *task_stack_page(const struct task_struct *task)
 	return task->stack;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - thread info가 task 구조체 안에 있는에 있는 config이므로 
+ *   parent에서 복사할 필요가없다.
+ */
 #define setup_thread_stack(new,old)	do { } while(0)
 
 /*
@@ -50,6 +55,11 @@ static inline unsigned long *end_of_stack(const struct task_struct *task)
 
 #define task_stack_page(task)	((void *)(task)->stack)
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - parent thread info를 child 에 복사한다.
+ * - thread info가 task struct에 없는 설정인경우이다
+ */
 static inline void setup_thread_stack(struct task_struct *p, struct task_struct *org)
 {
 	*task_thread_info(p) = *task_thread_info(org);

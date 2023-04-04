@@ -1122,6 +1122,10 @@ void fpsimd_flush_thread(void)
  * Save the userland FPSIMD state of 'current' to memory, but only if the state
  * currently held in the registers does in fact belong to 'current'
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - fpsimd 관련 save.
+ */
 void fpsimd_preserve_current_state(void)
 {
 	if (!system_supports_fpsimd())

@@ -643,6 +643,10 @@ static void userfaultfd_event_complete(struct userfaultfd_ctx *ctx,
 	__remove_wait_queue(&ctx->event_wqh, &ewq->wq);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - userfaultfd관련 복사.
+ */
 int dup_userfaultfd(struct vm_area_struct *vma, struct list_head *fcs)
 {
 	struct userfaultfd_ctx *ctx = NULL, *octx;

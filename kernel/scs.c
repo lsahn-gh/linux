@@ -100,6 +100,10 @@ void __init scs_init(void)
 			  scs_cleanup);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @tsk에 scs에 대한 prepare를 한다.
+ */
 int scs_prepare(struct task_struct *tsk, int node)
 {
 	void *s = scs_alloc(node);

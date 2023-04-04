@@ -72,6 +72,10 @@ static inline void mmap_write_lock(struct mm_struct *mm)
 	__mmap_lock_trace_acquire_returned(mm, true, true);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - subclass로 lock을 한다.
+ */
 static inline void mmap_write_lock_nested(struct mm_struct *mm, int subclass)
 {
 	__mmap_lock_trace_start_locking(mm, true);
@@ -79,6 +83,10 @@ static inline void mmap_write_lock_nested(struct mm_struct *mm, int subclass)
 	__mmap_lock_trace_acquire_returned(mm, true, true);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - kill가능한 lock
+ */
 static inline int mmap_write_lock_killable(struct mm_struct *mm)
 {
 	int ret;

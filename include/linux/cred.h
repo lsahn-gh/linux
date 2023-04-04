@@ -360,6 +360,10 @@ static inline void put_cred(const struct cred *_cred)
 	__groups;					\
 })
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - xxx에 대한 task->real_cred->xxx member를 return 한다.
+ */
 #define task_cred_xxx(task, xxx)			\
 ({							\
 	__typeof__(((struct cred *)NULL)->xxx) ___val;	\

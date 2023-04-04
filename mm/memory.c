@@ -438,6 +438,10 @@ void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *vma,
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - alloc 및 populate
+ */
 int __pte_alloc(struct mm_struct *mm, pmd_t *pmd)
 {
 	spinlock_t *ptl;
@@ -832,6 +836,14 @@ try_restore_exclusive_pte(pte_t *src_pte, struct vm_area_struct *vma,
  * covered by this vma.
  */
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   한 작업에서 다른 작업으로 하나의 vm_area를 복사합니다. 
+ *   새 작업에 이미 존재하는 페이지 테이블이 이 vma에 의해 커버되는 
+ *   전체 범위에서 지워진다고 가정합니다.
+ * - 일반적이지 않은 pte entry에 대한 복사를 수행한후 mapping한다.
+ */
 static unsigned long
 copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		pte_t *dst_pte, pte_t *src_pte, struct vm_area_struct *dst_vma,
@@ -840,8 +852,17 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	unsigned long vm_flags = dst_vma->vm_flags;
 	pte_t pte = *src_pte;
 	struct page *page;
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - @pte를 swp entry로 변환한다.
+ */
 	swp_entry_t entry = pte_to_swp_entry(pte);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - swap entry인 경우 duplicate 처리를 한다.
+ */
 	if (likely(!non_swap_entry(entry))) {
 		if (swap_duplicate(entry) < 0)
 			return -EIO;
@@ -855,6 +876,11 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			spin_unlock(&mmlist_lock);
 		}
 		rss[MM_SWAPENTS]++;
+/*
+ * IAMROOT, 2023.04.01:
+ * - migrate entry
+ *   PASS
+ */
 	} else if (is_migration_entry(entry)) {
 		page = pfn_swap_entry_to_page(entry);
 
@@ -875,6 +901,12 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 				pte = pte_swp_mkuffd_wp(pte);
 			set_pte_at(src_mm, addr, src_pte, pte);
 		}
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - device private entry
+ *   PASS
+ */
 	} else if (is_device_private_entry(entry)) {
 		page = pfn_swap_entry_to_page(entry);
 
@@ -907,6 +939,11 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 				pte = pte_swp_mkuffd_wp(pte);
 			set_pte_at(src_mm, addr, src_pte, pte);
 		}
+/*
+ * IAMROOT, 2023.04.01:
+ * - device exclusive entry
+ *   PASS
+ */
 	} else if (is_device_exclusive_entry(entry)) {
 		/*
 		 * Make device exclusive entries present by restoring the
@@ -921,6 +958,11 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	}
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_swp_clear_uffd_wp(pte);
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - mapping.
+ */
 	set_pte_at(dst_mm, addr, dst_pte, pte);
 	return 0;
 }
@@ -945,6 +987,28 @@ copy_nonpresent_pte(struct mm_struct *dst_mm, struct mm_struct *src_mm,
  * code know so that it can do so outside the page table
  * lock.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   필요한 경우 현재 페이지와 일반 페이지를 복사합니다.
+ *
+ *   NOTE! 일반적인 경우는 아무 작업도 수행할 필요가 없으며 
+ *   양수 값만 반환할 수 있습니다. 그러면 호출자가 페이지 
+ *   참조 횟수를 늘리고 기존 방식으로 pte를 재사용할 수 
+ *   있음을 알 수 있습니다. 
+ *
+ *   그러나 _if_ 부모에 고정해야 하기 때문에 복사해야 
+ *   합니다(그리고 자식은 동일한 페이지에 대한 참조가 
+ *   아니라 자체 복사본을 가져와야 합니다). 여기에서 
+ *   그렇게 하고 호출자에게 알리기 위해 0을 반환합니다. 끝났습니다. 
+ *
+ *   사전 할당된 페이지가 필요하지만 아직 페이지가 없는 경우 
+ *   페이지 테이블 잠금 외부에서 수행할 수 있도록 사전 할당 
+ *   코드가 알 수 있도록 음수 오류를 반환합니다.
+ *
+ * @return 1 copy를 할 필요가 없는 경우.
+ *         0 @prealloc을 사용하여 copy를 수행.
+ */
 static inline int
 copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 		  pte_t *dst_pte, pte_t *src_pte, unsigned long addr, int *rss,
@@ -965,9 +1029,28 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	 * the page count. That might give false positives for
 	 * for pinning, but it will work correctly.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   우리가 원하는 것은 이 페이지가 상위 프로세스에 의해 
+ *   고정되었는지 여부를 확인하는 것입니다. 그렇다면 양쪽에서 
+ *   pte를 wrprotect하는 대신 페이지를 즉시 복사하여 고정된 
+ *   페이지가 나중에 무작위로 교체되지 않도록 항상 보장합니다.
+ *
+ *   페이지 고정 확인은 페이지 수의 (정확하지 않은) 확인과 함께 
+ *   이 mm 고정된 것을 본 것입니다. 그것은 고정에 대해 거짓 
+ *   긍정을 줄 수 있지만 올바르게 작동합니다.
+ *
+ * - dma를 위한 write page 공간이라면 page를 복사해야된다.
+ *   그게 아니라면 return 시킨다.
+ */
 	if (likely(!page_needs_cow_for_dma(src_vma, page)))
 		return 1;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - page가 준비가 안됬으면 again을 시켜 page를 할당 받아오게한다.
+ */
 	new_page = *prealloc;
 	if (!new_page)
 		return -EAGAIN;
@@ -976,7 +1059,19 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	 * We have a prealloc page, all good!  Take it
 	 * over and copy the page & arm it.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - page복사를 준비 한다. 미리 alloc해놓은 page를 여기서 사용한다.
+ */
 	*prealloc = NULL;
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - page copy
+ *   PG_uptodate set.
+ *   anon_vma에 추가.
+ *   lru cache에 추가.
+ */
 	copy_user_highpage(new_page, page, addr, src_vma);
 	__SetPageUptodate(new_page);
 	page_add_new_anon_rmap(new_page, dst_vma, addr, false);
@@ -984,11 +1079,19 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	rss[mm_counter(new_page)]++;
 
 	/* All done, just insert the new page copy in the child */
+/*
+ * IAMROOT, 2023.04.01:
+ * - new_page에 대핸 pte를 가져와서, write 권한 추가여부를 확인하여 추가한다.
+ */
 	pte = mk_pte(new_page, dst_vma->vm_page_prot);
 	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
 	if (userfaultfd_pte_wp(dst_vma, *src_pte))
 		/* Uffd-wp needs to be delivered to dest pte as well */
 		pte = pte_wrprotect(pte_mkuffd_wp(pte));
+/*
+ * IAMROOT, 2023.04.01:
+ * - 완성된 pte를 mapping한다.
+ */
 	set_pte_at(dst_vma->vm_mm, addr, dst_pte, pte);
 	return 0;
 }
@@ -996,6 +1099,12 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 /*
  * Copy one pte.  Returns 0 if succeeded, or -EAGAIN if one preallocated page
  * is required to copy this pte.
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - copy를 해야되는 page인 경우(user dma page등) page도 복사를하고,
+ *   그게 아니면 table까지만 복사를 한다.
+ *   cow를 위해 parent page가 write권한이 있던것들은 read only로 변경한다.
  */
 static inline int
 copy_present_pte(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
@@ -1007,6 +1116,10 @@ copy_present_pte(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	pte_t pte = *src_pte;
 	struct page *page;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - normal인 경우 page를 얻어올 것이며, zero page인 경우 NULL이 올 것이다.
+ */
 	page = vm_normal_page(src_vma, addr, pte);
 	if (page) {
 		int retval;
@@ -1016,15 +1129,29 @@ copy_present_pte(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 		if (retval <= 0)
 			return retval;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - retval이 1로 온경우 copy가 수행이 안되잇을것이다.
+ */
 		get_page(page);
 		page_dup_rmap(page, false);
 		rss[mm_counter(page)]++;
 	}
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - 일반 page들은 mapping만을 수행한다.
+ */
 	/*
 	 * If it's a COW mapping, write protect it both
 	 * in the parent and the child
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - cow mapping이고, parent의 pte가 write권한을 가진경우, write 권을 뺀채로 
+ *   child는 mapping을 해야된다.
+ *   write가 발생하면 page fault가 발생하게 해야되기 때문이다.
+ */
 	if (is_cow_mapping(vm_flags) && pte_write(pte)) {
 		ptep_set_wrprotect(src_mm, addr, src_pte);
 		pte = pte_wrprotect(pte);
@@ -1034,17 +1161,34 @@ copy_present_pte(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	 * If it's a shared mapping, mark it clean in
 	 * the child
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - shared일 경우 dirty clear 및 rd set.
+ */
 	if (vm_flags & VM_SHARED)
 		pte = pte_mkclean(pte);
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - access flag clear.
+ */
 	pte = pte_mkold(pte);
 
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_clear_uffd_wp(pte);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pte entry만 copy한다.
+ */
 	set_pte_at(dst_vma->vm_mm, addr, dst_pte, pte);
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - new page alloc.
+ */
 static inline struct page *
 page_copy_prealloc(struct mm_struct *src_mm, struct vm_area_struct *vma,
 		   unsigned long addr)
@@ -1064,6 +1208,11 @@ page_copy_prealloc(struct mm_struct *src_mm, struct vm_area_struct *vma,
 	return new_page;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pte 복사를 수행한다. present / nonpresent에 따른 처리, present여도 경우에
+ *   따른 page복사(for user dma) or pte만 복사(cow를 위한.)처리를 수행한다.
+ */
 static int
 copy_pte_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	       pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
@@ -1083,6 +1232,10 @@ again:
 	progress = 0;
 	init_rss_vec(rss);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - alloc + populate + spinlick
+ */
 	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	if (!dst_pte) {
 		ret = -ENOMEM;
@@ -1100,6 +1253,10 @@ again:
 		 * We are holding two locks at this point - either of them
 		 * could generate latencies in another task on another CPU.
 		 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 32개 단위로 spinlock을 잠깐씩 풀어준다.
+ */
 		if (progress >= 32) {
 			progress = 0;
 			if (need_resched() ||
@@ -1110,6 +1267,12 @@ again:
 			progress++;
 			continue;
 		}
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - present가 아니지만 다른용도로 쓰이는(ex. swap)것에 대한 copy처리를
+ *   수행한다.
+ */
 		if (unlikely(!pte_present(*src_pte))) {
 			ret = copy_nonpresent_pte(dst_mm, src_mm,
 						  dst_pte, src_pte,
@@ -1132,6 +1295,10 @@ again:
 			WARN_ON_ONCE(ret != -ENOENT);
 		}
 		/* copy_present_pte() will clear `*prealloc' if consumed */
+/*
+ * IAMROOT, 2023.04.01:
+ * - 일반적인 pte mapping에 대한 복사처리.
+ */
 		ret = copy_present_pte(dst_vma, src_vma, dst_pte, src_pte,
 				       addr, rss, &prealloc);
 		/*
@@ -1147,6 +1314,14 @@ again:
 			 * will allocate page according to address).  This
 			 * could only happen if one pinned pte changed.
 			 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   pre-alloc 페이지는 mempolicy를 엄격히 따르기 위해 다음에 다시 
+ *   사용할 수 없습니다(예: alloc_page_vma()는 주소에 따라 
+ *   페이지를 할당합니다). 이것은 하나의 고정된 pte가 변경된 경우에만 
+ *   발생할 수 있습니다.
+ */
 			put_page(prealloc);
 			prealloc = NULL;
 		}
@@ -1169,6 +1344,13 @@ again:
 		entry.val = 0;
 	} else if (ret == -EBUSY) {
 		goto out;
+/*
+ * IAMROOT, 2023.04.01:
+ * - 위에서 EAGAIN으로 온경우는 page를 할당하기 위함이였다. prealloc에
+ *   page를 하나 할당해오고 again을 한다.
+ *   lock 처리 + 할당에 드는 시간 소요 + mempolicy를 따르기 위해 이렇게 하는 
+ *   것으로 보인다.
+ */
 	} else if (ret ==  -EAGAIN) {
 		prealloc = page_copy_prealloc(src_mm, src_vma, addr);
 		if (!prealloc)
@@ -1188,6 +1370,10 @@ out:
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pmd entry를 수행하며 table copy를 수행한다.
+ */
 static inline int
 copy_pmd_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	       pud_t *dst_pud, pud_t *src_pud, unsigned long addr,
@@ -1225,6 +1411,10 @@ copy_pmd_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pud entry를 수행하며 table copy를 수행한다.
+ */
 static inline int
 copy_pud_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	       p4d_t *dst_p4d, p4d_t *src_p4d, unsigned long addr,
@@ -1262,6 +1452,10 @@ copy_pud_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - p4d entry 순회하며 table copy 수행한다.
+ */
 static inline int
 copy_p4d_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	       pgd_t *dst_pgd, pgd_t *src_pgd, unsigned long addr,
@@ -1286,6 +1480,10 @@ copy_p4d_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - parent의 page table(src_vma)을 child의 page table에 복사를 수행한다.
+ */
 int
 copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 {
@@ -1305,6 +1503,13 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	 * readonly mappings. The tradeoff is that copy_page_range is more
 	 * efficient than faulting.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   page fault로 인해 올바르게 채워지는 ptes를 복사하지 마십시오. 
+ *   큰 공유 또는 개인 읽기 전용 매핑이 있을 때 포크가 훨씬 가벼워집니다.
+ *   장단점은 copy_page_range가 fault보다 효율적이라는 것입니다.
+ */
 	if (!(src_vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
 	    !src_vma->anon_vma)
 		return 0;
@@ -1312,11 +1517,21 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	if (is_vm_hugetlb_page(src_vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, src_vma);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - struct page를 쓰지 안흔 page인 경우.
+ */
 	if (unlikely(src_vma->vm_flags & VM_PFNMAP)) {
 		/*
 		 * We do not free on error cases below as remove_vma
 		 * gets called on error from higher level routine
 		 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   remove_vma가 상위 수준 루틴의 오류에서 호출되기 때문에 아래의 오류
+ *   사례에서는 해제하지 않습니다. 
+ */
 		ret = track_pfn_copy(src_vma);
 		if (ret)
 			return ret;
@@ -1328,8 +1543,19 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	 * parent mm. And a permission downgrade will only happen if
 	 * is_cow_mapping() returns true.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   상위 mm의 ptes에 대한 권한 다운그레이드가 있을 수 있는 경우에만
+ *   보조 MMU 매핑을 무효화해야 합니다. 권한 다운그레이드는 is_cow_mapping()이 
+ *   true를 반환하는 경우에만 발생합니다.
+ */
 	is_cow = is_cow_mapping(src_vma->vm_flags);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - cow인 경우 mmu 변경사항에 대해 notify 한다.
+ */
 	if (is_cow) {
 		mmu_notifier_range_init(&range, MMU_NOTIFY_PROTECTION_PAGE,
 					0, src_vma, src_mm, addr, end);
@@ -1341,15 +1567,40 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 		 * Use the raw variant of the seqcount_t write API to avoid
 		 * lockdep complaining about preemptibility.
 		 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   읽기 측이 회전하지 않고 mmap_lock으로 이동하므로 쓰기 측에는 
+ *   선점 비활성화가 필요하지 않습니다.
+ *
+ *   seqcount_t 쓰기 API의 원시 변형을 사용하여 lockdep이 선점에 
+ *   대해 불평하는 것을 방지합니다.
+ */
 		mmap_assert_write_locked(src_mm);
 		raw_write_seqcount_begin(&src_mm->write_protect_seq);
 	}
 
 	ret = 0;
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - 물리페이지는 그대로 있고, 그걸 가리키는 pgd만 copy하는 개념이된다.
+ */
 	dst_pgd = pgd_offset(dst_mm, addr);
 	src_pgd = pgd_offset(src_mm, addr);
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - pgd entry 순회하며 table copy 수행한다.
+ *   제일 마지막 pte에선 present / nonpresent에 따른 mapping / page copy등이 수행
+ *   된다.
+ */
 	do {
 		next = pgd_addr_end(addr, end);
+/*
+ * IAMROOT, 2023.04.01:
+ * - empty는 skip한다.
+ */
 		if (pgd_none_or_clear_bad(src_pgd))
 			continue;
 		if (unlikely(copy_p4d_range(dst_vma, src_vma, dst_pgd, src_pgd,

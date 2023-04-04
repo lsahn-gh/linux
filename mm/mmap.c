@@ -732,6 +732,11 @@ static unsigned long count_vma_pages_range(struct mm_struct *mm,
 	return nr_pages;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * @rb_link out. 새로 추가된 leaf node의 위치.
+ * - @vma를 rb_parent에 넣는다. 새로 추가된 leaf가 되는 자리는 rb_link로 out된다.
+ */
 void __vma_link_rb(struct mm_struct *mm, struct vm_area_struct *vma,
 		struct rb_node **rb_link, struct rb_node *rb_parent)
 {

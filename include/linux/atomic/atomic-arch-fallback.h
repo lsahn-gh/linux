@@ -1166,6 +1166,10 @@ arch_atomic_inc_and_test(atomic_t *v)
  * if the result is negative, or false when
  * result is greater than or equal to zero.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - add후 결과가 음수면 return true.
+ */
 static __always_inline bool
 arch_atomic_add_negative(int i, atomic_t *v)
 {

@@ -2481,6 +2481,10 @@ int ksm_madvise(struct vm_area_struct *vma, unsigned long start,
 }
 EXPORT_SYMBOL_GPL(ksm_madvise);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - PASS
+ */
 int __ksm_enter(struct mm_struct *mm)
 {
 	struct mm_slot *mm_slot;

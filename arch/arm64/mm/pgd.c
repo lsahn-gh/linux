@@ -17,6 +17,10 @@
 
 static struct kmem_cache *pgd_cache __ro_after_init;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pgd alloc
+ */
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {
 	gfp_t gfp = GFP_PGTABLE_USER;

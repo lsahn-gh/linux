@@ -2332,6 +2332,10 @@ struct page *alloc_pages(gfp_t gfp, unsigned order)
 }
 EXPORT_SYMBOL(alloc_pages);
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @src의 mpol을 @dst mpol에 복사해온다.
+ */
 int vma_dup_policy(struct vm_area_struct *src, struct vm_area_struct *dst)
 {
 	struct mempolicy *pol = mpol_dup(vma_policy(src));
@@ -2354,6 +2358,21 @@ int vma_dup_policy(struct vm_area_struct *src, struct vm_area_struct *dst)
  */
 
 /* Slow path of a mempolicy duplicate */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   mpol_dup()이 current->cpuset == cpuset_being_rebound를 발견하면 
+ *   cpuset_mems_allowed()에서 반환된 mems_allowed로 mpol_rebind_policy()를 
+ *   호출하여 복사된 mempolicy를 리바인딩합니다. 이는 cpuset 이동 후 mempolicies 
+ *   cpuset을 상대적으로 유지합니다. 자세한 내용은 kernel/cpuset.c 
+ *   update_nodemask()를 참조하십시오.
+ *
+ *   current의 mempolicy는 다른 작업(cpuset의 mem을 변경하는 작업)에 의해 
+ *   리바인드될 수 있으므로 현재 작업에 대한 리바인드 작업을 수행할 필요가 
+ *   없습니다.
+ *
+ * - @old를 복사한 new를 할당해서 return한다.
+ */
 struct mempolicy *__mpol_dup(struct mempolicy *old)
 {
 	struct mempolicy *new = kmem_cache_alloc(policy_cache, GFP_KERNEL);
@@ -2362,6 +2381,10 @@ struct mempolicy *__mpol_dup(struct mempolicy *old)
 		return ERR_PTR(-ENOMEM);
 
 	/* task's mempolicy is protected by alloc_lock */
+/*
+ * IAMROOT, 2023.04.01:
+ * - @old가 current일 경우 변경될 위험이 있으므로 lock을 건 후 복사한다.
+ */
 	if (old == current->mempolicy) {
 		task_lock(current);
 		*new = *old;
@@ -2369,6 +2392,11 @@ struct mempolicy *__mpol_dup(struct mempolicy *old)
 	} else
 		*new = *old;
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - current가 소속된 cpuset이 rebound 중이면 부모의 cpuset을 가져와
+ *   new에 적용한다.
+ */
 	if (current_cpuset_is_being_rebound()) {
 		nodemask_t mems = cpuset_mems_allowed(current);
 		mpol_rebind_policy(new, &mems);

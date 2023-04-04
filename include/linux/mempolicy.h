@@ -82,6 +82,11 @@ static inline void mpol_cond_put(struct mempolicy *pol)
 }
 
 extern struct mempolicy *__mpol_dup(struct mempolicy *pol);
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - @pol과 동일한 새로운 mempolicy을 할당해 가져온다.
+ */
 static inline struct mempolicy *mpol_dup(struct mempolicy *pol)
 {
 	if (pol)

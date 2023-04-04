@@ -559,6 +559,10 @@ atomic_inc_and_test(atomic_t *v)
 	return arch_atomic_inc_and_test(v);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @i만큼 더한 결과가 음수면 return true.
+ */
 static __always_inline bool
 atomic_add_negative(int i, atomic_t *v)
 {

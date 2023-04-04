@@ -17,6 +17,10 @@
 struct fs_pin;
 
 struct pid_namespace {
+/*
+ * IAMROOT, 2023.04.01:
+ * - pid관리 목적의 idr.
+ */
 	struct idr idr;
 	struct rcu_head rcu;
 	unsigned int pid_allocated;

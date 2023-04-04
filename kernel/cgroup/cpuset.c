@@ -1884,6 +1884,11 @@ done:
 	return retval;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - current가 소속된 cpuset이 rebound중인지를 확인한다.
+ *   rebund중이면 return true.
+ */
 bool current_cpuset_is_being_rebound(void)
 {
 	bool ret;

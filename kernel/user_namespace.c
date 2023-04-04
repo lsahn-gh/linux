@@ -66,6 +66,10 @@ static void set_cred_user_ns(struct cred *cred, struct user_namespace *user_ns)
  * This is called by copy_creds(), which will finish setting the target task's
  * credentials.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - TODO
+ */
 int create_user_ns(struct cred *new)
 {
 	struct user_namespace *ns, *parent_ns = new->user_ns;
@@ -1279,6 +1283,10 @@ bool userns_may_setgroups(const struct user_namespace *ns)
 /*
  * Returns true if @child is the same namespace or a descendant of
  * @ancestor.
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - @child가 ancestor의 자손인지 판별한다.
  */
 bool in_userns(const struct user_namespace *ancestor,
 	       const struct user_namespace *child)

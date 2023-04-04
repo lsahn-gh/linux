@@ -1526,6 +1526,10 @@ EXPORT_SYMBOL(down_write);
 /*
  * lock for writing
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - kill가능한 lock.
+ */
 int __sched down_write_killable(struct rw_semaphore *sem)
 {
 	might_sleep();

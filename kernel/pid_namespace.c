@@ -34,6 +34,10 @@ static struct kmem_cache *pid_cache[MAX_PID_NS_LEVEL];
  * @level: pid namespace level
  */
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - ING
+ */
 static struct kmem_cache *create_pid_cachep(unsigned int level)
 {
 	/* Level 0 is init_pid_ns.pid_cachep */
@@ -58,6 +62,11 @@ static struct kmem_cache *create_pid_cachep(unsigned int level)
 	return READ_ONCE(*pkc);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - @ns가 소속된 euid ucounts의 UCOUNT_PID_NAMESPACES type에 대해 max를 검사하며 
+ *   count를 증가시키고 ucounts를 가져온다. 실패했을 경우 return NULL
+ */
 static struct ucounts *inc_pid_namespaces(struct user_namespace *ns)
 {
 	return inc_ucount(ns, current_euid(), UCOUNT_PID_NAMESPACES);
@@ -68,6 +77,10 @@ static void dec_pid_namespaces(struct ucounts *ucounts)
 	dec_ucount(ucounts, UCOUNT_PID_NAMESPACES);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - ING
+ */
 static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns,
 	struct pid_namespace *parent_pid_ns)
 {

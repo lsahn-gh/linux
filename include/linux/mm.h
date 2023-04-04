@@ -318,6 +318,11 @@ extern unsigned int kobjsize(const void *objp);
 
 #define VM_GROWSDOWN	0x00000100	/* general info on the segment */
 #define VM_UFFD_MISSING	0x00000200	/* missing pages tracking */
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - struct page를 쓰지 않는 page.
+ */
 #define VM_PFNMAP	0x00000400	/* Page-ranges managed without "struct page", just pure PFN */
 #define VM_UFFD_WP	0x00001000	/* wrprotect pages tracking */
 
@@ -336,6 +341,11 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_HUGETLB	0x00400000	/* Huge TLB Page VM */
 #define VM_SYNC		0x00800000	/* Synchronous page faults */
 #define VM_ARCH_1	0x01000000	/* Architecture-specific flag */
+
+/*
+ * IAMROOT, 2023.04.01:
+ * - fork시 vma를 지우는지에 대한 flag
+ */
 #define VM_WIPEONFORK	0x02000000	/* Wipe VMA contents in child. */
 #define VM_DONTDUMP	0x04000000	/* Do not include in the core dump */
 
@@ -1108,6 +1118,16 @@ void free_compound_page(struct page *page);
  * pte_mkwrite.  But get_user_pages can cause write faults for mappings
  * that do not have writing enabled, when used by access_process_vm.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   pte_mkwrite를 수행하되 vma가 VM_WRITE로 표시된 경우에만 수행하십시오. 
+ *   쓰기 액세스에 대한 결함을 서비스할 때 이 작업을 수행합니다. 일반적인 
+ *   경우에는 항상 pte_mkwrite를 원합니다. 그러나 get_user_pages는 
+ *   access_process_vm에서 사용할 때 쓰기가 활성화되지 않은 매핑에 대해 쓰기 
+ *   fault를 일으킬 수 있습니다.
+ * - VM_WRITE가 set되있으면 write 권한 추가.
+ */
 static inline pte_t maybe_mkwrite(pte_t pte, struct vm_area_struct *vma)
 {
 	if (likely(vma->vm_flags & VM_WRITE))
@@ -1410,6 +1430,42 @@ static inline void put_page(struct page *page)
  * get_user_pages and page_mkclean and other calls that race to set up page
  * table entries.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   GUP_PIN_COUNTING_BIAS 및 이를 사용하는 관련 함수는 두 개의 개별 항목이 
+ *   추적되도록 페이지의 refcount를 오버로드합니다. 
+ *   원래 페이지 참조 카운트 및 페이지에 대해 얼마나 많은 pin_user_pages() 
+ *   호출이 있었는지에 대한 새로운 카운트. 
+ *   (gup-pinned는 후자의 또 다른 용어입니다).
+ *
+ *   이 체계를 사용하면 pin_user_pages()가 특별해집니다.
+ *   이러한 페이지는 일반 페이지와 구별되는 것으로 표시됩니다. 따라서 
+ *   gup 고정 페이지를 해제하려면 unpin_user_page() 호출(및 해당 변형)을 
+ *   사용해야 합니다. 
+ *
+ *   가치 선택:
+ *
+ *   GUP_PIN_COUNTING_BIAS를 2의 거듭제곱으로 만들면 pin_user_pages() 및 
+ *   unpin_user_page()와 관련된 페이지 참조 횟수의 디버깅이 더 간단해집니다. 
+ *   페이지 참조 횟수에 짝수 2의 거듭제곱을 추가하면 상위 N만 사용하는 효과가 
+ *   있기 때문입니다. 편향 값을 사용하여 카운트업하는 코드용 비트. 즉, 
+ *   하위 비트는 1씩(또는 적어도 편향 값보다 훨씬 작은 값만큼) 증가 및 
+ *   감소하는 원래 코드의 배타적 사용을 위해 남겨집니다.
+ *
+ *   물론 하위 비트가 상위 비트로 넘치면(뺄셈이 원래 값을 복구하므로 괜찮음) 
+ *   육안 검사로는 더 이상 별도의 카운트를 직접 볼 수 없습니다. 그러나 페이지 
+ *   참조 수가 많지 않은 일반 응용 프로그램의 경우 이는 문제가 되지 않습니다.
+ *
+ *   잠금: page_cache_get_speculative() 및 page_cache_gup_pin_speculative()에 
+ *   설명된 잠금 없는 알고리즘은 get_user_pages 및 page_mkclean 및 페이지 
+ *   테이블 항목을 설정하기 위해 경쟁하는 기타 호출에 대한 안전한 작업을 
+ *   제공합니다.
+ *
+ * - GUP(Generic User Space Page)
+ *   user 공간을 dma mapping하여 pinned로 사용하는 경우등이 있는데 거기에 대한
+ *   ref를 관리할때가 있다.
+ */
 #define GUP_PIN_COUNTING_BIAS (1U << 10)
 
 void unpin_user_page(struct page *page);
@@ -1445,6 +1501,39 @@ void unpin_user_pages(struct page **pages, unsigned long npages);
  * Return: True, if it is likely that the page has been "dma-pinned".
  * False, if the page is definitely not dma-pinned.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   page_maybe_dma_pinned - 페이지가 DMA용으로 고정되었는지 보고합니다.
+ *
+ *   @page: The page.
+ *
+ *   이 함수는 pin_user_pages() 계열의 함수 호출을 통해 페이지가 
+ *   고정되었는지 확인합니다.
+ *
+ *   거대하지 않은 페이지의 경우 반환 값은 부분적으로 흐릿합니다.
+ *   false는 확실히 DMA에 대해 고정되지 않았음을 의미하기 때문에 모호하지 
+ *   않지만 true는 DMA에 대해 고정되었을 가능성이 있지만 최소한 
+ *   GUP_PIN_COUNTING_BIAS 가치의 일반 페이지 참조로 인해 거짓 긍정일 수 
+ *   있음을 의미합니다.
+ *
+ *   거짓 긍정은 다음과 같은 이유로 괜찮습니다.
+ *   a) 페이지가 그렇게 많은 refcount를 얻을 가능성이 낮고, b) 이 루틴의 
+ *   모든 호출자는 거짓 긍정을 정상적으로 처리할 수 있어야 합니다.
+ *
+ *   대용량 페이지의 경우 결과가 정확합니다. 사용 가능한 추적 데이터가 
+ *   더 많기 때문입니다.
+ *
+ *   복합 페이지의 세 번째 구조체 페이지는 GUP_PIN_COUNTING_BIAS 체계를 
+ *   사용하는 대신 핀 수를 추적하는 데 사용됩니다.
+ *
+ *   자세한 내용은 Documentation/core-api/pin_user_pages.rst를 참조하십시오.
+ *
+ *   Retrun: 페이지가 dma 고정되었을 가능성이 있는 경우 True입니다. 
+ *   페이지가 확실히 dma 고정되지 않은 경우 거짓입니다.
+ *
+ * @return true page가 dma pinned일 가능서 있는 경우.
+ */
 static inline bool page_maybe_dma_pinned(struct page *page)
 {
 	if (hpage_pincount_available(page))
@@ -1458,10 +1547,24 @@ static inline bool page_maybe_dma_pinned(struct page *page)
 	 * Here, for that overflow case, use the signed bit to count a little
 	 * bit higher via unsigned math, and thus still get an accurate result.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   page_ref_count()가 서명되었습니다. 해당 refcount가 오버플로되면 
+ *   page_ref_count()는 음수 값을 반환하고 호출자는 refcount를 더 이상 
+ *   증가시키지 않습니다.
+ *
+ *   여기서 해당 오버플로 사례의 경우 부호 있는 비트를 사용하여 부호 없는 
+ *   수학을 통해 조금 더 높게 계산하여 여전히 정확한 결과를 얻습니다.
+ */
 	return ((unsigned int)page_ref_count(compound_head(page))) >=
 		GUP_PIN_COUNTING_BIAS;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - VM_MAYWRITE만 있는 경우 cow mapping이라 판단한다.
+ */
 static inline bool is_cow_mapping(vm_flags_t flags)
 {
 	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
@@ -1470,6 +1573,17 @@ static inline bool is_cow_mapping(vm_flags_t flags)
 /*
  * This should most likely only be called during fork() to see whether we
  * should break the cow immediately for a page on the src mm.
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   이것은 src mm의 페이지에 대해 cow를 즉시 중단해야 하는지 여부를 
+ *   확인하기 위해 fork() 중에만 호출될 가능성이 높습니다.
+ *
+ * @return false
+ *  1. cow mapping이 아닌 경우.
+ *  2. pinned 된경우
+ *  3. dma pinned가 아닌 경우
  */
 static inline bool page_needs_cow_for_dma(struct vm_area_struct *vma,
 					  struct page *page)
@@ -2464,6 +2578,11 @@ static inline void pgtable_pte_page_dtor(struct page *page)
 #define pte_alloc_map(mm, pmd, address)			\
 	(pte_alloc(mm, pmd) ? NULL : pte_offset_map(pmd, address))
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - pte alloc이 실패했으면 return값이 있을것. return NULL.
+ *   성공했으면 spinlock을 걸며 pte를 얻어온다.
+ */
 #define pte_alloc_map_lock(mm, pmd, address, ptlp)	\
 	(pte_alloc(mm, pmd) ?			\
 		 NULL : pte_offset_map_lock(mm, pmd, address, ptlp))

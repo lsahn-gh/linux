@@ -47,6 +47,16 @@ static inline int current_is_kswapd(void)
  * on 32-bit-pgoff_t architectures.  And that assumes that the architecture packs
  * the type/offset into the pte as 5/27 as well.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   MAX_SWAPFILES는 스왑 유형의 최대 수를 정의합니다.
+ *   바꿀 수 있는 것들. 스왑 유형과 해당 스왑 유형에 대한 오프셋은 
+ *   pte와 swapcache의 pgoff_t로 인코딩됩니다. type에 5비트를 사용한다는 것은 
+ *   최대 swapcache 페이지 수가 32비트-pgoff_t 아키텍처에서 27비트임을 
+ *   의미합니다. 그리고 아키텍처가 type/offset을 pte에 5/27로 pack한다고 
+ *   가정합니다.
+ */
 #define MAX_SWAPFILES_SHIFT	5
 
 /*
@@ -69,6 +79,12 @@ static inline int current_is_kswapd(void)
  */
 #ifdef CONFIG_DEVICE_PRIVATE
 #define SWP_DEVICE_NUM 4
+/*
+ * IAMROOT, 2023.04.01:
+ * | swap      | hw posion | migrate | device |
+ * | 25 ~ 32   | 0 or 1    | 0 or 2  | o or 4 |
+ * 다 합쳐서 최대 32
+ */
 #define SWP_DEVICE_WRITE (MAX_SWAPFILES+SWP_HWPOISON_NUM+SWP_MIGRATION_NUM)
 #define SWP_DEVICE_READ (MAX_SWAPFILES+SWP_HWPOISON_NUM+SWP_MIGRATION_NUM+1)
 #define SWP_DEVICE_EXCLUSIVE_WRITE (MAX_SWAPFILES+SWP_HWPOISON_NUM+SWP_MIGRATION_NUM+2)
@@ -82,6 +98,13 @@ static inline int current_is_kswapd(void)
  */
 #ifdef CONFIG_MIGRATION
 #define SWP_MIGRATION_NUM 2
+
+/*
+ * IAMROOT, 2023.04.01:
+ * | swap      | hw posion | migrate | device |
+ * | 25 ~ 32   | 0 or 1    | 0 or 2  | o or 4 |
+ * 다 합쳐서 최대 32
+ */
 #define SWP_MIGRATION_READ	(MAX_SWAPFILES + SWP_HWPOISON_NUM)
 #define SWP_MIGRATION_WRITE	(MAX_SWAPFILES + SWP_HWPOISON_NUM + 1)
 #else
@@ -92,12 +115,24 @@ static inline int current_is_kswapd(void)
  * Handling of hardware poisoned pages with memory corruption.
  */
 #ifdef CONFIG_MEMORY_FAILURE
+/*
+ * IAMROOT, 2023.04.01:
+ * | swap      | hw posion | migrate | device |
+ * | 25 ~ 32   | 0 or 1    | 0 or 2  | o or 4 |
+ * 다 합쳐서 최대 32
+ */
 #define SWP_HWPOISON_NUM 1
 #define SWP_HWPOISON		MAX_SWAPFILES
 #else
 #define SWP_HWPOISON_NUM 0
 #endif
 
+/*
+ * IAMROOT, 2023.04.01:
+ * | swap      | hw posion | migrate | device |
+ * | 25 ~ 32   | 0 or 1    | 0 or 2  | o or 4 |
+ * 다 합쳐서 최대 32
+ */
 #define MAX_SWAPFILES \
 	((1 << MAX_SWAPFILES_SHIFT) - SWP_DEVICE_NUM - \
 	SWP_MIGRATION_NUM - SWP_HWPOISON_NUM)

@@ -1157,6 +1157,10 @@ static inline pte_t pte_swp_mksoft_dirty(pte_t pte)
 	return pte;
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - arch의 soft dirty 지원여부.
+ */
 static inline int pte_swp_soft_dirty(pte_t pte)
 {
 	return 0;

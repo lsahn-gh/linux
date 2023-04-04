@@ -292,6 +292,10 @@ void arch_release_task_struct(struct task_struct *tsk)
 	fpsimd_release_task(tsk);
 }
 
+/*
+ * IAMROOT, 2023.04.01:
+ * - src를 dst에 copy한다.
+ */
 int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 {
 	if (current->mm)
@@ -310,6 +314,19 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 	 * maintainers it is best not to leave TIF_SVE and sve_state in
 	 * an inconsistent state, even temporarily.
 	 */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   src의 sve_state(있는 경우)를 dst에서 분리하여 잘못 사용되거나 
+ *   조기에 해제되지 않도록 합니다. dst가 SVE를 사용하는 경우 나중에 
+ *   dst의 sve_state가 필요에 따라 할당됩니다.
+ *   일관성을 위해 여기에서도 TIF_SVE를 지웁니다.
+ *   이 작업은 나중에 copy_process()에서 수행할 수 있지만 향후 관리자를 
+ *   방해하지 않으려면 일시적일지라도 TIF_SVE 및 sve_state를 일관성 없는 
+ *   상태로 두지 않는 것이 가장 좋습니다.
+ *
+ * - copy후 sve에 대한것은 clear 해놓는다.
+ */
 	dst->thread.sve_state = NULL;
 	clear_tsk_thread_flag(dst, TIF_SVE);
 

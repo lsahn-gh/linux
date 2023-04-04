@@ -1262,6 +1262,35 @@ static unsigned char __swap_entry_free_locked(struct swap_info_struct *p,
  * changed with the page table locked to check whether the swap device
  * has been swapoff or swapoff+swapon.
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *   스왑 장치에서 스왑 항목이 유효한지 확인하십시오. 그렇다면 
+ *   swap_info_struct에 대한 포인터를 반환하고 put_swap_device()가 호출될 
+ *   때까지 스왑 장치가 스왑오프되지 않도록 방지하여 스왑 항목을 유효하게 
+ *   유지합니다. 그렇지 않으면 NULL을 반환합니다.
+ *
+ *   페이지 잠금, 페이지 테이블 잠금, 등. 발신자는 이에 대비해야 합니다. 
+ *   예를 들어 다음과 같은 상황이 가능합니다.
+ *
+ *   CPU1				CPU2
+ *   do_swap_page()
+ *     ...				swapoff+swapon
+ *     __read_swap_cache_async()
+ *       swapcache_prepare()
+ *         __swap_duplicate()
+ *           // check swap_map
+ *     // verify PTE not changed
+ *
+ *   __swap_duplicate()에서 지정된 스왑 항목이 스왑 오프된 다른 스왑 장치에 
+ *   대한 것일 수 있으므로 부분적으로 변경하기 전에 스왑 맵을 확인해야 
+ *   합니다. 그리고 do_swap_page()에서는 스왑 장치에서 페이지를 읽은 후 
+ *   페이지 테이블이 잠긴 상태에서 PTE가 변경되지 않았는지 확인하여 스왑 
+ *   장치가 스왑 오프 또는 스왑 오프+스왑인지 확인합니다.
+ *
+ * - swap device에에 대한 info를 가져온다.
+ * - PASS
+ */
 struct swap_info_struct *get_swap_device(swp_entry_t entry)
 {
 	struct swap_info_struct *si;
@@ -3425,6 +3454,10 @@ void si_swapinfo(struct sysinfo *val)
  * - swap-cache reference is requested but the entry is not used. -> ENOENT
  * - swap-mapped reference requested but needs continued swap count. -> ENOMEM
  */
+/*
+ * IAMROOT, 2023.04.01:
+ * - count에 usage를 추가한다.
+ */
 static int __swap_duplicate(swp_entry_t entry, unsigned char usage)
 {
 	struct swap_info_struct *p;
@@ -3503,6 +3536,17 @@ void swap_shmem_alloc(swp_entry_t entry)
  * but could not be atomically allocated.  Returns 0, just as if it succeeded,
  * if __swap_duplicate() fails for another reason (-EINVAL or -ENOENT), which
  * might occur if a page table entry has got corrupted.
+ */
+/*
+ * IAMROOT, 2023.04.01:
+ * - papago
+ *  스왑 항목의 참조 횟수를 1 늘립니다.
+ *  성공하면 0을 반환하고, swap_count_continuation이 필요하지만 원자적으로 
+ *  할당할 수 없으면 -ENOMEM을 반환합니다. __swap_duplicate()가 다른 
+ *  이유로(-EINVAL 또는 -ENOENT) 실패하면 성공한 것처럼 0을 반환합니다. 이는 
+ *  페이지 테이블 항목이 손상된 경우에 발생할 수 있습니다.
+ * - swap duplicate
+ * - PASS
  */
 int swap_duplicate(swp_entry_t entry)
 {

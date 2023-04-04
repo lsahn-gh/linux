@@ -142,6 +142,10 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 #endif
 
 #ifdef CONFIG_VMAP_STACK
+/*
+ * IAMROOT, 2023.04.01:
+ * - @t에 등록되있는 stack의 vm arear를 return한다.
+ */
 static inline struct vm_struct *task_stack_vm_area(const struct task_struct *t)
 {
 	return t->stack_vm_area;
