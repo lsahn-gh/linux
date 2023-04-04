@@ -151,6 +151,44 @@ EXPORT_SYMBOL(jiffies_64);
  *  6	 384    2621440 ms (~43m) 20971520 ms -  167772150 ms (~5h - ~1d)
  *  7	 448   20971520 ms (~5h) 167772160 ms - 1342177270 ms (~1d - ~15d)
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   타이머 휠에는 LVL_DEPTH 배열 레벨이 있습니다. 각 레벨은 LVL_SIZE 버킷의
+ *   배열을 제공합니다. 각 레벨은 자체 클록에 의해 구동되므로 각 레벨은 서로
+ *   다른 세분성을 갖습니다.
+ *
+ * The level granularity is:		LVL_CLK_DIV ^ lvl
+ * The level clock frequency is:	HZ / (LVL_CLK_DIV ^ level)
+ *
+ * 새로 무장한 타이머의 배열 수준은 상대 만료 시간에 따라 다릅니다. 만료 
+ * 시간이 멀어질수록 어레이 수준이 높아지므로 입도가 높아집니다.
+ *
+ * 타이머의 '정확한' 만료를 목표로 하는 원래 타이머 휠 구현과 달리 이
+ * 구현에서는 타이머를 하위 어레이 레벨로 다시 캐스케이딩할 필요가 없습니다.
+ * 커널의 이전 '클래식' 타이머 휠 구현은 일괄 만료를 제공하기 위해 만료
+ * 시간에 여유를 추가함으로써 이미 '정확한' 만료를 위반했습니다. 세분성
+ * 수준은 암시적 일괄 처리를 제공합니다.
+ *
+ * 이것은 대부분의 타이머 휠 사용 사례에 대한 원래 타이머 휠 구현의
+ * 최적화입니다.
+ * 타임아웃. 대부분의 타임아웃 타이머(네트워킹, 디스크 I/O ...)는 만료되기
+ * 전에 취소됩니다. 타임아웃이 만료되면 정상적인 작동이 방해받는 것을
+ * 나타내므로 타임아웃이 약간 지연되어 오는지는 중요하지 않습니다.
+ *
+ * 이에 대한 유일한 예외는 만료 시간이 짧은 네트워킹 타이머입니다. 그들은
+ * 세분성에 의존합니다. 그것들은 HZ 세분성을 가진 첫 번째 휠 레벨에 맞습니다.
+ *
+ * 우리는 더 이상 캐스케이딩이 없습니다. 만료 시간이 마지막 휠 레벨의 용량을
+ * 초과하는 타이머는 마지막 휠 레벨의 최대 타임아웃 값에서 강제 만료됩니다.
+ * 데이터 샘플링을 통해 관찰된 최대 값이 5일(네트워크 연결 추적)임을 알고
+ * 있으므로 이는 문제가 되지 않습니다.
+ *
+ * 현재 선택된 배열 상수 값은 배열 크기와 세분성 사이의 적절한 절충안입니다.
+ *
+ * 그 결과 다음과 같은 세분성 및 범위 수준이 생성됩니다. 
+ * (이 아래는 원본주석 참고)
+ */
 
 /* Clock divisor for the next level */
 #define LVL_CLK_SHIFT	3
@@ -341,6 +379,16 @@ static unsigned long round_jiffies_common(unsigned long j, int cpu,
 	 * The skew is done by adding 3*cpunr, then round, then subtract this
 	 * extra offset again.
 	 */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   우리는 모든 CPU가 동일한 잠금 또는 캐시라인에 도달하는 타이머를
+ *   한 번에 실행하는 것을 원하지 않으므로 추가 3jiffies로 각 추가 CPU를
+ *   왜곡합니다. 이 3개의 jiffies는 이미 이 작업을 수행한 mm/ 코드에서
+ *   원래 나온 것입니다.
+ *   스큐는 3*cpunr을 더한 다음 반올림하고 이 추가 오프셋을 다시 빼서
+ *   수행됩니다.
+ */
 	j += cpu * 3;
 
 	rem = j % HZ;
@@ -352,6 +400,14 @@ static unsigned long round_jiffies_common(unsigned long j, int cpu,
 	 * as cutoff for this rounding as an extreme upper bound for this.
 	 * But never round down if @force_up is set.
 	 */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   목표 jiffie가 1초 후(타이머 irq의 지연, 긴 irq 꺼짐 시간 등으로 인해
+ *   발생할 수 있음)인 경우 전체 초로 내림해야 합니다. 이 반올림에 대한
+ *   컷오프로 1/4초를 이에 대한 극단적인 상한으로 사용합니다.
+ *   그러나 @force_up이 설정되어 있으면 절대 내림하지 마십시오.
+ */
 	if (rem < HZ/4 && !force_up) /* round down */
 		j = j - rem;
 	else /* round up */
@@ -387,6 +443,27 @@ static unsigned long round_jiffies_common(unsigned long j, int cpu,
  *
  * The return value is the rounded version of the @j parameter.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   __round_jiffies - jiffies를 전체 초로 반올림하는 기능. 
+ *   @j: 반올림해야 하는 (절대) jiffies의 시간.
+ *   @cpu: 시간 초과가 발생할 프로세서 번호입니다.
+ *
+ *   __round_jiffies()는 미래의 절대 시간(jiffies 단위)을 (대략) 전체 초로
+ *   반올림합니다. 이는 대략 X초마다 실행되는 한 정확한 실행 시간이 그다지
+ *   중요하지 않은 타이머에 유용합니다.
+ *
+ *   이 타이머를 전체 초로 반올림하면 이러한 모든 타이머가 여러 시간에
+ *   분산되지 않고 동시에 실행됩니다. 이것의 목표는 CPU가 덜 깨어나도록
+ *   하여 전력을 절약하는 것입니다.
+ *
+ *   모든 프로세서가 정확히 동시에 실행되는 것을 방지하기 위해 각 
+ *   프로세서에 대해 정확한 반올림이 왜곡되어 잠금 경합 또는 가짜 캐시 
+ *   라인 바운싱이 발생할 수 있습니다.
+ *
+ *   반환 값은 @j 매개 변수의 반올림된 버전입니다. 
+ */
 unsigned long __round_jiffies(unsigned long j, int cpu)
 {
 	return round_jiffies_common(j, cpu, false);
@@ -413,6 +490,27 @@ EXPORT_SYMBOL_GPL(__round_jiffies);
  *
  * The return value is the rounded version of the @j parameter.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   __round_jiffies_relative - jiffies를 전체 초로 반올림하는 기능.
+ *   @j: 반올림해야 하는 (상대적) jiffies의 시간.
+ *   @cpu: 시간 초과가 발생할 프로세서 번호입니다.
+ *
+ *   __round_jiffies_relative()는 미래의 시간 델타(jiffies 단위)를 (대략)
+ *   완전한 초로 반올림합니다. 이는 대략 X초마다 실행되는 한 정확한 실행
+ *   시간이 그다지 중요하지 않은 타이머에 유용합니다.
+ *
+ *   이 타이머를 전체 초로 반올림하면 이러한 모든 타이머가 여러 시간에
+ *   분산되지 않고 동시에 실행됩니다. 이것의 목표는 CPU가 덜 깨어나도록
+ *   하여 전력을 절약하는 것입니다.
+ *
+ *   모든 프로세서가 정확히 동시에 실행되는 것을 방지하기 위해 각
+ *   프로세서에 대해 정확한 반올림이 왜곡되어 잠금 경합 또는 가짜 캐시
+ *   라인 바운싱이 발생할 수 있습니다.
+ *
+ *   반환 값은 @j 매개 변수의 반올림된 버전입니다. 
+ */
 unsigned long __round_jiffies_relative(unsigned long j, int cpu)
 {
 	unsigned long j0 = jiffies;
@@ -437,6 +535,22 @@ EXPORT_SYMBOL_GPL(__round_jiffies_relative);
  *
  * The return value is the rounded version of the @j parameter.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   round_jiffies - jiffies를 전체 초로 반올림하는 기능.
+ *   @j: 반올림해야 하는 (절대) jiffies의 시간.
+ *
+ *   round_jiffies()는 미래의 절대 시간(jiffies 단위)을 (대략) 전체
+ *   초로 반올림하거나 반올림합니다. 이는 대략 X초마다 실행되는 한
+ *   정확한 실행 시간이 그다지 중요하지 않은 타이머에 유용합니다.
+ *
+ *   이 타이머를 전체 초로 반올림하면 이러한 모든 타이머가 여러 시간에
+ *   분산되지 않고 동시에 실행됩니다. 이것의 목표는 CPU가 덜 깨어나도록
+ *   하여 전력을 절약하는 것입니다. 
+ *
+ *   반환 값은 @j 매개 변수의 반올림된 버전입니다.
+ */
 unsigned long round_jiffies(unsigned long j)
 {
 	return round_jiffies_common(j, raw_smp_processor_id(), false);
@@ -458,6 +572,22 @@ EXPORT_SYMBOL_GPL(round_jiffies);
  *
  * The return value is the rounded version of the @j parameter.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   round_jiffies_relative - jiffies를 전체 초로 반올림하는 기능.
+ *   @j: 반올림해야 하는 (상대적) jiffies의 시간.
+ *
+ *   round_jiffies_relative()는 미래의 시간 델타(jiffies 단위)를 (대략)
+ *   전체 초까지 반올림합니다. 이는 대략 X초마다 실행되는 한 정확한 실행
+ *   시간이 그다지 중요하지 않은 타이머에 유용합니다.
+ *
+ *   이 타이머를 전체 초로 반올림하면 이러한 모든 타이머가 여러 시간에
+ *   분산되지 않고 동시에 실행됩니다. 이것의 목표는 CPU가 덜 깨어나도록
+ *   하여 전력을 절약하는 것입니다. 
+ *
+ *   반환 값은 @j 매개 변수의 반올림된 버전입니다. 
+ */
 unsigned long round_jiffies_relative(unsigned long j)
 {
 	return __round_jiffies_relative(j, raw_smp_processor_id());
@@ -474,6 +604,17 @@ EXPORT_SYMBOL_GPL(round_jiffies_relative);
  * of firing does not matter too much, as long as they don't fire too
  * early.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   __round_jiffies_up - jiffies를 1초까지 반올림하는 기능.
+ *   @j: 반올림해야 하는 (절대) jiffies의 시간.
+ *   @cpu: 시간 초과가 발생할 프로세서 번호입니다.
+ *
+ *   내림하지 않는다는 점을 제외하고는 __round_jiffies() 와 동일합니다.
+ *   이는 너무 일찍 실행되지 않는 한 정확한 실행 시간이 그다지 중요하지
+ *   않은 타임아웃에 유용합니다. 
+ */
 unsigned long __round_jiffies_up(unsigned long j, int cpu)
 {
 	return round_jiffies_common(j, cpu, true);
@@ -489,6 +630,17 @@ EXPORT_SYMBOL_GPL(__round_jiffies_up);
  * round down.  This is useful for timeouts for which the exact time
  * of firing does not matter too much, as long as they don't fire too
  * early.
+ */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   __round_jiffies_up_relative - jiffies를 1초까지 반올림하는 기능.
+ *   @j: 반올림해야 하는 (상대적) jiffies의 시간.
+ *   @cpu: 시간 초과가 발생할 프로세서 번호입니다.
+ *
+ *   내림하지 않는다는 점을 제외하고는 __round_jiffies_relative() 와 동일합니다.
+ *   이는 너무 일찍 실행되지 않는 한 정확한 실행 시간이 그다지 중요하지 않은
+ *   타임아웃에 유용합니다.
  */
 unsigned long __round_jiffies_up_relative(unsigned long j, int cpu)
 {
@@ -508,6 +660,16 @@ EXPORT_SYMBOL_GPL(__round_jiffies_up_relative);
  * of firing does not matter too much, as long as they don't fire too
  * early.
  */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   round_jiffies_up - jiffies를 1초까지 반올림하는 기능.
+ *   @j: 반올림해야 하는 (절대) jiffies의 시간.
+ *
+ *   내림하지 않는다는 점을 제외하면 round_jiffies()와 동일합니다.
+ *   이는 너무 일찍 실행되지 않는 한 정확한 실행 시간이 그다지 중요하지
+ *   않은 타임아웃에 유용합니다. 
+ */
 unsigned long round_jiffies_up(unsigned long j)
 {
 	return round_jiffies_common(j, raw_smp_processor_id(), true);
@@ -522,6 +684,16 @@ EXPORT_SYMBOL_GPL(round_jiffies_up);
  * round down.  This is useful for timeouts for which the exact time
  * of firing does not matter too much, as long as they don't fire too
  * early.
+ */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   round_jiffies_up_relative - jiffies를 최대 1초까지 반올림하는 기능.
+ *   @j: 반올림해야 하는 (상대적) jiffies의 시간.
+ *
+ *   내림하지 않는다는 점을 제외하면 round_jiffies_relative()와 동일합니다.
+ *   이는 너무 일찍 실행되지 않는 한 정확한 실행 시간이 그다지 중요하지 않은
+ *   타임아웃에 유용합니다.
  */
 unsigned long round_jiffies_up_relative(unsigned long j)
 {
@@ -555,35 +727,6 @@ static inline void timer_set_idx(struct timer_list *timer, unsigned int idx)
 /*
  * IAMROOT, 2022.09.03:
  * - Git blame
- *
- *   timers: Use only bucket expiry for base->next_expiry value
- *
- *   The bucket expiry time is the effective expriy time of timers and is
- *   greater than or equal to the requested timer expiry time. This is due
- *   to the guarantee that timers never expire early and the reduced expiry
- *   granularity in the secondary wheel levels.
- *
- *   When a timer is enqueued, trigger_dyntick_cpu() checks whether the
- *   timer is the new first timer. This check compares next_expiry with
- *   the requested timer expiry value and not with the effective expiry
- *   value of the bucket into which the timer was queued.
- *
- *   Storing the requested timer expiry value in base->next_expiry can lead
- *   to base->clk going backwards if the requested timer expiry value is
- *   smaller than base->clk. Commit 30c66fc30ee7 ("timer: Prevent base->clk
- *   from moving backward") worked around this by preventing the store when
- *   timer->expiry is before base->clk, but did not fix the underlying
- *   problem.
- *
- *   Use the expiry value of the bucket into which the timer is queued to
- *   do the new first timer check. This fixes the base->clk going backward
- *   problem.
- *
- *   The workaround of commit 30c66fc30ee7 ("timer: Prevent base->clk from
- *   moving backward") in trigger_dyntick_cpu() is not longer necessary as the
- *   timers bucket expiry is guaranteed to be greater than or equal base->clk.
- *
- * - papago
  *   timers: base->next_expiry 값에 대해 버킷 만료만 사용합니다.
  *
  *   버킷 만료 시간은 타이머의 유효 만료 시간이며 요청된 타이머 만료 시간보다
@@ -2299,7 +2442,7 @@ void timer_clear_idle(void)
 
 /*
  * IAMROOT, 2022.09.03:
- * - 
+ * - next_expiry 시간이 지난 timer들을 levels 역순으로 expire 시킨다.
  */
 static inline void __run_timers(struct timer_base *base)
 {
@@ -2762,6 +2905,20 @@ EXPORT_SYMBOL(msleep_interruptible);
  * by avoiding the CPU-hogging busy-wait of udelay(), and the range reduces
  * power usage by allowing hrtimers to take advantage of an already-
  * scheduled interrupt instead of scheduling a new one just for this sleep.
+ */
+/*
+ * IAMROOT, 2023.03.24:
+ * - papago
+ *   usleep_range - 대략적인 시간 동안 휴면합니다.
+ *   @min: 휴면을 위한 최소 시간(usecs).
+ *   @max: 최대 절전 시간(usecs)입니다.
+ *
+ *   정확한 깨우기 시간이 유연한 비원자적 컨텍스트에서는 udelay() 대신
+ *   usleep_range()를 사용합니다. 수면은 udelay()의 CPU 독주 바쁜 대기를
+ *   피함으로써 응답성을 향상시키고 범위는 hrtimer가 이 수면을 위해 새
+ *   인터럽트를 예약하는 대신 이미 예약된 인터럽트를 활용할 수 있도록 하여 
+ *   전력 사용량을 줄입니다.
+. 
  */
 void __sched usleep_range(unsigned long min, unsigned long max)
 {

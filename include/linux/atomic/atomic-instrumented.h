@@ -541,6 +541,10 @@ atomic_sub_and_test(int i, atomic_t *v)
 	return arch_atomic_sub_and_test(i, v);
 }
 
+/*
+ * IAMROOT, 2023.03.27:
+ * - -1 dec. 0면 return true.
+ */
 static __always_inline bool
 atomic_dec_and_test(atomic_t *v)
 {
