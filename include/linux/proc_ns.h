@@ -64,6 +64,10 @@ static inline void proc_free_inum(unsigned int inum) {}
 
 #endif /* CONFIG_PROC_FS */
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - stashed = 0, inode num을 할당받아서 반환
+ */
 static inline int ns_alloc_inum(struct ns_common *ns)
 {
 	atomic_long_set(&ns->stashed, 0);

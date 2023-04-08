@@ -64,6 +64,14 @@ static inline struct nsproxy *create_nsproxy(void)
  * Return the newly created nsproxy.  Do not attach this to the task,
  * leave it to the caller to do proper locking and attach it to task.
  */
+/*
+ * IAMROOT. 2023.04.08:
+ * - google-translate
+ * 새 nsproxy 및 연결된 모든 네임스페이스를 생성합니다. 새로 생성된 nsproxy를
+ * 반환합니다. 이것을 작업에 첨부하지 말고 적절한 잠금을 수행하도록 호출자에게
+ * 맡기고 작업에 첨부하십시오.
+ * - TODO.
+ */
 static struct nsproxy *create_new_namespaces(unsigned long flags,
 	struct task_struct *tsk, struct user_namespace *user_ns,
 	struct fs_struct *new_fs)
@@ -189,6 +197,10 @@ int copy_namespaces(unsigned long flags, struct task_struct *tsk)
 		(CLONE_NEWIPC | CLONE_SYSVSEM))
 		return -EINVAL;
 
+	/*
+	 * IAMROOT, 2023.04.08:
+	 * - container를 하나 생성한다. docker container의 경우 처음 한번만 한다
+	 */
 	new_ns = create_new_namespaces(flags, tsk, user_ns, tsk->fs);
 	if (IS_ERR(new_ns))
 		return  PTR_ERR(new_ns);

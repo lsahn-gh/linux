@@ -1790,6 +1790,21 @@ void sched_init_numa(void)
 		return;
 
 	bitmap_zero(distance_map, NR_DISTANCE_VALUES);
+	/*
+	 * IAMROOT, 2023.04.08:
+	 * - ex. node_ids=4 이고 4, 8, 12 가 distanc map 에 설정된 경우
+	 *   distanc_map[0] = 0
+	 *   distanc_map[1] = 0
+	 *   ...
+	 *   distanc_map[4] = 1
+	 *   distanc_map[5] = 0
+	 *   ...
+	 *   distanc_map[8] = 1
+	 *   ...
+	 *   distanc_map[12] = 1
+	 *   ...
+	 *   distanc_map[16] = 0
+	 */
 	for (i = 0; i < nr_node_ids; i++) {
 		for (j = 0; j < nr_node_ids; j++) {
 			int distance = node_distance(i, j);

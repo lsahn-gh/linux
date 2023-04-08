@@ -199,6 +199,12 @@ static DEFINE_IDA(proc_inum_ida);
  * Return an inode number between PROC_DYNAMIC_FIRST and
  * 0xffffffff, or zero on failure.
  */
+/*
+ * IAMROOT. 2023.04.08:
+ * - google-translate
+ * PROC_DYNAMIC_FIRST와 0xffffffff 사이의 inode 번호를 반환하거나 실패 시 0을
+ * 반환합니다.
+ */
 int proc_alloc_inum(unsigned int *inum)
 {
 	int i;

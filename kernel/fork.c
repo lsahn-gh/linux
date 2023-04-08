@@ -2652,6 +2652,10 @@ static __latent_entropy struct task_struct *copy_process(
 
 	stackleak_task_init(p);
 
+	/*
+	 * IAMROOT, 2023.04.08:
+	 * - idle thread 용도일 때는 pid 를 만들지 않고 그외에는 pid를 할당
+	 */
 	if (pid != &init_struct_pid) {
 		pid = alloc_pid(p->nsproxy->pid_ns_for_children, args->set_tid,
 				args->set_tid_size);
@@ -2808,6 +2812,10 @@ static __latent_entropy struct task_struct *copy_process(
 
 		init_task_pid(p, PIDTYPE_PID, pid);
 		if (thread_group_leader(p)) {
+			/*
+			 * IAMROOT, 2023.04.08:
+			 * - process를 생성한 경우
+			 */
 			init_task_pid(p, PIDTYPE_TGID, pid);
 			init_task_pid(p, PIDTYPE_PGID, task_pgrp(current));
 			init_task_pid(p, PIDTYPE_SID, task_session(current));
@@ -2832,6 +2840,10 @@ static __latent_entropy struct task_struct *copy_process(
 			attach_pid(p, PIDTYPE_SID);
 			__this_cpu_inc(process_counts);
 		} else {
+			/*
+			 * IAMROOT, 2023.04.08:
+			 * - thread를 생성한 경우
+			 */
 			current->signal->nr_threads++;
 			atomic_inc(&current->signal->live);
 			refcount_inc(&current->signal->sigcnt);
