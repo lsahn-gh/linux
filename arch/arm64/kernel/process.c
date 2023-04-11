@@ -352,6 +352,14 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 	 * Otherwise we could erroneously skip reloading the FPSIMD
 	 * registers for p.
 	 */
+	/*
+	 * IAMROOT. 2023.04.08:
+	 * - google-translate
+	 * p가 최근에 종료된 다른 작업과 동일한 task_struct 포인터를 할당받은 경우 최근에
+	 * 종료된 해당 작업을 실행했을 수 있는 CPU에서 p가 연결 해제되었는지
+	 * 확인합니다. 그렇지 않으면 p에 대한 FPSIMD 레지스터 다시 로드를 잘못 건너뛸 수
+	 * 있습니다.
+	 */
 	fpsimd_flush_task_state(p);
 
 	ptrauth_thread_init_kernel(p);

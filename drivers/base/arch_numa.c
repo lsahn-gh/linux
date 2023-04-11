@@ -36,6 +36,27 @@ static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
  *   LOCAL_DISTANCE로, 나머지를 REMOTE_DISTANCE로 초기화한다.
  * - of_numa_parse_distance_map_v1에서 dt에서 읽은 값으로 재설정을 한다.
  * - numa_distance[from * numa_distance_cnt + to] 의 방식으로 접근한다.
+ * IAMROOT, 2023.04.08:
+ * - hip07-d05.dts
+ *   distance-map {
+ *		compatible = "numa-distance-map-v1";
+ *		distance-matrix = <0 0 10>,
+ *				  <0 1 15>,
+ *				  <0 2 20>,
+ *				  <0 3 25>,
+ *				  <1 0 15>,
+ *				  <1 1 10>,
+ *				  <1 2 25>,
+ *				  <1 3 30>,
+ *				  <2 0 20>,
+ *				  <2 1 25>,
+ *				  <2 2 10>,
+ *				  <2 3 15>,
+ *				  <3 0 25>,
+ *				  <3 1 30>,
+ *				  <3 2 15>,
+ *				  <3 3 10>;
+ *	};
  */
 static int numa_distance_cnt;
 static u8 *numa_distance;
@@ -435,6 +456,12 @@ void __init numa_set_distance(int from, int to, int distance)
 
 /*
  * Return NUMA distance @from to @to
+ */
+/*
+ * IAMROOT. 2023.04.08:
+ * - google-translate
+ * NUMA 거리 @from을 @to로 반환
+ * - from 에서 to 까지 거리를 가져온다
  */
 int __node_distance(int from, int to)
 {

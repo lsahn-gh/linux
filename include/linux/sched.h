@@ -1274,6 +1274,14 @@ struct task_struct {
 	struct list_head		ptrace_entry;
 
 	/* PID/PID hash table linkage. */
+	/*
+	 * IAMROOT, 2023.04.08:
+	 * - 2c4704756cab7cfa031ada4dab361562f0e357c0 커밋에 의해 기존 pids
+	 * 멤버가 변경됨
+	 * -	struct pid_link			pids[PIDTYPE_MAX];
+	 * +	struct pid			*thread_pid;
+	 * +	struct hlist_node		pid_links[PIDTYPE_MAX];
+	 */
 	struct pid			*thread_pid;
 	struct hlist_node		pid_links[PIDTYPE_MAX];
 	struct list_head		thread_group;

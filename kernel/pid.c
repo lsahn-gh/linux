@@ -160,6 +160,12 @@ void free_pid(struct pid *pid)
 	call_rcu(&pid->rcu, delayed_put_pid);
 }
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - ns가 별도로 할당되지 않은 경우는 최상위 부모 task가 init_nsproxy를 사용하고 있으므로
+ *   fork된 task 들도 같은 init_nsproxy를 사용하고 있고 인자 @ns 값은
+ *   init_pid_ns가 된다
+ */
 struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 		      size_t set_tid_size)
 {
@@ -177,6 +183,15 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 	 * up to set_tid_size PID namespaces. It does not have to set the PID
 	 * for a process in all nested PID namespaces but set_tid_size must
 	 * never be greater than the current ns->level + 1.
+	 */
+	/*
+	 * IAMROOT. 2023.04.08:
+	 * - google-translate
+	 * set_tid_size는 set_tid 배열의 크기를 포함합니다. 가장 중첩된 현재 활성 PID
+	 * 네임스페이스에서 시작하여 set_tid_size PID 네임스페이스까지 가장 중첩된 PID
+	 * 네임스페이스에서 프로세스에 대해 설정할 PID를 alloc_pid()에 알려줍니다. 중첩된
+	 * 모든 PID 네임스페이스의 프로세스에 대한 PID를 설정할 필요는 없지만
+	 * set_tid_size는 현재 ns->level + 1보다 커서는 안 됩니다.
 	 */
 	if (set_tid_size > ns->level + 1)
 		return ERR_PTR(-EINVAL);
