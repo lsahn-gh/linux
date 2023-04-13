@@ -317,6 +317,20 @@ radix_tree_node_free(struct radix_tree_node *node)
  * To make use of this facility, the radix tree must be initialised without
  * __GFP_DIRECT_RECLAIM being passed to INIT_RADIX_TREE().
  */
+/*
+ * IAMROOT, 2023.04.08:
+ * - papago
+ *   이 CPU의 radix_tree_node 버퍼를 충분한 개체로 로드하여 트리의 단일 
+ *   요소 추가가 실패하지 않도록 합니다. 성공하면 선점을 비활성화하고 0을 
+ *   반환합니다. 오류가 발생하면 선점이 비활성화되지 않은 상태로 -ENOMEM을 
+ *   반환합니다.
+ *
+ *   이 기능을 사용하려면 __GFP_DIRECT_RECLAIM을 INIT_RADIX_TREE()에 
+ *   전달하지 않고 기수 트리를 초기화해야 합니다.
+ *
+ * - @nr만큼 pcpu radix_tree_preloads에 node가 할당되있는지 확인한다.
+ *   부족하면 nr개수가 될때까지 할당한다.
+ */
 static __must_check int __radix_tree_preload(gfp_t gfp_mask, unsigned nr)
 {
 	struct radix_tree_preload *rtp;
@@ -327,6 +341,12 @@ static __must_check int __radix_tree_preload(gfp_t gfp_mask, unsigned nr)
 	 * Nodes preloaded by one cgroup can be used by another cgroup, so
 	 * they should never be accounted to any particular memory cgroup.
 	 */
+/*
+ * IAMROOT, 2023.04.08:
+ * - papago
+ *   하나의 cgroup에 의해 사전 로드된 노드는 다른 cgroup에서 사용될 수 
+ *   있으므로 특정 메모리 cgroup으로 간주되어서는 안됩니다.
+ */
 	gfp_mask &= ~__GFP_ACCOUNT;
 
 	local_lock(&radix_tree_preloads.lock);
@@ -1464,6 +1484,19 @@ EXPORT_SYMBOL(radix_tree_tagged);
  *
  * Preallocate memory to use for the next call to idr_alloc().  This function
  * returns with preemption disabled.  It will be enabled by idr_preload_end().
+ */
+/*
+ * IAMROOT, 2023.04.08:
+ * - papago
+ *   idr_preload - idr_alloc()을 위한 사전 로드.
+ *   @gfp_mask: 사전 로드에 사용할 할당 마스크입니다.
+ *
+ *   idr_alloc()에 대한 다음 호출에 사용할 메모리를 미리 할당합니다. 
+ *   이 함수는 선점이 비활성화된 상태로 반환됩니다. idr_preload_end()에 
+ *   의해 활성화됩니다.
+ *
+ * - pcpu radix_tree_preloads에 node가 IDR_PRELOAD_SIZE개가 될때까지
+ *   확인한다. 성공하면 lock을 안걸고 실패하면 lock을 건채로 return 된다.
  */
 void idr_preload(gfp_t gfp_mask)
 {

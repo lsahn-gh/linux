@@ -205,6 +205,16 @@ int kmem_cache_shrink(struct kmem_cache *);
  * f.e. add ____cacheline_aligned_in_smp to the struct declaration
  * then the objects will be properly aligned in SMP configurations.
  */
+/*
+ * IAMROOT, 2023.04.08:
+ * - papago
+ *   슬랩 캐시를 생성하려면 이 매크로를 사용하십시오. 구조의 이름과 위에 
+ *   나열된 일부 플래그를 지정하기만 하면 됩니다.
+ *
+ *   구조체의 정렬에 따라 객체 정렬이 결정됩니다. 당신이 f.e.
+ *   ____cacheline_aligned_in_smp를 구조체 선언에 추가하면 개체가 SMP 
+ *   구성에서 적절하게 정렬됩니다.
+ */
 #define KMEM_CACHE(__struct, __flags)					\
 		kmem_cache_create(#__struct, sizeof(struct __struct),	\
 			__alignof__(struct __struct), (__flags), NULL)

@@ -31,6 +31,14 @@
  * A maximum of 4 million PIDs should be enough for a while.
  * [NOTE: PID/TIDs are limited to 2^30 ~= 1 billion, see FUTEX_TID_MASK.]
  */
+
+/*
+ * IAMROOT, 2023.04.08:
+ * - CONFIG_BASE_SMALL == 0, PAGE_SIZE = 4k 
+ *   4M
+ * - CONFIG_BASE_SMALL == 1, PAGE_SIZE = 4K
+ *   32k
+ */
 #define PID_MAX_LIMIT (CONFIG_BASE_SMALL ? PAGE_SIZE * 8 : \
 	(sizeof(long) > 4 ? 4 * 1024 * 1024 : PID_MAX_DEFAULT))
 

@@ -63,10 +63,20 @@ struct pid init_struct_pid = {
 	}, }
 };
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - pid_idr_init에서 재설정된다.
+ *   32k 이상 4M 이하로 설정한다.(cpu32개 까진 32k. 이후는 한개당 1k증가)
+ */
 int pid_max = PID_MAX_DEFAULT;
 
 #define RESERVED_PIDS		300
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - pid_idr_init에서 재설정된다. 
+ *   cpus * 8 <= pid_max_min <= 301
+ */
 int pid_max_min = RESERVED_PIDS + 1;
 int pid_max_max = PID_MAX_LIMIT;
 
@@ -191,6 +201,11 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 	for (i = ns->level; i >= 0; i--) {
 		int tid = 0;
 
+
+/*
+ * IAMROOT, 2023.04.08:
+ * - level별 tid를 가져온다.
+ */
 		if (set_tid_size) {
 			tid = set_tid[ns->level - i];
 
@@ -212,6 +227,11 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 		idr_preload(GFP_KERNEL);
 		spin_lock_irq(&pidmap_lock);
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - 위에서 tid가 있었다면 tid기준으로 할당하고, 그게 아니면 
+ *   pid_max까지 cycle로 할당한다.
+ */
 		if (tid) {
 			nr = idr_alloc(&tmp->idr, NULL, tid,
 				       tid + 1, GFP_ATOMIC);
@@ -614,14 +634,31 @@ SYSCALL_DEFINE2(pidfd_open, pid_t, pid, unsigned int, flags)
 	return fd;
 }
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - pid_max, pid_max_min, init_pid_ns를 초기화한다.
+ */
 void __init pid_idr_init(void)
 {
 	/* Verify no one has done anything silly: */
 	BUILD_BUG_ON(PID_MAX_LIMIT >= PIDNS_ADDING);
 
 	/* bump default and minimum pid_max based on number of cpus */
+/*
+ * IAMROOT, 2023.04.08:
+ * - pid_max_max = 4M 
+ *   pid_max = 32k
+ *   PIDS_PER_CPU_DEFAULT * cpus = 1024 * cpus
+ *   min(4M, max(32k, cpus * 1024))
+ *   32k 이상 4M 이하로 설정한다. cpu32개 까진 32k. 이후는 한개당 1k증가
+ */
 	pid_max = min(pid_max_max, max_t(int, pid_max,
 				PIDS_PER_CPU_DEFAULT * num_possible_cpus()));
+
+/*
+ * IAMROOT, 2023.04.08:
+ * - cpus * 8 <= pid_max_min <= 301
+ */
 	pid_max_min = max_t(int, pid_max_min,
 				PIDS_PER_CPU_MIN * num_possible_cpus());
 	pr_info("pid_max: default: %u minimum: %u\n", pid_max, pid_max_min);

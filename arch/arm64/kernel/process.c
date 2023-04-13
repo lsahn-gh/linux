@@ -358,6 +358,11 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 	if (likely(!(p->flags & (PF_KTHREAD | PF_IO_WORKER)))) {
 		*childregs = *current_pt_regs();
+/*
+ * IAMROOT, 2023.04.08:
+ * - 복사대상의 x0(반환값)을 굳이 child에서 사용할 필요가 없다.
+ *   정돈하는 개념에서 0로 초기화해준다.
+ */
 		childregs->regs[0] = 0;
 
 		/*
