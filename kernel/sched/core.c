@@ -2434,7 +2434,7 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
  * IAMROOT, 2023.04.13:
  * - scheulder에 따른 schedule. @p와 @rq schedule가 같다면
  *   scheudler의 check_preempt_curr()에서 reschedule여부를 결정한다.
- *   @p schduler의 우선순위가 작다면 @rq로 rechedule한다.
+ *   @p schduler의 우선순위가 크다면 @rq를 rechedule한다.
  *   그게 아니면 rechedule안한다.
  *   (sched_class 비교는 __pick_next_task() 참고)
  */
