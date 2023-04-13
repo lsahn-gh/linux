@@ -1077,6 +1077,10 @@ static void attach_entity_cfs_rq(struct sched_entity *se);
  * Finally, that extrapolated util_avg is clamped to the cap (util_avg_cap)
  * if util_avg > util_avg_cap.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - TODO
+ */
 void post_init_entity_util_avg(struct task_struct *p)
 {
 	struct sched_entity *se = &p->se;

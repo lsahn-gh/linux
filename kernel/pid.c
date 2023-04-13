@@ -170,6 +170,12 @@ void free_pid(struct pid *pid)
 	call_rcu(&pid->rcu, delayed_put_pid);
 }
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - ns가 별도로 할당되지 않은 경우는 최상위 부모 task가 init_nsproxy를 사용하고 있으므로
+ *   fork된 task 들도 같은 init_nsproxy를 사용하고 있고 인자 @ns 값은
+ *   init_pid_ns가 된다
+ */
 struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 		      size_t set_tid_size)
 {
@@ -187,6 +193,15 @@ struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 	 * up to set_tid_size PID namespaces. It does not have to set the PID
 	 * for a process in all nested PID namespaces but set_tid_size must
 	 * never be greater than the current ns->level + 1.
+	 */
+	/*
+	 * IAMROOT. 2023.04.08:
+	 * - google-translate
+	 * set_tid_size는 set_tid 배열의 크기를 포함합니다. 가장 중첩된 현재 활성 PID
+	 * 네임스페이스에서 시작하여 set_tid_size PID 네임스페이스까지 가장 중첩된 PID
+	 * 네임스페이스에서 프로세스에 대해 설정할 PID를 alloc_pid()에 알려줍니다. 중첩된
+	 * 모든 PID 네임스페이스의 프로세스에 대한 PID를 설정할 필요는 없지만
+	 * set_tid_size는 현재 ns->level + 1보다 커서는 안 됩니다.
 	 */
 	if (set_tid_size > ns->level + 1)
 		return ERR_PTR(-EINVAL);
@@ -342,6 +357,10 @@ struct pid *find_vpid(int nr)
 }
 EXPORT_SYMBOL_GPL(find_vpid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - PIDTYPE_PID이면 thread_pid, 아니라면 signal->pids에서 가져온다.
+ */
 static struct pid **task_pid_ptr(struct task_struct *task, enum pid_type type)
 {
 	return (type == PIDTYPE_PID) ?
@@ -459,6 +478,11 @@ struct task_struct *find_get_task_by_vpid(pid_t nr)
 	return task;
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - type이 PIDTYPE_PID인경우 thread_pid, 그게 아니면 signal->pids에서 type에
+ *   따른 pid를 가져오고 ref up한다.
+ */
 struct pid *get_task_pid(struct task_struct *task, enum pid_type type)
 {
 	struct pid *pid;
@@ -493,6 +517,10 @@ struct pid *find_get_pid(pid_t nr)
 }
 EXPORT_SYMBOL_GPL(find_get_pid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @pid가 @ns안의 pid라면 @ns에서 보여지는 pid를 return 한다.
+ */
 pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 {
 	struct upid *upid;
@@ -507,6 +535,11 @@ pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 }
 EXPORT_SYMBOL_GPL(pid_nr_ns);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - current가 속한 ns에서 보여지는 @pid의 pid를 return.
+ *   속하지 않닸다면 return 0.
+ */
 pid_t pid_vnr(struct pid *pid)
 {
 	return pid_nr_ns(pid, task_active_pid_ns(current));
@@ -528,6 +561,10 @@ pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 }
 EXPORT_SYMBOL(__task_pid_nr_ns);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @tsk의 thread_pid의 ns를 return한다.
+ */
 struct pid_namespace *task_active_pid_ns(struct task_struct *tsk)
 {
 	return ns_of_pid(task_pid(tsk));

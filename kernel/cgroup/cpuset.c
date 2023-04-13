@@ -384,6 +384,17 @@ static DECLARE_WAIT_QUEUE_HEAD(cpuset_attach_wq);
  * requested and won't be changed by hotplug events. Only the effective
  * cpus or mems will be affected.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   Cgroup v2 동작은 기본 계층에 있거나 cpuset_v2_mode 마운트 옵션으로
+ *   v1 cpuset cgroup 파일 시스템을 마운트하여 cpuset_v2_mode 플래그가 
+ *   설정된 경우 cpus 및 mems 제어 파일에서 사용됩니다.
+ *   v2 동작에서 cpus 및 mems는 항상 사용자가 요청한 것이며 핫플러그 
+ *   이벤트에 의해 변경되지 않습니다. 유효 CPU 또는 메모리만 영향을 받습니다.
+ *
+ * - cgroup이 v2 mode로 동작하고 있는지 확인한다.
+ */
 static inline bool is_in_v2_mode(void)
 {
 	return cgroup_subsys_on_dfl(cpuset_cgrp_subsys) ||
@@ -3399,7 +3410,25 @@ void cpuset_cpus_allowed(struct task_struct *tsk, struct cpumask *pmask)
  *
  * Returns true if the affinity of @tsk was changed, false otherwise.
  **/
-
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   cpuset_cpus_allowed_fallback - 완전한 재앙 이전의 최종 폴백.
+ *   @tsk: 스케줄러가 어려움을 겪고 있는 task_struct에 대한 포인터.
+ *
+ *   설명: 스케줄러가 tsk->cpus_allowed에서 허용된 CPU를 찾을 수 없는 경우
+ *   task_cs(tsk)->cpus_allowed로 대체합니다. 그러나 레거시 모드에서 이 값은
+ *   task_cs(tsk)->effective_cpus와 동일하며, CPU 핫플러깅과 같은 경우에는
+ *   정상적인 cpumask를 포함하지 않습니다.
+ *   이것은 스케줄러를 위한 절대적인 최후의 수단이며 _모든_ 다른 길을 이동한
+ *   경우에만 사용됩니다.
+ *
+ *   @tsk의 선호도가 변경된 경우 true를 반환하고 그렇지 않은 경우 false를
+ *   반환합니다. 
+ *
+ * - 어떤 이유에 의해 @tsk에 허용된 cpu를 못찾은 상태. cgroup_subsys_state의 
+ *   cpuset_cgrp_id의 cpus_allowed로 확장을 시도한다.
+ */
 bool cpuset_cpus_allowed_fallback(struct task_struct *tsk)
 {
 	const struct cpumask *possible_mask = task_cpu_possible_mask(tsk);
@@ -3408,6 +3437,11 @@ bool cpuset_cpus_allowed_fallback(struct task_struct *tsk)
 
 	rcu_read_lock();
 	cs_mask = task_cs(tsk)->cpus_allowed;
+/*
+ * IAMROOT, 2023.04.13:
+ * - cgroup이 v2로 동작하고 있고, possible cpu에 cs_mask가 속한 경우,
+ *   @task의 cpumask에 cs_mask를 추가한다.
+ */
 	if (is_in_v2_mode() && cpumask_subset(cs_mask, possible_mask)) {
 		do_set_cpus_allowed(tsk, cs_mask);
 		changed = true;

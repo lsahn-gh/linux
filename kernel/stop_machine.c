@@ -198,6 +198,18 @@ enum multi_stop_state {
 	MULTI_STOP_EXIT,
 };
 
+/*
+ * IAMROOT, 2023.03.27:
+ * --- chat openai ---
+ *  - fn: 각 CPU를 정지시키기 위해 호출되는 함수 포인터.
+ *  - data: stop 함수에 전달되는 데이터에 대한 포인터.
+ *  - num_threads: 중지해야 하는 스레드 또는 CPU의 수입니다.
+ *  - active_cpus: 현재 활성화된 CPU 마스크에 대한 포인터.
+ *  - state: 다중 중지 작업의 현재 상태를 나타내는 열거형입니다.
+ *  - thread_ack: 중지 명령을 승인한 스레드 또는 CPU 수를 추적하는
+ *                원자 카운터입니다.
+ * --------------------
+ */
 struct multi_stop_data {
 	cpu_stop_fn_t		fn;
 	void			*data;
@@ -209,6 +221,11 @@ struct multi_stop_data {
 	atomic_t		thread_ack;
 };
 
+/*
+ * IAMROOT, 2023.03.27:
+ * - num_threads만큼의 thread_ack에 set하고,
+ *   @msdata의 state를 newstate로 교체한다.
+ */
 static void set_state(struct multi_stop_data *msdata,
 		      enum multi_stop_state newstate)
 {
@@ -219,6 +236,12 @@ static void set_state(struct multi_stop_data *msdata,
 }
 
 /* Last one to ack a state moves to the next state. */
+/*
+ * IAMROOT, 2023.03.27:
+ * - thread_ack를 1씩 감소한다. 만약 0이면 state를 up한다.
+ *   즉 모든 thread가 확인이됬는지 검사하고, 마지막 thread가 state를
+ *   up하는 방식이다.
+ */
 static void ack_state(struct multi_stop_data *msdata)
 {
 	if (atomic_dec_and_test(&msdata->thread_ack))
@@ -544,6 +567,8 @@ static int __stop_cpus(const struct cpumask *cpumask,
  * 아닌 값을 반환합니다.
  *
  * - NOTE. CONTEXT가 잠들수 있다는 의미는 전달된 fn에서 sleep api를 사용할 수 있다는 의미
+ * - mutex_lock으로 인해 실제 진입하는 cpu는 1개만일 것이고, 해당 cpu가
+ *   stopper를 기다리는 waiter 역할을 할 것이다.
  */
 static int stop_cpus(const struct cpumask *cpumask, cpu_stop_fn_t fn, void *arg)
 {
@@ -681,6 +706,10 @@ static int __init cpu_stop_init(void)
 }
 early_initcall(cpu_stop_init);
 
+/*
+ * IAMROOT, 2023.03.27:
+ * - 
+ */
 int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 			    const struct cpumask *cpus)
 {
@@ -719,6 +748,12 @@ int stop_machine_cpuslocked(cpu_stop_fn_t fn, void *data,
 	}
 
 	/* Set the initial state and stop all online cpus. */
+/*
+ * IAMROOT, 2023.03.27:
+ * - num_online_cpus() 에 대해서 stop을 대기하고 state를 MULTI_STOP_PREPARE로
+ *   설정한다. num_online_cpus()개수만큼 stop이 됬으면 MULTI_STOP_DISABLE_IRQ
+ *   로 넘어갈것이다.
+ */
 	set_state(&msdata, MULTI_STOP_PREPARE);
 	/*
 	 * IAMROOT, 2023.03.25:

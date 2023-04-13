@@ -448,6 +448,10 @@ static bool mirrored_kernelcore __meminitdata;
 int movable_zone;
 EXPORT_SYMBOL(movable_zone);
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - setup_nr_node_ids 에서 설정
+ */
 #if MAX_NUMNODES > 1
 unsigned int nr_node_ids __read_mostly = MAX_NUMNODES;
 unsigned int nr_online_nodes __read_mostly = 1;

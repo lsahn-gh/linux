@@ -140,6 +140,11 @@ static bool __read_mostly allow_mismatched_32bit_el0;
  * Static branch enabled only if allow_mismatched_32bit_el0 is set and we have
  * seen at least one CPU capable of 32-bit EL0.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - el0 32bit mode에서 사용가능한 cpu가 arm64 mode와 불일치한지에 대한 여부.
+ *   system_32bit_el0_cpumask() 참고.
+ */
 DEFINE_STATIC_KEY_FALSE(arm64_mismatched_32bit_el0);
 
 /*
@@ -1421,6 +1426,15 @@ has_cpuid_feature(const struct arm64_cpu_capabilities *entry, int scope)
 	return feature_matches(val, entry);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - system이 el0 32bit mode를 아에 진원 안한다면.
+ *   return cpu_none_mask.
+ * - system에 el0 32bit mode에서만 사용할수있는 cpu가 있는 설정상태라면.
+ *   return cpu_32bit_el0_mask
+ * - 32bit mode와 일반 mode의 구별이 없는 보통 상태라면.
+ *   cpu_possible_mask return.
+ */
 const struct cpumask *system_32bit_el0_cpumask(void)
 {
 	if (!system_supports_32bit_el0())

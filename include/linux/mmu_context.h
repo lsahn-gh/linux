@@ -29,6 +29,12 @@ static inline void leave_mm(int cpu) { }
 # define task_cpu_possible_mask(p)	cpu_possible_mask
 # define task_cpu_possible(cpu, p)	true
 #else
+/*
+ * IAMROOT, 2023.04.13:
+ * - @p가 들어갈수있는 cpumask를 선택하고(일반적으로 cpu_possible_mask),
+ *   그 mask에서 @cpu가 있는지 확인한다.
+ *   있다면 return 1. 없다면 return 0.
+ */
 # define task_cpu_possible(cpu, p)	cpumask_test_cpu((cpu), task_cpu_possible_mask(p))
 #endif
 

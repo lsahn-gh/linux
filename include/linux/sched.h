@@ -1035,6 +1035,15 @@ struct task_struct {
 	 * Tracking a recently used CPU allows a quick search for a recently
 	 * used CPU that may be idle.
 	 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   recent_used_cpu는 초기에 다른 task과 관련하여 깨우는 task에서 사용한 
+ *   마지막 CPU로 설정됩니다. 웨이커/웨이키 관계는 각 웨이크업이 다음 
+ *   웨이크업으로 이동하는 CPU 주변에서 작업을 푸시할 수 있습니다.
+ *   최근에 사용된 CPU를 추적하면 유휴 상태일 수 있는 최근에 사용된 CPU를 
+ *   빠르게 검색할 수 있습니다.
+ */
 	int				recent_used_cpu;
 	int				wake_cpu;
 #endif
@@ -1103,6 +1112,10 @@ struct task_struct {
 
 	unsigned int			policy;
 	int				nr_cpus_allowed;
+/*
+ * IAMROOT, 2023.04.13:
+ * - 기본적으로 자기자신의 cpus_mask를 가리킨다.
+ */
 	const cpumask_t			*cpus_ptr;
 	cpumask_t			*user_cpus_ptr;
 	cpumask_t			cpus_mask;
@@ -1274,6 +1287,17 @@ struct task_struct {
 	struct list_head		ptrace_entry;
 
 	/* PID/PID hash table linkage. */
+	/*
+	 * IAMROOT, 2023.04.08:
+	 * - 2c4704756cab7cfa031ada4dab361562f0e357c0 커밋에 의해 기존 pids
+	 * 멤버가 변경됨
+	 * -	struct pid_link			pids[PIDTYPE_MAX];
+	 * +	struct pid			*thread_pid;
+	 * +	struct hlist_node		pid_links[PIDTYPE_MAX];
+	 *
+	 * - thread_pid
+	 *   일반 pid. task_pid_ptr에서 PIDTYPE_PID type인 경우 선택 된다.
+	 */
 	struct pid			*thread_pid;
 	struct hlist_node		pid_links[PIDTYPE_MAX];
 	struct list_head		thread_group;
@@ -1855,6 +1879,10 @@ struct task_struct {
 	 */
 };
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - thread_pid를 return.
+ */
 static inline struct pid *task_pid(struct task_struct *task)
 {
 	return task->thread_pid;
@@ -2301,6 +2329,10 @@ extern struct thread_info init_thread_info;
 extern unsigned long init_stack[THREAD_SIZE / sizeof(unsigned long)];
 
 #ifdef CONFIG_THREAD_INFO_IN_TASK
+/*
+ * IAMROOT, 2023.04.13:
+ * - @task의 thread_info return.
+ */
 static inline struct thread_info *task_thread_info(struct task_struct *task)
 {
 	return &task->thread_info;

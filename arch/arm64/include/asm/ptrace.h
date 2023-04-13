@@ -250,6 +250,13 @@ static inline unsigned long pstate_to_compat_psr(const unsigned long pstate)
  * exception. Note that sizeof(struct pt_regs) has to be a multiple of 16 (for
  * stack alignment). struct user_pt_regs must form a prefix of struct pt_regs.
  */
+/*
+ * IAMROOT. 2023.04.08:
+ * - google-translate
+ * 이 구조체는 예외가 발생하는 동안 레지스터가 스택에 저장되는 방식을
+ * 정의합니다. sizeof(struct pt_regs)는 스택 정렬을 위해 16의 배수여야
+ * 합니다. struct user_pt_regs는 struct pt_regs의 접두사를 형성해야 합니다.
+ */
 struct pt_regs {
 	union {
 		struct user_pt_regs user_regs;

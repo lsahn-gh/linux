@@ -265,7 +265,12 @@ void update_sctlr_el1(u64 sctlr);
 extern struct task_struct *cpu_switch_to(struct task_struct *prev,
 					 struct task_struct *next);
 
-#define task_pt_regs(p) \
+/*
+ * IAMROOT, 2023.04.08:
+ * - task용 stack 의 제일 윗부분(최상위 어드레스)에 위치한 pt_regs를 반환
+ * - ptrace 용으로 사용될 거라 추정.
+ */
+#define task_pt_regs(p)							\
 	((struct pt_regs *)(THREAD_SIZE + task_stack_page(p)) - 1)
 
 #define KSTK_EIP(tsk)	((unsigned long)task_pt_regs(tsk)->pc)

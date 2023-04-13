@@ -300,6 +300,19 @@ int create_task_io_context(struct task_struct *task, gfp_t gfp_flags, int node)
  * This function always goes through task_lock() and it's better to use
  * %current->io_context + get_io_context() for %current.
  */
+/*
+ * IAMROOT. 2023.04.08:
+ * - google-translate
+ * get_task_io_context - 작업의 io_context 가져오기
+ * @task: 관심 작업
+ * @gfp_flags: 할당 플래그, 할당이 필요한 경우 사용
+ * @node: 할당 노드, 할당이 필요한 경우 사용
+ * @task의 io_context를 반환합니다. 존재하지 않는 경우 @gfp_flags 및 @node로
+ * 생성됩니다. 반환된 io_context는 참조 횟수가 증가합니다.
+ *
+ * 이 함수는 항상 task_lock()을 거치며 %current에는
+ * %current->io_context + get_io_context()를 사용하는 것이 좋습니다.
+ */
 struct io_context *get_task_io_context(struct task_struct *task,
 				       gfp_t gfp_flags, int node)
 {

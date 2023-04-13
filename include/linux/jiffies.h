@@ -152,6 +152,7 @@ static inline u64 get_jiffies_64(void)
 /*
  * IAMROOT, 2022.09.03:
  * - a가 b시각 이후이거나 같으면 true.
+ *   return a >= b
  */
 #define time_after_eq(a,b)	\
 	(typecheck(unsigned long, a) && \

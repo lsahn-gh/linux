@@ -36,7 +36,7 @@ static struct kmem_cache *pid_cache[MAX_PID_NS_LEVEL];
 
 /*
  * IAMROOT, 2023.04.01:
- * - ING
+ * - "pid_(level+1)" 이름으로 kmem cache를 만들어서 반환한다.
  */
 static struct kmem_cache *create_pid_cachep(unsigned int level)
 {
@@ -51,9 +51,19 @@ static struct kmem_cache *create_pid_cachep(unsigned int level)
 		return kc;
 
 	snprintf(name, sizeof(name), "pid_%u", level + 1);
+/*
+ * IAMROOT, 2023.04.13:
+ * - pid의 member numbers가 level만큼 커진다.
+ */
 	len = sizeof(struct pid) + level * sizeof(struct upid);
 	mutex_lock(&pid_caches_mutex);
 	/* Name collision forces to do allocation under mutex. */
+	/*
+	 * IAMROOT. 2023.04.08:
+	 * - google-translate
+	 * 이름 충돌은 뮤텍스 하에 할당을 수행하도록 강제합니다.
+	 * - NOTE. level 크기 만큼 upid 구조체를 증가하여 할당받는다.
+	 */
 	if (!*pkc)
 		*pkc = kmem_cache_create(name, len, 0,
 					 SLAB_HWCACHE_ALIGN | SLAB_ACCOUNT, 0);
@@ -79,7 +89,7 @@ static void dec_pid_namespaces(struct ucounts *ucounts)
 
 /*
  * IAMROOT, 2023.04.01:
- * - ING
+ * - pid namespace를 생성한다. pid할당시 필요한 cache도 같이 준비한다.
  */
 static struct pid_namespace *create_pid_namespace(struct user_namespace *user_ns,
 	struct pid_namespace *parent_pid_ns)
@@ -152,6 +162,10 @@ static void destroy_pid_namespace(struct pid_namespace *ns)
 	call_rcu(&ns->rcu, delayed_free_pidns);
 }
 
+/*
+ * IAMROOT, 2023.04.08:
+ * - CLONE_NEWPID flag 유무에 따라 namespace를 새로 생성하거나 기존걸 반환
+ */
 struct pid_namespace *copy_pid_ns(unsigned long flags,
 	struct user_namespace *user_ns, struct pid_namespace *old_ns)
 {

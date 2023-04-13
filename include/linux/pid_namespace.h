@@ -25,6 +25,10 @@ struct pid_namespace {
 	struct rcu_head rcu;
 	unsigned int pid_allocated;
 	struct task_struct *child_reaper;
+/*
+ * IAMROOT, 2023.04.13:
+ * - create_pid_cachep를 통해서 초기화 된다. level에 따라서 크기가 달라진다.
+ */
 	struct kmem_cache *pid_cachep;
 	unsigned int level;
 	struct pid_namespace *parent;

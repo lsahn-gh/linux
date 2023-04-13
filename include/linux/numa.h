@@ -21,7 +21,7 @@
 
 /*
  * IAMROOT, 2023.03.25:
- * - 어떤 NODE 이든 상관이 없는 것을 나타냄(= anynode)
+ * - NODE 이든 상관이 없는 것을 나타냄(= anynode)
  */
 #define	NUMA_NO_NODE	(-1)
 

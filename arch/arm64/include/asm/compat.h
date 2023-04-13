@@ -170,6 +170,10 @@ static inline int is_compat_task(void)
 	return test_thread_flag(TIF_32BIT);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @thread가 32bit mode인지 확인한다.
+ */
 static inline int is_compat_thread(struct thread_info *thread)
 {
 	return test_ti_thread_flag(thread, TIF_32BIT);
