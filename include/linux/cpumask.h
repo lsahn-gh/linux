@@ -26,6 +26,16 @@ typedef struct cpumask { DECLARE_BITMAP(bits, NR_CPUS); } cpumask_t;
  * You should only assume nr_cpu_ids bits of this mask are valid.  This is
  * a macro so it's const-correct.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   cpumask_bits - cpumask의 비트 가져오기
+ *   @maskp: 구조체 cpumask
+ *
+ *   이 마스크의 nr_cpu_ids 비트만 유효하다고 가정해야 합니다. 이것은
+ *   매크로이므로 const가 정확합니다.
+ * - return cpumask->bits
+ */
 #define cpumask_bits(maskp) ((maskp)->bits)
 
 /**
@@ -99,6 +109,10 @@ extern unsigned int nr_cpu_ids;
  *    only one CPU.
  */
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - set_cpu_online() 주석 참고
+ */
 extern struct cpumask __cpu_possible_mask;
 extern struct cpumask __cpu_online_mask;
 extern struct cpumask __cpu_present_mask;
@@ -122,6 +136,11 @@ static inline void cpu_max_bits_warn(unsigned int cpu, unsigned int bits)
 }
 
 /* verify cpu argument to cpumask_* operators */
+/*
+ * IAMROOT, 2023.04.13:
+ * - @cpu가 nr_cpumask_bits를 넘는지 검사하는 루틴이 있다.
+ *   return cpu.
+ */
 static inline unsigned int cpumask_check(unsigned int cpu)
 {
 	cpu_max_bits_warn(cpu, nr_cpumask_bits);
@@ -354,6 +373,18 @@ static inline void __cpumask_clear_cpu(int cpu, struct cpumask *dstp)
  * @cpumask: the cpumask pointer
  *
  * Returns 1 if @cpu is set in @cpumask, else returns 0
+ */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   cpumask_test_cpu - cpumask에서 cpu를 테스트합니다.
+ *
+ *   @cpu: CPU 번호(< nr_cpu_ids)
+ *   @cpumask: cpumask 포인터.
+ *
+ *   @cpumask에 @cpu가 설정되어 있으면 1을 반환하고 그렇지 않으면 0을 
+ *   반환합니다.
+ * - @cpumask에 cpu가 있으면 return 1. 아니면 return 0.
  */
 static inline int cpumask_test_cpu(int cpu, const struct cpumask *cpumask)
 {
@@ -616,6 +647,10 @@ static inline void cpumask_copy(struct cpumask *dstp,
  *
  * Returns >= nr_cpu_ids if no cpus set.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - 첫번째꺼 그냥 선택
+ */
 #define cpumask_any(srcp) cpumask_first(srcp)
 
 /**
@@ -831,6 +866,10 @@ extern const DECLARE_BITMAP(cpu_all_bits, NR_CPUS);
 #define cpu_all_mask to_cpumask(cpu_all_bits)
 
 /* First bits of cpu_bit_bitmap are in fact unset. */
+/*
+ * IAMROOT, 2023.04.13:
+ * - cpu가 하나도 set이 안되있는 bitmap을 return한다.
+ */
 #define cpu_none_mask to_cpumask(cpu_bit_bitmap[0])
 
 #define for_each_possible_cpu(cpu) for_each_cpu((cpu), cpu_possible_mask)
@@ -1056,6 +1095,10 @@ static inline bool cpu_present(unsigned int cpu)
 	return cpumask_test_cpu(cpu, cpu_present_mask);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - cpu가 active인지(스케쥴링 가능한 상태) 확인한다.
+ */
 static inline bool cpu_active(unsigned int cpu)
 {
 	return cpumask_test_cpu(cpu, cpu_active_mask);

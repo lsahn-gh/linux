@@ -94,8 +94,8 @@ static inline int numa_node_id(void)
 
 /*
  * IAMROOT, 2022.02.05:
- * - TODO
- *   해당 cpu의 node를 구해온다.
+ * - 해당 cpu의 node를 구해온다. cpu가 offline일 경우 return -1
+ *   (select_fallback_rq() 주석 참고)
  */
 static inline int cpu_to_node(int cpu)
 {

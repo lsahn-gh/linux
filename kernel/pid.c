@@ -337,6 +337,10 @@ struct pid *find_vpid(int nr)
 }
 EXPORT_SYMBOL_GPL(find_vpid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - PIDTYPE_PID이면 thread_pid, 아니라면 signal->pids에서 가져온다.
+ */
 static struct pid **task_pid_ptr(struct task_struct *task, enum pid_type type)
 {
 	return (type == PIDTYPE_PID) ?
@@ -454,6 +458,11 @@ struct task_struct *find_get_task_by_vpid(pid_t nr)
 	return task;
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - type이 PIDTYPE_PID인경우 thread_pid, 그게 아니면 signal->pids에서 type에
+ *   따른 pid를 가져오고 ref up한다.
+ */
 struct pid *get_task_pid(struct task_struct *task, enum pid_type type)
 {
 	struct pid *pid;
@@ -488,6 +497,10 @@ struct pid *find_get_pid(pid_t nr)
 }
 EXPORT_SYMBOL_GPL(find_get_pid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @pid가 @ns안의 pid라면 @ns에서 보여지는 pid를 return 한다.
+ */
 pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 {
 	struct upid *upid;
@@ -502,6 +515,11 @@ pid_t pid_nr_ns(struct pid *pid, struct pid_namespace *ns)
 }
 EXPORT_SYMBOL_GPL(pid_nr_ns);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - current가 속한 ns에서 보여지는 @pid의 pid를 return.
+ *   속하지 않닸다면 return 0.
+ */
 pid_t pid_vnr(struct pid *pid)
 {
 	return pid_nr_ns(pid, task_active_pid_ns(current));
@@ -523,6 +541,10 @@ pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 }
 EXPORT_SYMBOL(__task_pid_nr_ns);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @tsk의 thread_pid의 ns를 return한다.
+ */
 struct pid_namespace *task_active_pid_ns(struct task_struct *tsk)
 {
 	return ns_of_pid(task_pid(tsk));

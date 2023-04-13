@@ -89,6 +89,10 @@ int arch_dup_task_struct(struct task_struct *dst,
 #define TIF_FREEZE		19
 #define TIF_RESTORE_SIGMASK	20
 #define TIF_SINGLESTEP		21
+/*
+ * IAMROOT, 2023.04.13:
+ * - task가 32bit로 실행중인지에 대한 flag.
+ */
 #define TIF_32BIT		22	/* 32bit process */
 #define TIF_SVE			23	/* Scalable Vector Extension in use */
 #define TIF_SVE_VL_INHERIT	24	/* Inherit sve_vl_onexec across exec */

@@ -344,6 +344,34 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 	update_saved_ttbr0(tsk, next);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @p가 들어갈수있는 cpumask를 return 한다.
+ * - system 상태, @p의 el0 32bit mode 여부에 따른 cpu mask를 return한다.
+ *   최초에 32bit mode 구별이 없이 동일한 cpu를 사용한다면 cpu_possible_mask
+ *   가 일반적으로 return된다.
+ *   그 상황이 아니라면,
+ *
+ *   @p가 32bit mode가 아니라면 cpu_possible_mask,
+ *   @p가 32bit mode인데 system이 el0 32bit mode 미지원 이면 cpu_none_mask,
+ *   @p가 32bit mode인데 system이 el0 32bit mode 지원 이면 cpu_32bit_el0_mask
+ *   가 선택된다.
+ *
+ *   arm64_      | 32bitmode | system_     | return
+ *   mismatched_ |           | 32bit_      |
+ *   32bit_el0   |           | el0_cpumask |
+ *   ------------+-----------+-------------+-----------------------------+
+ *   disable     | -         | -           | cpu_possible_mask
+ *   ------------+-----------+-------------+-----------------------------+
+ *   enable      | disable   | -           | cpu_possible_mask
+ *   ------------+-----------+-------------+-----------------------------+
+ *   enable      | enable    | 32bit mode  | cpu_none_mask
+ *                             not support | 
+ *   ------------+-----------+-------------+-----------------------------+
+ *   enable      | enable    | 32bit mode   | cpu_32bit_el0_mask
+ *                             support
+ *   ------------+-----------+-------------+-----------------------------+
+ */
 static inline const struct cpumask *
 task_cpu_possible_mask(struct task_struct *p)
 {

@@ -553,6 +553,10 @@ void double_rq_lock(struct rq *rq1, struct rq *rq2)
 /*
  * __task_rq_lock - lock the rq @p resides on.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - @p의 @rq를 lock을 잡으며 얻어온다.
+ */
 struct rq *__task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 	__acquires(rq->lock)
 {
@@ -2315,6 +2319,10 @@ static inline void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	p->sched_class->dequeue_task(rq, p, flags);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - enqueue 및 on rq.
+ */
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
 {
 	enqueue_task(rq, p, flags);
@@ -2422,6 +2430,14 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 		p->sched_class->prio_changed(rq, p, oldprio);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - scheulder에 따른 schedule. @p와 @rq schedule가 같다면
+ *   scheudler의 check_preempt_curr()에서 reschedule여부를 결정한다.
+ *   @p schduler의 우선순위가 작다면 @rq로 rechedule한다.
+ *   그게 아니면 rechedule안한다.
+ *   (sched_class 비교는 __pick_next_task() 참고)
+ */
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
 	if (p->sched_class == rq->curr->sched_class)
@@ -2432,7 +2448,13 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 	/*
 	 * A queue event has occurred, and we're going to schedule.  In
 	 * this case, we can save a useless back to back clock update.
-	 */
+	 V*/
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   대기열 이벤트가 발생했으며 일정을 잡겠습니다. 이 경우 쓸모없는 
+ *   백투백 클럭 업데이트를 저장할 수 있습니다.
+ */
 	if (task_on_rq_queued(rq->curr) && test_tsk_need_resched(rq->curr))
 		rq_clock_skip_update(rq);
 }
@@ -2517,6 +2539,32 @@ static inline bool rq_has_pinned_tasks(struct rq *rq)
  * Per-CPU kthreads are allowed to run on !active && online CPUs, see
  * __set_cpus_allowed_ptr() and select_fallback_rq().
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   CPU별 kthread는 !active && 온라인 CPU에서 실행할 수 있습니다. 
+ *   __set_cpus_allowed_ptr() 및 select_fallback_rq()를 참조하세요.
+ *
+ * - 기본적으로 @p에서 @cpu가 사용가능한지 검사하며, 그외에
+ *   migrate 가능여부, user / kthread / pcpu kthread 에 따른 검사를
+ *   하여 @cpu가 @p에서 사용가능한 여부를 return한다.
+ *
+ * @p->cpumask | migrate | cpu online | thread | return
+ *                       | or active  |        | 
+ *                       | or task    |
+ *                       | possible   |
+ * ------------+---------+------------+--------+--------
+ * false       | -       | -          | -      | false
+ * true        | false   | false      | -      | false
+ * true        | false   | true       | -      | true
+ * true        | true    | false      | user   | false
+ * true        | true    | true       | user   | true
+ * true        | true    | false      | pcpu k | false
+ * true        | true    | true       | pcpu k | true
+ * true        | true    | dying      | kernel | false
+ * true        | true    | false      | kernel | false
+ * true        | true    | true       | kernel | true
+ */
 static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 {
 	/* When not in the task's cpumask, no point in looking further. */
@@ -2527,10 +2575,17 @@ static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
 	if (is_migration_disabled(p))
 		return cpu_online(cpu);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - user thread 인경우.
+ */
 	/* Non kernel threads are not allowed during either online or offline. */
 	if (!(p->flags & PF_KTHREAD))
 		return cpu_active(cpu) && task_cpu_possible(cpu, p);
-
+/*
+ * IAMROOT, 2023.04.13:
+ * - 아래부턴 kernel thread.
+ */
 	/* KTHREAD_IS_PER_CPU is always allowed. */
 	if (kthread_is_per_cpu(p))
 		return cpu_online(cpu);
@@ -2817,6 +2872,11 @@ void set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_ma
 	p->nr_cpus_allowed = cpumask_weight(new_mask);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - queued, running에 따라 전/후처리를 수행하면서 @new_mask로 @p의
+ *   cpusmask에 추가한다.
+ */
 static void
 __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32 flags)
 {
@@ -2835,6 +2895,18 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
 	 *
 	 * XXX do further audits, this smells like something putrid.
 	 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   여기서는 rq->lock과 p->pi_lock을 모두 유지하는 동안에만 이러한 변수를
+ *   변경해야 하기 때문에 선호도에 대한 잠금 규칙을 위반합니다. 
+ *
+ *   그러나 ttwu()는 p->pi_lock에서 이러한 변수에 액세스하는 유일한 
+ *   코드이고 smp_cond_load_acquire(&p->on_cpu, !VAL) 이후에만 액세스하고 
+ *   finish_task( 전에 __schedule()에 있기 때문에 마술처럼 작동합니다. ).
+ *
+ *   XXX에서 추가 감사를 합니다. 뭔가 썩은 냄새가 납니다.
+ */
 	if (flags & SCA_MIGRATE_DISABLE)
 		SCHED_WARN_ON(!p->on_cpu);
 	else
@@ -2854,6 +2926,10 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
 	if (running)
 		put_prev_task(rq, p);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - ex) set_cpus_allowed_common()
+ */
 	p->sched_class->set_cpus_allowed(p, new_mask, flags);
 
 	if (queued)
@@ -2862,6 +2938,10 @@ __do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask, u32
 		set_next_task(rq, p);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @new_mask를 @p cpumask에 추가한다.
+ */
 void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 {
 	__do_set_cpus_allowed(p, new_mask, 0);
@@ -3687,6 +3767,35 @@ EXPORT_SYMBOL_GPL(kick_process);
  * select_task_rq() below may allow selection of !active CPUs in order
  * to satisfy the above rules.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   ->cpus_ptr은 rq->lock과 p->pi_lock 모두에 의해 보호됩니다.
+ *
+ *   cpu_active와 cpu_online에 대한 몇 가지 참고 사항:
+ *
+ *   - cpu_active는 cpu_online의 하위 집합이어야 합니다.
+ *
+ *   - CPU 업 시 온라인 && !active CPU에서 CPU당 kthread를 허용합니다. 
+ *   __set_cpus_allowed_ptr()을 참조하십시오. 이 시점에서 새로 온라인 CPU는 
+ *   아직 sched 도메인의 일부가 아니며 밸런싱에서 이를 볼 수 없습니다.
+ *
+ *   - CPU 다운 시 cpu_active()를 지워 sched 도메인을 마스킹하고 로드 
+ *   밸런서가 제거할 CPU에 새 작업을 배치하지 않도록 합니다. 기존 작업은 
+ *   계속 실행되며 제거됩니다.
+ *
+ *   이는 폴백 선택이 !active CPU를 선택하지 않아야 함을 의미합니다.
+ *
+ *   그리고 모든 active CPU가 온라인 상태여야 한다고 가정할 수 있습니다. 
+ *   반대로 아래의 select_task_rq()는 위의 규칙을 만족시키기 위해 !active 
+ *   CPU의 선택을 허용할 수 있습니다.
+ *
+ * - 다음 우선순위로 cpu를 선택한다.
+ * - 1. cpu가 속한 node에서 고른다.
+ *   2. @p에서 허락된 cpu에서 한개 고른다.
+ *   3. cpuset_cgrp_id로 @p cpus_mask를 확장해서 다시 골라본다.
+ *   4. cpu_possible_mask로 @p cpus_mask를 한번 더 확장해서 다시 골라본다. 
+ */
 static int select_fallback_rq(int cpu, struct task_struct *p)
 {
 	int nid = cpu_to_node(cpu);
@@ -3699,6 +3808,14 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	 * will return -1. There is no CPU on the node, and we should
 	 * select the CPU on the other node.
 	 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   CPU가 있는 노드가 오프라인이면 cpu_to_node()는 -1을 반환합니다. 
+ *   노드에는 CPU가 없으며 다른 노드에서 CPU를 선택해야 합니다.
+ *
+ * - cpu가 속한 node에서 고른다.
+ */
 	if (nid != -1) {
 		nodemask = cpumask_of_node(nid);
 
@@ -3708,9 +3825,16 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 				return dest_cpu;
 		}
 	}
-
+/*
+ * IAMROOT, 2023.04.13:
+ * - @cpu가 속한 node에서 못골랏으면
+ */
 	for (;;) {
 		/* Any allowed, online CPU? */
+/*
+ * IAMROOT, 2023.04.13:
+ * - @p에서 허락된 cpu중에 한개 골라본다.
+ */
 		for_each_cpu(dest_cpu, p->cpus_ptr) {
 			if (!is_cpu_allowed(p, dest_cpu))
 				continue;
@@ -3719,6 +3843,13 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 		}
 
 		/* No more Mr. Nice Guy. */
+/*
+ * IAMROOT, 2023.04.13:
+ * - cpuset인경우(처음)
+ *   @cpu가 속한 node에서도, @p의 cpus_mask(cpus_ptr)에서도 cpu를 못골랐다.
+ *   cgroup의 cpuset_cgrp_id로 cpus_mask 확장을 시도한다. 성공했으면
+ *   possible로 state를 전환 하며, 확장된 cpus_mask으로 한번 더 시도한다.
+ */
 		switch (state) {
 		case cpuset:
 			if (cpuset_cpus_allowed_fallback(p)) {
@@ -3733,9 +3864,24 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 			 *
 			 * More yuck to audit.
 			 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   XXX select_task_rq()에서 호출되면 p->pi_lock만 보유하고 다시 잠금 
+ *   순서를 위반합니다. 
+ *
+ *   감사할 일이 더 많습니다.
+ * - possible state에서 확장을 못했거나, 확장했음에도 선택이 안된 경우
+ *   @p에서 possible mask로 한번더 확장한다.
+ */
 			do_set_cpus_allowed(p, task_cpu_possible_mask(p));
 			state = fail;
 			break;
+/*
+ * IAMROOT, 2023.04.13:
+ * - 결국 최종적으로 possible cpu에서 선택을 하기 때문에 el0 32bit mode등의
+ *   이유가 아닌한 bug에 도달할 일은 없어야한다.
+ */
 		case fail:
 			BUG();
 			break;
@@ -3743,12 +3889,22 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 	}
 
 out:
+/*
+ * IAMROOT, 2023.04.13:
+ * - cpuset state에서 못골랏으면 print출력.
+ */
 	if (state != cpuset) {
 		/*
 		 * Don't tell them about moving exiting tasks or
 		 * kernel threads (both mm NULL), since they never
 		 * leave kernel.
 		 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   종료 작업 또는 커널 스레드(둘 다 mm NULL)를 이동하는 것에 대해
+ *   말하지 마십시오. 커널을 떠나지 않기 때문입니다.
+ */
 		if (p->mm && printk_ratelimit()) {
 			printk_deferred("process %d (%s) no longer affine to cpu%d\n",
 					task_pid_nr(p), p->comm, cpu);
@@ -3761,11 +3917,24 @@ out:
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_ptr is stable.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - 1. 허락된 cpu가 여러개고, migrate가 가능하면 schedule에 따라 cpu를 
+ *   고른다.
+ *   2. cpu가 한개거나 migrate불가면 그냥 cpus_mask에서 첫번째꺼를 고른다.
+ *   3. 1 or 2에서 고른 cpu가 @p에 허용이 안되면 @p의 cpus_mask를 확장해서
+ *   다시 고른다.
+ */
 static inline
 int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
 {
 	lockdep_assert_held(&p->pi_lock);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - cpu가 1개거나 migrate가 비활성화인경우 cpumask_any로 선택, 그게 아니면
+ *   @p의 schedule에 따라서 cpu를 선택한다.
+ */
 	if (p->nr_cpus_allowed > 1 && !is_migration_disabled(p))
 		cpu = p->sched_class->select_task_rq(p, cpu, wake_flags);
 	else
@@ -3781,6 +3950,20 @@ int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
 	 * [ this allows ->select_task() to simply return task_cpu(p) and
 	 *   not worry about this generic constraint ]
 	 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   blocking task에서 set_task_cpu()를 호출하지 않으려면 유효한 
+ *   ->cpus_ptr CPU에 작업을 배치하기 위해 ttwu()에 의존해야 합니다.
+ *
+ *   이것은 모든 배치 전략에 공통적이기 때문에 여기에 있습니다. 
+ *
+ *   [ 이것은 ->select_task()가 단순히 task_cpu(p)를 반환하고 이 일반적인
+ *   제약에 대해 걱정하지 않도록 허용합니다 ]. 
+ *
+ * - 위에서 선택된 cpu가 @p에서 사용못한다면 @p의 cpus_mask를 확장하며
+ *   cpu를 고른다.
+ */
 	if (unlikely(!is_cpu_allowed(p, cpu)))
 		cpu = select_fallback_rq(task_cpu(p), p);
 
@@ -4888,6 +5071,17 @@ unsigned long to_ratio(u64 period, u64 runtime)
  * that must be done for every newly created context, then puts the task
  * on the runqueue and wakes it.
  */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   wake_up_new_task - 새로 생성된 task을 처음으로 깨웁니다.
+ *
+ *   이 기능은 새로 생성된 모든 컨텍스트에 대해 수행되어야 하는 일부 초기 
+ *   스케줄러 통계 하우스키핑을 수행한 다음 작업을 실행 대기열에 넣고
+ *   깨웁니다.
+ *
+ * - ING
+ */
 void wake_up_new_task(struct task_struct *p)
 {
 	struct rq_flags rf;
@@ -4904,8 +5098,23 @@ void wake_up_new_task(struct task_struct *p)
 	 * Use __set_task_cpu() to avoid calling sched_class::migrate_task_rq,
 	 * as we're not fully set-up yet.
 	 */
+/*
+ * IAMROOT, 2023.04.13:
+ * - papago
+ *   포크 밸런싱은 이전에 하지 말고 여기에서 하십시오. 이유는 다음과
+ *   같습니다.
+ *   - cpus_ptr은 포크 경로에서 변경될 수 있습니다.
+ *   - 이전에 선택한 CPU는 핫플러그를 통해 사라질 수 있습니다.
+ *
+ *   아직 완전히 설정되지 않았으므로 __set_task_cpu()를 사용하여
+ *   sched_class::migrate_task_rq 호출을 피하십시오. 
+ */
 	p->recent_used_cpu = task_cpu(p);
 	rseq_migrate(p);
+/*
+ * IAMROOT, 2023.04.13:
+ * - @p 자신의 cpu로 설정한다.
+ */
 	__set_task_cpu(p, select_task_rq(p, task_cpu(p), WF_FORK));
 #endif
 	rq = __task_rq_lock(p, &rf);

@@ -625,6 +625,10 @@ void kthread_set_per_cpu(struct task_struct *k, int cpu)
 	set_bit(KTHREAD_IS_PER_CPU, &kthread->flags);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - percpu thread인지 확인한다.
+ */
 bool kthread_is_per_cpu(struct task_struct *p)
 {
 	struct kthread *kthread = __to_kthread(p);

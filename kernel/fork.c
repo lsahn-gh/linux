@@ -1638,6 +1638,11 @@ static void complete_vfork_done(struct task_struct *tsk)
 	task_unlock(tsk);
 }
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - @vfork가 완료될때까지 기다린다. 즉 child가 종료되거나 execve등을
+ *   할때까지 기다린다.
+ */
 static int wait_for_vfork_done(struct task_struct *child,
 				struct completion *vfork)
 {
@@ -3006,6 +3011,8 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
  * 프로세스를 복사하고 성공하면 시작하고 필요한 경우 VM을 사용하여 완료될 때까지 기다립니다.
  *
  * args->exit_signal은 호출자가 정상인지 확인해야 합니다.
+ *
+ * - 
  */
 pid_t kernel_clone(struct kernel_clone_args *args)
 {
@@ -3031,7 +3038,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	 * 레거시 clone() 호출의 경우 CLONE_PIDFD는 parent_tid 인수를 사용하여 pidfd를
 	 * 반환합니다. 따라서 CLONE_PIDFD와 CLONE_PARENT_SETTID는 상호
 	 * 배타적입니다. clone3()을 통해 CLONE_PIDFD는 struct clone_args에서 별도의
-	 * 필드를 키웠고 둘 다 동일한 메모리 위치를 가리키도록 하는 것은 여전히 ​​이치에 맞지
+	 * 필드를 키웠고 둘 다 동일한 메모리 위치를 가리키도록 하는 것은 여전히 이치에 맞지
 	 * 않습니다. 여기서 이 확인을 수행하면 레거시 clone()을 확인하기 위해 별도의
 	 * 도우미가 필요하지 않다는 이점이 있습니다.
 	 */
@@ -3083,12 +3090,20 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	 */
 	trace_sched_process_fork(current, p);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - thread_pid를 가져오고 ref up
+ */
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
 
 	if (clone_flags & CLONE_PARENT_SETTID)
 		put_user(nr, args->parent_tid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - vfork요청이면 vfork준비를 한다.
+ */
 	if (clone_flags & CLONE_VFORK) {
 		p->vfork_done = &vfork;
 		init_completion(&vfork);
@@ -3101,6 +3116,10 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	if (unlikely(trace))
 		ptrace_event_pid(trace, pid);
 
+/*
+ * IAMROOT, 2023.04.13:
+ * - vfork요청이면 vfork syscall이 완료될때까지 기다린다.
+ */
 	if (clone_flags & CLONE_VFORK) {
 		if (!wait_for_vfork_done(p, &vfork))
 			ptrace_event_pid(PTRACE_EVENT_VFORK_DONE, pid);

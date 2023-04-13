@@ -731,13 +731,13 @@ alternative_else_nop_endif
 
 /*
  * IAMROOT, 2022.11.05: 
- * exceptino 처리 후 커널 또는 유저로 복귀하기 전에 수행할 루틴
+ * exception 처리 후 커널 또는 유저로 복귀하기 전에 수행할 루틴
  * - kernel_entry에서 백업해뒀던 값들을 복구한다.
  */
 	.macro	kernel_exit, el
 /*
  * IAMROOT, 2022.11.05: 
- * 커널로 북귀하는 경우 DAIF 플래그를 모두 disable 한다.
+ * 커널로 복귀하는 경우 DAIF 플래그를 모두 disable 한다.
  * el0의 경우 handler에서 이미 disable했었다.
  */
 	.if	\el != 0
