@@ -1375,6 +1375,12 @@ done:
  * An update requires explicit request to rebuild sched domains
  * with state indicating CPU topology changes.
  */
+/*
+ * IAMROOT. 2023.04.15:
+ * - google-translate
+ * cpu capacities로 그룹화된 CPU의 빌드업/업데이트 목록 업데이트에는 CPU 토폴로지 변경을
+ * 나타내는 상태로 sched 도메인을 재구축하라는 명시적 요청이 필요합니다.
+ */
 static void asym_cpu_capacity_scan(void)
 {
 	struct asym_cap_data *entry, *next;
@@ -1738,6 +1744,29 @@ bool find_numa_distance(int distance)
  *   there is an intermediary node C, which is < N hops away from both
  *   nodes A and B, the system is a glueless mesh.
  */
+/*
+ * IAMROOT. 2023.04.15:
+ * - google-translate
+ * 시스템은 세 가지 유형의 NUMA 토폴로지를 가질 수 있습니다.
+ * NUMA_DIRECT: 모든 노드가 직접 연결되거나 NUMA 시스템이 아님
+ * NUMA_GLUELESS_MESH: 중간 노드를 통해 도달 가능한 일부 노드
+ * NUMA_BACKPLANE: 노드가 백플레인을 통해 다른 노드에 도달 가능
+ *
+ * 백플레인 토폴로지는 직접 연결되지 않은 노드 간의 통신이 중간
+ * 노드(프로그램이 실행될 수 있는 곳) 또는 백플레인 컨트롤러를 통해 이루어지는지에
+ * 달려 있습니다. 이는 프로그램 배치에 영향을 미칩니다.
+ *
+ * 다음 테스트를 통해 토폴로지 유형을 식별할 수 있습니다.
+ * - 노드 간 최대 거리가 1홉이면 시스템이 직접 연결된 것입니다.
+ * - 두 개의 노드 A와 B에 대해 N > 1 홉 떨어져 있는 경우 중간 노드 C가
+ *   있고 노드 A와 B 모두에서 < N 홉 떨어져 있는 경우 시스템은 글루리스 메시입니다.
+ */
+/*
+ * IAMROOT, 2023.04.15:
+ * - 모든 노드간 연결이 1hop 에 갈 수 있으면 NUMA_DIRECT 로 설정
+ *   모든 노드간 연결이 2hop 이내에 갈 수 있으면 NUMA_GLUELESS_MESH 로 설정
+ *   그외 모든 노드간 연결이 2hop 초과이면 NUMA_BACKPLANE 로 설정
+ */
 static void init_numa_topology_type(void)
 {
 	int a, b, c, n;
@@ -1832,6 +1861,13 @@ void sched_init_numa(void)
 	 * We can now figure out how many unique distance values there are and
 	 * allocate memory accordingly.
 	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * 이제 얼마나 많은 고유한 거리 값이 있는지 파악하고 그에 따라 메모리를 할당할 수
+	 * 있습니다.
+	 * - 위 dts 예에서는 nr_levels 이 5로 설정된다.
+	 */
 	nr_levels = bitmap_weight(distance_map, NR_DISTANCE_VALUES);
 
 	sched_domains_numa_distance = kcalloc(nr_levels, sizeof(int), GFP_KERNEL);
@@ -1840,6 +1876,10 @@ void sched_init_numa(void)
 		return;
 	}
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - ex. sched_domains_numa_distance = {10, 15, 20, 25, 30} 으로 설정됨.
+	 */
 	for (i = 0, j = 0; i < nr_levels; i++, j++) {
 		j = find_next_bit(distance_map, NR_DISTANCE_VALUES, j);
 		sched_domains_numa_distance[i] = j;
@@ -1853,6 +1893,12 @@ void sched_init_numa(void)
 	 * The sched_domains_numa_distance[] array includes the actual distance
 	 * numbers.
 	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * 'nr_levels'에는 고유한 거리의 수가 포함됩니다. sched_domains_numa_distance[]
+	 * 배열에는 실제 거리 수가 포함됩니다.
+	 */
 
 	/*
 	 * Here, we should temporarily reset sched_domains_numa_levels to 0.
@@ -1863,6 +1909,15 @@ void sched_init_numa(void)
 	 *
 	 * We reset it to 'nr_levels' at the end of this function.
 	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * 여기에서 일시적으로 sched_domains_numa_levels를 0으로 재설정해야 합니다. 배열
+	 * sched_domains_numa_masks[][]에 대한 메모리 할당에 실패하면 배열에 'nr_levels'
+	 * 구성원보다 적게 포함됩니다. 이것은 다른 함수에서 배열
+	 * sched_domains_numa_masks[][]를 반복하는 데 사용할 때 위험할 수 있습니다. 이
+	 * 함수의 끝에서 'nr_levels'로 재설정합니다.
+	 */
 	sched_domains_numa_levels = 0;
 
 	sched_domains_numa_masks = kzalloc(sizeof(void *) * nr_levels, GFP_KERNEL);
@@ -1872,6 +1927,12 @@ void sched_init_numa(void)
 	/*
 	 * Now for each level, construct a mask per node which contains all
 	 * CPUs of nodes that are that many hops away from us.
+	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * 이제 각 레벨에 대해 우리로부터 그만큼 많은 홉 거리에 있는 노드의 모든 CPU를
+	 * 포함하는 노드당 마스크를 구성합니다.
 	 */
 	for (i = 0; i < nr_levels; i++) {
 		sched_domains_numa_masks[i] =
@@ -1886,8 +1947,16 @@ void sched_init_numa(void)
 			if (!mask)
 				return;
 
+			/*
+			 * IAMROOT, 2023.04.15:
+			 * - [numa_distance][node_id] 의 이차원 배열
+			 */
 			sched_domains_numa_masks[i][j] = mask;
 
+			/*
+			 * IAMROOT, 2023.04.15:
+			 * - N_POSSIBLE 노드 만큼 루프
+			 */
 			for_each_node(k) {
 				/*
 				 * Distance information can be unreliable for
@@ -1895,6 +1964,14 @@ void sched_init_numa(void)
 				 * masks to its bringup.
 				 * This relies on all unique distance values
 				 * still being visible at init time.
+				 */
+				/*
+				 * IAMROOT. 2023.04.15:
+				 * - google-translate
+				 * 거리 정보는 오프라인 노드에 대해 신뢰할 수 없을 수
+				 * 있으므로 노드 마스크 작성을 가져오기까지 연기하십시오.
+				 * 이것은 초기화 시점에 여전히 보이는 모든 고유한 거리
+				 * 값에 의존합니다.
 				 */
 				if (!node_online(j))
 					continue;
@@ -1905,14 +1982,46 @@ void sched_init_numa(void)
 				if (node_distance(j, k) > sched_domains_numa_distance[i])
 					continue;
 
+				/*
+				 * IAMROOT, 2023.04.15:
+				 * - distance 에 해당하는 노드의 상대 노드
+				 */
 				cpumask_or(mask, mask, cpumask_of_node(k));
 			}
 		}
 	}
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - [0]----15----[1]
+	 *    |            |
+	 *    |  \     /   |
+	 *   20     25     30
+	 *    |   /    \   |
+	 *    |            |
+	 *   [2]----15----[3]
+	 *   sched_domains_numa_masks[0][0] -> distance 10, node 0 =  0b0001
+	 *                           [0][1] -> distance 10, node 1 =  0b0010
+	 *                           [0][2] -> distance 10, node 2 =  0b0100
+	 *                           [0][3] -> distance 10, node 3 =  0b1000
+	 *                           [1][0] -> distance 15, node 0 =  0b0010
+	 *                           [1][1] -> distance 15, node 1 =  0b0001
+	 *                           [1][2] -> distance 15, node 2 =  0b1000
+	 *                           [1][3] -> distance 15, node 3 =  0b0100
+	 *                           ...
+	 */
 	/* Compute default topology size */
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - 기본은 SMT, MC, DIE 가 있고 config 설정에 따라 i값이 달라짐. 최대 3
+	 */
 	for (i = 0; sched_domain_topology[i].mask; i++);
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - ex. i는 기본 3, nr_leves 은 dts 예로 5, + 1(null) = 9
+	 *       sched_domain_topology_level 9개 만듦
+	 */
 	tl = kzalloc((i + nr_levels + 1) *
 			sizeof(struct sched_domain_topology_level), GFP_KERNEL);
 	if (!tl)
@@ -1921,11 +2030,20 @@ void sched_init_numa(void)
 	/*
 	 * Copy the default topology bits..
 	 */
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - 생성한 sched_domain_topology_level 에 default_topology 복사
+	 */
 	for (i = 0; sched_domain_topology[i].mask; i++)
 		tl[i] = sched_domain_topology[i];
 
 	/*
 	 * Add the NUMA identity distance, aka single NODE.
+	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * NUMA 식별 거리(일명 단일 NODE)를 추가합니다.
 	 */
 	tl[i++] = (struct sched_domain_topology_level){
 		.mask = sd_numa_mask,
@@ -1946,8 +2064,18 @@ void sched_init_numa(void)
 		};
 	}
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - default_topology 에서 설정된 tl로 변경
+	 */
 	sched_domain_topology = tl;
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - ex. 위 dts예를 들면 sched_domains_numa_levels = 5
+	 *   sched_max_numa_distance = 30
+	 *   sched_numa_topology_type = NUMA_DIRECT
+	 */
 	sched_domains_numa_levels = nr_levels;
 	sched_max_numa_distance = sched_domains_numa_distance[nr_levels - 1];
 
@@ -2376,6 +2504,12 @@ void free_sched_domains(cpumask_var_t doms[], unsigned int ndoms)
  * Set up scheduler domains and groups.  For now this just excludes isolated
  * CPUs, but could be used to exclude other special cases in the future.
  */
+/*
+ * IAMROOT. 2023.04.15:
+ * - google-translate
+ * 스케줄러 도메인 및 그룹을 설정합니다. 지금은 격리된 CPU만 제외하지만 향후 다른
+ * 특별한 경우를 제외하는 데 사용할 수 있습니다.
+ */
 int sched_init_domains(const struct cpumask *cpu_map)
 {
 	int err;
@@ -2384,6 +2518,10 @@ int sched_init_domains(const struct cpumask *cpu_map)
 	zalloc_cpumask_var(&sched_domains_tmpmask2, GFP_KERNEL);
 	zalloc_cpumask_var(&fallback_doms, GFP_KERNEL);
 
+	/*
+	 * IAMROOT, 2023.04.15:
+	 * - arm64에서는 아무것도 안한다.
+	 */
 	arch_update_cpu_topology();
 	asym_cpu_capacity_scan();
 	ndoms_cur = 1;

@@ -244,6 +244,19 @@ int bitmap_print_to_pagebuf(bool list, char *buf,
  * BITMAP_FIRST_WORD_MASK 64 ffffffffffffffff
  * BITMAP_FIRST_WORD_MASK 65 fffffffffffffffe
  */
+/*
+ * IAMROOT, 2023.04.15:
+ *   BITMAP_FIRST_WORD_MASK
+ *                              start
+ *                                v
+ *   |.............................|0000000|
+ *   -> FIRST_WORD 일때 start 비트 및에 하쉬 비트가 0으로 설정됨
+ *
+ * BITMAP_LAST_WORD_MASK
+ *       |<----nbits --------------------->|
+ *   |000|...                              |
+ *   -> LAST_WORD 일때 nbit 위쪽 상위 비트가 0으로 설정됨
+ */
 extern int bitmap_print_bitmask_to_buf(char *buf, const unsigned long *maskp,
 				      int nmaskbits, loff_t off, size_t count);
 
@@ -428,7 +441,7 @@ static inline bool bitmap_full(const unsigned long *src, unsigned int nbits)
 
 /*
  * IAMROOT, 2021.11.27:
- * - set bit count
+ * - @src 비트맵에서 @nbits 이내에 설정된 비트의 갯수 반환
  */
 static __always_inline int bitmap_weight(const unsigned long *src, unsigned int nbits)
 {

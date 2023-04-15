@@ -10491,6 +10491,12 @@ void __init sched_init_smp(void)
 	 * CPU masks are stable and all blatant races in the below code cannot
 	 * happen.
 	 */
+	/*
+	 * IAMROOT. 2023.04.15:
+	 * - google-translate
+	 * 아직 핫플러그 작업을 일으킬 사용자 공간이 없습니다. 따라서 모든 CPU 마스크는
+	 * 안정적이며 아래 코드의 모든 노골적인 경쟁은 발생할 수 없습니다.
+	 */
 	mutex_lock(&sched_domains_mutex);
 	sched_init_domains(cpu_active_mask);
 	mutex_unlock(&sched_domains_mutex);
