@@ -316,6 +316,10 @@ extern int cpumask_next_wrap(int n, const struct cpumask *mask, int start, bool 
  *
  * After the loop, cpu is >= nr_cpu_ids.
  */
+/*
+ * IAMROOT, 2023.04.15:
+ * - mask1 & mask2를 한후 iterate
+ */
 #define for_each_cpu_and(cpu, mask1, mask2)				\
 	for ((cpu) = -1;						\
 		(cpu) = cpumask_next_and((cpu), (mask1), (mask2)),	\
@@ -487,6 +491,11 @@ static inline void cpumask_xor(struct cpumask *dstp,
  * @src2p: the second input
  *
  * If *@dstp is empty, returns 0, else returns 1
+ */
+/*
+ * IAMROOT, 2023.04.15:
+ * - @src2p를 먼저 not을 한후 @src1p와 and한다.
+ *   *src1p & ~*src2p
  */
 static inline int cpumask_andnot(struct cpumask *dstp,
 				  const struct cpumask *src1p,

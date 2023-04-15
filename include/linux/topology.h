@@ -215,12 +215,20 @@ static inline int cpu_to_mem(int cpu)
 #endif
 
 #if defined(CONFIG_SCHED_SMT) && !defined(cpu_smt_mask)
+/*
+ * IAMROOT, 2023.04.15:
+ * - arm64는 현재 smt가 없다.
+ */
 static inline const struct cpumask *cpu_smt_mask(int cpu)
 {
 	return topology_sibling_cpumask(cpu);
 }
 #endif
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - @cpu가 속한 node의 cpumask를 return한다.
+ */
 static inline const struct cpumask *cpu_cpu_mask(int cpu)
 {
 	return cpumask_of_node(cpu_to_node(cpu));

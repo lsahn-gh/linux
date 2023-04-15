@@ -588,6 +588,11 @@ void init_defrootdomain(void)
 	atomic_set(&def_root_domain.refcount, 1);
 }
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - rootdomain에 대한 default값을 하나 할당하고 초기화해서 return한다.
+ *   isolate cpu를 제외한 모든 cpu들이 기본적으로 root domain에 참가한다.
+ */
 static struct root_domain *alloc_rootdomain(void)
 {
 	struct root_domain *rd;
@@ -1309,6 +1314,16 @@ struct asym_cap_data {
  * capacity.
  * The lifespan of data is unlimited.
  */
+/*
+ * IAMROOT, 2023.04.15:
+ * - asym_cpu_capacity_update_data()참고 
+ * - ex) CPU0~3 : 1024, CPU4-7 : 436 인 경우
+ *   1024, 436에 대한 node가 존재한다.
+ *   node1->capacity = 1024;
+ *   node1->cpus = cpu bitmaps에 cpu 0~3 set.
+ *   node2->capacity = 436;
+ *   node2->cpus = cpu bitmaps에 cpu 4~7 set.
+ */
 static LIST_HEAD(asym_cap_list);
 
 #define cpu_capacity_span(asym_data) to_cpumask((asym_data)->cpus)
@@ -1316,6 +1331,21 @@ static LIST_HEAD(asym_cap_list);
 /*
  * Verify whether there is any CPU capacity asymmetry in a given sched domain.
  * Provides sd_flags reflecting the asymmetry scope.
+ */
+/*
+ * IAMROOT, 2023.04.15:
+ * - papago
+ *   지정된 sched 도메인에 CPU 용량 비대칭이 있는지 확인합니다.
+ *   비대칭 범위를 반영하는 sd_flags를 제공합니다.
+ * - ex) 0,1 = 1024 capacity, 0,2 = 512 capacity, asym_cap_list에 전부있다고 가정
+ *
+ *   SMT 0,1 / 2,3 -> 0,1 : count 1, miss 1 
+ *                    2,3 : count 1, miss 1
+ *                    각각 동일한 cpu capacity의 그룹이므로 비대칭이 아니다.
+ *                    return 0.
+ *   DIE 0,1,2,3 -> count 2, miss 0
+ *                  다른 cpu capacity에 있기 때문에 비대칭이다. return 
+ *                  return SD_ASYM_CPUCAPACITY | SD_ASYM_CPUCAPACITY_FULL
  */
 static inline int
 asym_cpu_capacity_classify(const struct cpumask *sd_span,
@@ -1330,6 +1360,15 @@ asym_cpu_capacity_classify(const struct cpumask *sd_span,
 	 * CPUs capacities). Take into account CPUs that might be offline:
 	 * skip those.
 	 */
+/*
+ * IAMROOT, 2023.04.15:
+ * - papago
+ *   이 도메인에 걸쳐 있는 고유한 CPU 용량의 수를 계산합니다(sched_domain 
+ *   CPU 마스크를 사용 가능한 CPU 용량을 나타내는 마스크와 비교).
+ *   오프라인일 수 있는 CPU를 고려하십시오.
+ *   건너 뛰십시오.
+ * - span이 포함되있으면 count, topology범위를 벗어난거라면 miss가 된다.
+ */
 	list_for_each_entry(entry, &asym_cap_list, link) {
 		if (cpumask_intersects(sd_span, cpu_capacity_span(entry)))
 			++count;
@@ -1351,16 +1390,29 @@ asym_cpu_capacity_classify(const struct cpumask *sd_span,
 
 }
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - @cpu의 capacity와 동일한게 이미 asym_cap_list에 있는지 확인하고, 없으면 
+ *   추가한다. 처리후 해당 entry의 cpu bitmap에 @cpu를 set한다.
+ */
 static inline void asym_cpu_capacity_update_data(int cpu)
 {
 	unsigned long capacity = arch_scale_cpu_capacity(cpu);
 	struct asym_cap_data *entry = NULL;
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 해당 capactiy에 대해 이미 존재하면 cpu bitmap에만 cpu set..
+ */
 	list_for_each_entry(entry, &asym_cap_list, link) {
 		if (capacity == entry->capacity)
 			goto done;
 	}
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 자료구조를 할당하고 asym_cap_list에 추가한다.
+ */
 	entry = kzalloc(sizeof(*entry) + cpumask_size(), GFP_KERNEL);
 	if (WARN_ONCE(!entry, "Failed to allocate memory for asymmetry data\n"))
 		return;
@@ -1380,6 +1432,8 @@ done:
  * - google-translate
  * cpu capacities로 그룹화된 CPU의 빌드업/업데이트 목록 업데이트에는 CPU 토폴로지 변경을
  * 나타내는 상태로 sched 도메인을 재구축하라는 명시적 요청이 필요합니다.
+ *
+ * - cpu capacity별 자료구조인 asym_cap_list를 설정한다. 
  */
 static void asym_cpu_capacity_scan(void)
 {
@@ -1389,9 +1443,18 @@ static void asym_cpu_capacity_scan(void)
 	list_for_each_entry(entry, &asym_cap_list, link)
 		cpumask_clear(cpu_capacity_span(entry));
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - HK_FLAG_DOMAIN이 set되있다면 isolate가 안된 cpu들에 한한 iterate를 하면서,
+ *   해당 cpu capacity에 대해 asym_cap_list에 추가한다
+ */
 	for_each_cpu_and(cpu, cpu_possible_mask, housekeeping_cpumask(HK_FLAG_DOMAIN))
 		asym_cpu_capacity_update_data(cpu);
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 해당 cpapcity에 대한 cpu가 한개도 없으면 그냥 entry를 지워버린다.
+ */
 	list_for_each_entry_safe(entry, next, &asym_cap_list, link) {
 		if (cpumask_empty(cpu_capacity_span(entry))) {
 			list_del(&entry->link);
@@ -1403,6 +1466,10 @@ static void asym_cpu_capacity_scan(void)
 	 * Only one capacity value has been detected i.e. this system is symmetric.
 	 * No need to keep this data around.
 	 */
+/*
+ * IAMROOT, 2023.04.15:
+ * - 단일 capacity면 관리할 필요가없으므로(모든 cpu가 같다는것.) 그냥 다 지워버린다.
+ */
 	if (list_is_singular(&asym_cap_list)) {
 		entry = list_first_entry(&asym_cap_list, typeof(*entry), link);
 		list_del(&entry->link);
@@ -1467,16 +1534,30 @@ static void __free_domain_allocs(struct s_data *d, enum s_alloc what,
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - sdt(schedule domain topology)별 pcpu 할당 및 초기화,
+ *   @d에 대한 schedule domain, root domain 초기화.
+ */
 static enum s_alloc
 __visit_domain_allocation_hell(struct s_data *d, const struct cpumask *cpu_map)
 {
 	memset(d, 0, sizeof(*d));
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 각 sdt별 pcp할당 및 초기화.
+ */
 	if (__sdt_alloc(cpu_map))
 		return sa_sd_storage;
 	d->sd = alloc_percpu(struct sched_domain *);
 	if (!d->sd)
 		return sa_sd_storage;
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - rootdomain 생성.
+ */
 	d->rd = alloc_rootdomain();
 	if (!d->rd)
 		return sa_sd;
@@ -1510,10 +1591,21 @@ static void claim_allocations(int cpu, struct sched_domain *sd)
 enum numa_topology_type sched_numa_topology_type;
 
 static int			sched_domains_numa_levels;
+/*
+ * IAMROOT, 2023.04.15:
+ * - build중인 schedule domain 표시
+ */
 static int			sched_domains_curr_level;
 
 int				sched_max_numa_distance;
 static int			*sched_domains_numa_distance;
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - sched_domains_numa_masks[distance][node id] = nodemask
+ * - sched_init_numa()에서 만들어진다.
+ * - node id를 기준으로 distance이하의 인접 node에대한 nodemask가 설정된다.
+ */
 static struct cpumask		***sched_domains_numa_masks;
 int __read_mostly		node_reclaim_distance = RECLAIM_DISTANCE;
 
@@ -1542,6 +1634,10 @@ static unsigned long __read_mostly *sched_numa_onlined_nodes;
 	 SD_NUMA		|	\
 	 SD_ASYM_PACKING)
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 
+ */
 static struct sched_domain *
 sd_init(struct sched_domain_topology_level *tl,
 	const struct cpumask *cpu_map,
@@ -1556,13 +1652,37 @@ sd_init(struct sched_domain_topology_level *tl,
 	/*
 	 * Ugly hack to pass state to sd_numa_mask()...
 	 */
+/*
+ * IAMROOT, 2023.04.15:
+ * - 현재 진행중인 sdl을 표시해놓는 개념이다.
+ */
 	sched_domains_curr_level = tl->numa_level;
 #endif
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - tl별 mask함수에서 @@cpu에 맞는 mask를 가져오고, 해당 mask의 weight를 가져온다.
+ *   ex) cpu_smt_mask,
+ *       cpu_coregroup_mask,
+ *       cpu_cpu_mask,
+ *       sd_numa_mask
+ */
 	sd_weight = cpumask_weight(tl->mask(cpu));
 
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - cpu_numa_flags : SD_NUMA
+ *   cpu_core_flags : SD_SHARE_PKG_RESOURCES
+ *   cpu_smt_flags  : D_SHARE_CPUCAPACITY | SD_SHARE_PKG_RESOURCES
+ */
 	if (tl->sd_flags)
 		sd_flags = (*tl->sd_flags)();
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - 검사처리.
+ */
 	if (WARN_ONCE(sd_flags & ~TOPOLOGY_SD_FLAGS,
 			"wrong sd_flags in topology description\n"))
 		sd_flags &= TOPOLOGY_SD_FLAGS;
@@ -1671,6 +1791,11 @@ static struct sched_domain_topology_level default_topology[] = {
 static struct sched_domain_topology_level *sched_domain_topology =
 	default_topology;
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - schedule domain topology level만큼을 iterate한다.
+ * - sched_domain_topology_level 참고
+ */
 #define for_each_sd_topology(tl)			\
 	for (tl = sched_domain_topology; tl->mask; tl++)
 
@@ -1684,6 +1809,32 @@ void set_sched_topology(struct sched_domain_topology_level *tl)
 
 #ifdef CONFIG_NUMA
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - @sched_domains_curr_level를 기준으로 @cpu가 속한 node에 대한 
+ *   sched_domains_numa_masks를 return한다.
+ *
+ * - ex)   A, B, C, D는 node 이름.
+ 
+ *         A-- 20 -- B
+ *         |         |
+ *        15        20
+ *         |         |
+ *         C-- 20 -- D
+ *
+ *   
+ *   1. 요청한 cpu가 node A에 있고,
+ *      sched_domains_curr_level = 1(1 == 15라는 의미)인 경우.
+ *      node A, node C에 포함된 cpu들(cpumask) return.
+ *
+ *   2. 요청한 cpu가 node C에 있고,
+ *      sched_domains_curr_level = 2(2 == 20라는 의미)인 경우.
+ *      node A, node C, node D에 포함된 cpu들(cpumask) return.
+ *
+ *   3. 요청한 cpu가 node D에 있고,
+ *      sched_domains_curr_level = 2(2 == 20라는 의미)인 경우.
+ *      node C, node D, node B에 포함된 cpu들(cpumask) return.
+ */
 static const struct cpumask *sd_numa_mask(int cpu)
 {
 	return sched_domains_numa_masks[sched_domains_curr_level][cpu_to_node(cpu)];
@@ -2004,10 +2155,14 @@ void sched_init_numa(void)
 	 *                           [0][1] -> distance 10, node 1 =  0b0010
 	 *                           [0][2] -> distance 10, node 2 =  0b0100
 	 *                           [0][3] -> distance 10, node 3 =  0b1000
-	 *                           [1][0] -> distance 15, node 0 =  0b0010
-	 *                           [1][1] -> distance 15, node 1 =  0b0001
-	 *                           [1][2] -> distance 15, node 2 =  0b1000
-	 *                           [1][3] -> distance 15, node 3 =  0b0100
+	 *                           [1][0] -> distance 15, node 0 =  0b0011
+	 *                           [1][1] -> distance 15, node 1 =  0b0011
+	 *                           [1][2] -> distance 15, node 2 =  0b1100
+	 *                           [1][3] -> distance 15, node 3 =  0b1100
+	 *                           [2][0] -> distance 20, node 0 =  0b0111
+	 *                           [2][1] -> distance 20, node 1 =  0b0011
+	 *                           [2][2] -> distance 20, node 2 =  0b1101
+	 *                           [2][3] -> distance 20, node 3 =  0b1100
 	 *                           ...
 	 */
 	/* Compute default topology size */
@@ -2180,14 +2335,23 @@ int sched_numa_find_closest(const struct cpumask *cpus, int cpu)
 
 #endif /* CONFIG_NUMA */
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - sdt level만큼의 pcpu를 생성 및 초기화한다.
+ */
 static int __sdt_alloc(const struct cpumask *cpu_map)
 {
 	struct sched_domain_topology_level *tl;
 	int j;
 
+
 	for_each_sd_topology(tl) {
 		struct sd_data *sdd = &tl->data;
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - pcpu를 할당한다.
+ */
 		sdd->sd = alloc_percpu(struct sched_domain *);
 		if (!sdd->sd)
 			return -ENOMEM;
@@ -2204,6 +2368,11 @@ static int __sdt_alloc(const struct cpumask *cpu_map)
 		if (!sdd->sgc)
 			return -ENOMEM;
 
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - 만든 pcpu에 대해서 초기화를 수행한다.
+ */
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
 			struct sched_domain_shared *sds;
@@ -2285,6 +2454,10 @@ static void __sdt_free(const struct cpumask *cpu_map)
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - 
+ */
 static struct sched_domain *build_sched_domain(struct sched_domain_topology_level *tl,
 		const struct cpumask *cpu_map, struct sched_domain_attr *attr,
 		struct sched_domain *child, int cpu)
@@ -2319,6 +2492,11 @@ static struct sched_domain *build_sched_domain(struct sched_domain_topology_leve
  * Ensure topology masks are sane, i.e. there are no conflicts (overlaps) for
  * any two given CPUs at this (non-NUMA) topology level.
  */
+/*
+ * IAMROOT, 2023.04.15:
+ * - sanity check. 설정이 잘못됬는지 확인한다. overlap이 없는 level인데 overlap이
+ *   된것을 확인한다.
+ */
 static bool topology_span_sane(struct sched_domain_topology_level *tl,
 			      const struct cpumask *cpu_map, int cpu)
 {
@@ -2334,6 +2512,14 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
 	 * breaking the sched_group lists - i.e. a later get_group() pass
 	 * breaks the linking done for an earlier span.
 	 */
+/*
+ * IAMROOT, 2023.04.15:
+ * - papago
+ *   NUMA가 아닌 수준은 부분적으로 겹칠 수 없습니다. 완전히 같거나 
+ *   완전히 분리되어야 합니다. 그렇지 않으면 sched_group 목록이 깨질 수 
+ *   있습니다. 즉, 나중에 get_group() 패스가 이전 범위에 대해 수행된 
+ *   연결을 깨뜨립니다.
+ */
 	for_each_cpu(i, cpu_map) {
 		if (i == cpu)
 			continue;
@@ -2343,6 +2529,14 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
 		 * remove CPUs, which only lessens our ability to detect
 		 * overlaps
 		 */
+/*
+ * IAMROOT, 2023.04.15:
+ * - papago
+ *   우리가 만들려는 토폴로지와 정확히 일치하도록 'cpu_map'을 사용하여 
+ *   모든 마스크를 '및' 해야 하지만 이렇게 하면 CPU만 제거할 수 있으므로 
+ *   겹침을 감지하는 능력이 줄어들 뿐입니다.
+ * - 겹치면 안된다.
+ */
 		if (!cpumask_equal(tl->mask(cpu), tl->mask(i)) &&
 		    cpumask_intersects(tl->mask(cpu), tl->mask(i)))
 			return false;
@@ -2354,6 +2548,10 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
 /*
  * Build sched domains for a given set of CPUs and attach the sched domains
  * to the individual CPUs
+ */
+/*
+ * IAMROOT, 2023.04.15:
+ * - 
  */
 static int
 build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *attr)
@@ -2475,6 +2673,10 @@ int __weak arch_update_cpu_topology(void)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - @ndoms개수만큼을 만들고, 해당 ndoms에 cpumask를 생성한다.
+ */
 cpumask_var_t *alloc_sched_domains(unsigned int ndoms)
 {
 	int i;
@@ -2523,11 +2725,26 @@ int sched_init_domains(const struct cpumask *cpu_map)
 	 * - arm64에서는 아무것도 안한다.
 	 */
 	arch_update_cpu_topology();
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - asym cpu에 대한 자료구조 설정
+ */
 	asym_cpu_capacity_scan();
 	ndoms_cur = 1;
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - 일단 1개를 만든다. 실패할경우 fallback_doms를 사용한다.
+ */
 	doms_cur = alloc_sched_domains(ndoms_cur);
 	if (!doms_cur)
 		doms_cur = &fallback_doms;
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - @cpu_map & housekeeping를 대상으로 build를 진행한다.
+ */
 	cpumask_and(doms_cur[0], cpu_map, housekeeping_cpumask(HK_FLAG_DOMAIN));
 	err = build_sched_domains(doms_cur[0], NULL);
 

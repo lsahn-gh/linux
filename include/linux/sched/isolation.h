@@ -5,6 +5,11 @@
 #include <linux/init.h>
 #include <linux/tick.h>
 
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - housekeeping_isolcpus_setup() 참고
+ */
 enum hk_flags {
 	HK_FLAG_TIMER		= 1,
 	HK_FLAG_RCU		= (1 << 1),
