@@ -233,6 +233,13 @@ unsigned int bitmap_ord_to_pos(const unsigned long *bitmap, unsigned int ord, un
 int bitmap_print_to_pagebuf(bool list, char *buf,
 				   const unsigned long *maskp, int nmaskbits);
 
+
+extern int bitmap_print_bitmask_to_buf(char *buf, const unsigned long *maskp,
+				      int nmaskbits, loff_t off, size_t count);
+
+extern int bitmap_print_list_to_buf(char *buf, const unsigned long *maskp,
+				      int nmaskbits, loff_t off, size_t count);
+
 /* IAMROOT, 2021.09.30:
  * start bit보다 낮은 bit들은 전부 clear하기 위한것.
  * ex)
@@ -243,26 +250,61 @@ int bitmap_print_to_pagebuf(bool list, char *buf,
  * BITMAP_FIRST_WORD_MASK 63 8000000000000000
  * BITMAP_FIRST_WORD_MASK 64 ffffffffffffffff
  * BITMAP_FIRST_WORD_MASK 65 fffffffffffffffe
- */
-/*
- * IAMROOT, 2023.04.15:
- *   BITMAP_FIRST_WORD_MASK
- *                              start
- *                                v
- *   |.............................|0000000|
- *   -> FIRST_WORD 일때 start 비트 및에 하쉬 비트가 0으로 설정됨
  *
- * BITMAP_LAST_WORD_MASK
- *       |<----nbits --------------------->|
- *   |000|...                              |
- *   -> LAST_WORD 일때 nbit 위쪽 상위 비트가 0으로 설정됨
+ * IAMROOT, 2023.04.15:
+ * - BITMAP_FIRST_WORD_MASK(start)
+ * (~0UL << ((start) & (BITS_PER_LONG - 1)))
+ * (0xffff_ffff_ffff_ffff << ((start) & (64 -1)))
+ * (0xffff_ffff_ffff_ffff << ((start) & 0b111111))
+ *                                        start(=3)
+ *                                          v
+ * 0b1111_1111_1111_1111_..._1111_1111_1111_1000
+ * start 비트 및에 하위 비트가 0으로 설정됨. 상위 비트는 모두 1
+ *
+ * BITMAP_FIRST_WORD_MASK(1)
+ * 0b1111_1111_1111_1111_..._1111_1111_1111_1110
+ * BITMAP_FIRST_WORD_MASK(2)
+ * 0b1111_1111_1111_1111_..._1111_1111_1111_1100
+ *
+ * - BITMAP_LAST_WORD_MASK(nbits)
+ * (~0UL >> (-(nbits) & (BITS_PER_LONG - 1)))
+ * (0xffff_ffff_ffff_ffff >> (-(nbits) & (64 -1)))
+ * (0xffff_ffff_ffff_ffff >> (-(nbits) & 0b111111))
+ *
+ * 2의 보수 방식에 의한 음수 표현법
+ * 해당 수의 2진 표현을 뒤집은 후 1을 더하는 방법을 사용한다.
+ * ex. -1
+ * 1           = 0000 0000 0000 0000 0000 0000 0000 0001
+ * 1를 뒤집은 값 = 1111 1111 1111 1111 1111 1111 1111 1110
+ * -1의 2의 보수 = 1111 1111 1111 1111 1111 1111 1111 1111
+ *
+ * nbits      -(nbits)    (-(nbits) & 0b111111)  (~0UL >> (-(nbits) & 0b1111)))
+ * 1      ... 1111 1111   11 1111 (63)           (~0UL >> 63)
+ * 2      ... 1111 1110   11 1110 (62)           (~0UL >> 62)
+ * 3      ... 1111 1101   11 1101 (61)           (~0UL >> 61)
+ * 4      ... 1111 1100   11 1100 (60)           (~0UL >> 60)
+ * 결국 2의 보수 방식에 의해 nbits 위쪽 상위 비트가 0으로 설정됨. 하위 비트는 모두 1.
+ * 바꾸어 말하면 nbits 갯수 만큼의 하위 bits만 1로 설정되고 상위 비트는 모두 0 이 된다.
+ *
+ *                                        nbits(=3)
+ *                                          v
+ * 0b0000_0000_0000_0000_..._0000_0000_0000_0111
+ * nbits 갯수 만큼의 하위 비트만 1로 설정. 상위 비트는 모두 0
+ *
+ * BITMAP_LAST_WORD_MASK(0)
+ * 0b0000_0000_0000_0000_..._0000_0000_0000_0000
+ * BITMAP_LAST_WORD_MASK(1)
+ * 0b0000_0000_0000_0000_..._0000_0000_0000_0001
+ * BITMAP_LAST_WORD_MASK(2)
+ * 0b0000_0000_0000_0000_..._0000_0000_0000_0011
+ * ...
+ * BITMAP_LAST_WORD_MASK(63)
+ * 0b0111_1111_1111_1111_..._1111_1111_1111_1111
+ * BITMAP_LAST_WORD_MASK(64)
+ * 0b1111_1111_1111_1111_..._1111_1111_1111_1111
+ * BITMAP_LAST_WORD_MASK(65)
+ * 0b0000_0000_0000_0000_..._0000_0000_0000_0001
  */
-extern int bitmap_print_bitmask_to_buf(char *buf, const unsigned long *maskp,
-				      int nmaskbits, loff_t off, size_t count);
-
-extern int bitmap_print_list_to_buf(char *buf, const unsigned long *maskp,
-				      int nmaskbits, loff_t off, size_t count);
-
 #define BITMAP_FIRST_WORD_MASK(start) (~0UL << ((start) & (BITS_PER_LONG - 1)))
 #define BITMAP_LAST_WORD_MASK(nbits) (~0UL >> (-(nbits) & (BITS_PER_LONG - 1)))
 

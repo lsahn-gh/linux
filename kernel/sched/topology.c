@@ -2100,7 +2100,7 @@ void sched_init_numa(void)
 
 			/*
 			 * IAMROOT, 2023.04.15:
-			 * - [numa_distance][node_id] 의 이차원 배열
+			 * - [numa_distance_level][node_id] 형식의 이차원 배열
 			 */
 			sched_domains_numa_masks[i][j] = mask;
 
@@ -2135,7 +2135,9 @@ void sched_init_numa(void)
 
 				/*
 				 * IAMROOT, 2023.04.15:
-				 * - distance 에 해당하는 노드의 상대 노드
+				 * - j node에서 distance level i에 해당하는
+				 *   distance 값이하 node들의 cpumask 합.
+				 *   아래 그림및 주석 참조.
 				 */
 				cpumask_or(mask, mask, cpumask_of_node(k));
 			}
@@ -2146,25 +2148,54 @@ void sched_init_numa(void)
 	 * IAMROOT, 2023.04.15:
 	 * - [0]----15----[1]
 	 *    |            |
-	 *    |  \     /   |
+	 *    |   \    /   |
 	 *   20     25     30
 	 *    |   /    \   |
 	 *    |            |
 	 *   [2]----15----[3]
-	 *   sched_domains_numa_masks[0][0] -> distance 10, node 0 =  0b0001
-	 *                           [0][1] -> distance 10, node 1 =  0b0010
-	 *                           [0][2] -> distance 10, node 2 =  0b0100
-	 *                           [0][3] -> distance 10, node 3 =  0b1000
-	 *                           [1][0] -> distance 15, node 0 =  0b0011
-	 *                           [1][1] -> distance 15, node 1 =  0b0011
-	 *                           [1][2] -> distance 15, node 2 =  0b1100
-	 *                           [1][3] -> distance 15, node 3 =  0b1100
-	 *                           [2][0] -> distance 20, node 0 =  0b0111
-	 *                           [2][1] -> distance 20, node 1 =  0b0011
-	 *                           [2][2] -> distance 20, node 2 =  0b1101
-	 *                           [2][3] -> distance 20, node 3 =  0b1100
-	 *                           ...
+	 *
+	 *   static struct cpumask ***sched_domains_numa_masks; 는
+	 *   sched_domains_numa_masks[numa_distance_level][node_id] 형식이다.
+	 *   cpumask_of_node(0) 에서 가져오는 cpumask를 m0,
+	 *   cpumask_of_node(1) 에서 가져오는 cpumask를 m1 등으로 가정하고
+	 *   sched_domains_numa_masks 변수의 설정을 예상해본다
+	 *
+	 *   *sched_domains_numa_masks[0][0] = *m0          distance 10, node 0
+	 *                            [0][1] = *m1          distance 10, node 1
+	 *                            [0][2] = *m2          distance 10, node 2
+	 *                            [0][3] = *m3          distance 10, node 3
+	 *                            [1][0] = *m0|*m1      distance 15, node 0
+	 *                            [1][1] = *m0|*m1      distance 15, node 1
+	 *                            [1][2] = *m2|*m3      distance 15, node 2
+	 *                            [1][3] = *m2|*m3      distance 15, node 3
+	 *                            [2][0] = *m0|*m1|*m2  distance 20, node 0
+	 *                            [2][1] = *m0|*m1      distance 20, node 1
+	 *                            [2][2] = *m0|*m2|*m3  distance 20, node 2
+	 *                            [2][3] = *m2|*m3      distance 20, node 3
+	 *                            ...
+	 *
+	 *   각각의 노드에 설정된 cpumask 가 아래와 같다고 가정하면
+	 *   node                cpumask
+	 *   0                   0b..._0000_0000_0000_1111
+	 *   1                   0b..._0000_0000_1111_0000
+	 *   2                   0b..._0000_1111_0000_0000
+	 *   3                   0b..._1111_0000_0000_0000
+	 *   sched_domains_numa_masks 배열에 설정되는 값들은 다음과 같을 것이다.
+	 *   *sched_domains_numa_masks[0][0] =  0b..._0000_0000_0000_1111
+	 *   *sched_domains_numa_masks[0][1] =  0b..._0000_0000_1111_0000
+	 *   *sched_domains_numa_masks[0][2] =  0b..._0000_1111_0000_0000
+	 *   *sched_domains_numa_masks[0][3] =  0b..._1111_0000_0000_0000
+	 *   *sched_domains_numa_masks[1][0] =  0b..._0000_0000_1111_1111
+	 *   *sched_domains_numa_masks[1][1] =  0b..._0000_0000_1111_1111
+	 *   *sched_domains_numa_masks[1][2] =  0b..._1111_1111_0000_0000
+	 *   *sched_domains_numa_masks[1][3] =  0b..._1111_1111_0000_0000
+	 *   *sched_domains_numa_masks[2][0] =  0b..._0000_1111_1111_1111
+	 *   *sched_domains_numa_masks[2][1] =  0b..._0000_0000_1111_1111
+	 *   *sched_domains_numa_masks[2][2] =  0b..._1111_1111_0000_1111
+	 *   *sched_domains_numa_masks[2][3] =  0b..._1111_1111_0000_0000
+	 *                            ...
 	 */
+
 	/* Compute default topology size */
 	/*
 	 * IAMROOT, 2023.04.15:
