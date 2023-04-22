@@ -99,6 +99,14 @@ struct sched_domain {
 	unsigned int cache_nice_tries;	/* Leave cache hot tasks for # tries */
 
 	int nohz_idle;			/* NOHZ IDLE status */
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - 아래와 같은 flag들이 들어간다.
+ *   SD_PREFER_SIBLING, SD_SERIALIZE
+ *   SD_BALANCE_EXEC, SD_BALANCE_FORK, SD_WAKE_AFFINE
+ *   SD_OVERLAP
+ */
 	int flags;			/* See SD_* */
 	int level;
 
@@ -148,6 +156,10 @@ struct sched_domain {
 	char *name;
 #endif
 	union {
+/*
+ * IAMROOT, 2023.04.22:
+ * - case 1) sd_init()에서 struct sd_data가 설정된다.
+ */
 		void *private;		/* used during construction */
 		struct rcu_head rcu;	/* used during destruction */
 	};

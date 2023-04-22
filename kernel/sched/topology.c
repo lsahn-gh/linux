@@ -167,12 +167,28 @@ static const unsigned int SD_DEGENERATE_GROUPS_MASK =
 0;
 #undef SD_FLAG
 
+/*
+ * IAMROOT, 2023.04.22:
+ * @return 1 : 삭제해도된다는 의미이다.
+ * - @sd의 삭제 여부를 결정한다.
+ * - 삭제 경우
+ *   1. parent(@sd) weight가 1인 경우. 즉 child가 대신하면 되므로 삭제 해도된다.
+ *   2. 기타 유지 경우를 제외한 예외
+ *
+ * - 유지 경우
+ *   1. SD_DEGENERATE_GROUPS_MASK이 있으면서 groups이 2개이상인 경우 삭제 안한다.
+ *   2. SD_WAKE_AFFINE가 있는 경우.
+ */
 static int sd_degenerate(struct sched_domain *sd)
 {
 	if (cpumask_weight(sched_domain_span(sd)) == 1)
 		return 1;
 
 	/* Following flags need at least 2 groups */
+/*
+ * IAMROOT, 2023.04.22:
+ * - SD_DEGENERATE_GROUPS_MASK이 있으면서 groups이 2개이상인 경우 삭제 안한다.
+ */
 	if ((sd->flags & SD_DEGENERATE_GROUPS_MASK) &&
 	    (sd->groups != sd->groups->next))
 		return 0;
@@ -184,6 +200,11 @@ static int sd_degenerate(struct sched_domain *sd)
 	return 1;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - return 1 삭제를 해도된다.
+ * - ING
+ */
 static int
 sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 {
@@ -716,6 +737,10 @@ static void update_top_cache_domain(int cpu)
  * Attach the domain 'sd' to 'cpu' as its base domain. Callers must
  * hold the hotplug lock.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - 
+ */
 static void
 cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 {
@@ -729,6 +754,10 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 		if (!parent)
 			break;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 
+ */
 		if (sd_parent_degenerate(tmp, parent)) {
 			tmp->parent = parent->parent;
 			if (parent->parent)
@@ -787,6 +816,17 @@ enum s_alloc {
  * group. See build_balance_mask().
  *
  * Also see should_we_balance().
+ */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   이 그룹에 대한 정식 균형 CPU를 반환합니다. 이는 균형 마스크에도 있는 
+ *   이 그룹의 첫 번째 CPU입니다.
+ *
+ *   밸런스 마스크는 실제로 이 그룹에 도달할 수 있는 모든 CPU입니다. 
+ *   build_balance_mask()를 참조하십시오.
+ *
+ *   should_we_balance()도 참조하십시오.
  */
 int group_balance_cpu(struct sched_group *sg)
 {
@@ -888,6 +928,98 @@ int group_balance_cpu(struct sched_group *sg)
  * NUMA-0	0		1		2		3
  *
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ * NUMA topology (first read the regular topology blurb below)
+ *
+ * Given a node-distance table, for example:
+ *
+ *   node   0   1   2   3
+ *     0:  10  20  30  20
+ *     1:  20  10  20  30
+ *     2:  30  20  10  20
+ *     3:  20  30  20  10
+ *
+ * which represents a 4 node ring topology like:
+ *
+ *   0 ----- 1
+ *   |       |
+ *   |       |
+ *   |       |
+ *   3 ----- 2
+ *
+ * 이를 대표할 도메인과 그룹을 구성하고자 합니다. 이를 수행하는 방법은 
+ * 'hops'에 도메인을 구축하는 것입니다. 각 NUMA 수준에 대해 @level hops에서 
+ * 도달할 수 있는 모든 노드의 마스크를 구성합니다.
+ *
+ * 3개 수준을 제공하는 위의 NUMA 토폴로지의 경우:
+ *
+ * NUMA-2	0-3		         0-3		     0-3		     0-3
+ *  groups:	{0-1,3},{1-3}	{0-2},{0,2-3}	{1-3},{0-1,3}	{0,2-3},{0-2}
+ *
+ * NUMA-1	0-1,3		    0-2		        1-3		        0,2-3
+ *  groups:	{0},{1},{3}	    {0},{1},{2}	    {1},{2},{3}    	{0},{2},{3}
+ *
+ * NUMA-0	0		        1		         2		        3
+ *
+ *
+ * 알 수있는 바와 같이; 일반 토폴로지와 같이 잘 정렬되지 않습니다.
+ * 하위 도메인 청크에서 도메인을 반복할 때 일부 노드는 여러 번 표시될 수 
+ * 있습니다. 따라서 토폴로지의 이 부분에 대한 중첩 이름이 지정됩니다.
+ *
+ * 이 중복을 최소화하기 위해 도메인을 포함하기에 충분한 그룹만 구성합니다. 
+ * 예를 들어 Node-0 NUMA-2는 그룹(0-1,3 및 1-3)만 가져옵니다.
+ *
+ * 왜냐하면:
+ *
+ * - 각 도메인의 첫 번째 그룹은 하위 도메인입니다. 이것은 우리에게 
+ *   첫 번째 0-1,3을 얻습니다. 유일한 노출되지 않은 노드는 2이고 자식 도메인은 1-3입니다.
+ *
+ *   그러나 중복으로 인해 각 그룹에 대해 고유한 CPU를 계산하는 것이 더 
+ *   복잡합니다. 예를 들어 NODE-1 NUMA-2 그룹을 고려하십시오. 두 그룹 모두 
+ *   Node-0의 CPU를 포함하지만 해당 CPU는 실제로 해당 그룹에 도달하지 
+ *   않습니다(그들은 다음 그룹에 있게 됩니다.  0-1,3).
+ *
+ *   이를 수정하려면 그룹 밸런스 마스크를 도입해야 합니다. 이 마스크는 (자식) 
+ *   도메인 트리가 주어진 이 그룹에 도달할 수 있는 그룹의 CPU를 포함합니다. 
+ *
+ *   이를 통해 balance_cpu 및 sched_group_capacity 관계를 다시 한 번 계산할 수 있습니다.
+ *
+ *   XXX에는 balance_cpu가 고유하므로 sched_group_capacity 링크에 
+ *   사용할 수 있는 방법에 대한 단어가 포함됩니다.
+ *
+ *   또 다른 '흥미로운' 토폴로지는 다음과 같습니다.
+ *
+ * Another 'interesting' topology is:
+ *
+ *   node   0   1   2   3
+ *     0:  10  20  20  30
+ *     1:  20  10  20  20
+ *     2:  20  20  10  20
+ *     3:  30  20  20  10
+ *
+ * Which looks a little like:
+ *
+ *   0 ----- 1
+ *   |     / |
+ *   |   /   |
+ *   | /     |
+ *   2 ----- 3
+ *
+ * 이 토폴로지는 비대칭이며 노드 1,2는 완전히 연결되어 있지만 노드 0,3은 
+ * 그렇지 않습니다.
+ *
+ * 이로 인해 sched_domain이 각 CPU에 대해 동일한 번호가 아닌 몇 가지 특히 
+ * 이상한 경우가 발생합니다. 고려하다:
+ *
+ * NUMA-2	0-3					         0-3
+ *  groups:	{0-2},{1-3}				     {1-3},{0-2}
+ *
+ * NUMA-1	0-2		     0-3	0-3	 	 1-3
+ *
+ * NUMA-0	0		     1		2		 3
+ */
 
 
 /*
@@ -899,6 +1031,32 @@ int group_balance_cpu(struct sched_group *sg)
  * can fully construct this using the sched_domain bits (which are already
  * complete).
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   밸런스 마스크를 만듭니다. 여기에는 이 그룹에 도달할 수 있는 CPU만 포함되며 
+ *   균형을 계속 유지하는 것으로 간주되어야 합니다.
+ *
+ *   그룹 생성 단계에서 이 작업을 수행하므로 그룹 정보가 아직 완전하지 않지만 
+ *   각 그룹이 (하위) 도메인을 나타내므로 sched_domain 비트(이미 완료된)를 
+ *   사용하여 이를 완전히 구성할 수 있습니다.
+ *
+ * - balance mask를 생성하고 설정한다.
+ *   balance mask는 schedule group의 span과 거기에 포함되있는 하위 domain의 span이 같은 node의
+ *   cpu들만 설정된다.
+ *
+ * - ex) node3 numa-2의 {2-3}이 @sg로 들어왔다고 가정한다.
+ *              0                    1                2               3
+ *                                  
+ * NUMA-2       0-2                   0-3             0-3             1-3
+ *  groups:     {0-1},1-3 c의{2}     {0-2},{2-3}     {1-3},{0-1}     {2-3},0-2의 child {1}
+ * balance mask   0  ,        X        1  ,  3         2  ,  0         3  ,             X
+ *                                   
+ * NUMA-1       0-1                   0-2             1-3             2-3
+ *  groups:     {0},{1}               {1},{2},{0}     {2},{3},{1}     {3},{2}
+ *                                   
+ * NUMA-0       0                     1               2               3
+ */
 static void
 build_balance_mask(struct sched_domain *sd, struct sched_group *sg, struct cpumask *mask)
 {
@@ -909,6 +1067,10 @@ build_balance_mask(struct sched_domain *sd, struct sched_group *sg, struct cpuma
 
 	cpumask_clear(mask);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - sg->span과 child->span이 같은 경우가 있는 cpu들을 기록한다.
+ */
 	for_each_cpu(i, sg_span) {
 		sibling = *per_cpu_ptr(sdd->sd, i);
 
@@ -917,6 +1079,12 @@ build_balance_mask(struct sched_domain *sd, struct sched_group *sg, struct cpuma
 		 * unused. The mask will not be empty because those CPUs that
 		 * do have the top domain _should_ span the domain.
 		 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   이러한 sibling이 사용되지 않는 비대칭의 경우에 발생할 수 있습니다. 최상위 
+ *   도메인이 있는 CPU가 도메인에 _반드시_ 있기 때문에 마스크가 비어 있지 않습니다.
+ */
 		if (!sibling->child)
 			continue;
 
@@ -935,6 +1103,27 @@ build_balance_mask(struct sched_domain *sd, struct sched_group *sg, struct cpuma
  * XXX: This creates per-node group entries; since the load-balancer will
  * immediately access remote memory to construct this group's load-balance
  * statistics having the groups node local is of dubious benefit.
+ */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   XXX: 이렇게 하면 노드별 그룹 항목이 생성됩니다. 로드 밸런서는 그룹 
+ *   노드 로컬을 갖는 이 그룹의 로드 밸런싱 통계를 구성하기 위해 즉시 원격 
+ *   메모리에 액세스하므로 의심스러운 이점이 있습니다.
+ *
+ * - 결정된 sibling domain으로 group을 만든다.
+ * - ex) 
+ * NUMA-2       0-2             
+ *  groups:     {0-1},1-3 c의{2} 
+ *                               
+ * NUMA-1       0-1               
+ *  groups:     {0},{1}        
+ *                                 
+ * NUMA-0       0                  
+ *
+ * 1) @sd가 numa-2인 경우, child는 numa-1
+ * 2) @sd가 numa-1인 경우, child는 numa-0
+ * 3) @sd가 numa-0인 경우, 자기자신으로 선택
  */
 static struct sched_group *
 build_group_from_child_sched_domain(struct sched_domain *sd, int cpu)
@@ -958,6 +1147,10 @@ build_group_from_child_sched_domain(struct sched_domain *sd, int cpu)
 	return sg;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - balance mask 설정 및 capacity 값들을 설정한다.
+ */
 static void init_overlap_sched_group(struct sched_domain *sd,
 				     struct sched_group *sg)
 {
@@ -970,6 +1163,12 @@ static void init_overlap_sched_group(struct sched_domain *sd,
 	cpu = cpumask_first(mask);
 
 	sg->sgc = *per_cpu_ptr(sdd->sgc, cpu);
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - temp에 만들었던것을 최초 ref up때만 copy하고 이후는 기존과 비교해
+ *   warn 출력만한다.
+ */
 	if (atomic_inc_return(&sg->sgc->ref) == 1)
 		cpumask_copy(group_balance_mask(sg), mask);
 	else
@@ -986,6 +1185,10 @@ static void init_overlap_sched_group(struct sched_domain *sd,
 	sg->sgc->max_capacity = SCHED_CAPACITY_SCALE;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - @sd span에 포함이 되있는 sibling을 검색한다.
+ */
 static struct sched_domain *
 find_descended_sibling(struct sched_domain *sd, struct sched_domain *sibling)
 {
@@ -993,6 +1196,13 @@ find_descended_sibling(struct sched_domain *sd, struct sched_domain *sibling)
 	 * The proper descendant would be the one whose child won't span out
 	 * of sd
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   적절한 후손은 자녀가 sd를 벗어나지 않는 것입니다. 
+ *
+ * - @sd 범위에 있는 sibling->child가 있는 child를 찾는다.
+ */
 	while (sibling->child &&
 	       !cpumask_subset(sched_domain_span(sibling->child),
 			       sched_domain_span(sd)))
@@ -1003,6 +1213,15 @@ find_descended_sibling(struct sched_domain *sd, struct sched_domain *sibling)
 	 * to go down to skip those sched_domains which don't contribute to
 	 * scheduling because they will be degenerated in cpu_attach_domain
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   서로 다른 토폴로지 레벨에서 sgc를 참조하므로 스케줄링에 기여하지 않는 
+ *   sched_domains는 cpu_attach_domain에서 퇴화되기 때문에 아래로 내려가서 
+ *   건너뛰어야 합니다. 
+ *
+ * - sibling->child과 sibling의 span이 같으면 한번 더 내려간다.
+ */
 	while (sibling->child &&
 	       cpumask_equal(sched_domain_span(sibling->child),
 			     sched_domain_span(sibling)))
@@ -1011,6 +1230,11 @@ find_descended_sibling(struct sched_domain *sd, struct sched_domain *sibling)
 	return sibling;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - @sd에 대해서 sg(schedule group)을 생성하고 sg의 balance mask 및 capacity값들을 
+ *   설정한다.
+ */
 static int
 build_overlap_sched_groups(struct sched_domain *sd, int cpu)
 {
@@ -1029,6 +1253,10 @@ build_overlap_sched_groups(struct sched_domain *sd, int cpu)
 		if (cpumask_test_cpu(i, covered))
 			continue;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - sd_data에서 i에 해당하는 sibling을 가져온다.
+ */
 		sibling = *per_cpu_ptr(sdd->sd, i);
 
 		/*
@@ -1041,6 +1269,16 @@ build_overlap_sched_groups(struct sched_domain *sd, int cpu)
 		 * Domains should always include the CPU they're built on, so
 		 * check that.
 		 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   비대칭 노드 설정으로 인해 도메인 트리의 깊이가 다른 상황이 발생할 
+ *   수 있으므로 이미 전체 범위를 포함하는 도메인을 건너뛰어야 합니다.
+ *
+ *   이 경우 build_sched_domains()는 반복을 일찍 종료하고 형제 SD 
+ *   범위는 비어 있게 됩니다.
+ *   도메인은 항상 도메인이 구축된 CPU를 포함해야 하므로 확인하십시오.
+ */
 		if (!cpumask_test_cpu(i, sched_domain_span(sibling)))
 			continue;
 
@@ -1075,10 +1313,74 @@ build_overlap_sched_groups(struct sched_domain *sd, int cpu)
 		 * The NUMA-2 groups for nodes 0 and 3 are obviously buggered, as the
 		 * group span isn't a subset of the domain span.
 		 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ * -----------------------
+ *  위 주석은 child 개념이 도입되기전에 대한 설명이다. child 도입 이후로 groups 선택이 
+ *  개선되었다.
+ * ------------------------
+ *   일반적으로 우리는 형제의 자식 sched_domain으로 sched_group을 
+ *   빌드합니다. 그러나 NUMA 직경이 3 이상인 시스템의 경우 형제의 자식 
+ *   sched_domain이 아래와 같이 빌드되는 sched_domain을 벗어나기 때문에 
+ *   형제의 적절한 자손의 자식 도메인으로 sched_group을 빌드합니다.
+ *
+ *   최소 직경=3 토폴로지는 다음과 같습니다.
+ *   node   0   1   2   3
+ *     0:  10  20  30  40
+ *     1:  20  10  20  30
+ *     2:  30  20  10  20
+ *     3:  40  30  20  10
+ *
+ *   0 --- 1 --- 2 --- 3
+ *
+ *              0                    1                2               3
+ * NUMA-3       0-3                   N/A             N/A             0-3
+ *  groups:     {0-2},{1-3}                                           {1-3},{0-2}
+ * (40)         0, 3                                                   3, 0
+ *                                  
+ * NUMA-2       0-2                   0-3             0-3             1-3
+ *  groups:     {0-1},1-3 c의{2}     {0-2},{2-3}     {1-3},{0-1}     {2-3},0-2의 child {1}
+ * (30)         0, 2                  1, 3            2, 0            3, 1
+ *                                   
+ * NUMA-1       0-1                   0-2             1-3             2-3
+ *  groups:     {0},{1}               {1},{2},{0}     {2},{3},{1}     {3},{2}
+ * (20)                              
+ *                                   
+ * NUMA-0       0                     1               2               3
+ *
+ * ------------------------
+ *
+ * 그룹 범위가 도메인 범위의 하위 집합이 아니므로 노드 0 및 3에 대한 NUMA-2 
+ * 그룹은 분명히 버그가 있습니다.
+ *
+ * - 주석해석
+ *   > node는 다음과 같이 연결되있다는 예로 되있다. 자기자신(10)에 거리마다 10씩 증가.
+ *          +10      +10      +10
+ *       0 ------ 1 ------ 2 ----- 3
+ *   > NUMA-2의 node 0와 node 3에서, 범위에 distacke 40에 해당하는 node 3이 포함되며,
+ *   이런 로직이 될수 밖에 없다는 구조로 설명하고 있다.
+ *
+ * - 현재 범위에 포함이 안된 sibling이면 next를 검색한다.
+ *
+ * ex) 위 주석 예제의 NUMA-2 node3의 예로 든다.
+ *   step1) node 3으로 시작 
+ *   step3) node 3의 numa-2가 sibling으로 선택 (1-3)
+ *   step3) node 3, numa-2의 child(2-3)가 span에 전부 포함되므로 {2-3}으로 group이 생성
+ *   step4) 이후 for wrap을 통해 node 1로 for동작시작.
+ *   step5) node 1, numa-2가 sibling으로 선택 (0-3)
+ *   step6) node 1, numa-2의 child(0-2)으로 선택되지만 subset이 아니게 판정. child을 sibling으로
+ *          재선택
+ *   step7) sibling(0-2)의 child인 node1 numa-0가 span에 전부 포함되므로 {1}으로 group 생성
+ */
 		if (sibling->child &&
 		    !cpumask_subset(sched_domain_span(sibling->child), span))
 			sibling = find_descended_sibling(sd, sibling);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - sg 생성 및 설정
+ */
 		sg = build_group_from_child_sched_domain(sibling, cpu);
 		if (!sg)
 			goto fail;
@@ -1088,6 +1390,10 @@ build_overlap_sched_groups(struct sched_domain *sd, int cpu)
 
 		init_overlap_sched_group(sibling, sg);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 순환연결리스트 구성.ㅣ
+ */
 		if (!first)
 			first = sg;
 		if (last)
@@ -1176,7 +1482,101 @@ fail:
  *
  * [*] in other words, the first group of each domain is its child domain.
  */
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   패키지 토폴로지(fair.c의 로드 밸런스 설명 참조) 스케줄러는 여러 중요한 
+ *   토폴로지 기능을 나타내는 트리 구조를 구축합니다. 기본적으로(default_topology[]) 
+ *   여기에는 다음이 포함됩니다.
+ *
+ *   - Simultaneous multithreading (SMT)
+ *   - Multi-Core Cache (MC)
+ *   - Package (DIE)
+ *  
+ *   여기서 마지막 하나는 NUMA 노드까지의 모든 것을 나타냅니다.
+ *
+ *   트리는 3가지 기본 데이터 구조로 구성됩니다.
+ *
+ *		sched_domain -> sched_group -> sched_group_capacity
+ *		    ^ ^             ^ ^
+ *            `-'             `-'
+ *  
+ *   sched_domains는 CPU당이며 양방향 링크(상위 및 하위)를 가지며 해당 토폴로지
+ *   수준에 속하는 CPU의 계속 증가하는 마스크를 나타냅니다. 
+ *
+ *   각 sched_domain에는 sched_group의 순환(이중) 연결 목록이 있으며, 각각은 
+ *   아래 수준의 도메인(또는 첫 번째 도메인 수준의 경우 개별 CPU)을 나타냅니다. 
+ *   sched_domain으로 연결된 sched_group에는 해당 sched_domain[*]의 CPU가 포함됩니다.
+ *
+ *   2개의 스레드, 2개의 코어, 2개의 캐시 클러스터 부분을 예로 들어 보겠습니다.
+ *
+ *    CPU   0   1   2   3   4   5   6   7
+ *   
+ *    DIE  [                             ]
+ *    MC   [             ] [             ]
+ *    SMT  [     ] [     ] [     ] [     ]
+ *   
+ *     - or -
+ *   
+ *    DIE  0-7 0-7 0-7 0-7 0-7 0-7 0-7 0-7
+ *    MC   0-3 0-3 0-3 0-3 4-7 4-7 4-7 4-7
+ *    SMT  0-1 0-1 2-3 2-3 4-5 4-5 6-7 6-7
+ *   
+ *    CPU   0   1   2   3   4   5   6   7
+ *   
+ *  그것에 대해 생각하는 한 가지 방법은 다음과 같습니다.
+ *  sched_domain은 이러한 토폴로지 수준 사이에서 위아래로 이동하는 반면 sched_group은 
+ *  하위 도메인 세분성에서 옆으로 이동합니다.
+ *
+ *  sched_group_capacity는 각각의 고유한 sched_group이 shared storage를 갖도록 합니다.
+ *  (ps. sgc : sg에 있는 똑같은것 데이터를 모아놓는 곳)
+ *
+ *  두 가지 관련 구성 문제가 있으며 둘 다 각 그룹을 고유하게 식별하는 CPU가 
+ *  필요합니다(주어진 도메인에 대해).
+ *
+ *  - 첫 번째는 balance_cpu입니다(should_we_balance() 및 fair.c의 부하 균형 참조). 
+ *  각 그룹에 대해 더 높은 도메인에서 1개의 CPU만 계속 균형을 유지하기를 원합니다.
+ *
+ *  - 두 번째는 sched_group_capacity입니다. 모든 동일한 그룹이 단일 sched_group_capacity를 
+ *  공유하기를 원합니다.
+ *
+ *  이러한 토폴로지는 구축에 의해 배타적이기 때문입니다. 즉, SMT 스레드가 여러 코어에 
+ *  속하고 코어가 여러 캐시의 일부가 되는 것은 불가능합니다. 계층 구조의 각 CPU에는 
+ *  매우 명확하고 고유한 위치가 있습니다.
+ *
+ *  따라서 각 그룹에 대해 고유한 CPU를 계산하는 것은 간단합니다(반복 마스크는 중복되고 
+ *  모두 1로 설정됩니다. 그룹의 모든 CPU는 _that_ 그룹에서 끝납니다). 각 그룹에서 
+ *  첫 번째 CPU를 간단히 선택할 수 있습니다.
+ *
+ *  [*] 즉, 각 도메인의 첫 번째 그룹은 자식 도메인입니다.
+ *
+ *  - @sdd, @cpu에 해당하는 @sd의 하위 doamin의 가장 처음 cpu의 sg를 return한다.
+ *
+ *  - sd1 sd2 sd3 sd4
+ *     |  /   /   /
+ *     +-+----+--+
+*      |
+ *     sg
+ *     |
+ *     sgc
+ *
+ *
+ * - 예시.)
+ *   > die의 0-3까지에선 first cpu가 0, 4-7에선 first cpu가 4가 된다.
+ *   > MC는 마지막 sd이므로 한개씩 연결된다.
+ *   > sg끼리는 순환연결리스트로 이뤄진다.
+ *   > sgc는 각 sg에 한개씩 연결된다.
+ *
+ * DIE | 0 1 2 3         4 5 6 7 | <-- sd (span : 0xff)
+ *       |               |
+ *      +0---------------4+        <-- sg (sgc는 sg 밑에 하나씩.)
+ *      +-----------------+               (0,4의 span : 0x0f, 0xf0)
+ *
+ * MC  | 0 1 2 3 |     | 4 5 6 7 | <-- sd (span : 0x0f, 0xf0)
+ *       | | | |         | | | |
+ *      +0-1-2-3+       +4-5-6-7+  <-- sg (sgc는 sg 밑에 하나씩.)
+ *      +-------+       +-------+
+ */
 static struct sched_group *get_group(int cpu, struct sd_data *sdd)
 {
 	struct sched_domain *sd = *per_cpu_ptr(sdd->sd, cpu);
@@ -1184,6 +1584,10 @@ static struct sched_group *get_group(int cpu, struct sd_data *sdd)
 	struct sched_group *sg;
 	bool already_visited;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 하위 domain과 동일한 group을 사용하고, cpu번호는 그중 가장 처음 cpu를 사용한다.
+ */
 	if (child)
 		cpu = cpumask_first(sched_domain_span(child));
 
@@ -1196,13 +1600,26 @@ static struct sched_group *get_group(int cpu, struct sd_data *sdd)
 	WARN_ON(already_visited != (atomic_inc_return(&sg->sgc->ref) > 1));
 
 	/* If we have already visited that group, it's already initialized. */
+/*
+ * IAMROOT, 2023.04.22:
+ * - 한번이라도 만들어졌으면 ref만 증가시키면 된다. return.
+ */
 	if (already_visited)
 		return sg;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - child domain span을 그대로 group span으로 복사한다.
+ */
 	if (child) {
 		cpumask_copy(sched_group_span(sg), sched_domain_span(child));
 		cpumask_copy(group_balance_mask(sg), sched_group_span(sg));
 	} else {
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - 최하단인 경우는 @cpu를 사용하면 된다.
+ */
 		cpumask_set_cpu(cpu, sched_group_span(sg));
 		cpumask_set_cpu(cpu, group_balance_mask(sg));
 	}
@@ -1221,6 +1638,17 @@ static struct sched_group *get_group(int cpu, struct sd_data *sdd)
  *
  * Assumes the sched_domain tree is fully constructed
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   build_sched_groups는 주어진 span에 포함되는 그룹의 순환 연결 목록을 
+ *   작성하고 각 그룹의 -> cpumask를 올바르게 설정하고 -> sgc를 초기화합니다.
+ *
+ *   sched_domain 트리가 완전히 구성되었다고 가정합니다.
+ *
+ * - @sd의 span을 범위로 각 cpu의 sg를 순환연결리스트로 구성한다.
+ * - 일반 domain의 경우 group과 동일하다. span이 child를 전부 포함한다.
+ */
 static int
 build_sched_groups(struct sched_domain *sd, int cpu)
 {
@@ -1235,9 +1663,20 @@ build_sched_groups(struct sched_domain *sd, int cpu)
 
 	cpumask_clear(covered);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - @span 범위를 순환한다.
+ * - ex) span값이 다음과 같다고 가정한다.
+ *   (0, 1, 2, 3) (4, 5, 6, 7)
+ *   이경우 group이 2번만들어지게 되는 개념이되고 iterate는 2번만 get_group을 할것이다.
+ */
 	for_each_cpu_wrap(i, span, cpu) {
 		struct sched_group *sg;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 한번한건 pass
+ */
 		if (cpumask_test_cpu(i, covered))
 			continue;
 
@@ -1245,6 +1684,10 @@ build_sched_groups(struct sched_domain *sd, int cpu)
 
 		cpumask_or(covered, covered, sched_group_span(sg));
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 순환단방향연결리스트 형식으로 연결한다.
+ */
 		if (!first)
 			first = sg;
 		if (last)
@@ -1267,21 +1710,47 @@ build_sched_groups(struct sched_domain *sd, int cpu)
  * group having more cpu_capacity will pickup more load compared to the
  * group having less cpu_capacity.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   스케줄 그룹 cpu_capacity를 초기화합니다.
+ *
+ *   cpu_capacity는 sched 그룹의 용량을 나타내며, sched 도메인에서 서로 
+ *   다른 sched 그룹 간에 부하를 분산할 때 사용됩니다.
+ *   일반적으로 sched 도메인의 모든 그룹에 대한 cpu_capacity는 토폴로지에 
+ *   비대칭이 없는 한 동일합니다. 비대칭이 있는 경우 cpu_capacity가 더 
+ *   많은 그룹은 cpu_capacity가 더 적은 그룹에 비해 더 많은 부하를 받습니다.
+ *
+ * - 1. smt일 경우 각 sg마다 asym_prefer_cpu(가장빠른 cpu)를 비교하여 업데이트한다.
+ *   2. 각 group마다 balance cpu에 한하여 group capacity를 계산한다.
+ */
 static void init_sched_groups_capacity(int cpu, struct sched_domain *sd)
 {
 	struct sched_group *sg = sd->groups;
 
 	WARN_ON(!sg);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - smt domapin인 경우, 가장 빠른 cpu를 알아낸다.
+ */
 	do {
 		int cpu, max_cpu = -1;
 
 		sg->group_weight = cpumask_weight(sched_group_span(sg));
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - SMT domain이 아닌것들은 continue
+ */
 		if (!(sd->flags & SD_ASYM_PACKING))
 			goto next;
 
 		for_each_cpu(cpu, sched_group_span(sg)) {
+/*
+ * IAMROOT, 2023.04.22:
+ * - max_cpu를 정한다.
+ */
 			if (max_cpu < 0)
 				max_cpu = cpu;
 			else if (sched_asym_prefer(cpu, max_cpu))
@@ -1293,9 +1762,17 @@ next:
 		sg = sg->next;
 	} while (sg != sd->groups);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - balance mask의 첫번째 cpu에 한해서만 update_group_capacity()가 동작한다.
+ */
 	if (cpu != group_balance_cpu(sg))
 		return;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - group capacity를 산출한다.
+ */
 	update_group_capacity(sd, cpu);
 }
 
@@ -1346,6 +1823,30 @@ static LIST_HEAD(asym_cap_list);
  *   DIE 0,1,2,3 -> count 2, miss 0
  *                  다른 cpu capacity에 있기 때문에 비대칭이다. return 
  *                  return SD_ASYM_CPUCAPACITY | SD_ASYM_CPUCAPACITY_FULL
+ * - return
+ *   0 : asym이 없으면 return0.
+ *   SD_ASYM_CPUCAPACITY : asym_cap_list가 @sd_span에 2번 이상 있으면서,
+ *                         asm_cap_list에 없지만 cpu_map에도 있는 경우
+ *   SD_ASYM_CPUCAPACITY | SD_ASYM_CPUCAPACITY_FULL : @sd_span이 @asym_cap_list에 2번 이상 
+ *   존재하면서 sd_span에 없는 asym_cap_list도 모두 cpu_map에 없는 경우
+ *
+ *   case1) full 인 경우
+ *   | asym_cap_list | sd_span |  cpu_map
+ *         B             O           -
+ *         M             O           -
+ *         L             O           -
+ *
+ *   case2) full 이 아닌 경우
+ *   | asym_cap_list | sd_span |  cpu_map
+ *         B             O           -
+ *         M             O           -
+ *         L             X           O
+ *
+ *   case3) asym_cap_list에 하나만 존재하는경우. 즉 asym이 아닌경우
+ *   | asym_cap_list | sd_span |  cpu_map
+ *         B             O           -
+ *         M             X           -
+ *         L             X           -
  */
 static inline int
 asym_cpu_capacity_classify(const struct cpumask *sd_span,
@@ -1494,6 +1995,20 @@ static int __init setup_relax_domain_level(char *str)
 }
 __setup("relax_domain_level=", setup_relax_domain_level);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 1. attr없거나 relax_domain_level이 설정이 안되있는 경우.
+ *   default(kernel param : relax_domain_level)를 request로 사용한다.
+ *   default가 disable 되있으면 아무것도 안한다.
+ *   2. attr에 relax_domain_level이 있는 경우 해당 값을 request로 사용한다.,
+ *
+ *   request가 sd->level보다 높다면 SD_BALANCE_WAKE, SD_BALANCE_NEWIDLE을 끈다.
+ *
+ * - | attr->relax_domain_level | default_relax_domain_level | 결과
+ *   |  X                       |  X                         | none
+ *   |  X                       |  O                         | default_relax_domain_level
+ *   |  O                       |  -                         | attr->relax_domain_level
+ */
 static void set_domain_attribute(struct sched_domain *sd,
 				 struct sched_domain_attr *attr)
 {
@@ -1570,6 +2085,15 @@ __visit_domain_allocation_hell(struct s_data *d, const struct cpumask *cpu_map)
  * sched_group structure so that the subsequent __free_domain_allocs()
  * will not free the data we're using.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   후속 __free_domain_allocs()가 사용 중인 데이터를 해제하지 않도록 
+ *   sched_domain 및 sched_group 구조를 빌드하는 데 사용한 sd_data 
+ *   요소를 NULL로 설정합니다.
+ *
+ * - ref up이 된것들은 삭제하지 말라는 의미에서 NULL을 넣는다.
+ */
 static void claim_allocations(int cpu, struct sched_domain *sd)
 {
 	struct sd_data *sdd = sd->private;
@@ -1636,7 +2160,11 @@ static unsigned long __read_mostly *sched_numa_onlined_nodes;
 
 /*
  * IAMROOT, 2023.04.15:
- * - 
+ * - schedule domain을 초기화한다.
+ *   1. smt/mc/die/numa 에 따른 sd_flags() 설정
+ *   2. sd_span에 따른 asym flag 추가.
+ *   3. 설정한 flags에 따라 imbalance_pct, cache_nice_tries, flags 값 설정.
+ *   4. cache공유가 있다면 schedule domain share를 shared에 등록.
  */
 static struct sched_domain *
 sd_init(struct sched_domain_topology_level *tl,
@@ -1722,6 +2250,10 @@ sd_init(struct sched_domain_topology_level *tl,
 	cpumask_and(sd_span, cpu_map, tl->mask(cpu));
 	sd_id = cpumask_first(sd_span);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - sd_span의 asym flag를 추가한다.
+ */
 	sd->flags |= asym_cpu_capacity_classify(sd_span, cpu_map);
 
 	WARN_ONCE((sd->flags & (SD_SHARE_CPUCAPACITY | SD_ASYM_CPUCAPACITY)) ==
@@ -1732,22 +2264,44 @@ sd_init(struct sched_domain_topology_level *tl,
 	 * Convert topological properties into behaviour.
 	 */
 	/* Don't attempt to spread across CPUs of different capacities. */
+/*
+ * IAMROOT, 2023.04.22:
+ * - asym이면 성능이 다른 cpu가 여러개있는것인데, 이 경우 sibling prefer를 사용하지 못한다.
+ */
 	if ((sd->flags & SD_ASYM_CPUCAPACITY) && sd->child)
 		sd->child->flags &= ~SD_PREFER_SIBLING;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - smt(issue pipeline 공유)인 경우 조금 낮춰서 load balance를 좀 더 우호적으로 동작하도록 한다.
+ */
 	if (sd->flags & SD_SHARE_CPUCAPACITY) {
 		sd->imbalance_pct = 110;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - smt(L1 공유), MC(L2 or L3를 공유하는 경우). smt에 비해 좀더 높이고, cache 공유이므로 관련 값을 설정한다.
+ */
 	} else if (sd->flags & SD_SHARE_PKG_RESOURCES) {
 		sd->imbalance_pct = 117;
 		sd->cache_nice_tries = 1;
 
 #ifdef CONFIG_NUMA
+/*
+ * IAMROOT, 2023.04.22:
+ * - numa인 경우 성능이 다른 cpu이므로 위 code에서 처럼 sibling perfer를 제거한다.
+ */
 	} else if (sd->flags & SD_NUMA) {
 		sd->cache_nice_tries = 2;
 
 		sd->flags &= ~SD_PREFER_SIBLING;
 		sd->flags |= SD_SERIALIZE;
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - reclaim distance보다 큰 경우, 즉 멀리 떨어진 node에서 task를 실행 / fork / wake affine등을
+ *   안하도록 한다.
+ */
 		if (sched_domains_numa_distance[tl->numa_level] > node_reclaim_distance) {
 			sd->flags &= ~(SD_BALANCE_EXEC |
 				       SD_BALANCE_FORK |
@@ -1756,6 +2310,11 @@ sd_init(struct sched_domain_topology_level *tl,
 
 #endif
 	} else {
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - DIE
+ */
 		sd->cache_nice_tries = 1;
 	}
 
@@ -1763,6 +2322,10 @@ sd_init(struct sched_domain_topology_level *tl,
 	 * For all levels sharing cache; connect a sched_domain_shared
 	 * instance.
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - cache 공유가 있다면 shared에 sdd->sds를 등록한다.
+ */
 	if (sd->flags & SD_SHARE_PKG_RESOURCES) {
 		sd->shared = *per_cpu_ptr(sdd->sds, sd_id);
 		atomic_inc(&sd->shared->ref);
@@ -1908,9 +2471,9 @@ bool find_numa_distance(int distance)
  * 달려 있습니다. 이는 프로그램 배치에 영향을 미칩니다.
  *
  * 다음 테스트를 통해 토폴로지 유형을 식별할 수 있습니다.
- * - 노드 간 최대 거리가 1홉이면 시스템이 직접 연결된 것입니다.
- * - 두 개의 노드 A와 B에 대해 N > 1 홉 떨어져 있는 경우 중간 노드 C가
- *   있고 노드 A와 B 모두에서 < N 홉 떨어져 있는 경우 시스템은 글루리스 메시입니다.
+ * - 노드 간 최대 거리가 1hops이면 시스템이 직접 연결된 것입니다.
+ * - 두 개의 노드 A와 B에 대해 N > 1 hops 떨어져 있는 경우 중간 노드 C가
+ *   있고 노드 A와 B 모두에서 < N hops 떨어져 있는 경우 시스템은 글루리스 메시입니다.
  */
 /*
  * IAMROOT, 2023.04.15:
@@ -2082,7 +2645,7 @@ void sched_init_numa(void)
 	/*
 	 * IAMROOT. 2023.04.15:
 	 * - google-translate
-	 * 이제 각 레벨에 대해 우리로부터 그만큼 많은 홉 거리에 있는 노드의 모든 CPU를
+	 * 이제 각 레벨에 대해 우리로부터 그만큼 많은 hops 거리에 있는 노드의 모든 CPU를
 	 * 포함하는 노드당 마스크를 구성합니다.
 	 */
 	for (i = 0; i < nr_levels; i++) {
@@ -2487,7 +3050,9 @@ static void __sdt_free(const struct cpumask *cpu_map)
 
 /*
  * IAMROOT, 2023.04.15:
- * - 
+ * - @child   DIE의 child는 mc, MC의 child는 smt의 개념
+ * - @tl, @cpu_map, @child, @cpu에 따른 @sd를 생성하고, @child를 등록한다.
+ * - @attr에 따라 SD_BALANCE_WAKE, SD_BALANCE_NEWIDLE flag 삭제 여부를 결정한다.
  */
 static struct sched_domain *build_sched_domain(struct sched_domain_topology_level *tl,
 		const struct cpumask *cpu_map, struct sched_domain_attr *attr,
@@ -2495,11 +3060,24 @@ static struct sched_domain *build_sched_domain(struct sched_domain_topology_leve
 {
 	struct sched_domain *sd = sd_init(tl, cpu_map, child, cpu);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - @child(이전 domain. 현재 mc였다면 child는 smt)가 있었다면 child에 만들어진 @sd를
+ *   등록한다.
+ */
 	if (child) {
+/*
+ * IAMROOT, 2023.04.22:
+ * - child보다는 1이 높은 level로 설정하고, max값을 업데이트한다.
+ */
 		sd->level = child->level + 1;
 		sched_domain_level_max = max(sched_domain_level_max, sd->level);
 		child->parent = sd;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - child는 반드시 parent에 속하는 개념이 되야된다. 안되면 버그다. 예외처리를 한다.
+ */
 		if (!cpumask_subset(sched_domain_span(child),
 				    sched_domain_span(sd))) {
 			pr_err("BUG: arch topology borken\n");
@@ -2514,6 +3092,11 @@ static struct sched_domain *build_sched_domain(struct sched_domain_topology_leve
 		}
 
 	}
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - relax_domain_level보다 높은 @sd에 대해서 SD_BALANCE_WAKE, SD_BALANCE_NEWIDLE flag 삭제한다.
+ */
 	set_domain_attribute(sd, attr);
 
 	return sd;
@@ -2602,32 +3185,72 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 		goto error;
 
 	/* Set up domains for CPUs specified by the cpu_map: */
+/*
+ * IAMROOT, 2023.04.22:
+ * - pcpu별로 tl을 순회한다.
+ */
 	for_each_cpu(i, cpu_map) {
 		struct sched_domain_topology_level *tl;
 
 		sd = NULL;
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - tl을 순회하면서 schedule domain을 만든다.
+ */
 		for_each_sd_topology(tl) {
 
 			if (WARN_ON(!topology_span_sane(tl, cpu_map, i)))
 				goto error;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 최하단(smt)는 child가 NULL로 들어가고, 이후 mc는 smt의 sd가 child, die는 mc의 sd가
+ *   child로 들어가는 개념으로 동작한다.
+ */
 			sd = build_sched_domain(tl, cpu_map, attr, sd, i);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - ASYM여부를 저장. 
+ */
 			has_asym |= sd->flags & SD_ASYM_CPUCAPACITY;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 첫 level은 pcpu에 저장한ㄷ.
+ */
 			if (tl == sched_domain_topology)
 				*per_cpu_ptr(d.sd, i) = sd;
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - tl이 SDTL_OVERLAP인 경우 sd flags에도 overlap을 달아준다.
+ */
 			if (tl->flags & SDTL_OVERLAP)
 				sd->flags |= SD_OVERLAP;
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - level이 cpu_map까지가 범위이므로 범위에 도달하면 break한다.
+ */
 			if (cpumask_equal(cpu_map, sched_domain_span(sd)))
 				break;
 		}
 	}
 
 	/* Build the groups for the domains */
+/*
+ * IAMROOT, 2023.04.22:
+ * - 
+ */
 	for_each_cpu(i, cpu_map) {
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			sd->span_weight = cpumask_weight(sched_domain_span(sd));
+/*
+ * IAMROOT, 2023.04.22:
+ * - overlap이 있는 domain, 아닌 domain에 따라 scheduling group을 build한다.
+ */
 			if (sd->flags & SD_OVERLAP) {
 				if (build_overlap_sched_groups(sd, i))
 					goto error;
@@ -2643,6 +3266,11 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 		if (!cpumask_test_cpu(i, cpu_map))
 			continue;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 최하단 domain부터 시작하여 parent로 올라가면서 정리한다. 
+ *   삭제를 안할 pointer에 NULL을 넣는 작업 및 sg의 capacity를 update한다.
+ */
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			claim_allocations(i, sd);
 			init_sched_groups_capacity(i, sd);
@@ -2656,6 +3284,10 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 		sd = *per_cpu_ptr(d.sd, i);
 
 		/* Use READ_ONCE()/WRITE_ONCE() to avoid load/store tearing: */
+/*
+ * IAMROOT, 2023.04.22:
+ * - root domain의 max보다 방금 설정된 cpu성능값이 클경우 root domain의 max값을 고친다.
+ */
 		if (rq->cpu_capacity_orig > READ_ONCE(d.rd->max_cpu_capacity))
 			WRITE_ONCE(d.rd->max_cpu_capacity, rq->cpu_capacity_orig);
 
@@ -2663,6 +3295,10 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	}
 	rcu_read_unlock();
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 한번이라도 ASYM cpucapacity가 있었다면
+ */
 	if (has_asym)
 		static_branch_inc_cpuslocked(&sched_asym_cpucapacity);
 

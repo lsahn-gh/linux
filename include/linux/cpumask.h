@@ -297,6 +297,10 @@ extern int cpumask_next_wrap(int n, const struct cpumask *mask, int start, bool 
  *
  * After the loop, cpu is >= nr_cpu_ids.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - wrap이 붙은 함수 특징 : 지정된 cpu부터 그 전까지 한바퀴를 iterate한다.
+ */
 #define for_each_cpu_wrap(cpu, mask, start)					\
 	for ((cpu) = cpumask_next_wrap((start)-1, (mask), (start), false);	\
 	     (cpu) < nr_cpumask_bits;						\

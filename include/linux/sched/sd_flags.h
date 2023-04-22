@@ -48,6 +48,10 @@
  * SHARED_CHILD: Set from the base domain up to cpuset.sched_relax_domain_level.
  * NEEDS_GROUPS: Load balancing flag.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - set_domain_attribute()등에서 삭제 될수있다.
+ */
 SD_FLAG(SD_BALANCE_NEWIDLE, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
 
 /*
@@ -71,6 +75,10 @@ SD_FLAG(SD_BALANCE_FORK, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
  *
  * SHARED_CHILD: Set from the base domain up to cpuset.sched_relax_domain_level.
  * NEEDS_GROUPS: Load balancing flag.
+ */
+/*
+ * IAMROOT, 2023.04.22:
+ * - set_domain_attribute()등에서 삭제 될수있다.
  */
 SD_FLAG(SD_BALANCE_WAKE, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
 
@@ -116,6 +124,10 @@ SD_FLAG(SD_ASYM_CPUCAPACITY_FULL, SDF_SHARED_PARENT | SDF_NEEDS_GROUPS)
  * SHARED_CHILD: Set from the base domain up until spanned CPUs no longer share
  *               CPU capacity.
  * NEEDS_GROUPS: Capacity is shared between groups.
+ */
+/*
+ * IAMROOT, 2023.04.22:
+ * - smt같은 cpu. cpu capacity를 공유한다.
  */
 SD_FLAG(SD_SHARE_CPUCAPACITY, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
 

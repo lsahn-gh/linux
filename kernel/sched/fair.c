@@ -121,6 +121,10 @@ __setup("sched_thermal_decay_shift=", setup_sched_thermal_decay_shift);
 /*
  * For asym packing, by default the lower numbered CPU has higher priority.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - cpu번호가 작을수록 우선순위가 높다.(빠르다.)
+ */
 int __weak arch_asym_cpu_priority(int cpu)
 {
 	return -cpu;
@@ -10155,6 +10159,10 @@ static inline void init_sd_lb_stats(struct sd_lb_stats *sds)
 	};
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - rt + dl + 온도를 제외한 capacity값에 irq 소모비율까지 고려한 여유 capacity를 return한다.
+ */
 static unsigned long scale_rt_capacity(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -10162,8 +10170,17 @@ static unsigned long scale_rt_capacity(int cpu)
 	unsigned long used, free;
 	unsigned long irq;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - irq에서 사용한 시간을 가져온다.
+ */
 	irq = cpu_util_irq(rq);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - irq에서 사용한 cpu만으로 cpu 성능을 다쓴경우는 매우 드물지만 
+ *   예외처리를 해준다.
+ */
 	if (unlikely(irq >= max))
 		return 1;
 
@@ -10173,6 +10190,14 @@ static unsigned long scale_rt_capacity(int cpu)
 	 * avg_thermal.load_avg tracks thermal pressure and the weighted
 	 * average uses the actual delta max capacity(load).
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   avg_rt.util_avg 및 avg_dl.util_avg는 각각 가중치 0 및 1024로 이진 
+ *   신호(실행 중 및 실행 중이 아님)를 추적합니다.
+ *   avg_thermal.load_avg는 열 압력을 추적하고 가중 평균은 실제 델타 
+ *   최대 용량(부하)을 사용합니다.
+ */
 	used = READ_ONCE(rq->avg_rt.util_avg);
 	used += READ_ONCE(rq->avg_dl.util_avg);
 	used += thermal_load_avg(rq);
@@ -10185,6 +10210,11 @@ static unsigned long scale_rt_capacity(int cpu)
 	return scale_irq_capacity(free, irq, max);
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 1. @cpu에 대한 원래 성능을 cpu_capacity_orig에 기록한다.
+ *   2. rq에 rt에 대한 여유 capacity를 기록
+ */
 static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 {
 	unsigned long capacity = scale_rt_capacity(cpu);
@@ -10203,6 +10233,15 @@ static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 	sdg->sgc->max_capacity = capacity;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 최하위 domain
+ *   cpu capacity값을 설정한다.
+ * - SD_OVERLAP
+ *   group에 속해있는 cpu capacity값 통계하여 @sd의 sgc를 설정한다.
+ * - !SD_OVERLAP
+ *   하위 sgc의 capacity를 누적 통계하여 @sd의 sgc에 설정한다.
+ */
 void update_group_capacity(struct sched_domain *sd, int cpu)
 {
 	struct sched_domain *child = sd->child;
@@ -10214,6 +10253,11 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 	interval = clamp(interval, 1UL, max_load_balance_interval);
 	sdg->sgc->next_update = jiffies + interval;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - child가 없는 최하위 domain이 먼저 초기화되고, 이후  multi cpu
+ *   가 있는 domain들은 미리 계산된 capacity를 합산 및 비교를 하여 계산된다.
+ */
 	if (!child) {
 		update_cpu_capacity(sd, cpu);
 		return;
@@ -10223,12 +10267,20 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 	min_capacity = ULONG_MAX;
 	max_capacity = 0;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - numa. SD_OVERLAP 의미 자체가 중복되있는 cpu가 있을수 있다는 개념이 되므로,
+ *   직접 cpu capacity를 사용해 계산한다.
+ */
 	if (child->flags & SD_OVERLAP) {
 		/*
 		 * SD_OVERLAP domains cannot assume that child groups
 		 * span the current group.
 		 */
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - child에서 미리 update_cpu_capacity()를 통해 계산된 값들을 통계한다.
+ */
 		for_each_cpu(cpu, sched_group_span(sdg)) {
 			unsigned long cpu_cap = capacity_of(cpu);
 
@@ -10237,11 +10289,19 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 			max_capacity = max(cpu_cap, max_capacity);
 		}
 	} else  {
+/*
+ * IAMROOT, 2023.04.22:
+ * - SD_OVERLAP이 없으면 중복된 CPU가 없다는 개념이 되어 sgc 사용이 가능하다.
+ *   하위 sgc를 합산하여 현재 sgc로 통계한다.
+ */
 		/*
 		 * !SD_OVERLAP domains can assume that child groups
 		 * span the current group.
 		 */
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - child group들을 합산하여 sgc에 넣는다.
+ */
 		group = child->groups;
 		do {
 			struct sched_group_capacity *sgc = group->sgc;
