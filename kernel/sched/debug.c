@@ -389,7 +389,6 @@ static void register_sd(struct sched_domain *sd, struct dentry *parent)
 
 	debugfs_create_file("flags", 0444, parent, &sd->flags, &sd_flags_fops);
 }
-
 void update_sched_domain_debugfs(void)
 {
 	int cpu, i;
@@ -434,6 +433,10 @@ void update_sched_domain_debugfs(void)
 	}
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - @sd_sysctl_cpus mask에 @cpu를 추가한다
+ */
 void dirty_sched_domain_sysctl(int cpu)
 {
 	if (cpumask_available(sd_sysctl_cpus))

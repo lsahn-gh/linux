@@ -3292,6 +3292,17 @@ out:
  * task must not exit() & deallocate itself prematurely. The
  * call is not atomic; no spinlocks may be held.
  */
+/*
+ * IAMROOT. 2023.04.29:
+ * - google-translate
+ * 주어진 작업의 CPU 선호도를 변경합니다. 스레드를 적절한 CPU로 마이그레이션하고
+ * 스레드가 실행 중인 CPU가 허용된 비트 마스크에서 제거되면 일정을 잡습니다.
+ *
+ * 참고:
+ * 호출자는 작업에 대한 유효한 참조를 가지고 있어야 하며 작업은 조기에 exit() 및
+ * 할당 해제되어서는 안 됩니다. 호출은 원자적이지 않습니다. 어떤 스핀락도 보유할 수
+ * 없습니다.
+ */
 static int __set_cpus_allowed_ptr(struct task_struct *p,
 				  const struct cpumask *new_mask, u32 flags)
 {
@@ -3302,6 +3313,10 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 	return __set_cpus_allowed_ptr_locked(p, new_mask, flags, rq, &rf);
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - TODO @p 에 허용할 수 있는 cpumask 를 @new_mask로 지정
+ */
 int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 {
 	return __set_cpus_allowed_ptr(p, new_mask, 0);
@@ -6495,6 +6510,8 @@ __pick_next_task(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 	 *
 	 * - 아래는 sched_class가 idle 이나 cfs 이고 동작중인 task가
 	 *   모두 cfs_rq task 일 경우의 조건
+	 *
+	 * - newidle_balance 함수에서 rt, dl이 추가된 경우 p == RETRY_TASK 반환
 	 */
 	if (likely(prev->sched_class <= &fair_sched_class &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
@@ -6527,7 +6544,7 @@ restart:
 
 /*
  * IAMROOT, 2023.01.28:
- * - 우선순위별로 rt task 선택.
+ * - 우선순위별로 stop, dl, rt 순으로 task 선택.
  */
 	for_each_class(class) {
 		p = class->pick_next_task(rq);

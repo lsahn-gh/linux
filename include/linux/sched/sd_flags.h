@@ -95,7 +95,7 @@ SD_FLAG(SD_BALANCE_WAKE, SDF_SHARED_CHILD | SDF_NEEDS_GROUPS)
  *  domain내의 idle sibling중인 cpu에 대해서 선택한다는것이다.
  * ---
  * - idle상태에서 깨어난 cpu가 domain내의 idle sibling 선택을 허용한다.
- *
+ * - cluster 내의 형제들에서 cpu를 찾는 설정
  */
 SD_FLAG(SD_WAKE_AFFINE, SDF_SHARED_CHILD)
 

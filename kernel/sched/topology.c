@@ -160,6 +160,12 @@ static inline bool sched_debug(void)
 }
 #endif /* CONFIG_SCHED_DEBUG */
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - static const unsigned int SD_DEGENERATE_GROUPS_MASK = SD_BALANCE_NEWIDLE |
+ *   SD_ASYM_CPUCAPACITY | ...
+ *   SD_WAKE_AFFINE flag 외에 모든 값이 현재 SDF_NEEDS_GROUPS 에 설정되어 있다
+ */
 /* Generate a mask of SD flags with the SDF_NEEDS_GROUPS metaflag */
 #define SD_FLAG(name, mflags) (name * !!((mflags) & SDF_NEEDS_GROUPS)) |
 static const unsigned int SD_DEGENERATE_GROUPS_MASK =
@@ -203,12 +209,22 @@ static int sd_degenerate(struct sched_domain *sd)
 /*
  * IAMROOT, 2023.04.22:
  * - return 1 삭제를 해도된다.
- * - ING
+ * - @parent의 삭제 여부를 결정한다.
+ * - 삭제 경우
+ *   1. @parent 가 sd_degenerate 에 해당하는 경우
+ *   2. 기타 유지 경우를 제외한 예외
+ *
+ * - 유지 경우
+ *   1. @sd 와 @parent 의 span cpumask 가 같지 않을 경우
+ *   2. @parent 그룹이 하나 일 경우
+ *   2.1. @sd에는 AFFINE 설정이 없는데 부모에만 있는 경우
+ *   3. @parent 그룹이 둘 이상일 경우
+ *   3.1. @sd에 없는 flag 가 @parent 에 있는 경우
  */
 static int
 sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 {
-	unsigned long cflags = sd->flags, pflags = parent->flags;
+ 	unsigned long cflags = sd->flags, pflags = parent->flags;
 
 	if (sd_degenerate(parent))
 		return 1;
@@ -491,6 +507,7 @@ static void free_rootdomain(struct rcu_head *rcu)
  * IAMROOT, 2022.11.26:
  * - @rq에 @rd를 등록한다.
  *   @rq에 rd가 있었다면 old에 대한 기록을 지우고 @rd를 등록한다.
+ *   @rq->rd = @rd
  */
 void rq_attach_root(struct rq *rq, struct root_domain *rd)
 {
@@ -630,6 +647,10 @@ static struct root_domain *alloc_rootdomain(void)
 	return rd;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - @sg 에 연결된 모든 그룹을 free 한다. @free_sgc 가 1이면 sgc도 free 한다
+ */
 static void free_sched_groups(struct sched_group *sg, int free_sgc)
 {
 	struct sched_group *tmp, *first;
@@ -650,12 +671,22 @@ static void free_sched_groups(struct sched_group *sg, int free_sgc)
 	} while (sg != first);
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - @sd->groups @sd->shared @sd 를 free 한다
+ */
 static void destroy_sched_domain(struct sched_domain *sd)
 {
 	/*
 	 * A normal sched domain may have multiple group references, an
 	 * overlapping domain, having private groups, only one.  Iterate,
 	 * dropping group/capacity references, freeing where none remain.
+	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 일반 sched 도메인에는 여러 그룹 참조, 겹치는 도메인, 개인 그룹이 하나만 있을 수
+	 * 있습니다. 반복하고, 그룹/용량 참조를 삭제하고, 남아 있지 않은 곳을 해제합니다.
 	 */
 	free_sched_groups(sd->groups, 1);
 
@@ -704,6 +735,11 @@ DEFINE_PER_CPU(struct sched_domain __rcu *, sd_asym_cpucapacity);
  */
 DEFINE_STATIC_KEY_FALSE(sched_asym_cpucapacity);
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - 많이 찾는 domain 설정에 대해 pcpu 캐쉬로 설정한다
+ *   llc = last level cache
+ */
 static void update_top_cache_domain(int cpu)
 {
 	struct sched_domain_shared *sds = NULL;
@@ -739,7 +775,10 @@ static void update_top_cache_domain(int cpu)
  */
 /*
  * IAMROOT, 2023.04.22:
- * - 
+ * - 1. 삭제할 수 있는 도메인 삭제
+ *   2. rq 의 root domain 설정. cpu_rq(@cpu)->rd = @rd
+ *   3. rq 의 sd 설정.
+ *   4. sd_llc 등 많이 찾는 domain pcpu 캐쉬 설정
  */
 static void
 cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
@@ -749,15 +788,15 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	int numa_distance = 0;
 
 	/* Remove the sched domains which do not contribute to scheduling. */
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - @parent 를 최상위까지 따라 가며 삭제할 수 있는 조건 이면 삭제
+	 */
 	for (tmp = sd; tmp; ) {
 		struct sched_domain *parent = tmp->parent;
 		if (!parent)
 			break;
 
-/*
- * IAMROOT, 2023.04.22:
- * - 
- */
 		if (sd_parent_degenerate(tmp, parent)) {
 			tmp->parent = parent->parent;
 			if (parent->parent)
@@ -767,6 +806,12 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 			 * degenerate parent; the spans match for this
 			 * so the property transfers.
 			 */
+			/*
+			 * IAMROOT. 2023.04.29:
+			 * - google-translate
+			 * 타락한 부모의 경우 SD_PREFER_SIBLING을 아래로 전송합니다.
+			 * 이에 대한 스팬이 일치하므로 속성이 전송됩니다.
+			 */
 			if (parent->flags & SD_PREFER_SIBLING)
 				tmp->flags |= SD_PREFER_SIBLING;
 			destroy_sched_domain(parent);
@@ -774,6 +819,10 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 			tmp = tmp->parent;
 	}
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - 제일 아래 @sd 가 삭제 조건 이면 삭제
+	 */
 	if (sd && sd_degenerate(sd)) {
 		tmp = sd;
 		sd = sd->parent;
@@ -782,6 +831,10 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 			sd->child = NULL;
 	}
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - XXX numa_distance 사용 않는 변수임
+	 */
 	for (tmp = sd; tmp; tmp = tmp->parent)
 		numa_distance += !!(tmp->flags & SD_NUMA);
 
@@ -791,6 +844,10 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	tmp = rq->sd;
 	rcu_assign_pointer(rq->sd, sd);
 	dirty_sched_domain_sysctl(cpu);
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - XXX destroy 하는 것은 백업해둔 기존 rq->sd 이다.
+	 */
 	destroy_sched_domains(tmp);
 
 	update_top_cache_domain(cpu);
@@ -3020,6 +3077,11 @@ static void __sdt_free(const struct cpumask *cpu_map)
 	for_each_sd_topology(tl) {
 		struct sd_data *sdd = &tl->data;
 
+		/*
+		 * IAMROOT, 2023.04.29:
+		 * - claim_allocations 함수에서 NULL로 설정되지 않은 것들 free.
+		 *   실제로 pcpu 이중 포인터에 할당된 구조체 메모리 해제
+		 */
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
 
@@ -3037,6 +3099,10 @@ static void __sdt_free(const struct cpumask *cpu_map)
 			if (sdd->sgc)
 				kfree(*per_cpu_ptr(sdd->sgc, j));
 		}
+		/*
+		 * IAMROOT, 2023.04.29:
+		 * - sd_data 멤버 pcpu 포인터 변수 4개 free
+		 */
 		free_percpu(sdd->sd);
 		sdd->sd = NULL;
 		free_percpu(sdd->sds);

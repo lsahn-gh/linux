@@ -736,6 +736,8 @@ struct cfs_rq {
  *  - h_nr_running
  *    하위 그룹까지 포함한 실행가능한 cfs_rq의 task 수.
  *    (throttled된 하위 cfs rq는 제외).
+ *  - idle_h_nr_running
+ *    하위 그룹까지 포함한 실행가능한 SCHED_IDLE policy 에 task 수
  */
 	unsigned int		nr_running;
 	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
@@ -2236,6 +2238,15 @@ queue_balance_callback(struct rq *rq,
  *
  * Returns the highest sched_domain of a CPU which contains the given flag.
  */
+/*
+ * IAMROOT. 2023.04.29:
+ * - google-translate
+ * 가장 높은 플래그_도메인 - 플래그를 포함하는 가장 높은 sched_domain을 반환합니다.
+ * @cpu: 가장 높은 수준의 sched 도메인을 반환할 CPU.
+ * @flag: 주어진 CPU에 대해 가장 높은 sched_domain을 확인하는 플래그입니다.
+ *
+ * 주어진 플래그를 포함하는 CPU의 가장 높은 sched_domain을 반환합니다.
+ */
 static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd, *hsd = NULL;
@@ -2249,6 +2260,10 @@ static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 	return hsd;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - 주어진 플래그를 포함하는 CPU의 가장 낮은 sched_domain을 반환합니다.
+ */
 static inline struct sched_domain *lowest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd;
