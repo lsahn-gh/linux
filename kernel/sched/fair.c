@@ -196,6 +196,16 @@ static inline void update_load_set(struct load_weight *lw, unsigned long w)
  *
  * This idea comes from the SD scheduler of Con Kolivas:
  */
+/*
+ * IAMROOT. 2023.04.30:
+ * - google-translate
+ * CPU가 많을수록 사용자에게 표시되는 '유효 대기 시간'이 줄어들기 때문에 CPU가 더
+ * 많은 경우 세분성 값을 늘립니다. 그러나 관계는 선형적이지 않으므로 CPU 수의
+ * log2를 사용하여 두 번째로 좋은 추측을 선택합니다. 이 아이디어는 Con Kolivas의 SD
+ * 스케줄러에서 가져온 것입니다.
+ *
+ * - ex. default 의 경우 cpus가 4라면 ilog2(4) + 1 로 해서 3을 반환
+ */
 static unsigned int get_update_sysctl_factor(void)
 {
 	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
@@ -217,6 +227,13 @@ static unsigned int get_update_sysctl_factor(void)
 	return factor;
 }
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - ex. num_online_cpus 가 4이고 default case라 factor에 3이 설정되었다고 가정
+ * - sysctl_sched_min_granularity = 3 * normalized_sysctl_sched_min_granularity
+ *                                = 3 * 0.75
+ *                                = 2.25(ms)
+ */
 static void update_sysctl(void)
 {
 	unsigned int factor = get_update_sysctl_factor();
@@ -12995,6 +13012,14 @@ static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
 /*
  * Trigger the SCHED_SOFTIRQ if it is time to do periodic load balancing.
  */
+/*
+ * IAMROOT. 2023.04.30:
+ * - google-translate
+ * 주기적 로드 밸런싱을 수행할 시간인 경우 SCHED_SOFTIRQ를 트리거합니다.
+ *
+ * - next balance 시간이 지나면 SCHED_SOFTIRQ에 의해
+ *   run_rebalance_domains 함수를 호출한다
+ */
 void trigger_load_balance(struct rq *rq)
 {
 	/*
@@ -13012,7 +13037,8 @@ void trigger_load_balance(struct rq *rq)
 
 	/*
 	 * IAMROOT, 2023.04.29:
-	 * - run_rebalance_domains 함수를 호출하게 된다.
+	 * - init_sched_fair_class 에서 설정한
+	 *   run_rebalance_domains 함수를 호출하게 된다.
 	 */
 	if (time_after_eq(jiffies, rq->next_balance))
 		raise_softirq(SCHED_SOFTIRQ);
@@ -13849,6 +13875,8 @@ void show_numa_stats(struct task_struct *p, struct seq_file *m)
 /*
  * IAMROOT, 2022.12.29:
  * - sched에 관련한 softirq를 하나 열어둔다.
+ * - scheduler_tick - > trigger_load_balance 에서 SCHED_SOFTIRQ에 설정한
+ *   run_rebalance_domains 함수를 호출하게 된다
  */
 __init void init_sched_fair_class(void)
 {

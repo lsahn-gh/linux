@@ -777,7 +777,7 @@ static void update_top_cache_domain(int cpu)
  * IAMROOT, 2023.04.22:
  * - 1. 삭제할 수 있는 도메인 삭제
  *   2. rq 의 root domain 설정. cpu_rq(@cpu)->rd = @rd
- *   3. rq 의 sd 설정.
+ *   3. rq 의 sd 설정.(최하위 레벨 sd)
  *   4. sd_llc 등 많이 찾는 domain pcpu 캐쉬 설정
  */
 static void
@@ -790,7 +790,7 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	/* Remove the sched domains which do not contribute to scheduling. */
 	/*
 	 * IAMROOT, 2023.04.29:
-	 * - @parent 를 최상위까지 따라 가며 삭제할 수 있는 조건 이면 삭제
+	 * - @parent 를 최상위 레벨까지 따라 가며 삭제할 수 있는 조건 이면 삭제
 	 */
 	for (tmp = sd; tmp; ) {
 		struct sched_domain *parent = tmp->parent;
@@ -821,7 +821,7 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 
 	/*
 	 * IAMROOT, 2023.04.29:
-	 * - 제일 아래 @sd 가 삭제 조건 이면 삭제
+	 * - 제일 아래 레벨 @sd 가 삭제 조건 이면 삭제
 	 */
 	if (sd && sd_degenerate(sd)) {
 		tmp = sd;
@@ -833,7 +833,8 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 
 	/*
 	 * IAMROOT, 2023.04.29:
-	 * - XXX numa_distance 사용 않는 변수임
+	 * - XXX numa_distance 사용 않는 변수임.
+	 * - 현재 버전(v6.3) 에서는 삭제되었다.
 	 */
 	for (tmp = sd; tmp; tmp = tmp->parent)
 		numa_distance += !!(tmp->flags & SD_NUMA);
@@ -842,6 +843,10 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 
 	rq_attach_root(rq, rd);
 	tmp = rq->sd;
+	/*
+	 * IAMROOT, 2023.04.30:
+	 * - 최하위 레벨 sd 가 rq에 연결된다.
+	 */
 	rcu_assign_pointer(rq->sd, sd);
 	dirty_sched_domain_sysctl(cpu);
 	/*
@@ -2087,6 +2092,11 @@ static void set_domain_attribute(struct sched_domain *sd,
 static void __sdt_free(const struct cpumask *cpu_map);
 static int __sdt_alloc(const struct cpumask *cpu_map);
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - sdt 빌드시 임시로 사용한 pcpu 와 할당된 구조체 메모리중 ref가 없는 것 free.
+ * - sd 구조체는 모두 남겨지게 된다.(degenerate 로 삭제된 것 제외)
+ */
 static void __free_domain_allocs(struct s_data *d, enum s_alloc what,
 				 const struct cpumask *cpu_map)
 {
@@ -2574,6 +2584,14 @@ static void init_numa_topology_type(void)
 
 #define NR_DISTANCE_VALUES (1 << DISTANCE_BITS)
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - 1. sched_domains_numa_distance[] 에 node 의 모든 distance 값 설정
+ *   2. 해당 distance level 에서 node id 별로 접근할 수 있는 cpumask
+ *      (sched_domains_numa_masks) 설정. 이후 sd의 span cpumask 로 사용된다
+ *   3. sched_domain_topology_level 구조체 초기화
+ *   4. numa_levels, max_numa_distance, topology type, numa_onlinenodes 설정
+ */
 void sched_init_numa(void)
 {
 	struct sched_domain_topology_level *tl;
@@ -2989,6 +3007,8 @@ int sched_numa_find_closest(const struct cpumask *cpus, int cpu)
 /*
  * IAMROOT, 2023.04.15:
  * - sdt level만큼의 pcpu를 생성 및 초기화한다.
+ *   1. sdt 관련 구조체 포인터에 대한 pcpu 할당
+ *   2. sdt 관련 구조체 메모리를 할당하고 pcpu에 연결
  */
 static int __sdt_alloc(const struct cpumask *cpu_map)
 {
@@ -3069,6 +3089,15 @@ static int __sdt_alloc(const struct cpumask *cpu_map)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - 1. sdt 빌드시 임시로 사용한 pcpu 이중 포인터(sd_data 멤버들(sd, sds, sg, sgc))를
+ *     모두 free
+ *   2. sds, sg, sgc 에 연결된 ref가 0인 구조체 메모리도 모두 해제한다.
+ * - claim_allocations 함수에서 free 하지 않을 구조체 메모리의 pcpu는 NULL로 설정함
+ * - sd 의 경우는 전부가 NULL로 설정되었다.
+ * - 최종. sd 구조체 전부와 ref 가 있는 sds, sg, sgc 구조체 메모리만 남겨진다.
+ */
 static void __sdt_free(const struct cpumask *cpu_map)
 {
 	struct sched_domain_topology_level *tl;
@@ -3080,7 +3109,7 @@ static void __sdt_free(const struct cpumask *cpu_map)
 		/*
 		 * IAMROOT, 2023.04.29:
 		 * - claim_allocations 함수에서 NULL로 설정되지 않은 것들 free.
-		 *   실제로 pcpu 이중 포인터에 할당된 구조체 메모리 해제
+		 *   실제로 pcpu 이중 포인터에 연결된 구조체 메모리를 해제한다
 		 */
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
@@ -3102,6 +3131,8 @@ static void __sdt_free(const struct cpumask *cpu_map)
 		/*
 		 * IAMROOT, 2023.04.29:
 		 * - sd_data 멤버 pcpu 포인터 변수 4개 free
+		 *   위에서 pcpu에 연결된 구조체 메모리를 해제 했고 여기서는
+		 *   pcpu를 free 한다.
 		 */
 		free_percpu(sdd->sd);
 		sdd->sd = NULL;
@@ -3231,7 +3262,12 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
  */
 /*
  * IAMROOT, 2023.04.15:
- * - 
+ * - 1. sd build 및 초기화 (span(cpumask), flag, vars etc)
+ *   2. sg build - child domain 의 cpumask 값으로 설정. balance group 설정
+ *      SD_OVERLAP(numa) flag 여부에 따라 구분하여 빌드한다.
+ *   3. group capacity 설정
+ *   4. rq 에 rootdomain 과 최하위 sd 연결
+ *   5. 임시 pcpu 와 ref 없는 구조체 메모리 삭제
  */
 static int
 build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *attr)
@@ -3284,7 +3320,7 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 
 /*
  * IAMROOT, 2023.04.22:
- * - 첫 level은 pcpu에 저장한ㄷ.
+ * - 첫 level은 pcpu에 저장한다.
  */
 			if (tl == sched_domain_topology)
 				*per_cpu_ptr(d.sd, i) = sd;
@@ -3306,10 +3342,6 @@ build_sched_domains(const struct cpumask *cpu_map, struct sched_domain_attr *att
 	}
 
 	/* Build the groups for the domains */
-/*
- * IAMROOT, 2023.04.22:
- * - 
- */
 	for_each_cpu(i, cpu_map) {
 		for (sd = *per_cpu_ptr(d.sd, i); sd; sd = sd->parent) {
 			sd->span_weight = cpumask_weight(sched_domain_span(sd));

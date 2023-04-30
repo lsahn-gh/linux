@@ -10499,6 +10499,12 @@ int sched_cpu_dying(unsigned int cpu)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - 1. sched domain build 를 위한 numa 초기화
+ *   2. sd 빌드하여 rq에 연결
+ *   3. local_cpu_mask, local_cpu_mask_dl 할당및 0으로 초기화
+ */
 void __init sched_init_smp(void)
 {
 	sched_init_numa();
