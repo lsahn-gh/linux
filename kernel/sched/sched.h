@@ -2030,6 +2030,10 @@ static inline void __task_rq_unlock(struct rq *rq, struct rq_flags *rf)
 	raw_spin_rq_unlock(rq);
 }
 
+/*
+ * IAMROOT, 2023.04.14:
+ * - unlock 진행.
+ */
 static inline void
 task_rq_unlock(struct rq *rq, struct task_struct *p, struct rq_flags *rf)
 	__releases(rq->lock)
@@ -2367,6 +2371,7 @@ static inline struct task_group *task_group(struct task_struct *p)
 /* Change a task's cfs_rq and parent entity if it moves across CPUs/groups */
 /*
  * IAMROOT, 2022.11.26:
+ * - @p를 wakeup하는 @cpu에 해당하는 cfs_rq, tg를 설정한다.
  * - @p의 cfs, rt의 rq를 tg의 @cpu에 대한 cfs, rt의 rq로 설정한다.
  */
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
@@ -2399,6 +2404,8 @@ static inline struct task_group *task_group(struct task_struct *p)
 
 /*
  * IAMROOT, 2022.11.26:
+ * - @p를 wakeup하는 @cpu에 해당하는 cfs_rq, tg를 설정하고 cpu에 대한
+ *   정보를 기록한다.
  * - @p의 cfs, rt rq를 @p의 tg의 @cpu에 대해서 설정한다.
  */
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)

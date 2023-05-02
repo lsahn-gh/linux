@@ -1255,6 +1255,10 @@ void fpsimd_update_current_state(struct user_fpsimd_state const *state)
  * The final barrier ensures that TIF_FOREIGN_FPSTATE is seen set by any
  * subsequent code.
  */
+/*
+ * IAMROOT, 2023.04.14:
+ * - PASS
+ */
 void fpsimd_flush_task_state(struct task_struct *t)
 {
 	t->thread.fpsimd_cpu = NR_CPUS;

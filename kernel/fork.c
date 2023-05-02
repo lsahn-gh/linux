@@ -2053,7 +2053,7 @@ SYSCALL_DEFINE1(set_tid_address, int __user *, tidptr)
 
 /*
  * IAMROOT, 2023.04.01:
- * - @p에서 사용하는ㅇ rt mutext에 대한 값들의 초기화.
+ * - @p에서 사용하는 rt mutext에 대한 값들의 초기화.
  */
 static void rt_mutex_init_task(struct task_struct *p)
 {
@@ -2265,6 +2265,15 @@ static void copy_oom_score_adj(u64 clone_flags, struct task_struct *tsk)
  *
  * 레지스터와 프로세스 환경의 모든 해당 부분을 복제 플래그에
  * 따라 복사합니다. 실제 킥오프는 호출자에게 맡겨집니다.
+ * - current task를 src로 copy를 진행한다.
+ * - 1. flag 검사
+ *   2. signal pending 시 out 처리
+ *   3. child task struct 생성 및 stack 할당. 필요부분 초기화
+ *   5. parent의 mempolicy 복사
+ *   6. schedule 초기화.(normal priority를 상속받는다)
+ *   7. 여러 정보 초기화 및 copy.(file, sighand, io, ns..)
+ *   8. mm struct 복사
+ *   9.
  */
 static __latent_entropy struct task_struct *copy_process(
 					struct pid *pid,
@@ -2402,11 +2411,23 @@ static __latent_entropy struct task_struct *copy_process(
 	INIT_HLIST_NODE(&delayed.node);
 
 	spin_lock_irq(&current->sighand->siglock);
+/*
+ * IAMROOT, 2023.04.14:
+ * - thread가 아니라 process인 상황에서는 delayed에 multiprocess를 추가한다.
+ */
 	if (!(clone_flags & CLONE_THREAD))
 		hlist_add_head(&delayed.node, &current->signal->multiprocess);
+/*
+ * IAMROOT, 2023.04.14:
+ * - current의 TIF_SIGPENDING을 재계산한다.
+ */
 	recalc_sigpending();
 	spin_unlock_irq(&current->sighand->siglock);
 	retval = -ERESTARTNOINTR;
+/*
+ * IAMROOT, 2023.04.14:
+ * - 위에서 재계산한 TIF_SIGPENDING을 확인한다. pending중이면 out.
+ */
 	if (task_sigpending(current))
 		goto fork_out;
 
@@ -3012,7 +3033,10 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
  *
  * args->exit_signal은 호출자가 정상인지 확인해야 합니다.
  *
- * - 
+ * - 1. flag 검사.
+ *   2. copy_process
+ *   3. vfork인 경우에 대한 처리(init 및 child process wait)
+ *   4. copy완료된 process wakeup(cpu set, running, enqueue, reschedule 요청등)
  */
 pid_t kernel_clone(struct kernel_clone_args *args)
 {
@@ -3110,6 +3134,10 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 		get_task_struct(p);
 	}
 
+/*
+ * IAMROOT, 2023.04.14:
+ * - 세팅된 cpu로 wakeup. reschedule 요청이 보내진다.
+ */
 	wake_up_new_task(p);
 
 	/* forking complete and child started to run, tell ptracer */

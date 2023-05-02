@@ -338,6 +338,10 @@ int arch_dup_task_struct(struct task_struct *dst, struct task_struct *src)
 
 asmlinkage void ret_from_fork(void) asm("ret_from_fork");
 
+/*
+ * IAMROOT, 2023.04.14:
+ * - thread_struct 초기화.
+ */
 int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		unsigned long stk_sz, struct task_struct *p, unsigned long tls)
 {
@@ -364,12 +368,17 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 	ptrauth_thread_init_kernel(p);
 
+/*
+ * IAMROOT, 2023.04.14:
+ * - kernel thread도, io worker도 아닌 경우에 수행한다.
+ *   current pt_regs을 copy에서 사용한다
+ */
 	if (likely(!(p->flags & (PF_KTHREAD | PF_IO_WORKER)))) {
 		*childregs = *current_pt_regs();
 /*
  * IAMROOT, 2023.04.08:
  * - 복사대상의 x0(반환값)을 굳이 child에서 사용할 필요가 없다.
- *   정돈하는 개념에서 0로 초기화해준다.
+ *   정돈하는 개념에서 0로 초기화해주는 거 같다.
  */
 		childregs->regs[0] = 0;
 
@@ -400,6 +409,15 @@ int copy_thread(unsigned long clone_flags, unsigned long stack_start,
 		 * When a user task is created from a kthread, childregs will
 		 * be initialized by start_thread() or start_compat_thread().
 		 */
+/*
+ * IAMROOT, 2023.04.14:
+ * - papago
+ *   kthread에는 ERET에 대한 컨텍스트가 없으므로 버그가 있는 ERET가 불법 예외 
+ *   반환으로 처리되도록 합니다.
+ *
+ *   사용자 작업이 kthread에서 생성되면 childregs는 start_thread() 또는
+ *   start_compat_thread()에 의해 초기화됩니다.
+ */
 		memset(childregs, 0, sizeof(struct pt_regs));
 		childregs->pstate = PSR_MODE_EL1h | PSR_IL_BIT;
 

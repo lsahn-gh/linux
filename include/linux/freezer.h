@@ -32,6 +32,13 @@ extern bool freezing_slow_path(struct task_struct *p);
 /*
  * Check if there is a request to freeze a process
  */
+/*
+ * IAMROOT, 2023.04.14:
+ * - return false
+ *   freezing 요청이 없거나 freezing을 못하는 상황.
+ * - return true.
+ *   freezing을 해야되는 상황.
+ */
 static inline bool freezing(struct task_struct *p)
 {
 	if (likely(!atomic_read(&system_freezing_cnt)))

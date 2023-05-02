@@ -204,9 +204,8 @@ void recalc_sigpending_and_wake(struct task_struct *t)
 
 /*
  * IAMROOT, 2023.03.25:
- * - current task가 sigpending 상태가 아니면서 freezing이 가능하지 않은 경우
- *   TIF_SIGPENDING flag 제거
- * - NOTE. recalc_sigpending_tsk에서는 TIF_SIGPENDING flag 설정
+ * - current의 TIF_SIGPENDING set / clear 여부 재계산을 수행한다.
+ *   set할 필요가 없고 freezing이 아닌 경우 clear한다.
  */
 void recalc_sigpending(void)
 {

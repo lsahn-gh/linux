@@ -175,6 +175,8 @@ void free_pid(struct pid *pid)
  * - ns가 별도로 할당되지 않은 경우는 최상위 부모 task가 init_nsproxy를 사용하고 있으므로
  *   fork된 task 들도 같은 init_nsproxy를 사용하고 있고 인자 @ns 값은
  *   init_pid_ns가 된다
+ *
+ * - ns->pid_cachep에서 pid를 할당해 오고, level별로 초기화를 진행한다.
  */
 struct pid *alloc_pid(struct pid_namespace *ns, pid_t *set_tid,
 		      size_t set_tid_size)

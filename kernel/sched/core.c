@@ -1048,6 +1048,10 @@ void wake_up_q(struct wake_q_head *head)
  * IAMROOT, 2022.12.22:
  * - @rq가 자기자신이면 reschedule 수행. 아닌 경우 @rq의 cpu로
  *   ipi를 통해서 reschedule 요청을 한다.
+ * - reschedule 요청 대상 cpu가 자기자신 일경우
+ *   flag만 세워놓는다. 후에 flag가 check될때 reschule 될것이다.
+ * - reschedule 요청 대상 cpu가 자기자신이 아닐 경우
+ *   reschedule ipi를 보낸다.
  */
 void resched_curr(struct rq *rq)
 {
@@ -2433,9 +2437,9 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 /*
  * IAMROOT, 2023.04.13:
  * - scheulder에 따른 schedule. @p와 @rq schedule가 같다면
- *   scheudler의 check_preempt_curr()에서 reschedule여부를 결정한다.
- *   @p schduler의 우선순위가 크다면 @rq를 rechedule한다.
- *   그게 아니면 rechedule안한다.
+ *   scheudler의 check_preempt_curr()에서 reschedule 요청 여부를 결정한다.
+ *   @p schduler의 우선순위가 크다면 @rq를 rechedule 요청 한다.
+ *   그게 아니면 rechedule 요청을 안한다.
  *   (sched_class 비교는 __pick_next_task() 참고)
  */
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
@@ -5080,7 +5084,13 @@ unsigned long to_ratio(u64 period, u64 runtime)
  *   스케줄러 통계 하우스키핑을 수행한 다음 작업을 실행 대기열에 넣고
  *   깨웁니다.
  *
- * - ING
+ * - @p를 wakeup 시킨다.
+ *   1. TASK_RUNNING
+ *   2. @p에 이미 설정된 cpu로 cfs_rq, tg등을 설정.
+ *   3. update rq clock, load avg 초기화.
+ *   4. enqueue
+ *   5. check preemp(reschedule 요청)
+ *   6. task_woken callback수행.
  */
 void wake_up_new_task(struct task_struct *p)
 {
@@ -5135,6 +5145,10 @@ void wake_up_new_task(struct task_struct *p)
 		rq_repin_lock(rq, &rf);
 	}
 #endif
+/*
+ * IAMROOT, 2023.04.14:
+ * - 위에서 걸었던 lock들을 해제 한다.
+ */
 	task_rq_unlock(rq, p, &rf);
 }
 
