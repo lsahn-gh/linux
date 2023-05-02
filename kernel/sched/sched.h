@@ -736,6 +736,8 @@ struct cfs_rq {
  *  - h_nr_running
  *    하위 그룹까지 포함한 실행가능한 cfs_rq의 task 수.
  *    (throttled된 하위 cfs rq는 제외).
+ *  - idle_h_nr_running
+ *    하위 그룹까지 포함한 실행가능한 SCHED_IDLE policy 에 task 수
  */
 	unsigned int		nr_running;
 	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
@@ -1078,7 +1080,11 @@ static inline long se_weight(struct sched_entity *se)
 	return scale_load_down(se->load.weight);
 }
 
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - ex) a = 10, b = 11, return true
+ * - powerPC에선 번호가 빠른게 빠르다.
+ */
 static inline bool sched_asym_prefer(int a, int b)
 {
 	return arch_asym_cpu_priority(a) > arch_asym_cpu_priority(b);
@@ -1369,10 +1375,16 @@ struct rq {
 	struct root_domain		*rd;
 	struct sched_domain __rcu	*sd;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - rt부분이 제외된 cpu capacity. 항상 변한다.
+ *   update_cpu_capacity() 참고 
+ */
 	unsigned long		cpu_capacity;
 /*
  * IAMROOT, 2023.02.11:
- * - 현재 cpu성능.
+ * - 현재 cpu성능. cpu 원래 성능이 기록된다.
+ *   update_cpu_capacity() 참고 
  */
 	unsigned long		cpu_capacity_orig;
 
@@ -2230,6 +2242,15 @@ queue_balance_callback(struct rq *rq,
  *
  * Returns the highest sched_domain of a CPU which contains the given flag.
  */
+/*
+ * IAMROOT. 2023.04.29:
+ * - google-translate
+ * 가장 높은 플래그_도메인 - 플래그를 포함하는 가장 높은 sched_domain을 반환합니다.
+ * @cpu: 가장 높은 수준의 sched 도메인을 반환할 CPU.
+ * @flag: 주어진 CPU에 대해 가장 높은 sched_domain을 확인하는 플래그입니다.
+ *
+ * 주어진 플래그를 포함하는 CPU의 가장 높은 sched_domain을 반환합니다.
+ */
 static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd, *hsd = NULL;
@@ -2243,6 +2264,10 @@ static inline struct sched_domain *highest_flag_domain(int cpu, int flag)
 	return hsd;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - 주어진 플래그를 포함하는 CPU의 가장 낮은 sched_domain을 반환합니다.
+ */
 static inline struct sched_domain *lowest_flag_domain(int cpu, int flag)
 {
 	struct sched_domain *sd;
@@ -2270,6 +2295,10 @@ struct sched_group_capacity {
 	 * CPU capacity of this group, SCHED_CAPACITY_SCALE being max capacity
 	 * for a single CPU.
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - cpu개수로 초기값이 결정된다. build_balance_mask() 참고.
+ */
 	unsigned long		capacity;
 	unsigned long		min_capacity;		/* Min per-CPU capacity in group */
 	unsigned long		max_capacity;		/* Max per-CPU capacity in group */
@@ -2298,6 +2327,12 @@ struct sched_group {
 	 * by attaching extra space to the end of the structure,
 	 * depending on how many CPUs the kernel has booted up with)
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - balance mask.
+ *   numa : build_balance_mask()설명 참고
+ *   numa 이하 : get_group()참고.
+ */
 	unsigned long		cpumask[];
 };
 
@@ -2308,6 +2343,10 @@ static inline struct cpumask *sched_group_span(struct sched_group *sg)
 
 /*
  * See build_balance_mask().
+ */
+/*
+ * IAMROOT, 2023.04.22:
+ * - balance mask은 build_balance_mask()설명 참고
  */
 static inline struct cpumask *group_balance_mask(struct sched_group *sg)
 {
@@ -3710,6 +3749,25 @@ static inline unsigned long cpu_util_irq(struct rq *rq)
 	return rq->avg_irq.util_avg;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - @util : 남은 capacity(max - dl - rt)
+ *   @irq  : irq에서 사용한 성능
+ *   @max  : 최대 성능
+ *
+ * - max값에서 irq position을 제외한 비율을 util에 적용한다.
+ *   ex) util이 500이라고 할때, irq에 의해 cpu가 10% 소모됫으면 util도 10%낮춰서
+ *       450으로 계산한다.
+ *
+ *  util * (max - irq)
+ *   -------------
+ *   max 
+ *
+ * ex) rt = 10, dl = 20, termal = 30, irq = 40, max = 1024
+ *     util = 1024 - 10 - 20 - 30 = 964
+ *
+ *     (964 * (1024 - 40)) / 1024 = 926
+ */
 static inline
 unsigned long scale_irq_capacity(unsigned long util, unsigned long irq, unsigned long max)
 {

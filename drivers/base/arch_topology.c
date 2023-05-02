@@ -948,15 +948,31 @@ out:
 struct cpu_topology cpu_topology[NR_CPUS];
 EXPORT_SYMBOL_GPL(cpu_topology);
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - @cpu가 속한 node에서 시작하여 core_sibling, llc_sibling이 각각 포함되있는지 
+ *  검사해 해당 cpu-list가 전부 속해있다면 해당 cpu-list로 대체해서 return한다.
+ * - arm64기준으로는 같은 cluster 내의 core cpumask.
+ */
 const struct cpumask *cpu_coregroup_mask(int cpu)
 {
 	const cpumask_t *core_mask = cpumask_of_node(cpu_to_node(cpu));
 
 	/* Find the smaller of NUMA, core or LLC siblings */
+/*
+ * IAMROOT, 2023.04.15:
+ * - sibling이 core_mask에 다 포함되있는거면 sibling으로 대체한다.
+ */
 	if (cpumask_subset(&cpu_topology[cpu].core_sibling, core_mask)) {
 		/* not numa in package, lets use the package siblings */
 		core_mask = &cpu_topology[cpu].core_sibling;
 	}
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - llc(last level cache)가 있는경우 llc_sibling이 완전히 core_mask에 포함되있는지 검사한다.
+ *   포함되면 llc_sibling으로 대체한다.
+ */
 	if (cpu_topology[cpu].llc_id != -1) {
 		if (cpumask_subset(&cpu_topology[cpu].llc_sibling, core_mask))
 			core_mask = &cpu_topology[cpu].llc_sibling;

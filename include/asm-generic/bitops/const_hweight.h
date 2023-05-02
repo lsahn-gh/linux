@@ -5,6 +5,10 @@
 /*
  * Compile time versions of __arch_hweightN()
  */
+/*
+ * IAMROOT, 2023.04.15:
+ * - 8bit 에 1의 갯수
+ */
 #define __const_hweight8(w)		\
 	((unsigned int)			\
 	 ((!!((w) & (1ULL << 0))) +	\

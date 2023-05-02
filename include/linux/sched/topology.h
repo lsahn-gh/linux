@@ -81,6 +81,17 @@ struct sched_domain {
 	struct sched_domain __rcu *parent;	/* top domain must be null terminated */
 	struct sched_domain __rcu *child;	/* bottom domain must be null terminated */
 	struct sched_group *groups;	/* the balancing groups of the domain */
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - sd_init()등에서 초기화 하는게 보인다.
+ * - sd_init()에서의 사용 초기값들
+ *   min_interval     : cpu개수를 기준으로 결정된다. cpu 3개 = 3ms.
+ *   max_interval     : min_interval * 2로 결정된다.
+ *   imbalance_pct    : load balance을 할때 특정 기준값을 넘으면 balance를 수행하라는 한계값.
+ *                      117을 기본으로 사용했다.
+ *   balance_interval : cpu개수를 기준으로 결정된다.
+ */
 	unsigned long min_interval;	/* Minimum balance interval ms */
 	unsigned long max_interval;	/* Maximum balance interval ms */
 	unsigned int busy_factor;	/* less balancing by factor if busy */
@@ -88,6 +99,14 @@ struct sched_domain {
 	unsigned int cache_nice_tries;	/* Leave cache hot tasks for # tries */
 
 	int nohz_idle;			/* NOHZ IDLE status */
+
+/*
+ * IAMROOT, 2023.04.22:
+ * - 아래와 같은 flag들이 들어간다.
+ *   SD_PREFER_SIBLING, SD_SERIALIZE
+ *   SD_BALANCE_EXEC, SD_BALANCE_FORK, SD_WAKE_AFFINE
+ *   SD_OVERLAP
+ */
 	int flags;			/* See SD_* */
 	int level;
 
@@ -137,6 +156,10 @@ struct sched_domain {
 	char *name;
 #endif
 	union {
+/*
+ * IAMROOT, 2023.04.22:
+ * - case 1) sd_init()에서 struct sd_data가 설정된다.
+ */
 		void *private;		/* used during construction */
 		struct rcu_head rcu;	/* used during destruction */
 	};
@@ -178,6 +201,11 @@ bool cpus_share_cache(int this_cpu, int that_cpu);
 typedef const struct cpumask *(*sched_domain_mask_f)(int cpu);
 typedef int (*sched_domain_flags_f)(void);
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - overlap이 될수있는 schedule domain topology level.
+ *   numa topology에만 해당된다.
+ */
 #define SDTL_OVERLAP	0x01
 
 struct sd_data {
@@ -187,6 +215,29 @@ struct sd_data {
 	struct sched_group_capacity *__percpu *sgc;
 };
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - topology level 구성. 총 9단계로 구성된다.
+ *   distance단계부턴 cpu가 겹칠수 있다. 겹칠수있는 sdt는 SDTL_OVERLAP
+ *
+ *                                         mask       | sd_flags       |    flags     |
+ *   +----------+----------------+--------------------+----------------+--------------+
+ *   | 종료확인 | NULL           | -                  |       -        |      -       |
+ *   +----------+----------------+--------------------+----------------+--------------|
+ *   |          | 30(distance)   |                    |                |              |
+ *   |          | 25             |                    |                |              |
+ *   | NUMA     | 20             | sd_numa_mask       | cpu_numa_flags | SDTL_OVERLAP |
+ *   |          | 15             |                    |                |              |
+ *   |          | 10(local node) |                    |                |      0       |
+ *   +----------+----------------+--------------------+----------------+--------------+
+ *   |          | die            | cpu_cpu_mask       | NULL           |      0       |
+ *   | default  | mc             | cpu_coregroup_mask | cpu_core_flags |      0       |
+ *   |          | smt            | cpu_smt_mask       | cpu_smt_flags  |      0       |
+ *   +----------+----------------+--------------------+----------------+--------------+
+ *   - default_topology 참고
+ * - ps)
+ *   smt는 arm에는 없고 intel, amd, powerpc에만 현재 존재한다.
+ */
 struct sched_domain_topology_level {
 	sched_domain_mask_f mask;
 	sched_domain_flags_f sd_flags;

@@ -121,6 +121,10 @@ __setup("sched_thermal_decay_shift=", setup_sched_thermal_decay_shift);
 /*
  * For asym packing, by default the lower numbered CPU has higher priority.
  */
+/*
+ * IAMROOT, 2023.04.22:
+ * - cpu번호가 작을수록 우선순위가 높다.(빠르다.)
+ */
 int __weak arch_asym_cpu_priority(int cpu)
 {
 	return -cpu;
@@ -192,6 +196,16 @@ static inline void update_load_set(struct load_weight *lw, unsigned long w)
  *
  * This idea comes from the SD scheduler of Con Kolivas:
  */
+/*
+ * IAMROOT. 2023.04.30:
+ * - google-translate
+ * CPU가 많을수록 사용자에게 표시되는 '유효 대기 시간'이 줄어들기 때문에 CPU가 더
+ * 많은 경우 세분성 값을 늘립니다. 그러나 관계는 선형적이지 않으므로 CPU 수의
+ * log2를 사용하여 두 번째로 좋은 추측을 선택합니다. 이 아이디어는 Con Kolivas의 SD
+ * 스케줄러에서 가져온 것입니다.
+ *
+ * - ex. default 의 경우 cpus가 4라면 ilog2(4) + 1 로 해서 3을 반환
+ */
 static unsigned int get_update_sysctl_factor(void)
 {
 	unsigned int cpus = min_t(unsigned int, num_online_cpus(), 8);
@@ -213,6 +227,13 @@ static unsigned int get_update_sysctl_factor(void)
 	return factor;
 }
 
+/*
+ * IAMROOT, 2023.04.30:
+ * - ex. num_online_cpus 가 4이고 default case라 factor에 3이 설정되었다고 가정
+ * - sysctl_sched_min_granularity = 3 * normalized_sysctl_sched_min_granularity
+ *                                = 3 * 0.75
+ *                                = 2.25(ms)
+ */
 static void update_sysctl(void)
 {
 	unsigned int factor = get_update_sysctl_factor();
@@ -7214,6 +7235,10 @@ static inline void update_overutilized_status(struct rq *rq) { }
 #endif
 
 /* Runqueue only has SCHED_IDLE tasks enqueued */
+/*
+ * IAMROOT, 2023.04.29:
+ * - 가장 느린 SCHED_IDLE policy 를 가진 cfs task 만 동작 할때
+ */
 static int sched_idle_rq(struct rq *rq)
 {
 	return unlikely(rq->nr_running == rq->cfs.idle_h_nr_running &&
@@ -9179,6 +9204,14 @@ idle:
 	 * possible for any higher priority task to appear. In that case we
 	 * must re-start the pick_next_entity() loop.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * newidle_balance()는 rq->lock을 해제(및 다시 획득)하기 때문에 우선 순위가 더 높은
+	 * 작업이 나타날 수 있습니다. 이 경우 pick_next_entity() 루프를 다시 시작해야
+	 * 합니다.
+	 * - new_tasks 가 rt 나 dl 이다.
+	 */
 	if (new_tasks < 0)
 		return RETRY_TASK;
 
@@ -9384,6 +9417,10 @@ static bool yield_to_task_fair(struct rq *rq, struct task_struct *p)
  *      rewrite all of this once again.]
  */
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - load balance  주기는 1틱에서 최대 0.1초로 제한
+ */
 static unsigned long __read_mostly max_load_balance_interval = HZ/10;
 
 enum fbq_type { regular, remote, all };
@@ -9906,6 +9943,10 @@ static inline bool cfs_rq_has_blocked(struct cfs_rq *cfs_rq)
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - cfs를 제외한(rt, dl, thermal, irq)util_avg중 하나라도 0 이 아니면 true
+ */
 static inline bool others_have_blocked(struct rq *rq)
 {
 	if (READ_ONCE(rq->avg_rt.util_avg))
@@ -9930,6 +9971,11 @@ static inline void update_blocked_load_tick(struct rq *rq)
 	WRITE_ONCE(rq->last_blocked_load_update_tick, jiffies);
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - rt, dl, thermal,irq cfs load avg 가 모두 0이면 has_blocked_load를 0으로 갱신
+ *   @has_blocked는 rt dl thermal irq util_avg, cfs load_avg중 하나라도 있으면 true
+ */
 static inline void update_blocked_load_status(struct rq *rq, bool has_blocked)
 {
 	if (!has_blocked)
@@ -9953,6 +9999,12 @@ static bool __update_blocked_others(struct rq *rq, bool *done)
 	 * update_load_avg() can call cpufreq_update_util(). Make sure that RT,
 	 * DL and IRQ signals have been updated before updating CFS.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * update_load_avg()는 cpufreq_update_util()을 호출할 수 있습니다. CFS를
+	 * 업데이트하기 전에 RT, DL 및 IRQ 신호가 업데이트되었는지 확인하십시오.
+	 */
 	curr_class = rq->curr->sched_class;
 
 	thermal_pressure = arch_scale_thermal_pressure(cpu_of(rq));
@@ -9962,6 +10014,10 @@ static bool __update_blocked_others(struct rq *rq, bool *done)
 		  update_thermal_load_avg(rq_clock_thermal(rq), rq, thermal_pressure) |
 		  update_irq_load_avg(rq, 0);
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - cfs를 제외한(rt, dl, thermal, irq) util_avg중 하나라도 있으면 *done=false
+	 */
 	if (others_have_blocked(rq))
 		*done = false;
 
@@ -10075,6 +10131,12 @@ static unsigned long task_h_load(struct task_struct *p)
 }
 #endif
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - 1. rq dl thermal irq util avg, cfs load avg 가 모두 0 이면
+ *      has_blocked_load = 0 으로 설정
+ *   2. decayed 면 cpufreq_update_util 호출
+ */
 static void update_blocked_averages(int cpu)
 {
 	bool decayed = false, done = true;
@@ -10085,7 +10147,15 @@ static void update_blocked_averages(int cpu)
 	update_blocked_load_tick(rq);
 	update_rq_clock(rq);
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - cfs를 제외한(rt, dl, thermal, irq) util_avg중 하나라도 있으면 *done=false
+	 */
 	decayed |= __update_blocked_others(rq, &done);
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - cfs load_avg가 있으면 *done=false
+	 */
 	decayed |= __update_blocked_fair(rq, &done);
 
 	update_blocked_load_status(rq, !done);
@@ -10155,6 +10225,10 @@ static inline void init_sd_lb_stats(struct sd_lb_stats *sds)
 	};
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - rt + dl + 온도를 제외한 capacity값에 irq 소모비율까지 고려한 여유 capacity를 return한다.
+ */
 static unsigned long scale_rt_capacity(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -10162,8 +10236,17 @@ static unsigned long scale_rt_capacity(int cpu)
 	unsigned long used, free;
 	unsigned long irq;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - irq에서 사용한 시간을 가져온다.
+ */
 	irq = cpu_util_irq(rq);
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - irq에서 사용한 cpu만으로 cpu 성능을 다쓴경우는 매우 드물지만 
+ *   예외처리를 해준다.
+ */
 	if (unlikely(irq >= max))
 		return 1;
 
@@ -10173,6 +10256,14 @@ static unsigned long scale_rt_capacity(int cpu)
 	 * avg_thermal.load_avg tracks thermal pressure and the weighted
 	 * average uses the actual delta max capacity(load).
 	 */
+/*
+ * IAMROOT, 2023.04.22:
+ * - papago
+ *   avg_rt.util_avg 및 avg_dl.util_avg는 각각 가중치 0 및 1024로 이진 
+ *   신호(실행 중 및 실행 중이 아님)를 추적합니다.
+ *   avg_thermal.load_avg는 열 압력을 추적하고 가중 평균은 실제 델타 
+ *   최대 용량(부하)을 사용합니다.
+ */
 	used = READ_ONCE(rq->avg_rt.util_avg);
 	used += READ_ONCE(rq->avg_dl.util_avg);
 	used += thermal_load_avg(rq);
@@ -10185,6 +10276,11 @@ static unsigned long scale_rt_capacity(int cpu)
 	return scale_irq_capacity(free, irq, max);
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 1. @cpu에 대한 원래 성능을 cpu_capacity_orig에 기록한다.
+ *   2. rq에 rt에 대한 여유 capacity를 기록
+ */
 static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 {
 	unsigned long capacity = scale_rt_capacity(cpu);
@@ -10203,6 +10299,15 @@ static void update_cpu_capacity(struct sched_domain *sd, int cpu)
 	sdg->sgc->max_capacity = capacity;
 }
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - 최하위 domain
+ *   cpu capacity값을 설정한다.
+ * - SD_OVERLAP
+ *   group에 속해있는 cpu capacity값 통계하여 @sd의 sgc를 설정한다.
+ * - !SD_OVERLAP
+ *   하위 sgc의 capacity를 누적 통계하여 @sd의 sgc에 설정한다.
+ */
 void update_group_capacity(struct sched_domain *sd, int cpu)
 {
 	struct sched_domain *child = sd->child;
@@ -10214,6 +10319,11 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 	interval = clamp(interval, 1UL, max_load_balance_interval);
 	sdg->sgc->next_update = jiffies + interval;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - child가 없는 최하위 domain이 먼저 초기화되고, 이후  multi cpu
+ *   가 있는 domain들은 미리 계산된 capacity를 합산 및 비교를 하여 계산된다.
+ */
 	if (!child) {
 		update_cpu_capacity(sd, cpu);
 		return;
@@ -10223,12 +10333,20 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 	min_capacity = ULONG_MAX;
 	max_capacity = 0;
 
+/*
+ * IAMROOT, 2023.04.22:
+ * - numa. SD_OVERLAP 의미 자체가 중복되있는 cpu가 있을수 있다는 개념이 되므로,
+ *   직접 cpu capacity를 사용해 계산한다.
+ */
 	if (child->flags & SD_OVERLAP) {
 		/*
 		 * SD_OVERLAP domains cannot assume that child groups
 		 * span the current group.
 		 */
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - child에서 미리 update_cpu_capacity()를 통해 계산된 값들을 통계한다.
+ */
 		for_each_cpu(cpu, sched_group_span(sdg)) {
 			unsigned long cpu_cap = capacity_of(cpu);
 
@@ -10237,11 +10355,19 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
 			max_capacity = max(cpu_cap, max_capacity);
 		}
 	} else  {
+/*
+ * IAMROOT, 2023.04.22:
+ * - SD_OVERLAP이 없으면 중복된 CPU가 없다는 개념이 되어 sgc 사용이 가능하다.
+ *   하위 sgc를 합산하여 현재 sgc로 통계한다.
+ */
 		/*
 		 * !SD_OVERLAP domains can assume that child groups
 		 * span the current group.
 		 */
-
+/*
+ * IAMROOT, 2023.04.22:
+ * - child group들을 합산하여 sgc에 넣는다.
+ */
 		group = child->groups;
 		do {
 			struct sched_group_capacity *sgc = group->sgc;
@@ -11836,6 +11962,11 @@ out:
 	return ld_moved;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - @sd 에 해당하는 interval을 알아온다.
+ *   busy 일 경우는 interval(ms)*busy_factor -1(tick) 한다
+ */
 static inline unsigned long
 get_sd_balance_interval(struct sched_domain *sd, int cpu_busy)
 {
@@ -11852,6 +11983,12 @@ get_sd_balance_interval(struct sched_domain *sd, int cpu_busy)
 	 * balancing at lower domains by preventing their balancing periods
 	 * from being multiples of each other.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 밸런싱 기간이 서로 배수가 되는 것을 방지하여 하위 도메인에서 밸런싱과 경쟁하는
+	 * 상위 도메인에서 바쁜 밸런싱 가능성을 줄입니다.
+	 */
 	if (cpu_busy)
 		interval -= 1;
 
@@ -11860,6 +11997,10 @@ get_sd_balance_interval(struct sched_domain *sd, int cpu_busy)
 	return interval;
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - 다음 balancing 주기를 설정한다
+ */
 static inline void
 update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
 {
@@ -11974,10 +12115,20 @@ void update_max_interval(void)
  *
  * Balancing parameters are set up in init_sched_domains.
  */
+/*
+ * IAMROOT. 2023.04.29:
+ * - google-translate
+ * 각 스케줄링 도메인이 균형을 이루어야 하는지 확인하고 균형이 맞으면 균형 작업을
+ * 시작합니다. 밸런싱 매개변수는 init_sched_domains에 설정됩니다.
+ */
 static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 {
 	int continue_balancing = 1;
 	int cpu = rq->cpu;
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - busy 는 NOT_IDLE 이면서 SCHED_IDLE task 는 제외
+	 */
 	int busy = idle != CPU_IDLE && !sched_idle_cpu(cpu);
 	unsigned long interval;
 	struct sched_domain *sd;
@@ -11992,6 +12143,12 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 		/*
 		 * Decay the newidle max times here because this is a regular
 		 * visit to all the domains. Decay ~1% per second.
+		 */
+		/*
+		 * IAMROOT. 2023.04.29:
+		 * - google-translate
+		 * 이것은 모든 도메인을 정기적으로 방문하기 때문에 여기에서 newidle
+		 * 최대 시간을 감소시킵니다. 초당 ~1% 감소.
 		 */
 		if (time_after(jiffies, sd->next_decay_max_lb_cost)) {
 			sd->max_newidle_lb_cost =
@@ -12014,6 +12171,10 @@ static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 
 		interval = get_sd_balance_interval(sd, busy);
 
+		/*
+		 * IAMROOT, 2023.04.29:
+		 * - numa의 경우는 순차적으로 진행
+		 */
 		need_serialize = sd->flags & SD_SERIALIZE;
 		if (need_serialize) {
 			if (!spin_trylock(&balancing))
@@ -12046,6 +12207,12 @@ out:
 		 * Ensure the rq-wide value also decays but keep it at a
 		 * reasonable floor to avoid funnies with rq->avg_idle.
 		 */
+		/*
+		 * IAMROOT. 2023.04.29:
+		 * - google-translate
+		 * rq-wide 값도 감소하는지 확인하되 rq->avg_idle로 재미를 피하기 위해
+		 * 합리적인 바닥에 유지하십시오.
+		 */
 		rq->max_idle_balance_cost =
 			max((u64)sysctl_sched_migration_cost, max_cost);
 	}
@@ -12056,11 +12223,21 @@ out:
 	 * When the cpu is attached to null domain for ex, it will not be
 	 * updated.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * next_balance는 필요할 때만 업데이트됩니다. 예를 들어 CPU가 null 도메인에
+	 * 연결되면 업데이트되지 않습니다.
+	 */
 	if (likely(update_next_balance))
 		rq->next_balance = next_balance;
 
 }
 
+/*
+ * IAMROOT, 2023.04.29:
+ * - schedule domain 이 지정되지 않았을 때
+ */
 static inline int on_null_domain(struct rq *rq)
 {
 	return unlikely(!rcu_dereference_sched(rq->sd));
@@ -12510,6 +12687,12 @@ abort:
  * In CONFIG_NO_HZ_COMMON case, the idle balance kickee will do the
  * rebalancing for all the cpus for whom scheduler ticks are stopped.
  */
+/*
+ * IAMROOT. 2023.04.29:
+ * - google-translate
+ * CONFIG_NO_HZ_COMMON의 경우 유휴 균형 키키는 스케줄러 틱이 중지된 모든 CPU에 대해
+ * 재조정을 수행합니다.
+ */
 static bool nohz_idle_balance(struct rq *this_rq, enum cpu_idle_type idle)
 {
 	unsigned int flags = this_rq->nohz_idle_balance;
@@ -12629,12 +12812,25 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 * There is a task waiting to run. No need to search for one.
 	 * Return 0; the task will be enqueued when switching to idle.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 실행 대기 중인 작업이 있습니다. 하나를 검색할 필요가 없습니다. 0을
+	 * 반환합니다. 유휴 상태로 전환하면 작업이 대기열에 추가됩니다.
+	 */
 	if (this_rq->ttwu_pending)
 		return 0;
 
 	/*
 	 * We must set idle_stamp _before_ calling idle_balance(), such that we
 	 * measure the duration of idle_balance() as idle time.
+	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 우리는 idle_balance()의 지속 시간을 유휴 시간으로 측정하도록 idle_balance()를
+	 * 호출하기 _전에_ idle_stamp를 설정해야 합니다.
+	 * - idle balance 현재 시각 update
 	 */
 	this_rq->idle_stamp = rq_clock(this_rq);
 
@@ -12650,8 +12846,20 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 * further scheduler activity on it and we're being very careful to
 	 * re-start the picking loop.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * current는 on_cpu이므로 부하 분산을 위해 선택되는 것을 방지하고 선점/IRQ는 여전히
+	 * 비활성화되어 추가 스케줄러 활동을 방지하며 선택 루프를 다시 시작하는 데 매우
+	 * 주의를 기울이고 있습니다.
+	 */
 	rq_unpin_lock(this_rq, rf);
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - avg_idle 이 500ms 보다 작거나 rt나 dl에 중복 task가 없으면
+	 *   balancing 을 포기한다.(다음 balancing 주기만 설정)
+	 */
 	if (this_rq->avg_idle < sysctl_sched_migration_cost ||
 	    !READ_ONCE(this_rq->rd->overload)) {
 
@@ -12672,11 +12880,22 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		int continue_balancing = 1;
 		u64 t0, domain_cost;
 
+		/*
+		 * IAMROOT, 2023.04.29:
+		 * - sd 단계별 cost 가 증가하면서 avg_idle 보다 커지면 중단하고
+		 *   빠져나온다.
+		 */
 		if (this_rq->avg_idle < curr_cost + sd->max_newidle_lb_cost) {
 			update_next_balance(sd, &next_balance);
 			break;
 		}
 
+		/*
+		 * IAMROOT, 2023.04.29:
+		 * - 각 도메인들은 default로 SD_BALANCE_NEWIDLE 설정임.
+		 *   단 relax_domain_level 설정이 있는 경우는 그보다 상위 도메인의
+		 *   SD_BALANCE_NEWIDLE 값은 제거된다.
+		 */
 		if (sd->flags & SD_BALANCE_NEWIDLE) {
 			t0 = sched_clock_cpu(this_cpu);
 
@@ -12697,6 +12916,11 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 		 * Stop searching for tasks to pull if there are
 		 * now runnable tasks on this rq.
 		 */
+		/*
+		 * IAMROOT. 2023.04.29:
+		 * - google-translate
+		 * 현재 이 rq에 실행 가능한 작업이 있는 경우 가져올 작업 검색을 중지합니다.
+		 */
 		if (pulled_task || this_rq->nr_running > 0 ||
 		    this_rq->ttwu_pending)
 			break;
@@ -12713,10 +12937,21 @@ static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 	 * have been enqueued in the meantime. Since we're not going idle,
 	 * pretend we pulled a task.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 도메인을 탐색하는 동안 우리는 rq 잠금을 해제했으며 그 동안 작업이 대기열에
+	 * 추가되었을 수 있습니다. 유휴 상태가 아니므로 작업을 수행했다고 가정합니다.
+	 */
 	if (this_rq->cfs.h_nr_running && !pulled_task)
 		pulled_task = 1;
 
 	/* Is there a task of a high priority class? */
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - dl이나 rt task 가 추가된 경우.
+	 *   -1(RETRY_TASK)을 return 하여 다른 class(rt,dl) pick_nexk_task 실행
+	 */
 	if (this_rq->nr_running != this_rq->cfs.h_nr_running)
 		pulled_task = -1;
 
@@ -12757,6 +12992,15 @@ static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
 	 * load balance only within the local sched_domain hierarchy
 	 * and abort nohz_idle_balance altogether if we pull some load.
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * 이 CPU에 보류 중인 nohz_balance_kick이 있으면 틱이 중지된 다른 유휴 CPU를
+	 * 대신하여 밸런싱을 수행합니다. nohz_idle_balance *before* rebalance_domains를
+	 * 수행하여 유휴 CPU에 로드 밸런싱 기회를 제공합니다. 그렇지 않으면 로컬
+	 * sched_domain 계층 내에서만 부하를 분산하고 일부 부하를 풀면 nohz_idle_balance를
+	 * 완전히 중단할 수 있습니다.
+	 */
 	if (nohz_idle_balance(this_rq, idle))
 		return;
 
@@ -12768,15 +13012,34 @@ static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
 /*
  * Trigger the SCHED_SOFTIRQ if it is time to do periodic load balancing.
  */
+/*
+ * IAMROOT. 2023.04.30:
+ * - google-translate
+ * 주기적 로드 밸런싱을 수행할 시간인 경우 SCHED_SOFTIRQ를 트리거합니다.
+ *
+ * - next balance 시간이 지나면 SCHED_SOFTIRQ에 의해
+ *   run_rebalance_domains 함수를 호출한다
+ */
 void trigger_load_balance(struct rq *rq)
 {
 	/*
 	 * Don't need to rebalance while attached to NULL domain or
 	 * runqueue CPU is not active
 	 */
+	/*
+	 * IAMROOT. 2023.04.29:
+	 * - google-translate
+	 * NULL 도메인에 연결되어 있거나 실행 대기열 CPU가 활성화되어 있지 않은 동안
+	 * 재조정할 필요가 없습니다.
+	 */
 	if (unlikely(on_null_domain(rq) || !cpu_active(cpu_of(rq))))
 		return;
 
+	/*
+	 * IAMROOT, 2023.04.29:
+	 * - init_sched_fair_class 에서 설정한
+	 *   run_rebalance_domains 함수를 호출하게 된다.
+	 */
 	if (time_after_eq(jiffies, rq->next_balance))
 		raise_softirq(SCHED_SOFTIRQ);
 
@@ -13612,6 +13875,8 @@ void show_numa_stats(struct task_struct *p, struct seq_file *m)
 /*
  * IAMROOT, 2022.12.29:
  * - sched에 관련한 softirq를 하나 열어둔다.
+ * - scheduler_tick - > trigger_load_balance 에서 SCHED_SOFTIRQ에 설정한
+ *   run_rebalance_domains 함수를 호출하게 된다
  */
 __init void init_sched_fair_class(void)
 {

@@ -73,6 +73,10 @@ static inline unsigned long topology_get_thermal_pressure(int cpu)
 void topology_set_thermal_pressure(const struct cpumask *cpus,
 				   unsigned long th_pressure);
 
+/*
+ * IAMROOT, 2023.04.15:
+ * - arm64는 smt가 현재 없다. thread_id와 thread_sibling은 설정이 안될것이다.
+ */
 struct cpu_topology {
 	int thread_id;
 	int core_id;
@@ -80,6 +84,12 @@ struct cpu_topology {
 	int llc_id;
 	cpumask_t thread_sibling;
 	cpumask_t core_sibling;
+
+/*
+ * IAMROOT, 2023.04.15:
+ * - cache를 공유하는 list.
+ *   last level cache
+ */
 	cpumask_t llc_sibling;
 };
 
