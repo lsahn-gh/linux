@@ -914,6 +914,7 @@ static u32 do_read_iar(struct pt_regs *regs)
 
 /*
  * IAMROOT, 2022.10.08:
+ * - TODO
  * - gic control handler.
  *   interrupt가 vector table다음으로 받는 handler.
  * - irq 흐름

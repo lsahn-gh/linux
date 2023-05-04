@@ -828,6 +828,14 @@ struct cfs_rq {
 	 * Where f(tg) is the recursive weight fraction assigned to
 	 * this group.
 	 */
+/*
+ * IAMROOT, 2023.05.03:
+ * update_cfs_rq_h_load() 참고
+ * - h_load_next : update_cfs_rq_h_load에서 top-down 방식으로 내려가기 위해
+ *   임시로 사용하는 용도.
+ * - h_load : hierarchy load
+ * - last_h_load_update : 마지막 h_load update 시각
+ */
 	unsigned long		h_load;
 	u64			last_h_load_update;
 	struct sched_entity	*h_load_next;
@@ -1393,6 +1401,12 @@ struct rq {
 	unsigned char		nohz_idle_balance;
 	unsigned char		idle_balance;
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - task에 대한 load의 1.2배가 cpu capacity를 넘었을경우,
+ *   h_load가 계산되어 기록된다. 그게 아니면 보통 0
+ *   (update_misfit_status()참고)
+ */
 	unsigned long		misfit_task_load;
 
 	/* For active balancing */

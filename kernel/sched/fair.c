@@ -467,16 +467,43 @@ static inline void cfs_rq_tg_path(struct cfs_rq *cfs_rq, char *path, int len)
 
 /*
  * IAMROOT, 2022.12.27:
- * - TODO
+ * @return true @cfs_rq가 tree에 연결되있는 경우
+ *
+ * - @cfs_rq가 on list라면 tree 연결 여부를 판별, 그게 아니면
+ *   on list후 parent에 따라 list 연결, tree 연결 여부 판별을한다.
+ * - rq->tmp_alone_branch == rq->leaf_cfs_rq_list
+ *   rq tmp_alone_branch가 자신의 rq leaf_cfs_rq_list면 tree에
+ *   연결된, 성공적으로 add된것을 나타낸다.
+ * - tree 연결의 의미.
+ *   parent가 아에 없거나, parent가 있고, parent가 on list가 되있는 상태
+ *   자기자신의 tree 최상위거나, parent가 tree에 이미 있으므로, tree에
+ *   연결되있다고 판단한다.
+ * - parent가 있지만 parent가 on list가 아닌 상태.
+ *   parent가 아직 tree에 들어가지 않았으므로, child도 자연스럽게 아직
+ *   tree에 안들어갓다.
+ *
+ * - tmp_alone_branch
+ *   tree(branch)의 시작점을 cache한다.
+ *   tree가 root에서부터 이어질수도, 아니면 parent가 아직 tree에 연결이
+ *   안되 root까지 안이어진 상태일수도 있다. 
  */
 static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
 	int cpu = cpu_of(rq);
 
+/*
+ * IAMROOT, 2023.05.04:
+ * - @cfs_rq가 on list인 경우 이미 추가되있다. 따로 추가할 필요없이
+ *   list가 tree에 연결되어있는지만을 확인한다.
+ *   (tmp_alone_branch가 leaf_cfs_rq_list가 같은지를 비교)
+ */
 	if (cfs_rq->on_list)
 		return rq->tmp_alone_branch == &rq->leaf_cfs_rq_list;
-
+/*
+ * IAMROOT, 2023.05.04:
+ * - @cfs_rq를 on list한다.
+ */
 	cfs_rq->on_list = 1;
 
 	/*
@@ -488,6 +515,17 @@ static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 	 * tmp_alone_branch either when the branch is connected
 	 * to a tree or when we reach the top of the tree
 	 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   우리가 부모보다 먼저 나타나거나(이미 대기열에 있는 경우) 부모가 
+ *   대기열에 있을 때 우리 뒤에 나타나도록 강제합니다. 우리가 항상 
+ *   상향식으로 큐에 넣는다는 사실은 이것을 두 가지 경우와 루트 
+ *   cfs_rq에 대한 특별한 경우로 줄입니다. 또한 분기가 트리에 
+ *   연결되거나 트리의 맨 위에 도달할 때 항상 tmp_alone_branch를 
+ *   재설정한다는 의미이기도 합니다. 
+ * - parent가 이미 on list라면 parent 뒤에 child를 넣어야한다.
+ */
 	if (cfs_rq->tg->parent &&
 	    cfs_rq->tg->parent->cfs_rq[cpu]->on_list) {
 		/*
@@ -496,6 +534,13 @@ static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 		 * the list, this means to put the child at the tail
 		 * of the list that starts by parent.
 		 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   부모가 이미 목록에 있는 경우 직전에 자식을 추가합니다. 
+ *   목록의 순환 연결 속성 덕분에 이는 부모로 시작하는 목록의 
+ *   끝에 자식을 두는 것을 의미합니다.
+ */
 		list_add_tail_rcu(&cfs_rq->leaf_cfs_rq_list,
 			&(cfs_rq->tg->parent->cfs_rq[cpu]->leaf_cfs_rq_list));
 		/*
@@ -503,21 +548,42 @@ static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 		 * reset tmp_alone_branch to the beginning of the
 		 * list.
 		 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   이제 분기가 트리에 연결되었으므로 tmp_alone_branch를 목록의 
+ *   시작 부분으로 재설정할 수 있습니다.
+ */
 		rq->tmp_alone_branch = &rq->leaf_cfs_rq_list;
 		return true;
 	}
 
+/*
+ * IAMROOT, 2023.05.04:
+ * - parent가 없으면 list의 last에 넣는다.
+ */
 	if (!cfs_rq->tg->parent) {
 		/*
 		 * cfs rq without parent should be put
 		 * at the tail of the list.
 		 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   부모가 없는 cfs rq는 목록의 끝에 넣어야 합니다.
+ */
 		list_add_tail_rcu(&cfs_rq->leaf_cfs_rq_list,
 			&rq->leaf_cfs_rq_list);
 		/*
 		 * We have reach the top of a tree so we can reset
 		 * tmp_alone_branch to the beginning of the list.
 		 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   트리의 맨 위에 도달하여 tmp_alone_branch를 목록의 
+ *   시작 부분으로 재설정할 수 있습니다.
+ */
 		rq->tmp_alone_branch = &rq->leaf_cfs_rq_list;
 		return true;
 	}
@@ -528,15 +594,33 @@ static inline bool list_add_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 	 * tmp_alone_branch points to the begin of the branch
 	 * where we will add parent.
 	 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   부모는 아직 추가되지 않았으므로 우리 뒤에 추가되도록 하고 싶습니다.
+ *   tmp_alone_branch는 부모를 추가할 분기의 시작을 가리킵니다.
+ *
+ * - parent가 있지만, parent가 on_list가 아닌 경우이다.
+ *   child -> parent순으로 놓는다.
+ */
 	list_add_rcu(&cfs_rq->leaf_cfs_rq_list, rq->tmp_alone_branch);
 	/*
 	 * update tmp_alone_branch to points to the new begin
 	 * of the branch
 	 */
+/*
+ * IAMROOT, 2023.05.04:
+ * - papago
+ *   분기의 새로운 시작을 가리키도록 tmp_alone_branch를 업데이트합니다.
+ */
 	rq->tmp_alone_branch = &cfs_rq->leaf_cfs_rq_list;
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - @cfs_rq를 leaf_cfs_rq_list에서 제거한다.
+ */
 static inline void list_del_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 {
 	if (cfs_rq->on_list) {
@@ -549,6 +633,16 @@ static inline void list_del_leaf_cfs_rq(struct cfs_rq *cfs_rq)
 		 * to the prev element but it will point to rq->leaf_cfs_rq_list
 		 * at the end of the enqueue.
 		 */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   대기열에 넣는 동안 cfs_rq가 제한 해제/제한되면 tmp_alone_branch가 
+ *   우리가 최종적으로 삭제하려는 잎을 가리킬 수 있습니다. 이 경우 
+ *   tmp_alone_branch는 prev 요소로 이동하지만 enqueue의 끝에서 
+ *   rq->leaf_cfs_rq_list를 가리킵니다.
+ * - 제거할 @cfs_rq의 leaf_cfs_rq_list가 tmp_alone_branch이라면 prev로
+ *   갱신한다.
+ */
 		if (rq->tmp_alone_branch == &cfs_rq->leaf_cfs_rq_list)
 			rq->tmp_alone_branch = cfs_rq->leaf_cfs_rq_list.prev;
 
@@ -3996,13 +4090,14 @@ static inline void cfs_rq_util_change(struct cfs_rq *cfs_rq, int flags)
  */
 /*
  * IAMROOT, 2022.12.27:
- * - TODO
  * - papago
  *   list_add_leaf_cfs_rq는 항상 상위 cfs_rq 바로 앞에 하위 cfs_rq를
  *   목록에 배치하고 cfs_rqs는 목록 상향식에서 제거하기 때문에 목록에서
  *   우리 앞에 있는 cfs_rq가 하위인지 여부만 테스트하면 됩니다.
  *   cfs_rq가 목록에 없으면 분기를 트리에 연결하기 위해 자식을 추가해야
  *   하는지 여부를 테스트합니다 * (자세한 내용은 list_add_leaf_cfs_rq() 참조)
+ *
+ * - 
  */
 static inline bool child_cfs_rq_on_list(struct cfs_rq *cfs_rq)
 {
@@ -4024,7 +4119,10 @@ static inline bool child_cfs_rq_on_list(struct cfs_rq *cfs_rq)
 
 /*
  * IAMROOT, 2022.12.27:
- * - TODO
+ * - @cfs_rq가 decay됬는지 확인한다.
+ *   weight, load_sum, util_sum, running_sum 전부 @cfs_rq에
+ *   load가 있다는것을 의미하고, child_cfs_rq_on_list()가 true면
+ *   하위 cfs_rq가 있다는 거고 이또한 load가 있다는 의미다.
  */
 static inline bool cfs_rq_is_decayed(struct cfs_rq *cfs_rq)
 {
@@ -4672,6 +4770,16 @@ static inline int propagate_entity_load_avg(struct sched_entity *se)
  * Check if we need to update the load and the utilization of a blocked
  * group_entity:
  */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   차단된 group_entity의 부하 및 사용률을 업데이트해야 하는지 확인합니다.
+ *
+ * @return true update할 필요없다.(skip)
+ *
+ * - load나 propagat중이라면 update를 해야된다(return false).
+ *   그에 대하 확인을 진행한다.
+ */
 static inline bool skip_blocked_update(struct sched_entity *se)
 {
 	struct cfs_rq *gcfs_rq = group_cfs_rq(se);
@@ -4680,6 +4788,11 @@ static inline bool skip_blocked_update(struct sched_entity *se)
 	 * If sched_entity still have not zero load or utilization, we have to
 	 * decay it:
 	 */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   sched_entity가 여전히 로드 또는 사용률이 0이 아닌 경우 이를 소멸시켜야 합니다.
+ */
 	if (se->avg.load_avg || se->avg.util_avg)
 		return false;
 
@@ -4687,6 +4800,11 @@ static inline bool skip_blocked_update(struct sched_entity *se)
 	 * If there is a pending propagation, we have to update the load and
 	 * the utilization of the sched_entity:
 	 */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   보류 중인 전파가 있는 경우 sched_entity의 로드 및 사용률을 업데이트해야 합니다.
+ */
 	if (gcfs_rq->propagate)
 		return false;
 
@@ -4695,6 +4813,12 @@ static inline bool skip_blocked_update(struct sched_entity *se)
 	 * already zero and there is no pending propagation, so it will be a
 	 * waste of time to try to decay it:
 	 */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   그렇지 않으면 sched_entity의 부하와 사용률이 이미 0이고 보류 중인 전파가 
+ *   없으므로 이를 소멸시키려고 시도하는 것은 시간 낭비입니다.
+ */
 	return true;
 }
 
@@ -5126,6 +5250,10 @@ static inline unsigned long task_util(struct task_struct *p)
 	return READ_ONCE(p->se.avg.util_avg);
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - ewma, enqueued중에 큰거를 가져온다.(util_est 주석참고)
+ */
 static inline unsigned long _task_util_est(struct task_struct *p)
 {
 	struct util_est ue = READ_ONCE(p->se.avg.util_est);
@@ -5133,12 +5261,21 @@ static inline unsigned long _task_util_est(struct task_struct *p)
 	return max(ue.ewma, (ue.enqueued & ~UTIL_AVG_UNCHANGED));
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - rq의 load_avg, se의 ewma, enqueued중에 큰거를 가져온다.
+ */
 static inline unsigned long task_util_est(struct task_struct *p)
 {
 	return max(task_util(p), _task_util_est(p));
 }
 
 #ifdef CONFIG_UCLAMP_TASK
+/*
+ * IAMROOT, 2023.05.03:
+ * - UCLAMP_MIN <= max(rq load_avg, se util_est  ewma,
+ *                     se util_est enqueue) <= UCLAMP_MAX
+ */
 static inline unsigned long uclamp_task_util(struct task_struct *p)
 {
 	return clamp(task_util_est(p),
@@ -5285,6 +5422,11 @@ done:
 	trace_sched_util_est_se_tp(&p->se);
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - return uclamp_task_util(p) * 1.2 <= capacity
+ * - uclamp_task_util에 20%의 가중치를 둔값이, capacity보다 큰지를 확인한다.
+ */
 static inline int task_fits_capacity(struct task_struct *p, long capacity)
 {
 	return fits_capacity(uclamp_task_util(p), capacity);
@@ -5292,7 +5434,14 @@ static inline int task_fits_capacity(struct task_struct *p, long capacity)
 
 /*
  * IAMROOT, 2023.01.28:
- * - TODO
+ * - misfit_task_load를 갱신한다.
+ * - misfit_task_load 미갱신
+ *   1. sched_asym_cpucapacity disable
+ * - misfit_task_load = 0
+ *   1. p == NULL이거나 allow cpu가 1개
+ *   2. @p의 load 1.2배값이 @rq의 cpu보다 작거나 같은 경우
+ * - misfit_task_load update
+ *   1. @p의 load 1.2배값이 @rq의 cpu보다 큰경우.
  */
 static inline void update_misfit_status(struct task_struct *p, struct rq *rq)
 {
@@ -8706,6 +8855,10 @@ static void task_dead_fair(struct task_struct *p)
 	remove_entity_load_avg(&p->se);
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - ING
+ */
 static int
 balance_fair(struct rq *rq, struct task_struct *prev, struct rq_flags *rf)
 {
@@ -9932,6 +10085,11 @@ static void attach_tasks(struct lb_env *env)
 }
 
 #ifdef CONFIG_NO_HZ_COMMON
+/*
+ * IAMROOT, 2023.05.03:
+ * - @cfs_rq에 load avg, util_avg가 있는경우, 작업이 block되있다고
+ *   예상할수있다.
+ */
 static inline bool cfs_rq_has_blocked(struct cfs_rq *cfs_rq)
 {
 	if (cfs_rq->avg.load_avg)
@@ -9966,6 +10124,10 @@ static inline bool others_have_blocked(struct rq *rq)
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - update_blocked_averages()를 했던 마지막 시각 timestamp
+ */
 static inline void update_blocked_load_tick(struct rq *rq)
 {
 	WRITE_ONCE(rq->last_blocked_load_update_tick, jiffies);
@@ -9988,6 +10150,14 @@ static inline void update_blocked_load_tick(struct rq *rq) {}
 static inline void update_blocked_load_status(struct rq *rq, bool has_blocked) {}
 #endif
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - @rq의 curr sched_class기준으로, 즉 현재 동작하고있는 sched_class기준으로
+ *   rt,dl과 온도및 irq에 대한 load avg를 계산한다. decay가 어느 한군데서라도
+ *   수행됬으면 return true.
+ * - 아직 rt, dl, thermal, irq에 load 있는, 즉 blocked되고있다면 @done을
+ *   false로 update한다.
+ */
 static bool __update_blocked_others(struct rq *rq, bool *done)
 {
 	const struct sched_class *curr_class;
@@ -10026,6 +10196,16 @@ static bool __update_blocked_others(struct rq *rq, bool *done)
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - bottom-up으로 순회하며 다음을 수행한다.
+ *   1. cfs_rq load를 update한다. decay됬으면 task group도 update한다.
+ *      이때 decay된 cfs_rq가 요청한 @rq였다면 return시 decayed 표시를한다.
+ *   2. cfs_rq의 se의 update여부를 확인해 update한다.
+ *   3. @cfs_rq가 decay됬으면 leaf_cfs_rq에서 제거한다.
+ *   4. @cfs_rq가 block이면, 즉 어떤 작업이 있으면 @done을 false로
+ *   update한다
+ */
 static bool __update_blocked_fair(struct rq *rq, bool *done)
 {
 	struct cfs_rq *cfs_rq, *pos;
@@ -10071,6 +10251,14 @@ static bool __update_blocked_fair(struct rq *rq, bool *done)
  * This needs to be done in a top-down fashion because the load of a child
  * group is a fraction of its parents load.
  */
+/*
+ * IAMROOT, 2023.05.03:
+ * - papago
+ *   cfs_rq 및 모든 해당 상위 항목에 대한 계층적 부하 계수를 계산합니다.
+ *   하위 그룹의 로드는 상위 로드의 일부이기 때문에 하향식 방식으로 수행해야 합니다.
+ *
+ * - top-down 방식으로 내려가며 h_load를 계산한다.
+ */
 static void update_cfs_rq_h_load(struct cfs_rq *cfs_rq)
 {
 	struct rq *rq = rq_of(cfs_rq);
@@ -10078,10 +10266,19 @@ static void update_cfs_rq_h_load(struct cfs_rq *cfs_rq)
 	unsigned long now = jiffies;
 	unsigned long load;
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - 이전에 이미 햇다면 return.
+ */
 	if (cfs_rq->last_h_load_update == now)
 		return;
 
 	WRITE_ONCE(cfs_rq->h_load_next, NULL);
+/*
+ * IAMROOT, 2023.05.03:
+ * - se를 오르며 h_load_next에 등록해놓는다.
+ *   누군가 이미 update를 햇다면 이후엔 다해놧을것이므로 break.
+ */
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		WRITE_ONCE(cfs_rq->h_load_next, se);
@@ -10089,11 +10286,21 @@ static void update_cfs_rq_h_load(struct cfs_rq *cfs_rq)
 			break;
 	}
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - root까지 도달했다면 root h_load를 load avg로 기록해둔다.
+ */
 	if (!se) {
 		cfs_rq->h_load = cfs_rq_load_avg(cfs_rq);
 		cfs_rq->last_h_load_update = now;
 	}
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - root(혹은 기록해놨던 se부터)시작하여 아래로 내려가면서
+ *   hierarchy로 통계를 내가며 기록하면서 내려간다.
+ *   마지막으로 기록한 시간을 last_h_load_update에 기록한다.
+ */
 	while ((se = READ_ONCE(cfs_rq->h_load_next)) != NULL) {
 		load = cfs_rq->h_load;
 		load = div64_ul(load * se->avg.load_avg,
@@ -10104,6 +10311,10 @@ static void update_cfs_rq_h_load(struct cfs_rq *cfs_rq)
 	}
 }
 
+/*
+ * IAMROOT, 2023.05.03:
+ * - @p를 기준으로 h load를 update후, @p에 대한 h_load를 가져온다.
+ */
 static unsigned long task_h_load(struct task_struct *p)
 {
 	struct cfs_rq *cfs_rq = task_cfs_rq(p);
@@ -10133,9 +10344,11 @@ static unsigned long task_h_load(struct task_struct *p)
 
 /*
  * IAMROOT, 2023.04.29:
- * - 1. rq dl thermal irq util avg, cfs load avg 가 모두 0 이면
+ * - 1. 현재함수 진입시각 update 및 rq clock 
+ * - 2. blocked cfs, rt, dl, thermal, irq를 update한다.
+ *   3. rq dl thermal irq util avg, cfs load avg 가 모두 0 이면
  *      has_blocked_load = 0 으로 설정
- *   2. decayed 면 cpufreq_update_util 호출
+ *   4. decayed 면 cpufreq_update_util 호출
  */
 static void update_blocked_averages(int cpu)
 {
@@ -11966,6 +12179,7 @@ out:
  * IAMROOT, 2023.04.29:
  * - @sd 에 해당하는 interval을 알아온다.
  *   busy 일 경우는 interval(ms)*busy_factor -1(tick) 한다
+ * - cpu_busy일경우 busy_factor배수 interval시간을 늘려준다는 개념.
  */
 static inline unsigned long
 get_sd_balance_interval(struct sched_domain *sd, int cpu_busy)
@@ -12000,6 +12214,11 @@ get_sd_balance_interval(struct sched_domain *sd, int cpu_busy)
 /*
  * IAMROOT, 2023.04.29:
  * - 다음 balancing 주기를 설정한다
+ * - next_balance가 cpu not busy를 기준으로 balance_interval만을 고려하여,
+ *   너무 빠를 경우 last_balance + balance_interval로 수정한다.
+ * - cpu not busy를 기준으로 balance_interval만을 고려하여,
+ *   *next_balance < last_balance + balance_interval 인 경우에만 한해
+ *   next_balance를 더 나중으로 고친다.
  */
 static inline void
 update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
@@ -12797,6 +13016,9 @@ static inline void nohz_newidle_balance(struct rq *this_rq) { }
  * IAMROOT, 2023.01.28:
  * - TODO
  *   다른 cpu에서 task를 가져온다.
+ * 1. update misfit_task_load
+ *   1.1 avg_idle이 작거나 overload가 없는경우 next_balance만 계산
+ * 2.
  */
 static int newidle_balance(struct rq *this_rq, struct rq_flags *rf)
 {
