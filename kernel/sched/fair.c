@@ -135,6 +135,11 @@ int __weak arch_asym_cpu_priority(int cpu)
  *
  * (default: ~20%)
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * @return true  @cap의 1.2배가 max를 초과 안한다.
+ *         false @cap의 1.2배가 max를 넘는다.
+ */
 #define fits_capacity(cap, max)	((cap) * 1280 < (max) * 1024)
 
 /*
@@ -142,6 +147,11 @@ int __weak arch_asym_cpu_priority(int cpu)
  * is 'cap1' noticeably greater than 'cap2'
  *
  * (default: ~5%)
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * @return true  cap1 > cap2 * 1.05
+ *         false cap1 <= cap2 * 1.05
  */
 #define capacity_greater(cap1, cap2) ((cap1) * 1024 > (cap2) * 1078)
 #endif
@@ -3523,6 +3533,11 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
  *
  * A variant of sub_positive(), which does not use explicit load-store
  * and is thus optimized for local variable updates.
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - *_ptr = *_ptr - _val
+ *   0보다 작아지면 *_ptr = 0
  */
 #define lsub_positive(_ptr, _val) do {				\
 	typeof(_ptr) ptr = (_ptr);				\
@@ -7367,6 +7382,11 @@ static inline void hrtick_update(struct rq *rq)
 #ifdef CONFIG_SMP
 static inline unsigned long cpu_util(int cpu);
 
+/*
+ * prifri, 2023.05.06:
+ * @return true  estimate cpu util의 1.2배가 cap을 넘은 경우.
+ * @return false 안넘은 경우
+ */
 static inline bool cpu_overutilized(int cpu)
 {
 	return !fits_capacity(cpu_util(cpu), capacity_of(cpu));
@@ -8346,6 +8366,43 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
  * migrations (scheduler-driven DVFS).
  *
  * Return: the (estimated) utilization for the specified CPU
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   cpu_util - CFS 작업이 사용하는 CPU 용량을 추정합니다.
+ *   @cpu: 활용도를 얻을 CPU.
+ *
+ *   반환 값의 단위는 용량 중 하나여야 CFS 작업에 사용 가능한 
+ *   CPU 용량(예: cpu_capacity)과 사용량을 비교할 수 있습니다.
+ *
+ *   cfs_rq.avg.util_avg는 실행 가능한 작업의 실행 시간과 CPU에서 현재 실행할 
+ *   수 없는 작업의 최근 사용률을 더한 합계입니다. 이는 
+ *   [0..capacity_orig] 범위에서 CPU 사용률을 나타냅니다. 여기서 capacity_orig는 
+ *   가장 높은 빈도(arch_scale_freq_capacity())에서 사용 가능한 cpu_capacity입니다.
+ *   CPU 사용률은 이 CPU의 실행 시간이 capacity_curr로 조정되기 때문에 CPU의 
+ *   현재 용량(capacity_curr <= capacity_orig) 이하의 합계로 수렴됩니다.
+ *
+ *   CPU의 예상 사용률은 cfs_rq.avg.util_avg와 해당 CPU에서 현재 실행 가능한 
+ *   작업의 예상 사용률 합계 사이의 최대값으로 정의됩니다.
+ *   이를 통해 긴 휴면 기간 이후 실행 중인 큰 작업이 있는 CPU의 예상 사용률을 
+ *   적절하게 나타낼 수 있습니다. 그러나 동시에 동일한 CPU에서 깨어나는 다른 
+ *   작업의 가능성을 설명할 때 차단된 사용률의 이점을 유지합니다.
+ *
+ *   그럼에도 불구하고 cfs_rq.avg.util_avg는 cfs.avg.util_avg의 잘못된 
+ *   반올림으로 인해 또는 새 실행 시간으로 평균이 안정화될 때까지 작업 
+ *   마이그레이션 및 새 작업 웨이크업 직후에 capacity_curr 또는 
+ *   capacity_orig보다 높을 수 있습니다. 사용량이 [0..capacity_orig] 
+ *   범위 내에서 유지되는지 확인하고 필요한 경우 제한해야 합니다. 사용률 
+ *   제한이 없으면 그룹은 과부하 상태(CPU0 사용률 121% + CPU1 사용률 80%)로 
+ *   표시될 수 있지만 CPU1은 사용 가능한 용량의 20%를 가집니다. 작업 
+ *   마이그레이션(스케줄러 기반 DVFS) 후에 필요한 용량을 예측하는 데 
+ *   유용하므로 사용률이 capacity_curr(capacity_orig는 아님)를 초과하도록 허용합니다.
+ *
+ *   Return: 지정된 CPU의 (예상) 사용률. 
+ *  - estimate cpu 사용율을 return한다.
+ *  - ps) big task였던 작업이 long sleep을 이후 깨어 낫을때 load가 높아질것을
+ *  예측하기 위함.
  */
 static inline unsigned long cpu_util(int cpu)
 {
@@ -9576,6 +9633,18 @@ static bool yield_to_task_fair(struct rq *rq, struct task_struct *p)
  */
 static unsigned long __read_mostly max_load_balance_interval = HZ/10;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - fbq(first busiest queue)
+ *   fbq_classify_group(),fbq_classify_rq() 참고
+ *
+ * - regular
+ *   numa설정이 안된 task가 하나라도 있는 경우
+ * - remote
+ *   preferred node가 아닌 곳에서 동작하는 task가 있다.
+ * - all
+ *   모든 task가 preferred node에서 동작하고있다.
+ */
 enum fbq_type { regular, remote, all };
 
 /*
@@ -9584,6 +9653,37 @@ enum fbq_type { regular, remote, all };
  * The enum is ordered by pulling priority, with the group with lowest priority
  * first so the group_type can simply be compared when selecting the busiest
  * group. See update_sd_pick_busiest().
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   'group_type'은 로드 밸런싱 시점의 CPU 그룹을 설명합니다.
+ *
+ *   enum은 가장 바쁜 그룹을 선택할 때 group_type을 간단히 비교할 수 있도록 
+ *   우선 순위가 가장 낮은 그룹부터 우선 순위를 끌어서 정렬합니다. 
+ *   update_sd_pick_busiest()를 참조하십시오.
+ *
+ *   group_has_spare :
+ *   그룹에는 더 많은 작업을 실행하는 데 사용할 수 있는 여유 용량이 있습니다. 
+ *
+ *   group_fully_busy :
+ *   그룹이 완전히 사용되고 작업이 더 많은 CPU 주기를 놓고 경쟁하지 않습니다. 
+ *   그럼에도 불구하고 일부 작업은 실행되기 전에 대기할 수 있습니다.
+ *
+ *   group_misfit_task :
+ *   SD_ASYM_CPUCAPACITY만. 하나의 작업이 CPU 용량에 맞지 않아 더 강력한 
+ *   CPU로 마이그레이션해야 합니다.
+ *
+ *   group_asym_packing :
+ *   SD_ASYM_PACKING 전용. 용량이 더 큰 하나의 로컬 CPU를 사용할 수 있으며 
+ *   작업을 현재 CPU에서 실행하는 대신 여기로 마이그레이션해야 합니다.
+ *
+ *   group_imbalanced :
+ *   태스크의 친화성 제약으로 인해 이전에는 스케줄러가 시스템 전체에 걸쳐 
+ *   부하를 분산할 수 없었습니다.
+ *
+ *   group_overloaded : 
+ *   CPU가 과부하되어 모든 작업에 예상 CPU 주기를 제공할 수 없습니다.
  */
 enum group_type {
 	/* The group has spare capacity that can be used to run more tasks.  */
@@ -9616,6 +9716,20 @@ enum group_type {
 	group_overloaded
 };
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - find_busiest_group()(migration_type을 찾음),
+ *   find_busiest_queue()(migration_type을 사용) 참고
+ *
+ * - migrate_load
+ *   load를 비교한다.
+ * - migrate_util
+ *   util를 비교한다.
+ * - migrate_task
+ *   task수를 비교한다.
+ * - migrate_misfit
+ *   misfit load를 비교한다.
+ */
 enum migration_type {
 	migrate_load = 0,
 	migrate_util,
@@ -10393,9 +10507,19 @@ struct sg_lb_stats {
 	unsigned int idle_cpus;
 	unsigned int group_weight;
 	enum group_type group_type;
+/*
+ * IAMROOT, 2023.05.06:
+ * - task를 move해야되는지의 여부. update_sg_lb_stats() 참고
+ */
 	unsigned int group_asym_packing; /* Tasks should be moved to preferred CPU */
 	unsigned long group_misfit_task_load; /* A CPU has a task too big for its capacity */
 #ifdef CONFIG_NUMA_BALANCING
+/*
+ * IAMROOT, 2023.05.06:
+ * - nr_numa_running : node 지정을 했을때, 선호 node 상관없이 동작하는 task수
+ *                     node 지정을 안했으면 증가를 안한다.
+ * - numa_migrate_preferred : 권장 node에 동작하는 task수
+ */
 	unsigned int nr_numa_running;
 	unsigned int nr_preferred_running;
 #endif
@@ -10413,10 +10537,18 @@ struct sd_lb_stats {
 	unsigned long avg_load;	/* Average load across all groups in sd */
 	unsigned int prefer_sibling; /* tasks should go to sibling first */
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 가장 높은 group
+ */
 	struct sg_lb_stats busiest_stat;/* Statistics of the busiest group */
 	struct sg_lb_stats local_stat;	/* Statistics of the local group */
 };
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - @sds초기화.
+ */
 static inline void init_sd_lb_stats(struct sd_lb_stats *sds)
 {
 	/*
@@ -10426,6 +10558,15 @@ static inline void init_sd_lb_stats(struct sd_lb_stats *sds)
 	 * busiest_stat::idle_cpus to the worst busiest group because
 	 * update_sd_pick_busiest() reads these before assignment.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   중복 작업을 피하기 위해 정리 작업에 인색합니다. update_sg_lb_stats()가 
+ *   전체 지우기/할당을 수행하기 때문에 local_stat 지우기를 피할 수 있습니다.
+ *   하지만 busiest_stat::group_type 및 busiest_stat::idle_cpus를 가장 바쁜 
+ *   그룹으로 설정해야 합니다. 왜냐하면 update_sd_pick_busiest()가 할당 전에 
+ *   이들을 읽기 때문입니다.
+ */
 	*sds = (struct sd_lb_stats){
 		.busiest = NULL,
 		.local = NULL,
@@ -10602,6 +10743,14 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
  * activity. The imbalance_pct is used for the threshold.
  * Return true is the capacity is reduced
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   부수적인 활동으로 rq의 용량이 눈에 띄게 줄었는지 확인합니다. 
+ *   imbalance_pct는 임계값에 사용됩니다. true를 반환하면 용량이 줄었다는것.
+ *
+ * - rq capa가 눈에뜨게 줄었다면 return true.
+ */
 static inline int
 check_cpu_capacity(struct rq *rq, struct sched_domain *sd)
 {
@@ -10649,7 +10798,38 @@ static inline int check_misfit_status(struct rq *rq, struct sched_domain *sd)
  * group imbalance and decide the groups need to be balanced again. A most
  * subtle and fragile situation.
  */
-
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   그룹 불균형은 ->cpus_ptr 제약 조건으로 인해 균형 그룹이 부적합한 문제를 
+ *   나타냅니다(그리고 해결을 시도합니다).
+ *
+ *   첫 번째 그룹의 CPU 1개와 두 번째 그룹의 CPU 3개를 덮는 cpumask가 있는 
+ *   각각 4개의 CPU와 4개의 작업으로 구성된 두 그룹의 상황을 상상해 보십시오.
+ *   다음과 같은 것:
+ *
+ *	{ 0 1 2 3 } { 4 5 6 7 }
+ *	        *     * * *
+ *   그룹별로 균형을 잡으려면 첫 번째 그룹에 두 개의 작업을 배치하고 두 번째 
+ *   그룹에 두 개의 작업을 배치합니다. 분명히 이것은 cpu 3에 과부하를 일으키고 
+ *   두 번째 그룹의 CPU 중 하나를 사용하지 않은 상태로 남겨두기 때문에 
+ *   바람직하지 않습니다.
+ *
+ *   이 문제에 대한 현재 솔루션은 하위 도메인이 균형에 도달하지 못하고 선호도 
+ *   제약으로 인해 작업을 이동하는 데 어려움이 있음을 확인하여 첫 번째 그룹의 
+ *   편향을 감지하는 것입니다.
+ *
+ *   이렇게 적발된 때 이 그룹은 가장 바쁜 후보가 됩니다. 
+ *   update_sd_pick_busiest()를 참조하십시오. 그리고 calculate_imbalance() 및 
+ *   find_busiest_group()은 효과적인 그룹 불균형을 만들 수 있도록 일반적인 
+ *   균형 조건 중 일부를 피합니다.
+ *
+ *   다음 실행에서 그룹 불균형을 찾지 못하고 그룹의 균형을 다시 맞춰야 한다고 
+ *   결정할 수 있기 때문에 이것은 다소 까다로운 제안입니다. 가장 미묘하고 
+ *   깨지기 쉬운 상황.
+ *
+ * - imbalance가 있는지 확인한다.
+ */
 static inline int sg_imbalanced(struct sched_group *group)
 {
 	return group->sgc->imbalance;
@@ -10666,6 +10846,21 @@ static inline int sg_imbalanced(struct sched_group *group)
  * capacity in meaningful for the load balancer.
  * As an example, an available capacity of 1% can appear but it doesn't make
  * any benefit for the load balance.
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   group_has_capacity는 그룹에 일부 작업에서 사용할 수 있는 여유 용량이 
+ *   있는 경우 true를 반환합니다.
+ *   작업 수가 CPU 수보다 적거나 사용률이 CFS 작업에 사용할 수 있는 용량보다 
+ *   낮은 경우 그룹에 여유 용량이 있는 것으로 간주합니다.
+ *   후자의 경우 임계값을 사용하여 상태를 안정화하고 작업 로드의 분산을 
+ *   고려하며 사용 가능한 용량이 로드 밸런서에 의미가 있는 경우 true를 반환합니다.
+ *   예를 들어 사용 가능한 용량이 1%로 나타날 수 있지만 부하 분산에는 아무런 
+ *   이점이 없습니다.
+ *
+ * - group이 충분한 cap을 가지고 있는지 확인한다. group_is_overloaded()와 비슷한
+ *   방법으로 비교한다.
  */
 static inline bool
 group_has_capacity(unsigned int imbalance_pct, struct sg_lb_stats *sgs)
@@ -10692,16 +10887,40 @@ group_has_capacity(unsigned int imbalance_pct, struct sg_lb_stats *sgs)
  *  overloaded so both group_has_capacity and group_is_overloaded return
  *  false.
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   group_is_overloaded는 그룹에 처리할 수 있는 것보다 많은 작업이 있는 경우 
+ *   true를 반환합니다.
+ *   group_is_overloaded는 !group_has_capacity와 같지 않습니다. 정확한 
+ *   작업 수를 가진 그룹은 더 이상 여유 용량이 없지만 과부하되지 않았기 때문에 
+ *   group_has_capacity와 group_is_overloaded 모두 false를 반환합니다.
+ *
+ * - group이 overload가 됬는지에 대한 여부를 판별한다. 판별시 imbalance 보정을 한다.
+ *   group_has_capacity()에서도 비슷한 방법으로 판별한다.
+ */
 static inline bool
 group_is_overloaded(unsigned int imbalance_pct, struct sg_lb_stats *sgs)
 {
+/*
+ * IAMROOT, 2023.05.06:
+ * - task가 cpu개수보다 적은 경우. return false.
+ */
 	if (sgs->sum_nr_running <= sgs->group_weight)
 		return false;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group util이 group cap을 넘은 경우 return true.
+ */
 	if ((sgs->group_capacity * 100) <
 			(sgs->group_util * imbalance_pct))
 		return true;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group runnable이 group cap을 넘은 경우 return true.
+ */
 	if ((sgs->group_capacity * imbalance_pct) <
 			(sgs->group_runnable * 100))
 		return true;
@@ -10709,6 +10928,10 @@ group_is_overloaded(unsigned int imbalance_pct, struct sg_lb_stats *sgs)
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 인자를 사용하 group type을 판별한다.
+ */
 static inline enum
 group_type group_classify(unsigned int imbalance_pct,
 			  struct sched_group *group,
@@ -10739,6 +10962,21 @@ group_type group_classify(unsigned int imbalance_pct,
  * @sgs: variable to hold the statistics for this group.
  * @sg_status: Holds flag indicating the status of the sched_group
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   update_sg_lb_stats - 부하 분산을 위해 sched_group의 통계를 업데이트합니다.
+ *   @env: 로드 밸런싱 환경.
+ *   @group: 통계를 업데이트할 sched_group.
+ *   @sgs: 이 그룹에 대한 통계를 보유하는 변수입니다.
+ *   @sg_status: sched_group의 상태를 나타내는 플래그를 보유합니다. 
+ *
+ * - group 통계를 갱신한다.
+ * - @sg_status
+ *   SG_OVERLOAD : nr_running이 2개이상인 cpu가 있는 경우
+ *                 remote asym이면서, group_misfit_task_load이 갱신된경우
+ *   SG_OVERUTILIZED : overutil인 cpu가 있는 경우
+ */
 static inline void update_sg_lb_stats(struct lb_env *env,
 				      struct sched_group *group,
 				      struct sg_lb_stats *sgs,
@@ -10764,6 +11002,10 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 		if (nr_running > 1)
 			*sg_status |= SG_OVERLOAD;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - @i가 overutil이라면 SG_OVERUTILIZED를 set한다.
+ */
 		if (cpu_overutilized(i))
 			*sg_status |= SG_OVERUTILIZED;
 
@@ -10784,6 +11026,10 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 			continue;
 
 		/* Check for a misfit task on the cpu */
+/*
+ * IAMROOT, 2023.05.06:
+ * - remote인 경우, asym이라면 misfit이 제일큰것을 기록하고, SG_OVERLOAD표시를 한다.
+ */
 		if (env->sd->flags & SD_ASYM_CPUCAPACITY &&
 		    sgs->group_misfit_task_load < rq->misfit_task_load) {
 			sgs->group_misfit_task_load = rq->misfit_task_load;
@@ -10792,6 +11038,11 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 	}
 
 	/* Check if dst CPU is idle and preferred to this group */
+/*
+ * IAMROOT, 2023.05.06:
+ * - smt이고, 1개이상의 task가 동작중이고, dst_cpu가 
+ *   asym_prefer_cpu보다 우선순위가 높다면 group_asym_packing을 set한다.
+ */
 	if (env->sd->flags & SD_ASYM_PACKING &&
 	    env->idle != CPU_NOT_IDLE &&
 	    sgs->sum_h_nr_running &&
@@ -10803,9 +11054,17 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 
 	sgs->group_weight = group->group_weight;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group_type을 update한다.
+ */
 	sgs->group_type = group_classify(env->sd->imbalance_pct, group, sgs);
 
 	/* Computing avg_load makes sense only when group is overloaded */
+/*
+ * IAMROOT, 2023.05.06:
+ * - overload인 경우에만 avg_load를 update한다.
+ */
 	if (sgs->group_type == group_overloaded)
 		sgs->avg_load = (sgs->group_load * SCHED_CAPACITY_SCALE) /
 				sgs->group_capacity;
@@ -10824,6 +11083,28 @@ static inline void update_sg_lb_stats(struct lb_env *env,
  * Return: %true if @sg is a busier group than the previously selected
  * busiest group. %false otherwise.
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *  update_sd_pick_busiest - 가장 바쁜 그룹에서 1을 반환합니다. 
+ *  @env: 로드 밸런싱 환경.
+ *  @sds: sched_domain 통계.
+ *  @sg: 가장 바쁜지 확인할 sched_group 후보.
+ *  @sgs: sched_group 통계.
+ *
+ *  @sg가 이전에 선택한 가장 바쁜 그룹보다 더 바쁜 그룹인지 확인합니다.
+ *
+ *  Return: @sg가 이전에 선택한 가장 바쁜 그룹보다 더 바쁜 그룹인 경우 
+ *  %true입니다. 그렇지 않으면 %false입니다.
+ *
+ *  @return true sg를 busiest로 갱신한다.
+ *
+ *  1. @sgs이 misfit인 경우, 교체대상이 misfit보다 커야 해결된다. 작을 경우 return false.,
+ *  2. local이 group_has_spare가 아닌 경우 이미 바쁘다. return false.
+ *  3. group_type이 높은게 우선 순위가 높다. 
+ *  4. group_type이 같은 경우 group_type에 따른 비교를 한다.
+ *  5. asym일 경우 cap이 높은 경우가 우선시된다.
+ */
 static bool update_sd_pick_busiest(struct lb_env *env,
 				   struct sd_lb_stats *sds,
 				   struct sched_group *sg,
@@ -10841,17 +11122,38 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	 * CPUs in the group should either be possible to resolve
 	 * internally or be covered by avg_load imbalance (eventually).
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   우리가 도울 수 없는 부적합한 작업을 끌어내려고 하지 마십시오.
+ *   여기서 max_capacity를 사용할 수 있습니다. 그룹의 일부 CPU에 대한 
+ *   용량 감소는 내부적으로 해결할 수 있거나 avg_load 불균형에 의해 
+ *   처리되어야 하기 때문입니다(결국).
+ *
+ * - group에 big task가 돌고있는 상황에서, group보다 더 낮은 cpu가 dst인 경우,
+ *   즉 group이 misfit으로 바쁜데, dest가 이미 group 보다 성능이 떨어지면 busiest로 
+ *   선택안하겠다는것이다.
+ * - local_stat이 group_has_spare가 아닌 경우, 즉 local이 이미 바쁜상태.
+ */
 	if (sgs->group_type == group_misfit_task &&
 	    (!capacity_greater(capacity_of(env->dst_cpu), sg->sgc->max_capacity) ||
 	     sds->local_stat.group_type != group_has_spare))
 		return false;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group_type으로 우선순위를 먼저 판별한다.
+ */
 	if (sgs->group_type > busiest->group_type)
 		return true;
 
 	if (sgs->group_type < busiest->group_type)
 		return false;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group_type이 같은 경우. 각 type별로 비교하는 방법을 따른다.
+ */
 	/*
 	 * The candidate and the current busiest group are the same type of
 	 * group. Let check which one is the busiest according to the type.
@@ -10869,6 +11171,11 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 		 * Select the 1st imbalanced group as we don't have any way to
 		 * choose one more than another.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   다른 것보다 하나를 더 선택할 방법이 없으므로 첫 번째 불균형 그룹을 선택합니다.
+ */
 		return false;
 
 	case group_asym_packing:
@@ -10897,6 +11204,16 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 		 * XXX for now avg_load is not computed and always 0 so we
 		 * select the 1st one.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   avg_load가 가장 높은 완전히 바쁜 그룹을 선택합니다. 이론상으로는 작업에 
+ *   필요한 모든 컴퓨팅 용량이 있기 때문에 이러한 종류의 그룹에서 작업을 가져올 
+ *   필요가 없지만 공유 HW 리소스에 액세스할 때 경합을 줄임으로써 전체 처리량을 
+ *   여전히 개선할 수 있습니다.
+ *
+ *   XXX: 현재 avg_load는 계산되지 않고 항상 0이므로 첫 번째 것을 선택합니다.
+ */
 		if (sgs->avg_load <= busiest->avg_load)
 			return false;
 		break;
@@ -10909,6 +11226,15 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 		 * that the group has less spare capacity but finally more idle
 		 * CPUs which means less opportunity to pull tasks.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   유휴 CPU 수가 가장 적고 실행 중인 작업 수가 가장 많은 오버로드되지 않은 
+ *   그룹을 선택합니다. 더 안정적인 여유 용량을 비교할 수도 있지만 그룹의 여유 
+ *   용량은 적지만 결국 유휴 CPU가 많아져 작업을 가져올 기회가 줄어듭니다.
+ *
+ * - idle_cpus가 많은것을 우선한다. 같다면 running이 많은것을 우선한다.
+ */
 		if (sgs->idle_cpus > busiest->idle_cpus)
 			return false;
 		else if ((sgs->idle_cpus == busiest->idle_cpus) &&
@@ -10924,6 +11250,15 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 	 * throughput. Maximize throughput, power/energy consequences are not
 	 * considered.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   후보 sg는 CPU당 작업이 하나 이상 없으며 CPU당 용량이 더 큽니다. 
+ *   성능이 낮은 CPU로 작업을 마이그레이션하면 처리량이 저하될 수 있습니다. 
+ *   처리량을 최대화하고 전력/에너지 결과는 고려하지 않습니다.
+ *
+ * - asym인 경우 cap이 높은것을 우선한다는 의미가된다.
+ */
 	if ((env->sd->flags & SD_ASYM_CPUCAPACITY) &&
 	    (sgs->group_type <= group_fully_busy) &&
 	    (capacity_greater(sg->sgc->min_capacity, capacity_of(env->dst_cpu))))
@@ -10933,8 +11268,13 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 }
 
 #ifdef CONFIG_NUMA_BALANCING
+/*
+ * IAMROOT, 2023.05.06:
+ * - fbq_type을 판별해 return 한다. 
+ *   group 기준으로 판별한다.
+ */
 static inline enum fbq_type fbq_classify_group(struct sg_lb_stats *sgs)
-{
+
 	if (sgs->sum_h_nr_running > sgs->nr_numa_running)
 		return regular;
 	if (sgs->sum_h_nr_running > sgs->nr_preferred_running)
@@ -10942,8 +11282,25 @@ static inline enum fbq_type fbq_classify_group(struct sg_lb_stats *sgs)
 	return all;
 }
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - fbq_type을 판별해 return한다.
+ *   rq기준으로 판별한다.
+ *
+ * - regular
+ *   numa설정이 안된 task가 하나라도 있는 경우
+ * - remote
+ *   preferred running초과의 task가 있다면 1개 이상이 preferred node가
+ *   아닌 곳에서 동작하고 있다는것이다.
+ * - all
+ *   모든 task가 preferred node에서 동작하고있다.
+ */
 static inline enum fbq_type fbq_classify_rq(struct rq *rq)
 {
+/*
+ * IAMROOT, 2023.05.06:
+ * - nr_running이 nr_numa_running이 될순없다. == 인 상태로 내려오게된다.
+ */
 	if (rq->nr_running > rq->nr_numa_running)
 		return regular;
 	if (rq->nr_running > rq->nr_preferred_running)
@@ -11124,6 +11481,15 @@ static bool update_pick_idlest(struct sched_group *idlest,
  * This is an approximation as the number of running tasks may not be
  * related to the number of busy CPUs due to sched_setaffinity.
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   사용량이 많은 CPU가 도메인의 25% 미만인 경우 NUMA 불균형을 허용합니다.
+ *   실행 중인 작업의 수는 sched_setaffinity로 인해 사용 중인 CPU 수와 관련이 
+ *   없을 수 있으므로 근사치입니다.
+ *
+ * - return true : running의 25%보다 cpu가 많은 경우.
+ */
 static inline bool allow_numa_imbalance(int dst_running, int dst_weight)
 {
 	return (dst_running < (dst_weight >> 2));
@@ -11289,6 +11655,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
  * @sds: variable to hold the statistics for this sched_domain.
  */
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group을 순회하며 local과 busiest group을 찾고, 통계를 내어 @sds를 완성한다.
+ *   통계후, rd에 SG_OVERLOAD, SG_OVERUTILIZED가 있었다면 기록한다.
+ */
 static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sds)
 {
 	struct sched_domain *child = env->sd->child;
@@ -11297,15 +11668,30 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
 	struct sg_lb_stats tmp_sgs;
 	int sg_status = 0;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group을 순회하며 sds를 통계한다. local인것은 한번반 선택되고, other인 경우
+ *   busiest 판별까지 수행한다.
+ */
 	do {
 		struct sg_lb_stats *sgs = &tmp_sgs;
 		int local_group;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - dst_cpu가 local group에 있는지 확인한다.
+ *   group의 첫번째는 local, 두번째부터는 remote가 된다.
+ */
 		local_group = cpumask_test_cpu(env->dst_cpu, sched_group_span(sg));
 		if (local_group) {
 			sds->local = sg;
 			sgs = local;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - @env->idle이 새로추가되는 경우가 아닌 경우(CPU_NEWLY_IDLE), 즉
+ *   periodic balance이거나 next_update이후에 진입했다면 capacity를 update한다.
+ */
 			if (env->idle != CPU_NEWLY_IDLE ||
 			    time_after_eq(jiffies, sg->sgc->next_update))
 				update_group_capacity(env->sd, env->dst_cpu);
@@ -11316,7 +11702,15 @@ static inline void update_sd_lb_stats(struct lb_env *env, struct sd_lb_stats *sd
 		if (local_group)
 			goto next_group;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 여기서부터 other group
+ */
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest 여부를 판별하여 갱신한다.
+ */
 		if (update_sd_pick_busiest(env, sds, sg, sgs)) {
 			sds->busiest = sg;
 			sds->busiest_stat = *sgs;
@@ -11333,10 +11727,18 @@ next_group:
 	/* Tag domain that child domain prefers tasks go to siblings first */
 	sds->prefer_sibling = child && child->flags & SD_PREFER_SIBLING;
 
-
+/*
+ * IAMROOT, 2023.05.06:
+ * - numa인 경우, fbq_type을 판별한다.
+ */
 	if (env->sd->flags & SD_NUMA)
 		env->fbq_type = fbq_classify_group(&sds->busiest_stat);
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - root인 경우, SG_OVERLOAD, SG_OVERUTILIZED가 있었다면 기록한다.
+ *   SG_OVERUTILIZED은 무조건 기록한다.
+ */
 	if (!env->sd->parent) {
 		struct root_domain *rd = env->dst_rq->rd;
 
@@ -11356,9 +11758,19 @@ next_group:
 
 #define NUMA_IMBALANCE_MIN 2
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - imbalance를 그대로 사용할지 여부를 정한다. dest에 cpu대비 running이 이미 
+ *   많을때 imbalance값이 적다면 그냥 0 return.
+ *   아닌 경우 그대로 imbalance 사용
+ */
 static inline long adjust_numa_imbalance(int imbalance,
 				int dst_running, int dst_weight)
 {
+/*
+ * IAMROOT, 2023.05.06:
+ * - running이 cpu개수보다 25%이하이면 imbalance값을 그대로 사용한다.
+ */
 	if (!allow_numa_imbalance(dst_running, dst_weight))
 		return imbalance;
 
@@ -11366,6 +11778,13 @@ static inline long adjust_numa_imbalance(int imbalance,
 	 * Allow a small imbalance based on a simple pair of communicating
 	 * tasks that remain local when the destination is lightly loaded.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - 목적지가 가볍게 로드될 때 로컬로 남아 있는 간단한 통신 작업 쌍을 
+ *   기반으로 약간의 불균형을 허용합니다.
+ *
+ * - 이미 dest에 running이 많다. 이때 imbalance가 적다면(2 이하) 그냥 수행안한다
+ */
 	if (imbalance <= NUMA_IMBALANCE_MIN)
 		return 0;
 
@@ -11377,6 +11796,17 @@ static inline long adjust_numa_imbalance(int imbalance,
  *			 groups of a given sched_domain during load balance.
  * @env: load balance environment
  * @sds: statistics of the sched_domain whose imbalance is to be calculated.
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   calculate_imbalance - 부하 분산 동안 주어진 sched_domain의 그룹 내에 
+ *   존재하는 불균형의 양을 계산합니다.
+ *   @env: 부하 분산 환경
+ *   @sds:불균형을 계산할 sched_domain의 통계입니다.
+ *
+ * - imbalance값을 산출한다. group에 따라 migration_type과 imbalance를
+ *   정한다.
  */
 static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *sds)
 {
@@ -11392,6 +11822,11 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 		return;
 	}
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - smt인 경우이다.
+ * - smt인 경우 load를 이동시키는게 그렇게 중요하진 않다.
+ */
 	if (busiest->group_type == group_asym_packing) {
 		/*
 		 * In case of asym capacity, we will try to migrate all load to
@@ -11409,6 +11844,13 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 		 * the imbalance. The next load balance will take care of
 		 * balancing back the system.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   group_imb의 경우 CPU 로드 평형을 보장하기 위해 그룹 전체 평균에 
+ *   의존할 수 없으며 불균형을 수정하기 위해 작업을 이동하려고 합니다. 
+ *   다음 부하 균형은 시스템 균형을 다시 조정합니다.
+ */
 		env->migration_type = migrate_task;
 		env->imbalance = 1;
 		return;
@@ -11418,6 +11860,13 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 	 * Try to use spare capacity of local group without overloading it or
 	 * emptying busiest.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   로컬 그룹의 여유 용량을 과부하하거나 가장 많이 비우지 않고 사용하십시오.
+ * - local이 놀고있는 경우 busiest->group_type > group_fully_busy(실질적으로 overload)
+ *   이면서 SD_SHARE_PKG_RESOURCES를 가지지 않은 경우(numa or die)
+ */
 	if (local->group_type == group_has_spare) {
 		if ((busiest->group_type > group_fully_busy) &&
 		    !(env->sd->flags & SD_SHARE_PKG_RESOURCES)) {
@@ -11429,6 +11878,16 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 			 * amount of load to migrate in order to balance the
 			 * system.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   가장 사용량이 많은 경우 여유 용량을 채우십시오. 이로 인해 가장 
+ *   바쁘거나 여전히 과부하 상태인 예비 용량이 생성될 수 있지만 시스템 균형을 
+ *   유지하기 위해 마이그레이션할 로드 양을 직접 계산하는 간단한 방법은 없습니다.
+ * - local이 놀고있지만, busiest가 overload이고, numa or die와 같은 많은 cpu가 보유될수
+ *   있는 경우 util로 선택하게 한다.
+ * - imbalance는 남은 capa개념으로 설정한다.
+ */
 			env->migration_type = migrate_util;
 			env->imbalance = max(local->group_capacity, local->group_util) -
 					 local->group_util;
@@ -11440,6 +11899,14 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 			 * waiting task in this overloaded busiest group. Let's
 			 * try to pull it.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   경우에 따라 마이그레이션으로 인해 그룹의 사용률이 최대이거나 
+ *   용량보다 훨씬 높지만 로컬 CPU는 (새로) 유휴 상태입니다. 가장 바쁜 이 
+ *   그룹에는 최소한 하나의 대기 작업이 있습니다. 당겨보자.
+ * -migrate등의 이유로 예외사항이 발생할수있다. 그에 대한 처리를 수행한다.
+ */
 			if (env->idle != CPU_NOT_IDLE && env->imbalance == 0) {
 				env->migration_type = migrate_task;
 				env->imbalance = 1;
@@ -11448,6 +11915,11 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 			return;
 		}
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - group이 cpu1개뿐이거나, prefer sibling이 존재하는 경우
+ *   local보다 2개이상 많은 running이 있으면 imbalance set된다.
+ */
 		if (busiest->group_weight == 1 || sds->prefer_sibling) {
 			unsigned int nr_diff = busiest->sum_nr_running;
 			/*
@@ -11455,6 +11927,10 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 			 * groups.
 			 */
 			env->migration_type = migrate_task;
+/*
+ * IAMROOT, 2023.05.06:
+ * - nr_diff -= local->sum_nr_running. -가 되면 nr_iff = 0.
+ */
 			lsub_positive(&nr_diff, local->sum_nr_running);
 			env->imbalance = nr_diff >> 1;
 		} else {
@@ -11463,12 +11939,21 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 			 * If there is no overload, we just want to even the number of
 			 * idle cpus.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - local이 busiest보다 2개이상 idle이 많은 경우 imbalance set된다.
+ */
 			env->migration_type = migrate_task;
 			env->imbalance = max_t(long, 0, (local->idle_cpus -
 						 busiest->idle_cpus) >> 1);
 		}
 
 		/* Consider allowing a small imbalance between NUMA groups */
+
+/*
+ * IAMROOT, 2023.05.06:
+ * - numa인경우, cpu가 running의 25%보다 적으면 imbalance가 0으로 바뀐다.
+ */
 		if (env->sd->flags & SD_NUMA) {
 			env->imbalance = adjust_numa_imbalance(env->imbalance,
 				busiest->sum_nr_running, busiest->group_weight);
@@ -11481,6 +11966,14 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 	 * Local is fully busy but has to take more load to relieve the
 	 * busiest group
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   로컬은 완전히 바쁘지만 가장 바쁜 그룹을 완화하기 위해 더 많은 
+ *   부하를 감당해야 합니다. 
+ * - local이 overload이하인경우, local avg_load, sds avg_load를 계산을 한다.
+ *   그 후 local이 busiest보다 바쁘다면 imbalance는 0으로 하고 return.
+ */
 	if (local->group_type < group_overloaded) {
 		/*
 		 * Local will become overloaded so the avg_load metrics are
@@ -11496,10 +11989,19 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 		 * If the local group is more loaded than the selected
 		 * busiest group don't try to pull any tasks.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - local이 바
+ */
 		if (local->avg_load >= busiest->avg_load) {
 			env->imbalance = 0;
 			return;
 		}
+
+/*
+ * IAMROOT, 2023.05.06:
+ * - 이 아래는 local이 busiest보다 안바쁜 상태.
+ */
 	}
 
 	/*
@@ -11510,6 +12012,19 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 	 * reduce the group load below the group capacity. Thus we look for
 	 * the minimum possible imbalance.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   두 그룹 모두 과부하 상태이거나 과부하 상태가 될 것이며 우리는 모든 CPU를 
+ *   average_load로 가져오려고 합니다. 따라서 우리는 평균 부하 이상으로 자신을 
+ *   밀고 싶지 않으며 최대 부하 CPU를 평균 부하 아래로 낮추고 싶지도 않습니다. 
+ *   동시에 우리는 그룹 부하를 그룹 용량 이하로 줄이고 싶지 않습니다. 
+ *   따라서 우리는 가능한 최소한의 불균형을 찾습니다.
+ *
+ * - min((busiest - domain), (domain - local))
+ *   busiest는 평균이상, local은 평균이하일 것이다. 평균에서 차이가 덜 나는 것을
+ *   기준으로 imbalance를 정한다. minimum possible imbalance로 하고 싶기때문이다.
+ */
 	env->migration_type = migrate_load;
 	env->imbalance = min(
 		(busiest->avg_load - sds->avg_load) * busiest->group_capacity,
@@ -11550,6 +12065,21 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
  *
  * Return:	- The busiest group if imbalance exists.
  */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   find_busiest_group - 불균형이 있는 경우 sched_domain 내에서 가장 
+ *   바쁜 그룹을 반환합니다.
+ *
+ *   또한 균형을 회복하기 위해 이동해야 하는 실행 가능한 로드의 양을 계산합니다.
+ *
+ *   @env: 로드 밸런싱 환경.
+ *
+ *   return: - 불균형이 존재하는 경우 가장 바쁜 그룹. 
+ *
+ * -가장바쁜 group을 찾는다(단, imbalance는 0보다 커야한다.) 
+ *   또한 group_type에 따른 imbalance와 migration_type을 정한다.
+ */
 static struct sched_group *find_busiest_group(struct lb_env *env)
 {
 	struct sg_lb_stats *local, *busiest;
@@ -11561,11 +12091,21 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	 * Compute the various statistics relevant for load balancing at
 	 * this level.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - group을 순회해 통계하여 @sds를 완성한다.
+ */
 	update_sd_lb_stats(env, &sds);
 
 	if (sched_energy_enabled()) {
 		struct root_domain *rd = env->dst_rq->rd;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - overutilized은 update_sd_lb_stats()에서 SG_OVERUTILIZED이였을 경우
+ *   update되었을것이다.
+ * - parition domain이 있고, overutil이 안됬으면 out이다.
+ */
 		if (rcu_dereference(rd->pd) && !READ_ONCE(rd->overutilized))
 			goto out_balanced;
 	}
@@ -11574,36 +12114,114 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	busiest = &sds.busiest_stat;
 
 	/* There is no busy sibling group to pull tasks from */
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest가 없엇으면 out.
+ */
 	if (!sds.busiest)
 		goto out_balanced;
 
 	/* Misfit tasks should be dealt with regardless of the avg load */
+/*
+ * IAMROOT, 2023.05.06:
+ * - group_misfit_task, group_asym_packing, group_imbalance면 force
+ *   수행한다.
+ * - 남은 group_type
+ *   group_has_spare
+ *   group_fully_busy,
+ *   group_misfit_task,
+ *   group_asym_packing,
+ *   group_imbalanced,
+ *   group_overloaded
+ */
 	if (busiest->group_type == group_misfit_task)
 		goto force_balance;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 남은 group_type
+ *   group_has_spare
+ *   group_fully_busy,
+ *   //group_misfit_task,
+ *   group_asym_packing,
+ *   group_imbalanced,
+ *   group_overloaded
+ */
 	/* ASYM feature bypasses nice load balance check */
 	if (busiest->group_type == group_asym_packing)
 		goto force_balance;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 남은 group_type
+ *   group_has_spare
+ *   group_fully_busy,
+ *   //group_misfit_task,
+ *   //group_asym_packing,
+ *   group_imbalanced,
+ *   group_overloaded
+ */
 	/*
 	 * If the busiest group is imbalanced the below checks don't
 	 * work because they assume all things are equal, which typically
 	 * isn't true due to cpus_ptr constraints and the like.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   가장 바쁜 그룹이 불균형한 경우 아래 검사는 모든 것이 동일하다고 
+ *   가정하기 때문에 작동하지 않습니다. 이는 일반적으로 cpus_ptr 제약 
+ *   조건 등으로 인해 사실이 아닙니다.
+ *
+ * - 주석에 따르면 group balance인 경우에만 아래가 동작한다고 한다.
+ *   imbalance인경우는 force 진행.
+ */
 	if (busiest->group_type == group_imbalanced)
 		goto force_balance;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 남은 group_type
+ *   group_has_spare
+ *   group_fully_busy,
+ *   //group_misfit_task,
+ *   //group_asym_packing,
+ *   //group_imbalanced,
+ *   group_overloaded
+ */
 	/*
 	 * If the local group is busier than the selected busiest group
 	 * don't try and pull any tasks.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - local이 busiest 보다 더 바쁘면 out.
+ */
 	if (local->group_type > busiest->group_type)
 		goto out_balanced;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 남은 group_type. (local group보다 높거나 같은)
+ *   group_has_spare
+ *   group_fully_busy,
+ *   //group_misfit_task,
+ *   //group_asym_packing,
+ *   //group_imbalanced,
+ *   group_overloaded
+ */
 	/*
 	 * When groups are overloaded, use the avg_load to ensure fairness
 	 * between tasks.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - local이 overload인 경우 out인 상황을 판단한다.
+ *   1. local이 이미 busiest보다 load가 더 걸린경우
+ *   2. local이 domain전체보다 load가 더 높은 경우. 
+ *   즉 평균보다 자기자신이 더 높은 경우.
+ *   3. imbalance을 적용했을때, busiest보다 낮으면 안한다.
+ */
 	if (local->group_type == group_overloaded) {
 		/*
 		 * If the local group is more loaded than the selected
@@ -11633,10 +12251,27 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 	}
 
 	/* Try to move all excess tasks to child's sibling domain */
+/*
+ * IAMROOT, 2023.05.06:
+ * - fource 수행.
+ * 1. 선호 sibling이 존재
+ * 2. local 이 idle
+ * 3. busiest가 local보다 2개이상 많음.
+ */
 	if (sds.prefer_sibling && local->group_type == group_has_spare &&
 	    busiest->sum_nr_running > local->sum_nr_running + 1)
 		goto force_balance;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 남은 group_type. (local group보다 높거나 같은)
+ *   group_has_spare <---
+ *   group_fully_busy <--
+ *   //group_misfit_task,
+ *   //group_asym_packing,
+ *   //group_imbalanced,
+ *   group_overloaded
+ */
 	if (busiest->group_type != group_overloaded) {
 		if (env->idle == CPU_NOT_IDLE)
 			/*
@@ -11644,8 +12279,19 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 			 * result the local one too) but this CPU is already
 			 * busy, let another idle CPU try to pull task.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   가장 바쁜 그룹이 불균형한 경우 아래 검사는 모든 것이 동일하다고 
+ *   가정하기 때문에 작동하지 않습니다. 이는 일반적으로 cpus_ptr 제약 
+ *   조건 등으로 인해 사실이 아닙니다.
+ */
 			goto out_balanced;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest에 2개이상의 cpu가 있는데, busiest가 local보다 idle이 더 많은경우
+ */
 		if (busiest->group_weight > 1 &&
 		    local->idle_cpus <= (busiest->idle_cpus + 1))
 			/*
@@ -11657,8 +12303,22 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 			 * on another group. Of course this applies only if
 			 * there is more than 1 CPU per group.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   가장 바쁜 그룹이 오버로드되지 않고 이 그룹과 가장 바쁜 그룹 wrt 
+ *   유휴 CPU 간에 불균형이 없으면 균형이 잡힌 것입니다. diff가 1보다 
+ *   크면 불균형이 중요해집니다. 그렇지 않으면 불균형을 다른 그룹으로 
+ *   이동하게 될 수 있습니다. 물론 이는 그룹당 CPU가 1개 이상인 
+ *   경우에만 적용됩니다.
+ */
 			goto out_balanced;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest가 한개인 경우 끌고 오면 안된다.
+ *   ex) fully busy인데 task를 하나 끌고 와봤자 load가 또 찰뿐일것이다.
+ */
 		if (busiest->sum_h_nr_running == 1)
 			/*
 			 * busiest doesn't have any tasks waiting to run
@@ -11678,6 +12338,10 @@ out_balanced:
 
 /*
  * find_busiest_queue - find the busiest runqueue among the CPUs in the group.
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - @group에서 가장 바쁜 cpu를 찾는다
  */
 static struct rq *find_busiest_queue(struct lb_env *env,
 				     struct sched_group *group)
@@ -11714,9 +12378,35 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 		 *
 		 * Both cases only affect the total convergence complexity.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   우리는 그룹/실행 대기열을 세 그룹으로 분류합니다.
+ *   - regular: !numa 작업이 있습니다. 
+ *   - remote: '잘못된' 노드에서 실행되는 numa 작업이 있습니다.
+ *   - all: 구분이 없습니다.
+ *
+ *   이상적으로 배치된 누마 작업을 마이그레이션하지 않으려면 더 
+ *   나은 옵션이 있을 때 무시하십시오.
+ *
+ *   다른 작업을 마이그레이션하기 위해 실제 가장 바쁜 대기열을 무시하더라도 
+ *   다음 밸런스 패스는 노드 내부에서 작업을 이동하여 가장 바쁜 대기열을 
+ *   여전히 줄일 수 있습니다.
+ *
+ *   이 분류로 인해 충분한 부하를 이동할 수 없는 경우 다음 단계에서 
+ *   그룹 분류를 조정하고 더 많은 작업을 마이그레이션할 수 있습니다.
+ *
+ *   두 경우 모두 전체 수렴 복잡성에만 영향을 미칩니다.
+ *
+ * - 해당 cpu의 fbq_type이 group fbq_type보다 좋은경우 continue
+ */
 		if (rt > env->fbq_type)
 			continue;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest를 찾는데 idle인것은 필요없다. continue
+ */
 		nr_running = rq->cfs.h_nr_running;
 		if (!nr_running)
 			continue;
@@ -11729,6 +12419,15 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 		 * Higher per-CPU capacity is considered better than balancing
 		 * average load.
 		 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   ASYM_CPUCAPACITY 도메인의 경우 결국 active_balancing 
+ *   고용량->저용량으로 이어질 수 있는 CPU를 선택하지 마십시오.
+ *   CPU당 용량이 높을수록 평균 로드 균형을 맞추는 것보다 더 나은 
+ *   것으로 간주됩니다.
+ * - asym인데, task가 1개면서 dest의 capa이 작은쪽이면 continue.
+ */
 		if (env->sd->flags & SD_ASYM_CPUCAPACITY &&
 		    !capacity_greater(capacity_of(env->dst_cpu), capacity) &&
 		    nr_running == 1)
@@ -11740,8 +12439,18 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			 * When comparing with load imbalance, use cpu_load()
 			 * which is not scaled with the CPU capacity.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   로드 불균형과 비교할 때 CPU 용량으로 스케일링되지 않는 cpu_load()를 사용하십시오.
+ */
 			load = cpu_load(rq);
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - task가 1개돌때, cpu load가 imbalance보다 크다면, rq capa가 눈에띄게 줄어든게 아니라면
+ *   break
+ */
 			if (nr_running == 1 && load > env->imbalance &&
 			    !check_cpu_capacity(rq, env->sd))
 				break;
@@ -11759,6 +12468,20 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			 * load_i * capacity_j > load_j * capacity_i;
 			 * where j is our previous maximum.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   다른 CPU와의 부하 비교를 위해 CPU 용량으로 확장된 cpu_load()를 고려하여 더 
+ *   낮은 용량에서 잠재적으로 실행 중인 CPU에서 부하를 이동할 수 있습니다.
+ *
+ *   따라서 우리는 max(load_i / capacity_i)를 찾고 있습니다. 나눗셈을 없애기 위한 
+ *   십자형 곱셈은 다음과 같이 작동합니다.
+ *   load_i * capacity_j > load_j * capacity_i; 
+ *   여기서 j는 이전 최대값입니다.
+ *
+ * - 현재의 load, busiest load와 현재의 capa, busiest capa를 cross하여 비교한다.
+ *   iterate중인 load가 크다면 busiest로 갱신한다.
+ */
 			if (load * busiest_capacity > busiest_load * capacity) {
 				busiest_load = load;
 				busiest_capacity = capacity;
@@ -11774,9 +12497,21 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			 * running task. Whatever its utilization, we will fail
 			 * detach the task.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   하나의 실행 중인 작업으로 CPU에서 사용률을 끌어오려고 하지 마십시오. 
+ *   활용도가 무엇이든 작업 분리에 실패합니다.
+ *   
+ * - task한개면 굳이 안한다.
+ */
 			if (nr_running <= 1)
 				continue;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - 현재 util이 크다면 busiest로 갱신한다.
+ */
 			if (busiest_util < util) {
 				busiest_util = util;
 				busiest = rq;
@@ -11784,6 +12519,10 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			break;
 
 		case migrate_task:
+/*
+ * IAMROOT, 2023.05.06:
+ * - task숫자로 비교해 갱신한다.
+ */
 			if (busiest_nr < nr_running) {
 				busiest_nr = nr_running;
 				busiest = rq;
@@ -11795,6 +12534,13 @@ static struct rq *find_busiest_queue(struct lb_env *env,
 			 * For ASYM_CPUCAPACITY domains with misfit tasks we
 			 * simply seek the "biggest" misfit task.
 			 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   부적합 작업이 있는 ASYM_CPUCAPACITY 도메인의 경우 가장 큰 부적합 
+ *   작업을 찾습니다.
+ * - misfit_task_load로 비교해 갱신한다.
+ */
 			if (rq->misfit_task_load > busiest_load) {
 				busiest_load = rq->misfit_task_load;
 				busiest = rq;
@@ -11874,6 +12620,18 @@ static int need_active_balance(struct lb_env *env)
 
 static int active_load_balance_cpu_stop(void *data);
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - return 0
+ *   1. dst_cpu와 cpus가 겹치는 범위가 없는 경우
+ *   2. balance mask의 idle cpu의 첫번째와 dst_cpu가 불일치 하는 경우
+ *   3. idle이 없으면 balance mask의 첫번째가 dest cpu가 아닌 경우
+ *
+ * - return 1. shulde balance를 하는 경우
+ *   1. env->idle의 CPU_NEWLY_IDLE. 무조건 balance 하라는 의미이다.
+ *   2. balance mask중에서 idle인 첫번째 cpu가 dest cpu 인 겨우
+ *   3. idle이 없으면 balance mask의 첫번째가 dest cpu인 경우
+ */
 static int should_we_balance(struct lb_env *env)
 {
 	struct sched_group *sg = env->sd->groups;
@@ -11883,6 +12641,13 @@ static int should_we_balance(struct lb_env *env)
 	 * Ensure the balancing environment is consistent; can happen
 	 * when the softirq triggers 'during' hotplug.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   밸런싱 환경이 일관성이 있는지 확인합니다. 
+ *   softirq가 핫플러그 'during'을 트리거할 
+ *   때 발생할 수 있습니다.
+ */
 	if (!cpumask_test_cpu(env->dst_cpu, env->cpus))
 		return 0;
 
@@ -11890,10 +12655,20 @@ static int should_we_balance(struct lb_env *env)
 	 * In the newly idle case, we will allow all the CPUs
 	 * to do the newly idle load balance.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   새로 유휴 상태인 경우 모든 CPU가 새로 유휴 로드 밸런싱을 
+ *   수행하도록 허용합니다.
+ */
 	if (env->idle == CPU_NEWLY_IDLE)
 		return 1;
 
 	/* Try to find first idle CPU */
+/*
+ * IAMROOT, 2023.05.06:
+ * - balance mask에서 idle인 cpu중 첫번째가 dst_cpu랑 일치하는지 판별한다
+ */
 	for_each_cpu_and(cpu, group_balance_mask(sg), env->cpus) {
 		if (!idle_cpu(cpu))
 			continue;
@@ -11902,6 +12677,11 @@ static int should_we_balance(struct lb_env *env)
 		return cpu == env->dst_cpu;
 	}
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - idle cpu가 없는경우 balance mask의 첫번째 cpu가 dst_cpu와 일치하는
+ *   지 비교한다.
+ */
 	/* Are we the first CPU of this group ? */
 	return group_balance_cpu(sg) == env->dst_cpu;
 }
@@ -11909,6 +12689,10 @@ static int should_we_balance(struct lb_env *env)
 /*
  * Check this_cpu to ensure it is balanced within domain. Attempt to move
  * tasks if there is an imbalance.
+ */
+/*
+ * IAMROOT, 2023.05.06:
+ * - 
  */
 static int load_balance(int this_cpu, struct rq *this_rq,
 			struct sched_domain *sd, enum cpu_idle_type idle,
@@ -11933,16 +12717,29 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 		.tasks		= LIST_HEAD_INIT(env.tasks),
 	};
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - acive에서 span과 겹치는 범위를 cpus에 저장한다.
+ */
 	cpumask_and(cpus, sched_domain_span(sd), cpu_active_mask);
 
 	schedstat_inc(sd->lb_count[idle]);
 
 redo:
+/*
+ * IAMROOT, 2023.05.06:
+ * - @idle이 CPU_NEWLY_IDLE가 아니였다면, balance cpu중에 
+ *   dest cpu가 있는지 확인한다. 없다면 out_balanced.
+ */
 	if (!should_we_balance(&env)) {
 		*continue_balancing = 0;
 		goto out_balanced;
 	}
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - busiest group을 찾는다.
+ */
 	group = find_busiest_group(&env);
 	if (!group) {
 		schedstat_inc(sd->lb_nobusyg[idle]);
@@ -12137,6 +12934,14 @@ out_balanced:
 	 * constraints. Clear the imbalance flag only if other tasks got
 	 * a chance to move and fix the imbalance.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   약간의 선호도 제약에 직면했을 수 있지만 균형에 도달합니다. 
+ *   다른 작업이 이동하고 불균형을 수정할 기회가 있는 경우에만 
+ *   불균형 플래그를 지우십시오.
+ * - 
+ */
 	if (sd_parent && !(env.flags & LBF_ALL_PINNED)) {
 		int *group_imbalance = &sd_parent->groups->sgc->imbalance;
 
@@ -12150,6 +12955,13 @@ out_all_pinned:
 	 * we can't migrate them. Let the imbalance flag set so parent level
 	 * can try to migrate them.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - papago
+ *   모든 작업이 이 수준에 고정되어 마이그레이션할 수 없기 때문에 
+ *   균형에 도달합니다. 부모 수준에서 마이그레이션을 시도할 수 있도록 
+ *   불균형 플래그를 설정하십시오.
+ */
 	schedstat_inc(sd->lb_balanced[idle]);
 
 	sd->nr_balance_failed = 0;
@@ -12163,6 +12975,12 @@ out_one_pinned:
 	 * skyrocketing in a short amount of time. Skip the balance_interval
 	 * increase logic to avoid that.
 	 */
+/*
+ * IAMROOT, 2023.05.06:
+ * - newidle_balance()는 균형 간격을 무시하므로 이 코드에 반복적으로 
+ *   도달할 수 있으며 짧은 시간 내에 balance_interval이 급등할 수 
+ *   있습니다. 이를 방지하려면 balance_interval 증가 로직을 건너뛰십시오.
+ */
 	if (env.idle == CPU_NEWLY_IDLE)
 		goto out;
 

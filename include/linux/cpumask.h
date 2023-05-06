@@ -802,6 +802,10 @@ static inline unsigned int cpumask_size(void)
  */
 typedef struct cpumask *cpumask_var_t;
 
+/*
+ * IAMROOT, 2023.05.06:
+ * - @x(pcpu cpumasks)에서 this cpu에 대한 cpumask를 가져온다.
+ */
 #define this_cpu_cpumask_var_ptr(x)	this_cpu_read(x)
 #define __cpumask_var_read_mostly	__read_mostly
 

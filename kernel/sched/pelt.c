@@ -201,7 +201,6 @@ accumulate_sum(u64 delta, struct sched_avg *sa,
 	u32 contrib = (u32)delta; /* p == 0 -> delta < 1024 */
 	u64 periods;
 
-
 /*
  * IAMROOT, 2022.12.31:
  * - 이전에 남겨진 시간을 고려한다.
