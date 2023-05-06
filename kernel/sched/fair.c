@@ -11274,7 +11274,7 @@ static bool update_sd_pick_busiest(struct lb_env *env,
  *   group 기준으로 판별한다.
  */
 static inline enum fbq_type fbq_classify_group(struct sg_lb_stats *sgs)
-
+{
 	if (sgs->sum_h_nr_running > sgs->nr_numa_running)
 		return regular;
 	if (sgs->sum_h_nr_running > sgs->nr_preferred_running)
