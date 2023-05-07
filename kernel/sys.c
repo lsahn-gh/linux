@@ -1221,6 +1221,11 @@ out:
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.05.07:
+ * - init process가 setsid를 호출하는 시작점.
+ *   /autogroup-17 의 형식으로 autogroup이 만들어진다.
+ */
 SYSCALL_DEFINE0(setsid)
 {
 	return ksys_setsid();
@@ -2537,6 +2542,13 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
 	return error;
 }
 
+/*
+ * IAMROOT, 2023.05.07:
+ * - user에서 getcpu() 미구현시 사용방법.
+ *   unsigned cpu, node;
+ *   struct getcpu_cache tmp;
+ *   syscall(__NR_getcpu, &cpu, &node, &tmp);
+ */
 SYSCALL_DEFINE3(getcpu, unsigned __user *, cpup, unsigned __user *, nodep,
 		struct getcpu_cache __user *, unused)
 {
