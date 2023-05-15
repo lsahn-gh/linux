@@ -12952,6 +12952,12 @@ redo:
 
 	ld_moved = 0;
 	/* Clear this flag as soon as we find a pullable task */
+/*
+ * IAMROOT, 2023.05.15: 
+ * LBF_ALL_PINNED: 
+ * 이 플래그는 최초 설정으로 migration할 수 있는 task가 하나도 없는 상태입니다.
+ * 만일 하나라도 pull이 가능한 태스크가 발견되면 이 플래그를 클리어합니다.
+ */
 	env.flags |= LBF_ALL_PINNED;
 	if (busiest->nr_running > 1) {
 		/*
