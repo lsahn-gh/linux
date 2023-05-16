@@ -30,6 +30,12 @@ SCHED_FEAT(LAST_BUDDY, true)
  * Consider buddies to be cache hot, decreases the likeliness of a
  * cache buddy being migrated away, increases cache locality.
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * 버디를 캐시 핫으로 간주하고, 캐시 버디가 멀리 마이그레이션될 가능성을 줄이고,
+ * 캐시 지역성을 높입니다.
+ */
 SCHED_FEAT(CACHE_HOT_BUDDY, true)
 
 /*

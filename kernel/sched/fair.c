@@ -6419,6 +6419,12 @@ static inline int throttled_hierarchy(struct cfs_rq *cfs_rq)
  * dest_cpu are members of a throttled hierarchy when performing group
  * load-balance operations.
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * 그룹 부하 분산 작업을 수행할 때 src_cpu 또는 dest_cpu에 해당하는 그룹 엔터티 중
+ * 어느 것도 제한 계층의 구성원이 아닌지 확인합니다.
+ */
 static inline int throttled_lb_pair(struct task_group *tg,
 				    int src_cpu, int dest_cpu)
 {
@@ -9718,6 +9724,12 @@ enum migration_type {
 	migrate_misfit
 };
 
+/*
+ * IAMROOT, 2023.05.13:
+ * - LBF_ALL_PINNED: 모든 task들을 migration 할 수 없을 때
+ *   LBF_DST_PINNED: dst cpu로 migration 할 수 없을 때
+ *   LBF_SOME_PINNED: 일부 task가 migration 할 수 없을 때
+ */
 #define LBF_ALL_PINNED	0x01
 #define LBF_NEED_BREAK	0x02
 #define LBF_DST_PINNED  0x04
@@ -9754,6 +9766,17 @@ struct lb_env {
 /*
  * Is this task likely cache-hot:
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * 이 작업이 캐시 핫일 가능성이 있습니까?
+ * - cache hot 이 아닌 조건
+ *   1. !fair_sched_class 2. idle_policy 3. SMT
+ * - cache hot 인 조건
+ *   1. CACHE_HOT_BUDDY
+ *   2. task 가 스케쥴링되고 실행한 시간 이
+ *      sysctl_sched_migration_cost(default 0.5ms) 보다 작을때
+ */
 static int task_hot(struct task_struct *p, struct lb_env *env)
 {
 	s64 delta;
@@ -9773,11 +9796,19 @@ static int task_hot(struct task_struct *p, struct lb_env *env)
 	/*
 	 * Buddy candidates are cache hot:
 	 */
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - 다음 순서(next,last)는 cache hot task 로 판단한다.
+	 */
 	if (sched_feat(CACHE_HOT_BUDDY) && env->dst_rq->nr_running &&
 			(&p->se == cfs_rq_of(&p->se)->next ||
 			 &p->se == cfs_rq_of(&p->se)->last))
 		return 1;
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - taskhot 설정으로 debug시 sysfs를 통해 설정
+	 */
 	if (sysctl_sched_migration_cost == -1)
 		return 1;
 
@@ -9785,12 +9816,27 @@ static int task_hot(struct task_struct *p, struct lb_env *env)
 	 * Don't migrate task if the task's cookie does not match
 	 * with the destination CPU's core cookie.
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 작업의 쿠키가 대상 CPU의 코어 쿠키와 일치하지 않는 경우 작업을 마이그레이션하지
+	 * 마십시오.
+	 */
 	if (!sched_core_cookie_match(cpu_rq(env->dst_cpu), p))
 		return 1;
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - taskhot 이 아닌 설정으로 debug시 sysfs를 통해 설정
+	 */
 	if (sysctl_sched_migration_cost == 0)
 		return 0;
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - task 가 스케쥴링되고 실행한 시간.
+	 *   sysctl_sched_migration_cost(default 0.5ms) 보다 작을때 task hot 임.
+	 */
 	delta = rq_clock_task(env->src_rq) - p->se.exec_start;
 
 	return delta < (s64)sysctl_sched_migration_cost;
@@ -9801,6 +9847,15 @@ static int task_hot(struct task_struct *p, struct lb_env *env)
  * Returns 1, if task migration degrades locality
  * Returns 0, if task migration improves locality i.e migration preferred.
  * Returns -1, if task migration is not affected by locality.
+ */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * 작업 마이그레이션이 지역성을 저하시키는 경우 1을 반환합니다.
+ * 작업 마이그레이션이 지역성을 향상시키는 경우(즉, 마이그레이션이 선호되는 경우) 0을
+ * 반환합니다.
+ * 작업 마이그레이션이 지역의 영향을 받지 않는 경우 -1을 반환합니다.
+ * TODO
  */
 static int migrate_degrades_locality(struct task_struct *p, struct lb_env *env)
 {
@@ -9859,6 +9914,22 @@ static inline int migrate_degrades_locality(struct task_struct *p,
 /*
  * can_migrate_task - may task p from runqueue rq be migrated to this_cpu?
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * can_migrate_task - runqueue rq의 작업 p를 this_cpu로 마이그레이션할 수 있습니까?
+ * - migrate(x)
+ *   1. throttled_lb_pair
+ *   2. pcpu kthread
+ *   3. available cpus_ptr에 포함되지 않은 경우
+ *   4. task_running
+ *   5.
+ * - migrate
+ *   1. LBF_ACTIVE_LB 설정인 경우
+ *   2. cache cold인 경우
+ *   3. 이번에 hot으로 판명 되었지만 migration 시도 실패(그전 cold 타임)가
+ *	 cache_nice_tries를 넘은 경우 return 1
+ */
 static
 int can_migrate_task(struct task_struct *p, struct lb_env *env)
 {
@@ -9873,13 +9944,32 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	 * 3) running (obviously), or
 	 * 4) are cache-hot on their current CPU.
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 다음과 같은 작업은 마이그레이션하지 않습니다.
+	 * 1) throttled_lb_pair, 또는
+	 * 2) cpus_ptr로 인해 이 CPU로 마이그레이션할 수 없음, 또는
+	 * 3) (분명히) 실행 중, 또는
+	 * 4) 현재 CPU에서 캐시 핫입니다.
+	 * - 2.5) pcpu kthread
+	 */
 	if (throttled_lb_pair(task_group(p), env->src_cpu, env->dst_cpu))
 		return 0;
 
 	/* Disregard pcpu kthreads; they are where they need to be. */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * pcpu kthread를 무시하십시오. 그들은 그들이 있어야 할 곳에 있습니다.
+	 */
 	if (kthread_is_per_cpu(p))
 		return 0;
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - available cpu에 dst_cpu 가 제외된 경우
+	 */
 	if (!cpumask_test_cpu(env->dst_cpu, p->cpus_ptr)) {
 		int cpu;
 
@@ -9897,11 +9987,28 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 		 * - if we have already computed one in current iteration
 		 * - if it's an active balance
 		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 이 작업을 sched_group의 다른 CPU로 마이그레이션할 수 있는지
+		 * 기억하십시오. src_cpu에서 다른 작업을 끌어와서 로드 균형 목표를
+		 * 충족할 수 없는 경우 다시 방문하고 싶을 수 있습니다.
+		 *
+		 * new_dst_cpu 계산을 피하십시오
+		 * - NEWLY_IDLE의 경우
+		 * - 현재 반복에서 이미 계산한 경우
+		 * - active balance 경우
+		 */
 		if (env->idle == CPU_NEWLY_IDLE ||
 		    env->flags & (LBF_DST_PINNED | LBF_ACTIVE_LB))
 			return 0;
 
 		/* Prevent to re-select dst_cpu via env's CPUs: */
+		/*
+		 * IAMROOT, 2023.05.13:
+		 * - dst_grpmask 중 avilable cpu가 있으면 LBF_DST_PINNED 설정
+		 *   하고 new_dst_cpu 교체
+		 */
 		for_each_cpu_and(cpu, env->dst_grpmask, env->cpus) {
 			if (cpumask_test_cpu(cpu, p->cpus_ptr)) {
 				env->flags |= LBF_DST_PINNED;
@@ -9914,6 +10021,11 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	}
 
 	/* Record that we found at least one task that could run on dst_cpu */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * dst_cpu에서 실행할 수 있는 작업을 하나 이상 찾았음을 기록합니다.
+	 */
 	env->flags &= ~LBF_ALL_PINNED;
 
 	if (task_running(env->src_rq, p)) {
@@ -9928,6 +10040,15 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	 * 3) task is cache cold, or
 	 * 4) too many balance attempts have failed.
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 다음과 같은 경우 적극적인 마이그레이션:
+	 * 1) active balance
+	 * 2) 대상 numa가 선호됨
+	 * 3) 작업이 캐시 콜드이거나
+	 * 4) 너무 많은 균형 시도가 실패했습니다.
+	 */
 	if (env->flags & LBF_ACTIVE_LB)
 		return 1;
 
@@ -9935,6 +10056,12 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	if (tsk_cache_hot == -1)
 		tsk_cache_hot = task_hot(p, env);
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - 1. cache cold인 경우 return 1
+	 *   2. 이번에 hot으로 판명 되었지만 migration 시도 실패(그전 cold 타임)가
+	 *      cache_nice_tries를 넘은 경우 return 1
+	 */
 	if (tsk_cache_hot <= 0 ||
 	    env->sd->nr_balance_failed > env->sd->cache_nice_tries) {
 		if (tsk_cache_hot == 1) {
@@ -9965,12 +10092,27 @@ static void detach_task(struct task_struct *p, struct lb_env *env)
  *
  * Returns a task if successful and NULL otherwise.
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * detach_one_task() -- "도메인" 내 활성 균형 작업의 일부로 env->src_rq에서 정확히
+ * 하나의 작업을 대기열에서 빼려고 시도합니다. 성공하면 작업을 반환하고 그렇지
+ * 않으면 NULL을 반환합니다.
+ */
+/*
+ * IAMROOT, 2023.05.13:
+ * - 리스트의 뒤에서 task 하나를 detach 한다.
+ */
 static struct task_struct *detach_one_task(struct lb_env *env)
 {
 	struct task_struct *p;
 
 	lockdep_assert_rq_held(env->src_rq);
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - list의 뒷부분(cold)부터 순회한다.
+	 */
 	list_for_each_entry_reverse(p,
 			&env->src_rq->cfs_tasks, se.group_node) {
 		if (!can_migrate_task(p, env))
@@ -10010,6 +10152,12 @@ static int detach_tasks(struct lb_env *env)
 	/*
 	 * Source run queue has been emptied by another CPU, clear
 	 * LBF_ALL_PINNED flag as we will not test any task.
+	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 소스 실행 대기열이 다른 CPU에 의해 비워졌습니다. 어떤 작업도 테스트하지 않을
+	 * 것이므로 LBF_ALL_PINNED 플래그를 지웁니다.
 	 */
 	if (env->src_rq->nr_running <= 1) {
 		env->flags &= ~LBF_ALL_PINNED;
@@ -11985,7 +12133,7 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
 		 */
 /*
  * IAMROOT, 2023.05.06:
- * - local이 바
+ * - local 평균이 더 바쁘면 balance 하지 않는다.
  */
 		if (local->avg_load >= busiest->avg_load) {
 			env->imbalance = 0;
@@ -12322,6 +12470,10 @@ static struct sched_group *find_busiest_group(struct lb_env *env)
 
 force_balance:
 	/* Looks like there is an imbalance. Compute it */
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - migration_type 과 imbalance 값이 결정된다
+	 */
 	calculate_imbalance(env, &sds);
 	return env->imbalance ? sds.busiest : NULL;
 
@@ -12554,6 +12706,10 @@ static struct rq *find_busiest_queue(struct lb_env *env,
  */
 #define MAX_PINNED_INTERVAL	512
 
+/*
+ * IAMROOT, 2023.05.13:
+ * - smt 에서 dst_cpu가 우선순위가 높으면 true
+ */
 static inline bool
 asym_active_balance(struct lb_env *env)
 {
@@ -12562,10 +12718,20 @@ asym_active_balance(struct lb_env *env)
 	 * lower priority CPUs in order to pack all tasks in the
 	 * highest priority CPUs.
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * ASYM_PACKING은 우선 순위가 가장 높은 CPU의 모든 작업을 압축하기 위해 바쁘지만
+	 * 우선 순위가 낮은 CPU에서 마이그레이션 작업을 강제 실행해야 합니다.
+	 */
 	return env->idle != CPU_NOT_IDLE && (env->sd->flags & SD_ASYM_PACKING) &&
 	       sched_asym_prefer(env->dst_cpu, env->src_cpu);
 }
 
+/*
+ * IAMROOT, 2023.05.13:
+ * - 여유 용량이 있는데 balance 실패횟수가 cache_nice_tries+2보다 클 경우 true 반환
+ */
 static inline bool
 imbalanced_active_balance(struct lb_env *env)
 {
@@ -12576,6 +12742,14 @@ imbalanced_active_balance(struct lb_env *env)
 	 * distribution of the load on the system but also the even distribution of the
 	 * threads on a system with spare capacity
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 균형이 맞지 않는 경우에는 시스템에 대한 로드의 공정한 분배를 방해하는 고정된
+	 * 작업의 경우뿐만 아니라 여유 용량이 있는 시스템의 스레드의 균등한 분배도
+	 * 포함됩니다.
+	 * - 여유 용량이 있는데 balance 실패횟수가 cache_nice_tries+2보다 클 경우 true
+	 */
 	if ((env->migration_type == migrate_task) &&
 	    (sd->nr_balance_failed > sd->cache_nice_tries+2))
 		return 1;
@@ -12583,6 +12757,14 @@ imbalanced_active_balance(struct lb_env *env)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.05.13:
+ * - active_balance 조건:
+ *   1. smt 에서 dst_cpu가 우선순위가 높다
+ *   2. 여유 용량이 있는데 balance 실패횟수가 cache_nice_tries+2보다 클 경우
+ *   3. src_cpu의 용량이 감소하여 dst_cpu에서 더 많은 용량을 사용할 수 있는 경우
+ *   4. misfit type 인 경우
+ */
 static int need_active_balance(struct lb_env *env)
 {
 	struct sched_domain *sd = env->sd;
@@ -12598,6 +12780,13 @@ static int need_active_balance(struct lb_env *env)
 	 * It's worth migrating the task if the src_cpu's capacity is reduced
 	 * because of other sched_class or IRQs if more capacity stays
 	 * available on dst_cpu.
+	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * dst_cpu는 유휴 상태이고 src_cpu CPU에는 1개의 CFS 작업만 있습니다. 다른
+	 * sched_class 또는 IRQ로 인해 src_cpu의 용량이 감소한 경우 dst_cpu에서 더 많은
+	 * 용량을 사용할 수 있는 경우 작업을 마이그레이션할 가치가 있습니다.
 	 */
 	if ((env->idle != CPU_NOT_IDLE) &&
 	    (env->src_rq->cfs.h_nr_running == 1)) {
@@ -12685,8 +12874,10 @@ static int should_we_balance(struct lb_env *env)
  * tasks if there is an imbalance.
  */
 /*
- * IAMROOT, 2023.05.06:
- * - 
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * this_cpu를 확인하여 도메인 내에서 균형이 맞는지 확인하십시오. 불균형이 있는 경우
+ * 작업 이동을 시도합니다.
  */
 static int load_balance(int this_cpu, struct rq *this_rq,
 			struct sched_domain *sd, enum cpu_idle_type idle,
@@ -12755,6 +12946,12 @@ redo:
 
 	ld_moved = 0;
 	/* Clear this flag as soon as we find a pullable task */
+/*
+ * IAMROOT, 2023.05.15: 
+ * LBF_ALL_PINNED: 
+ * 이 플래그는 최초 설정으로 migration할 수 있는 task가 하나도 없는 상태입니다.
+ * 만일 하나라도 pull이 가능한 태스크가 발견되면 이 플래그를 클리어합니다.
+ */
 	env.flags |= LBF_ALL_PINNED;
 	if (busiest->nr_running > 1) {
 		/*
@@ -12762,6 +12959,13 @@ redo:
 		 * an imbalance but busiest->nr_running <= 1, the group is
 		 * still unbalanced. ld_moved simply stays zero, so it is
 		 * correctly treated as an imbalance.
+		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 작업 이동을 시도합니다. find_busiest_group이 불균형을 발견했지만
+		 * busiest->nr_running <= 1인 경우 그룹은 여전히 ​​불균형입니다.
+		 * ld_moved는 단순히 0으로 유지되므로 불균형으로 올바르게 처리됩니다.
 		 */
 		env.loop_max  = min(sysctl_sched_nr_migrate, busiest->nr_running);
 
@@ -12773,6 +12977,12 @@ more_balance:
 		 * cur_ld_moved - load moved in current iteration
 		 * ld_moved     - cumulative load moved across iterations
 		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * cur_ld_moved - 현재 반복에서 이동된 로드
+		 * ld_moved - 반복 간에 이동된 누적 로드
+		 */
 		cur_ld_moved = detach_tasks(&env);
 
 		/*
@@ -12781,6 +12991,14 @@ more_balance:
 		 * unlock busiest->lock, and we are able to be sure
 		 * that nobody can manipulate the tasks in parallel.
 		 * See task_rq_lock() family for the details.
+		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * busiest_rq에서 일부 작업을 분리했습니다. 모든 작업은
+		 * "TASK_ON_RQ_MIGRATING"으로 마스킹되어 가장 바쁜->잠금을 안전하게
+		 * 해제할 수 있으며 아무도 병렬로 작업을 조작할 수 없도록 할 수 있습니다.
+		 * 자세한 내용은 task_rq_lock() 제품군을 참조하세요.
 		 */
 
 		rq_unlock(busiest, &rf);
@@ -12816,6 +13034,28 @@ more_balance:
 		 * moreover subsequent load balance cycles should correct the
 		 * excess load moved.
 		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 우리에게 이동할 수 없는 src_cpu의 작업(아핀)을 다시 방문하여 실행할
+		 * 수 있는 sched_group의 대체 dst_cpu로 이동합니다. 동일한 src_cpu에서
+		 * 반복하는 횟수의 상한은 sched_group의 CPU 수에 따라 다릅니다.
+		 *
+		 * 이것은
+		 * 로드 밸런스 시맨틱을 누가 given_cpu로 이동할 수 있는지에 대해 약간
+		 * 변경합니다. given_cpu 자체(또는 given_cpu가 nohz-idle인 경우 대신
+		 * 작동하는 ilb_cpu) 외에도 이제 balance_cpu가 given_cpu로 부하를
+		 * 이동할 위치에 있습니다. 드물게 충돌이 발생할 수 있습니다(balance_cpu
+		 * 및 given_cpu/ilb_cpu가 _독립적으로_ 그리고 _동일_ 시간에 일부 로드를
+		 * given_cpu로 이동하도록 결정) 과도한 로드가 given_cpu로 이동되도록
+		 * 합니다. 그러나 이것은 실제로 그렇게 많이 발생하지 않아야 하며, 또한
+		 * 후속 로드 균형 주기는 이동된 초과 로드를 수정해야 합니다.
+		 */
+		/*
+		 * IAMROOT, 2023.05.13:
+		 * - dst_cpu 가 available 하지 않아 new_dst_cpu로 교체해서
+		 *   재시도
+		 */
 		if ((env.flags & LBF_DST_PINNED) && env.imbalance > 0) {
 
 			/* Prevent to re-select dst_cpu via env's CPUs */
@@ -12837,6 +13077,13 @@ more_balance:
 		/*
 		 * We failed to reach balance because of affinity.
 		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 친화력 때문에 균형에 도달하지 못했습니다.
+		 * - cpu 제한으로 balance를 할 수 없어 부모 도메인에서 시도하도록
+		 *   sd_parent->groups->sgc->imbalance를 1로 설정한다.
+		 */
 		if (sd_parent) {
 			int *group_imbalance = &sd_parent->groups->sgc->imbalance;
 
@@ -12845,6 +13092,11 @@ more_balance:
 		}
 
 		/* All tasks on this runqueue were pinned by CPU affinity */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 이 실행 대기열의 모든 작업은 CPU 선호도에 의해 고정되었습니다.
+		 */
 		if (unlikely(env.flags & LBF_ALL_PINNED)) {
 			__cpumask_clear_cpu(cpu_of(busiest), cpus);
 			/*
@@ -12854,6 +13106,15 @@ more_balance:
 			 * pull load from which are not contained within the
 			 * destination group that is receiving any migrated
 			 * load.
+			 */
+			/*
+			 * IAMROOT. 2023.05.13:
+			 * - google-translate
+			 * 현재 sched_domain 수준에서 로드 밸런싱을 계속하려는 시도는
+			 * 마이그레이션된 로드를 수신하는 대상 그룹에 포함되지 않은
+			 * 로드를 끌어올 수 있는 가장 바쁜 CPU로 남아 있는 활성
+			 * CPU가 있는 경우에만 의미가 있습니다.
+			 * - dst_grpmask에 없는 cpus 가 아직 있으니 재시도 한다.
 			 */
 			if (!cpumask_subset(cpus, env.dst_grpmask)) {
 				env.loop = 0;
@@ -12872,9 +13133,20 @@ more_balance:
 		 * frequent, pollute the failure counter causing
 		 * excessive cache_hot migrations and active balances.
 		 */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * periodic balance에서만 실패 카운터를 증가시킵니다. 우리는 매우
+		 * 빈번할 수 있는 newidle 균형이 실패 카운터를 오염시켜 과도한 cache_hot
+		 * 마이그레이션 및 활성 균형을 유발하는 것을 원하지 않습니다.
+		 */
 		if (idle != CPU_NEWLY_IDLE)
 			sd->nr_balance_failed++;
 
+		/*
+		 * IAMROOT, 2023.05.13:
+		 * - active balance 는 무조건 curr 를 migration 한다.
+		 */
 		if (need_active_balance(&env)) {
 			unsigned long flags;
 
@@ -12885,18 +13157,37 @@ more_balance:
 			 * if the curr task on busiest CPU can't be
 			 * moved to this_cpu:
 			 */
+			/*
+			 * IAMROOT. 2023.05.13:
+			 * - google-translate
+			 * 가장 바쁜 CPU의 현재 작업을 this_cpu로 이동할 수 없는 경우
+			 * active_load_balance_cpu_stop을 시작하지 마십시오.
+			 */
 			if (!cpumask_test_cpu(this_cpu, busiest->curr->cpus_ptr)) {
 				raw_spin_rq_unlock_irqrestore(busiest, flags);
 				goto out_one_pinned;
 			}
 
 			/* Record that we found at least one task that could run on this_cpu */
+			/*
+			 * IAMROOT. 2023.05.13:
+			 * - google-translate
+			 * this_cpu에서 실행할 수 있는 작업을 하나 이상 찾았음을
+			 * 기록합니다.
+			 */
 			env.flags &= ~LBF_ALL_PINNED;
 
 			/*
 			 * ->active_balance synchronizes accesses to
 			 * ->active_balance_work.  Once set, it's cleared
 			 * only after active load balance is finished.
+			 */
+			/*
+			 * IAMROOT. 2023.05.13:
+			 * - google-translate
+			 * ->active_balance는 ->active_balance_work에 대한
+			 * 액세스를 동기화합니다. 일단  설정되면 활성 부하 분산이
+			 * 완료된 후에만 지워집니다.
 			 */
 			if (!busiest->active_balance) {
 				busiest->active_balance = 1;
@@ -12912,11 +13203,20 @@ more_balance:
 			}
 		}
 	} else {
+		/*
+		 * IAMROOT, 2023.05.13:
+		 * - ld_moved 가 0이 아닌 경우
+		 */
 		sd->nr_balance_failed = 0;
 	}
 
 	if (likely(!active_balance) || need_active_balance(&env)) {
 		/* We were unbalanced, so reset the balancing interval */
+		/*
+		 * IAMROOT. 2023.05.13:
+		 * - google-translate
+		 * 균형이 맞지 않았으므로 균형 간격을 재설정하십시오.
+		 */
 		sd->balance_interval = sd->min_interval;
 	}
 
@@ -12958,6 +13258,10 @@ out_all_pinned:
  */
 	schedstat_inc(sd->lb_balanced[idle]);
 
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - 해당 도메인은 고정 되었으므로 failed를 0으로 초기화
+	 */
 	sd->nr_balance_failed = 0;
 
 out_one_pinned:
@@ -12979,6 +13283,10 @@ out_one_pinned:
 		goto out;
 
 	/* tune up the balancing interval */
+	/*
+	 * IAMROOT, 2023.05.13:
+	 * - balance 가 어느 정도 맞았다면 interval을 2배로 설정
+	 */
 	if ((env.flags & LBF_ALL_PINNED &&
 	     sd->balance_interval < MAX_PINNED_INTERVAL) ||
 	    sd->balance_interval < sd->max_interval)
@@ -13051,6 +13359,17 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
  * least 1 task to be running on each physical CPU where possible, and
  * avoids physical / logical imbalances.
  */
+/*
+ * IAMROOT. 2023.05.13:
+ * - google-translate
+ * active_load_balance_cpu_stop은 CPU 스토퍼에 의해 실행됩니다. 가장 바쁜 CPU에서
+ * 실행 중인 작업을 유휴 CPU로 푸시합니다. 가능한 경우 각 물리적 CPU에서 최소 1개의
+ * 작업을 실행해야 하며 물리적/논리적 불균형을 방지합니다.
+ */
+/*
+ * IAMROOT, 2023.05.13:
+ * - busiest rq 에서 target rq로 옮긴다.
+ */
 static int active_load_balance_cpu_stop(void *data)
 {
 	struct rq *busiest_rq = data;
@@ -13067,10 +13386,21 @@ static int active_load_balance_cpu_stop(void *data)
 	 * CPUs can become inactive. We should not move tasks from or to
 	 * inactive CPUs.
 	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 중지 작업을 대기하고 실행하는 사이에는 CPU가 비활성화될 수 있는 구멍이
+	 * 있습니다. 비활성 CPU에서 또는 비활성 CPU로 작업을 이동해서는 안 됩니다.
+	 */
 	if (!cpu_active(busiest_cpu) || !cpu_active(target_cpu))
 		goto out_unlock;
 
 	/* Make sure the requested CPU hasn't gone down in the meantime: */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 그 동안 요청된 CPU가 다운되지 않았는지 확인합니다.
+	 */
 	if (unlikely(busiest_cpu != smp_processor_id() ||
 		     !busiest_rq->active_balance))
 		goto out_unlock;
@@ -13083,6 +13413,12 @@ static int active_load_balance_cpu_stop(void *data)
 	 * This condition is "impossible", if it occurs
 	 * we need to fix it. Originally reported by
 	 * Bjorn Helgaas on a 128-CPU setup.
+	 */
+	/*
+	 * IAMROOT. 2023.05.13:
+	 * - google-translate
+	 * 이 조건은 "불가능"하며 발생하면 수정해야 합니다. 원래 Bjorn Helgaas가 128-CPU
+	 * 설정에서 보고했습니다.
 	 */
 	BUG_ON(busiest_rq == target_rq);
 

@@ -2586,6 +2586,10 @@ static inline int task_current(struct rq *rq, struct task_struct *p)
 	return rq->curr == p;
 }
 
+/*
+ * IAMROOT, 2023.05.13:
+ * - on_cpu: 현재 동작중인 task. curr 보다 신뢰성이 있다.
+ */
 static inline int task_running(struct rq *rq, struct task_struct *p)
 {
 #ifdef CONFIG_SMP
