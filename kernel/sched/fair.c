@@ -4482,25 +4482,6 @@ void set_task_rq_fair(struct sched_entity *se,
 *  예상되면 해당 load_avg 값이 높아집니다. 반면에 그룹이 앞으로 더 적은
 *  CPU 시간을 소비할 것으로 예상되는 경우에는 load_avg 값이 더 낮아집니다.
 *
-*  - blocked load
-*  현재 예약 대기 중이며 현재 CPU에서 실행되고 있지 않은 작업의 load입니다.
-*  이러한 task은 스케줄러에서 CPU를 할당할 때까지 실행할 수 없기 때문에
-*  "block"된 것으로 간주됩니다.
-*
-*  blocked load는 block task가 실행 가능해지고 CPU에서 실행되도록 예약된 후
-*  task 또는 task group이 반환될 것으로 예상되는 load를 나타내기 때문에
-*  task 또는 task group의 load avg에 포함됩니다. load avg에 block load를
-*  포함함으로써 스케줄러는 예약 대기 중인 작업의 CPU 리소스 사용량을
-*  고려하고 다른 task 및 task group에 CPU 시간을 할당하는 방법에 대해 더 많은
-*  정보에 입각한 결정을 내릴 수 있습니다.
-*
-*  blocked load는 task 또는 task group의 avg load를 계산하는 데 사용되기
-*  때문에 load sum의 필수 부분으로 유지됩니다. 하중 avg은 하중 sum를
-*  PELT window의 크기로 나누어 계산합니다. blocked load가 load sum의 필수
-*  부분으로 포함되지 않은 경우 load avg에 정확하게 반영되지 않으며
-*  스케줄러는 task 또는 task group의 CPU 리소스 사용에 대한 완전한 그림을
-*  갖지 못할 것입니다.
-*
 * - overlap
 *  A와 B라는 두 개의 작업이 있는 실행 대기열이 있다고 상상해 보십시오.
 *  작업 A는 실행 가능한 시간의 50%이고 작업 B는 실행 가능한 시간의
@@ -10763,6 +10744,19 @@ check_cpu_capacity(struct rq *rq, struct sched_domain *sd)
  * help that task: we can migrate the task to a CPU of higher capacity, or
  * the task's current CPU is heavily pressured.
  */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   rq에 부적합한 작업이 있는지 확인하고 우리가 실제로 해당 작업을 도울 
+ *   수 있는 것처럼 보이는지 확인합니다. 작업을 더 높은 용량의 CPU로 
+ *   마이그레이션하거나 작업의 현재 CPU에 큰 부담이 있습니다.
+ *
+ * - 1. @rq에 이미 misfit load(cpu capa를 넘어선 load)가 있다.
+ *   2. @rd에 @rq보다 높은 capa를 가진 cpu가 존재하거나
+ *      @rq capa가 이미 줄어든 상태라면
+ *   위 조건이 맞는지 확인한다. 즉 misfit load가 있지만, 더 좋은
+ *   cpu로 옮길수 있는 상황인지 확인한다.
+ */
 static inline int check_misfit_status(struct rq *rq, struct sched_domain *sd)
 {
 	return rq->misfit_task_load &&
@@ -13313,6 +13307,12 @@ static inline int find_new_ilb(void)
  * Kick a CPU to do the nohz balancing, if it is time for it. We pick any
  * idle CPU in the HK_FLAG_MISC housekeeping set (if there is one).
  */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   Nohz 밸런싱을 수행할 시간이 되면 CPU를 걷어차십시오. HK_FLAG_MISC 
+ *   하우스키핑 세트(있는 경우)에서 유휴 CPU를 선택합니다.
+ */
 static void kick_ilb(unsigned int flags)
 {
 	int ilb_cpu;
@@ -13321,6 +13321,12 @@ static void kick_ilb(unsigned int flags)
 	 * Increase nohz.next_balance only when if full ilb is triggered but
 	 * not if we only update stats.
 	 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   전체 ilb가 트리거되는 경우에만 nohz.next_balance를 늘리고 통계만 
+ *   업데이트하는 경우에는 늘리지 않습니다.
+ */
 	if (flags & NOHZ_BALANCE_KICK)
 		nohz.next_balance = jiffies+1;
 
@@ -13333,6 +13339,13 @@ static void kick_ilb(unsigned int flags)
 	 * Access to rq::nohz_csd is serialized by NOHZ_KICK_MASK; he who sets
 	 * the first flag owns it; cleared by nohz_csd_func().
 	 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   rq::nohz_csd에 대한 액세스는 NOHZ_KICK_MASK에 의해 직렬화됩니다. 
+ *   첫 번째 깃발을 세우는 사람이 그것을 소유합니다. nohz_csd_func()에 
+ *   의해 지워집니다.
+ */
 	flags = atomic_fetch_or(flags, nohz_flags(ilb_cpu));
 	if (flags & NOHZ_KICK_MASK)
 		return;
@@ -13342,12 +13355,46 @@ static void kick_ilb(unsigned int flags)
 	 * is idle. And the softirq performing nohz idle load balance
 	 * will be run before returning from the IPI.
 	 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   이렇게 하면 유휴 상태인 대상 CPU에서 IPI를 생성합니다. 그리고 
+ *   nohz 유휴 부하 균형을 수행하는 softirq는 IPI에서 반환되기 
+ *   전에 실행됩니다.
+ */
 	smp_call_function_single_async(ilb_cpu, &cpu_rq(ilb_cpu)->nohz_csd);
 }
 
 /*
  * Current decision point for kicking the idle load balancer in the presence
  * of idle CPUs in the system.
+ */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   시스템에 유휴 CPU가 있는 경우 유휴 로드 밸런서를 제거하기 위한 현재 결정
+ *   지점입니다.
+ *
+ * - flags를 정하고 거기에 따라 kick_ilb를 한다.
+ *   -- 아무것도 안함.
+ *      1. 이미 idle_balance 중
+ *      2. nohz cpu가 하나도 없음.
+ *      3. now <= nohz.next_balance
+ *         (has_blocked == false거나, true여도 now <= next_blocked 인경우)
+ *      4. @rq cpu가 sd_asym_cpucapacity에 있는 상황에서,
+ *         @rq에 misfit load가 없거나, 있어도 더 좋은 cpu로 옮길수 없는 경우
+ *
+ *   -- NOHZ_STATS_KICK
+ *      1. now <= nohz.next_balance
+ *         (has_blocked == true, now > next_blocked 인경우)
+ *
+ *   -- NOHZ_KICK_MASK
+ *      1. @rq에 running이 2개이상인 경우
+ *      2. @rq에 cfs task가 있고, cpu 용량이 줄어든 경우
+ *      3. @cpu의 asym pack에서, idle cpu중에 @cpu보다 높은 우선순위가 
+ *      있는 경우
+ *      4. @rq cpu가 sd_asym_cpucapacity에 있는 상황에서,
+ *         @rq에 misfit load가 있고, 더 좋은 cpu로 옮길수 있는 경우
  */
 static void nohz_balancer_kick(struct rq *rq)
 {
@@ -13364,19 +13411,40 @@ static void nohz_balancer_kick(struct rq *rq)
 	 * We may be recently in ticked or tickless idle mode. At the first
 	 * busy tick after returning from idle, we will update the busy stats.
 	 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   최근에 틱 또는 틱리스 유휴 모드에 있을 수 있습니다. 유휴 상태에서 
+ *   돌아온 후 첫 번째 바쁜 틱에서 바쁜 통계를 업데이트합니다.
+ */
 	nohz_balance_exit_idle(rq);
 
 	/*
 	 * None are in tickless mode and hence no need for NOHZ idle load
 	 * balancing.
 	 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   아무도 틱리스 모드에 있지 않으므로 NOHZ 유휴 로드 밸런싱이 필요하지
+ *   않습니다.
+ */
 	if (likely(!atomic_read(&nohz.nr_cpus)))
 		return;
 
+/*
+ * IAMROOT, 2023.05.12:
+ * - has_blocked가 존재하고, now가 next_blocked 이후라면 flags를
+ *   NOHZ_STATS_KICK으로 변경한다.
+ */
 	if (READ_ONCE(nohz.has_blocked) &&
 	    time_after(now, READ_ONCE(nohz.next_blocked)))
 		flags = NOHZ_STATS_KICK;
 
+/*
+ * IAMROOT, 2023.05.12:
+ * - now가 next_balance 이전 시간이라면 out.
+ */
 	if (time_before(now, nohz.next_balance))
 		goto out;
 
@@ -13394,6 +13462,12 @@ static void nohz_balancer_kick(struct rq *rq)
 		 * capacity; kick the ILB to see if there's a better CPU to run
 		 * on.
 		 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   CFS 작업이 있고 현재 CPU의 용량이 줄어든 경우; 실행하기에 더 나은 
+ *   CPU가 있는지 확인하려면 ILB를 실행하십시오.
+ */
 		if (rq->cfs.h_nr_running >= 1 && check_cpu_capacity(rq, sd)) {
 			flags = NOHZ_KICK_MASK;
 			goto unlock;
@@ -13401,12 +13475,23 @@ static void nohz_balancer_kick(struct rq *rq)
 	}
 
 	sd = rcu_dereference(per_cpu(sd_asym_packing, cpu));
+/*
+ * IAMROOT, 2023.05.12:
+ * - @cpu의 asym pack에서, idle cpu중에 @cpu보다 높은 우선순위가 있는지
+ *   확인한다.
+ */
 	if (sd) {
 		/*
 		 * When ASYM_PACKING; see if there's a more preferred CPU
 		 * currently idle; in which case, kick the ILB to move tasks
 		 * around.
 		 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   ASYM_PACKING일 때; 현재 유휴 상태인 더 선호하는 CPU가 있는지 
+ *   확인합니다. 이 경우 ILB를 걷어차서 작업을 이동합니다.
+ */
 		for_each_cpu_and(i, sched_domain_span(sd), nohz.idle_cpus_mask) {
 			if (sched_asym_prefer(i, cpu)) {
 				flags = NOHZ_KICK_MASK;
@@ -13416,11 +13501,25 @@ static void nohz_balancer_kick(struct rq *rq)
 	}
 
 	sd = rcu_dereference(per_cpu(sd_asym_cpucapacity, cpu));
+/*
+ * IAMROOT, 2023.05.12:
+ * - @sd에 소속된 cpu라면, misfit load가 있으며, 더 좋은 cpu로 
+ *   옮길수있다면 NOHZ_KICK_MASK
+ * - @rq에 misfit load가 있지만, 더 좋은 cpu로 옮길수있는 경우 
+ *   NOHZ_KICK_MASK을 선택한다.
+ *   그게 아니라면 그냥 종료한다.
+ */
 	if (sd) {
 		/*
 		 * When ASYM_CPUCAPACITY; see if there's a higher capacity CPU
 		 * to run the misfit task on.
 		 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   ASYM_CPUCAPACITY일 때; 적합하지 않은 작업을 실행할 수 있는 더 높은 
+ *   용량의 CPU가 있는지 확인하십시오.
+ */ 
 		if (check_misfit_status(rq, sd)) {
 			flags = NOHZ_KICK_MASK;
 			goto unlock;
@@ -13433,6 +13532,14 @@ static void nohz_balancer_kick(struct rq *rq)
 		 *
 		 * Skip the LLC logic because it's not relevant in that case.
 		 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   비대칭 시스템의 경우 캐시 사용의 균형을 잘 맞추는 것이 아니라 
+ *   비대칭을 수용하고 작업에 충분한 CPU 용량만 있는지 확인하려고 합니다.
+ *
+ *   이 경우 관련이 없으므로 LLC 논리를 건너뜁니다.
+ */
 		goto unlock;
 	}
 
@@ -13447,6 +13554,16 @@ static void nohz_balancer_kick(struct rq *rq)
 		 * the others are - so just get a nohz balance going if it looks
 		 * like this LLC domain has tasks we could move.
 		 */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *  LLC 도메인 간에 불균형이 있는 경우(IOW는 전체 캐시 사용을 증가시킬 수 
+ *  있음) 일부 로드를 풀기 위해 로드가 적은 일부 LLC 도메인이 필요합니다. 
+ *  마찬가지로 현재 LLC 도메인 내에서 부하를 분산해야 할 수도 있습니다
+ *  (예: 압축된 SMT 코어이지만 다른 CPU는 유휴 상태임). 여기에서는 다른 
+ *  사람들이 얼마나 바쁜지 알 수 없습니다. 따라서 이 LLC 도메인에 우리가 
+ *  이동할 수 있는 작업이 있는 것처럼 보이면 노헤즈 잔액을 유지하세요.
+ */
 		nr_busy = atomic_read(&sds->nr_busy_cpus);
 		if (nr_busy > 1) {
 			flags = NOHZ_KICK_MASK;
@@ -13460,6 +13577,11 @@ out:
 		kick_ilb(flags);
 }
 
+/*
+ * IAMROOT, 2023.05.12:
+ * - @cpu의 sd last level cache pcpu에서 nohz_idle표시를 풀고
+ *   shared에서 busy cpu를 up한다.
+ */
 static void set_cpu_sd_state_busy(int cpu)
 {
 	struct sched_domain *sd;
@@ -13476,6 +13598,13 @@ unlock:
 	rcu_read_unlock();
 }
 
+/*
+ * IAMROOT, 2023.05.12:
+ * - tick stop을 종료한다. 중지되었다는 표시(nohz_tick_stopped)를 
+ *   unset하고, idle(tick stop이였으므로 idle 이였을것)도 풀어준다.
+ *   nohz가 해제되므로 nohz개수에도 뺀다.
+ * - @rq->cpu의 sd llc에서도 nohz idle을 unset한다.
+ */
 void nohz_balance_exit_idle(struct rq *rq)
 {
 	SCHED_WARN_ON(rq != this_rq());

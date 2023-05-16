@@ -721,6 +721,18 @@ static void destroy_sched_domains(struct sched_domain *sd)
  * the cpumask of the domain), this allows us to quickly tell if
  * two CPUs are in the same cache domain, see cpus_share_cache().
  */
+/*
+ * IAMROOT, 2023.05.12:
+ * - papago
+ *   SD_SHARE_PKG_RESOURCE가 설정된 가장 높은 sched_domain(마지막 
+ *   레벨 캐시 도메인)에 대한 특수 포인터를 유지하면 일부 
+ *   포인터가 select_idle_sibling()을 쫓는 것을 피할 수 있습니다.
+ *
+ *   또한 도메인마다 고유한 ID를 유지합니다(도메인의 cpumask에서 
+ *   첫 번째 CPU 번호 사용). 이렇게 하면 두 개의 CPU가 동일한 
+ *   캐시 도메인에 있는지 빠르게 알 수 있습니다. 
+ *   cpus_share_cache()를 참조하십시오.
+ */
 DEFINE_PER_CPU(struct sched_domain __rcu *, sd_llc);
 DEFINE_PER_CPU(int, sd_llc_size);
 DEFINE_PER_CPU(int, sd_llc_id);
