@@ -211,6 +211,11 @@ static u64 cfd_seq_inc(unsigned int src, unsigned int dst, unsigned int type)
 	} while (0)
 
 /* Record current CSD work for current CPU, NULL to erase. */
+/*
+ * IAMROOT, 2023.05.18:
+ * - @csd != null이면 cur_csd 관련 자료구조에 등록한다.
+ *   @cus == null이면 초기화한다.
+ */
 static void __csd_lock_record(struct __call_single_data *csd)
 {
 	if (!csd) {
@@ -226,6 +231,13 @@ static void __csd_lock_record(struct __call_single_data *csd)
 		  /* Or before unlock, as the case may be. */
 }
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - 현재 진행중인 csd를 기록 / 해제 한다.
+ *   @csd != null이면 cur_csd 관련 자료구조에 등록한다.
+ *   @cus == null이면 초기화한다.
+ * - debug record. lock이 된채로 들어와야되는듯 하다.
+ */
 static __always_inline void csd_lock_record(struct __call_single_data *csd)
 {
 	if (static_branch_unlikely(&csdlock_debug_enabled))
@@ -454,6 +466,11 @@ static __always_inline void csd_lock(struct __call_single_data *csd)
 	smp_wmb();
 }
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - u_flags를 atomic clear함으로 선점을 푼다.
+ *   CSD_FLAG_LOCK등으로 flag가 걸렸었을것이다.
+ */
 static __always_inline void csd_unlock(struct __call_single_data *csd)
 {
 	WARN_ON(!(csd->node.u_flags & CSD_FLAG_LOCK));
@@ -466,6 +483,11 @@ static __always_inline void csd_unlock(struct __call_single_data *csd)
 
 static DEFINE_PER_CPU_SHARED_ALIGNED(call_single_data_t, csd_data);
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - call_single_queue에 @cpu를 추가한다. 만약 이전에 이미 있었을 경우
+ *   @cpu에 IPI_CALL_FUNC를 요청한다.
+ */
 void __smp_call_single_queue(int cpu, struct llist_node *node)
 {
 #ifdef CONFIG_CSD_LOCK_WAIT_DEBUG
@@ -492,6 +514,17 @@ void __smp_call_single_queue(int cpu, struct llist_node *node)
 	 * locking and barrier primitives. Generic code isn't really
 	 * equipped to do the right thing...
 	 */
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   목록 추가는 IPI 핸들러를 보내기 전에 볼 수 있어야 합니다. 스핀록에 의해 
+ *   암시된 일반적인 캐시 일관성 규칙 때문에 항목을 풀기 위해 목록을 잠급니다.
+ *
+ *   IPI가 아키텍처의 캐시 일관성 프로토콜에서 순서를 벗어날 수 있는 경우 아치 
+ *   코드에 충분한 동기화를 추가하여 캐시 일관성 WRT 잠금 및 배리어 프리미티브를 
+ *   따르는 것처럼 보이도록 해야 합니다. 일반 코드는 실제로 올바른 작업을 수행할 
+ *   수 없습니다.
+ */
 	if (llist_add(node, &per_cpu(call_single_queue, cpu)))
 		send_call_function_single_ipi(cpu);
 }
@@ -500,6 +533,18 @@ void __smp_call_single_queue(int cpu, struct llist_node *node)
  * Insert a previously allocated call_single_data_t element
  * for execution on the given CPU. data must already have
  * ->func, ->info, and ->flags set.
+ */
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   지정된 CPU에서 실행하기 위해 이전에 할당된 call_single_data_t 요소를 
+ *   삽입합니다. 데이터에는 이미 ->func, ->info 및 ->flags가 설정되어 있어야 
+ *   합니다.
+ *
+ * - cpu가 this cpu면 @csd의 func을 실행하고 lock을 푼다.
+ *   그게 아니면 csd->node.llist에 예약한다. 이미 예약되있으면 IPI_CALL_FUNC로
+ *   @cpu에 ipi를 요청한다.
+ * - nohz_csd인 경우 func = nohz_csd_func
  */
 static int generic_exec_single(int cpu, struct __call_single_data *csd)
 {
@@ -512,6 +557,12 @@ static int generic_exec_single(int cpu, struct __call_single_data *csd)
 		 * We can unlock early even for the synchronous on-stack case,
 		 * since we're doing this from the same CPU..
 		 */
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   동일한 CPU에서 이 작업을 수행하기 때문에 동기식 온스택 경우에도 
+ *   일찍 잠금을 해제할 수 있습니다.
+ */
 		csd_lock_record(csd);
 		csd_unlock(csd);
 		local_irq_save(flags);
@@ -791,10 +842,42 @@ EXPORT_SYMBOL(smp_call_function_single);
  *
  * Return: %0 on success or negative errno value on error
  */
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   smp_call_function_single_async() - 특정 CPU에서 비동기 함수를 실행합니다.
+ *   @cpu: 실행할 CPU입니다.
+ *   @csd: 사전 할당 및 설정 데이터 구조.
+ *
+ *   smp_call_function_single()과 비슷하지만 호출이 비동기적이므로 비활성화된 
+ *   인터럽트가 있는 컨텍스트에서 수행될 수 있습니다.
+ *
+ *   호출자는 자신의 사전 할당된 데이터 구조를 전달합니다(예: 개체에 포함됨)
+ *   @csd에서 수행되는 IPI가 엄격하게 직렬화되도록 동기화를 담당합니다. 
+ *
+ *   smp_call_function_single_async()에 대한 이전 호출에 의해 아직 처리되지 
+ *   않은 하나의 csd로 함수가 호출되면 함수는 csd 객체가 아직 진행 중임을 
+ *   나타내는 -EBUSY와 함께 즉시 반환됩니다.
+ *
+ *   메모: 불행히도 현재 이 직렬화의 정확성을 검증할 수 있는 디버깅 기능이 
+ *   없습니다.
+ *
+ *   반품: 성공 시 %0 또는 오류 시 음수 errno 값. 
+ *
+ * - @cpu가 this cpu면 @csd->func을 호출하고, 그게 아니면 @cpu의 csd list에 
+ *   예약해놓는다.
+ */
 int smp_call_function_single_async(int cpu, struct __call_single_data *csd)
 {
 	int err = 0;
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - preempt disable을 lock 걸고 CSD_FLAG_LOCK로 flag lock 표시를 한다.
+ *   generic_exec_single()내부에서 u_flags가 clear되며 lock이 풀리고 
+ *   빠져나올것이다.
+ *   (preept disable로 이미 
+ */
 	preempt_disable();
 
 	if (csd->node.u_flags & CSD_FLAG_LOCK) {

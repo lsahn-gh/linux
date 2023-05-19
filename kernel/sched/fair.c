@@ -10140,6 +10140,16 @@ static const unsigned int sched_nr_migrate_break = 32;
  *
  * Returns number of detached tasks if successful and 0 otherwise.
  */
+/*
+ * IAMROOT, 2023.05.19:
+ * - papago
+ *   detach_tasks() -- 도메인 sd 내에서 균형 조정 작업의 일부로 
+ *   busiest_rq에서 최대 불균형 로드/유틸/작업을 분리하려고 시도합니다.
+ *
+ *   성공하면 분리된 작업의 수를 반환하고 그렇지 않으면 0을 반환합니다.
+ *
+ * - 
+ */
 static int detach_tasks(struct lb_env *env)
 {
 	struct list_head *tasks = &env->src_rq->cfs_tasks;
@@ -10158,6 +10168,9 @@ static int detach_tasks(struct lb_env *env)
 	 * - google-translate
 	 * 소스 실행 대기열이 다른 CPU에 의해 비워졌습니다. 어떤 작업도 테스트하지 않을
 	 * 것이므로 LBF_ALL_PINNED 플래그를 지웁니다.
+	 *
+	 * - 직전에 nr_running > 1으로 들어왔는데, 그사이 감소가 되어버렸다.
+	 *   누군가에게 migrate된것이므로 LBF_ALL_PINNED를 지워주면서 종료한다.
 	 */
 	if (env->src_rq->nr_running <= 1) {
 		env->flags &= ~LBF_ALL_PINNED;
@@ -12878,6 +12891,7 @@ static int should_we_balance(struct lb_env *env)
  * - google-translate
  * this_cpu를 확인하여 도메인 내에서 균형이 맞는지 확인하십시오. 불균형이 있는 경우
  * 작업 이동을 시도합니다.
+ * - ING
  */
 static int load_balance(int this_cpu, struct rq *this_rq,
 			struct sched_domain *sd, enum cpu_idle_type idle,
@@ -12923,7 +12937,7 @@ redo:
 
 /*
  * IAMROOT, 2023.05.06:
- * - busiest group을 찾는다.
+ * - busiest group을 찾고, 해당 group에서 가장 바쁜 cpu를 찾는다.
  */
 	group = find_busiest_group(&env);
 	if (!group) {
@@ -12951,6 +12965,8 @@ redo:
  * LBF_ALL_PINNED: 
  * 이 플래그는 최초 설정으로 migration할 수 있는 task가 하나도 없는 상태입니다.
  * 만일 하나라도 pull이 가능한 태스크가 발견되면 이 플래그를 클리어합니다.
+ * - 일단 all pinned로 설정해놓고, 하나라도 migrate가능한 task가 찾아진다면
+ *   거기서 clear한다.
  */
 	env.flags |= LBF_ALL_PINNED;
 	if (busiest->nr_running > 1) {
@@ -12964,7 +12980,7 @@ redo:
 		 * IAMROOT. 2023.05.13:
 		 * - google-translate
 		 * 작업 이동을 시도합니다. find_busiest_group이 불균형을 발견했지만
-		 * busiest->nr_running <= 1인 경우 그룹은 여전히 ​​불균형입니다.
+		 * busiest->nr_running <= 1인 경우 그룹은 여전히 불균형입니다.
 		 * ld_moved는 단순히 0으로 유지되므로 불균형으로 올바르게 처리됩니다.
 		 */
 		env.loop_max  = min(sysctl_sched_nr_migrate, busiest->nr_running);
@@ -13010,6 +13026,11 @@ more_balance:
 
 		local_irq_restore(rf.flags);
 
+/*
+ * IAMROOT, 2023.05.19:
+ * - loop_break동안 balance가 안됬을때, 너무 오래 lock을 잡고있었으므로
+ *   lock을 한번 해제해서 한번 선점을 풀었다가 다시 시도한다.
+ */
 		if (env.flags & LBF_NEED_BREAK) {
 			env.flags &= ~LBF_NEED_BREAK;
 			goto more_balance;
@@ -13055,6 +13076,9 @@ more_balance:
 		 * IAMROOT, 2023.05.13:
 		 * - dst_cpu 가 available 하지 않아 new_dst_cpu로 교체해서
 		 *   재시도
+		 * - dst를 범위에서 지운후 new_dst_cpu로 교체한다.
+		 *   새로운 dst가 설정되었으므로 dst pinned를 풀고 loop 횟수도 초기화
+		 *   한다.
 		 */
 		if ((env.flags & LBF_DST_PINNED) && env.imbalance > 0) {
 
@@ -13083,6 +13107,7 @@ more_balance:
 		 * 친화력 때문에 균형에 도달하지 못했습니다.
 		 * - cpu 제한으로 balance를 할 수 없어 부모 도메인에서 시도하도록
 		 *   sd_parent->groups->sgc->imbalance를 1로 설정한다.
+		 *   (sg_imbalanced() 사용처 확인)
 		 */
 		if (sd_parent) {
 			int *group_imbalance = &sd_parent->groups->sgc->imbalance;
@@ -13210,6 +13235,11 @@ more_balance:
 		sd->nr_balance_failed = 0;
 	}
 
+/*
+ * IAMROOT, 2023.05.19:
+ * - lb_moved의 유무에 상관없이 active_balance를 안했거나, active_balance가
+ *   필요한 상황이면 unbalanced라고 판단해 min interval로 고친다.
+ */
 	if (likely(!active_balance) || need_active_balance(&env)) {
 		/* We were unbalanced, so reset the balancing interval */
 		/*
@@ -13487,6 +13517,7 @@ void update_max_interval(void)
  * - google-translate
  * 각 스케줄링 도메인이 균형을 이루어야 하는지 확인하고 균형이 맞으면 균형 작업을
  * 시작합니다. 밸런싱 매개변수는 init_sched_domains에 설정됩니다.
+ * - ING
  */
 static void rebalance_domains(struct rq *rq, enum cpu_idle_type idle)
 {
@@ -13619,7 +13650,19 @@ static inline int on_null_domain(struct rq *rq)
  * - HK_FLAG_MISC CPUs are used for this task, because HK_FLAG_SCHED not set
  *   anywhere yet.
  */
-
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   유휴 로드 밸런싱 세부 정보.
+ *   - 사용 중인 CPU 중 하나가 유휴 재조정이 필요할 수 있음을 알게 되면 
+ *   유휴 로드 밸런서를 중지한 다음 모든 유휴 CPU에 대해 유휴 로드 밸런싱을 
+ *   수행합니다.
+ *   - HK_FLAG_SCHED가 아직 어디에도 설정되지 않았기 때문에 HK_FLAG_MISC CPU가 
+ *   이 작업에 사용됩니다.
+ *
+ * - HK_FLAG_MISC가 set 되있는 nohz idle_cpu 중에서 idle인 가장 빠른
+ *   cpu 한개를 가져온다.
+ */
 static inline int find_new_ilb(void)
 {
 	int ilb;
@@ -13648,6 +13691,17 @@ static inline int find_new_ilb(void)
  * - papago
  *   Nohz 밸런싱을 수행할 시간이 되면 CPU를 걷어차십시오. HK_FLAG_MISC 
  *   하우스키핑 세트(있는 경우)에서 유휴 CPU를 선택합니다.
+ *
+ * - NOHZ_BALANCE_KICK이 있는경우 next_balance를 현재시간으로 update한다.
+ *   ilb cpu가 없거나, 이미 실행이 안된다해도 next_balance는 update 될것이다.
+ *
+ * - NOHZ_STATS_KICK
+ *   해당 flag만 있을경우 next_balance를 update안하고 수행을 시도할것이다.
+ *
+ * - HK_FLAG_MISC가 있는 nohz idle cpu를 찾고, 해당 cpu에 nohz_csd_func를
+ *   수행하도록 하거나 예약(list 추가, 이미 있으면 ipi요청) 한다.
+ *   궁극적으로 해당 cpu에 softirq를 통해 run_rebalance_domains를
+ *   수행하게 한다.
  */
 static void kick_ilb(unsigned int flags)
 {
@@ -13668,6 +13722,10 @@ static void kick_ilb(unsigned int flags)
 
 	ilb_cpu = find_new_ilb();
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - HK_FLAG_MISC가 set되있는 nohz idle cpu가 없다면 return.
+ */
 	if (ilb_cpu >= nr_cpu_ids)
 		return;
 
@@ -13681,6 +13739,9 @@ static void kick_ilb(unsigned int flags)
  *   rq::nohz_csd에 대한 액세스는 NOHZ_KICK_MASK에 의해 직렬화됩니다. 
  *   첫 번째 깃발을 세우는 사람이 그것을 소유합니다. nohz_csd_func()에 
  *   의해 지워집니다.
+ *
+ * - atomic write로 권한 획득. 이미 flags가 있다면 누군가 요청했다는 것이므로
+ *   return.
  */
 	flags = atomic_fetch_or(flags, nohz_flags(ilb_cpu));
 	if (flags & NOHZ_KICK_MASK)
@@ -13697,6 +13758,9 @@ static void kick_ilb(unsigned int flags)
  *   이렇게 하면 유휴 상태인 대상 CPU에서 IPI를 생성합니다. 그리고 
  *   nohz 유휴 부하 균형을 수행하는 softirq는 IPI에서 반환되기 
  *   전에 실행됩니다.
+ *
+ * - @cpu가 this cpu면 nohz_csd_func를 호출하고, 그게 아니면 @cpu의 csd list에 
+ *   예약해놓는다.
  */
 	smp_call_function_single_async(ilb_cpu, &cpu_rq(ilb_cpu)->nohz_csd);
 }
@@ -14481,7 +14545,10 @@ out:
  */
 /*
  * IAMROOT, 2022.11.26:
- * TODO.
+ * - papago
+ *   run_rebalance_domains는 스케줄러 틱에서 필요할 때 트리거됩니다.
+ *   nohz 유휴 밸런싱(nohz_balancing_kick 설정)에 대해서도 트리거됩니다.
+ * - ING
  */
 static __latent_entropy void run_rebalance_domains(struct softirq_action *h)
 {

@@ -1287,6 +1287,7 @@ struct rq {
 /*
  * IAMROOT, 2022.11.26:
  * - call single data
+ *   func : nohz_csd_func
  */
 	call_single_data_t	nohz_csd;
 #endif /* CONFIG_SMP */
@@ -1398,6 +1399,10 @@ struct rq {
 
 	struct callback_head	*balance_callback;
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - nohz_csd_func()참고. NOHZ_KICK_MASK등의 flag가 위치할수있다.
+ */
 	unsigned char		nohz_idle_balance;
 	unsigned char		idle_balance;
 
@@ -3495,6 +3500,13 @@ extern void cfs_bandwidth_usage_dec(void);
 #define NOHZ_STATS_KICK_BIT	1
 #define NOHZ_NEWILB_KICK_BIT	2
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - NOHZ_BALANCE_KICK
+ *   kick_lib()할때 next_balance를 현재시각으로 업데이트한다.
+ * - NOHZ_STATS_KICK
+ *   단독으로 사용할 경우 kick_lib()를 next_balance없이 수행한다.
+ */
 #define NOHZ_BALANCE_KICK	BIT(NOHZ_BALANCE_KICK_BIT)
 #define NOHZ_STATS_KICK		BIT(NOHZ_STATS_KICK_BIT)
 /*

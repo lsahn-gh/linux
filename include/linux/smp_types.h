@@ -4,6 +4,12 @@
 
 #include <linux/llist.h>
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - CSD_FLAG_LOCK.
+ *   선점 flag.
+ * - csd_unlock()에서 clear된다.
+ */
 enum {
 	CSD_FLAG_LOCK		= 0x01,
 

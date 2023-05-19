@@ -901,6 +901,10 @@ static bool set_nr_and_not_polling(struct task_struct *p)
  * If this returns true, then the idle task promises to call
  * sched_ttwu_pending() and reschedule soon.
  */
+/*
+ * IAMROOT, 2023.05.18:
+ * - arm계열은 미지원. return false.
+ */
 static bool set_nr_if_polling(struct task_struct *p)
 {
 	struct thread_info *ti = task_thread_info(p);
@@ -1243,6 +1247,13 @@ void wake_up_nohz_cpu(int cpu)
 		wake_up_idle_cpu(cpu);
 }
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - 1. NOHZ_KICK_MASK | NOHZ_NEWILB_KICK를 cpu nohz_flags에서 지운다.
+ *   2. idle_balance를 update한다.
+ *   3. idle이고, reschedule요청이 없으면 수정전 flag값을 nohz_idle_balance에
+ *   넣고 SCHED_SOFTIRQ를 수행한다.
+ */
 static void nohz_csd_func(void *info)
 {
 	struct rq *rq = info;
@@ -4231,6 +4242,11 @@ void sched_ttwu_pending(void *arg)
 	rq_unlock_irqrestore(rq, &rf);
 }
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - @cpu에 IPI_CALL_FUNC를 요청한다.
+ * - arm계열은 무조건 arch_send_call_function_ipi()가 호출된다.
+ */
 void send_call_function_single_ipi(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);

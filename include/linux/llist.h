@@ -214,6 +214,10 @@ static inline bool __llist_add_batch(struct llist_node *new_first,
  *
  * Returns true if the list was empty prior to adding this entry.
  */
+/*
+ * IAMROOT, 2023.05.18:
+ * - @return true add전에 empty였으면.
+ */
 static inline bool llist_add(struct llist_node *new, struct llist_head *head)
 {
 	return llist_add_batch(new, new, head);

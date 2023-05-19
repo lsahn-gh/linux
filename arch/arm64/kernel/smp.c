@@ -72,6 +72,10 @@ struct secondary_data secondary_data;
 /* Number of CPUs which aren't online, but looping in kernel text. */
 static int cpus_stuck_in_kernel;
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - ipi별 수행함수 do_handle_IPI() 참고.
+ */
 enum ipi_msg_type {
 	IPI_RESCHEDULE,
 	IPI_CALL_FUNC,
@@ -896,6 +900,10 @@ void arch_send_call_function_ipi_mask(const struct cpumask *mask)
 	smp_cross_call(mask, IPI_CALL_FUNC);
 }
 
+/*
+ * IAMROOT, 2023.05.18:
+ * - @cpu에 IPI_CALL_FUNC을 요청한다.
+ */
 void arch_send_call_function_single_ipi(int cpu)
 {
 	smp_cross_call(cpumask_of(cpu), IPI_CALL_FUNC);

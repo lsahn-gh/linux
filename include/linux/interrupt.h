@@ -584,7 +584,14 @@ DECLARE_STATIC_KEY_FALSE(force_irqthreads_key);
    tasklets are more than enough. F.e. all serial device BHs et
    al. should be converted to tasklets, not to softirqs.
  */
-
+/*
+ * IAMROOT, 2023.05.18:
+ * - papago
+ *   _실제로_ 고주파 스레드 작업 스케줄링이 필요하지 않은 경우 새 softirq를 
+ *   할당하지 마십시오. 거의 모든 목적을 위해 tasklet은 충분합니다. 
+ *   F.e. 모든 직렬 장치 BHs et al. softirqs가 아닌 tasklet으로 변환해야 합니다.
+ * - enum별 실행함수 open_softirq() 주석 참고
+ */
 enum
 {
 	HI_SOFTIRQ=0,
