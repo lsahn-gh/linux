@@ -349,6 +349,10 @@ static void destroy_perf_domain_rcu(struct rcu_head *rp)
 	free_pd(pd);
 }
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - has_eas 여부에 따라 static key 설정을 변경한다.
+ */
 static void sched_energy_set(bool has_eas)
 {
 	if (!has_eas && static_branch_unlikely(&sched_energy_present)) {
@@ -3589,6 +3593,33 @@ static int dattrs_equal(struct sched_domain_attr *cur, int idx_cur,
  *
  * Call with hotplug lock and sched_domains_mutex held
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * cpumasks의 doms_new[] 배열에서 'ndoms_new' cpumasks로 지정된 대로 sched 도메인을
+ * 분할합니다. 이는 doms_new[]를 현재 sched 도메인 분할인 doms_cur[]와
+ * 비교합니다. 삭제된 각 도메인을 파괴하고 각각의 새 도메인을
+ * 구축합니다.
+ *
+ * 'doms_new'는 길이가 'ndoms_new'인 cpumask_var_t의
+ * 배열입니다. 마스크는 교차하지 않습니다(중첩하지 마십시오). 각 마스크에 대해
+ * 하나의 sched 도메인을 설정해야 합니다. 어떤 cpumask에도 없는 CPU는 로드
+ * 밸런싱되지 않습니다. 현재 'doms_cur' 도메인과 새 'doms_new' 도메인 모두에 동일한
+ * cpumask가 나타나면 그대로 둘 수 있습니다.
+ *
+ * 전달된 'doms_new'는
+ * alloc_sched_domains를 사용하여 할당되어야 합니다. 이 루틴은 소유권을 가지며
+ * 작업이 완료되면 free_sched_domains합니다. 호출자가 alloc 호출에 실패하면
+ * doms_new == NULL && ndoms_new == 1을 전달할 수 있으며
+ * partition_sched_domains()는 단일 파티션 'fallback_doms'로 폴백하고 도메인을
+ * 강제로 다시 빌드합니다.
+ *
+ * doms_new == NULL이면 cpu_online_mask로
+ * 대체됩니다. ndoms_new == 0은 기존 도메인을 파기하는 특수한 경우이며 기본
+ * 도메인을 생성하지 않습니다.
+ *
+ * 핫플러그 잠금 및 sched_domains_mutex 보류로 호출
+ */
 void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 				    struct sched_domain_attr *dattr_new)
 {
@@ -3601,6 +3632,11 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	/* Let the architecture update CPU core mappings: */
 	new_topology = arch_update_cpu_topology();
 	/* Trigger rebuilding CPU capacity asymmetry data */
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - topology rebuild 중이다.
+	 * - XXX arch_update_cpu_topology 함수가 설정하는 것은?
+	 */
 	if (new_topology)
 		asym_cpu_capacity_scan();
 
@@ -3618,6 +3654,13 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	}
 
 	/* Destroy deleted domains: */
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - i: 기존 도메인, j: 새 도메인
+	 *   기존 도메인과 새도메인의 cpumask와 속성이 일치 하는 것만 남겨두고
+	 *   (dl bandwidth정보만 삭제) 그렇지 않으면 기존 도메인 삭제
+	 *   (detach_destroy_domains)
+	 */
 	for (i = 0; i < ndoms_cur; i++) {
 		for (j = 0; j < n && !new_topology; j++) {
 			if (cpumask_equal(doms_cur[i], doms_new[j]) &&
@@ -3629,6 +3672,14 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 				 * its dl_bw->total_bw needs to be cleared.  It
 				 * will be recomputed in function
 				 * update_tasks_root_domain().
+				 */
+				/*
+				 * IAMROOT. 2023.05.20:
+				 * - google-translate
+				 * 이 도메인은 삭제되지 않으므로 해당
+				 * dl_bw->total_bw를 지워야 합니다.
+				 * update_tasks_root_domain() 함수에서
+				 * 다시 계산됩니다.
 				 */
 				rd = cpu_rq(cpumask_any(doms_cur[i]))->rd;
 				dl_clear_root_domain(rd);
@@ -3642,6 +3693,10 @@ match1:
 	}
 
 	n = ndoms_cur;
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - 메모리 할당에 실패하여 doms_new가 NULL인 경우
+	 */
 	if (!doms_new) {
 		n = 0;
 		doms_new = &fallback_doms;
@@ -3650,6 +3705,11 @@ match1:
 	}
 
 	/* Build new domains: */
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - i: 새도메인, j: 기존도메인
+	 *   cpumask나 속성이 같지 않은 경우에만 domain build
+	 */
 	for (i = 0; i < ndoms_new; i++) {
 		for (j = 0; j < n && !new_topology; j++) {
 			if (cpumask_equal(doms_new[i], doms_cur[j]) &&
@@ -3664,8 +3724,17 @@ match2:
 
 #if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
 	/* Build perf. domains: */
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - pd 구성이 변경된 경우에만 build 한다.
+	 */
 	for (i = 0; i < ndoms_new; i++) {
 		for (j = 0; j < n && !sched_energy_update; j++) {
+			/*
+			 * IAMROOT, 2023.05.20:
+			 * - cpumask  같고 pd(power domain)의 첫번째 cpu일 때만
+			 *   pd를 만들지 않는다.
+			 */
 			if (cpumask_equal(doms_new[i], doms_cur[j]) &&
 			    cpu_rq(cpumask_first(doms_cur[j]))->rd->pd) {
 				has_eas = true;
@@ -3681,6 +3750,10 @@ match3:
 #endif
 
 	/* Remember the new sched domains: */
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - 기존 도메인과 속성을 지운다.
+	 */
 	if (doms_cur != &fallback_doms)
 		free_sched_domains(doms_cur, ndoms_cur);
 

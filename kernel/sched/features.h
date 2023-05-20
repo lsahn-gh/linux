@@ -56,6 +56,12 @@ SCHED_FEAT(NONTASK_CAPACITY, true)
  * Queue remote wakeups on the target CPU and process them
  * using the scheduler IPI. Reduces rq->lock contention/bounces.
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * 대상 CPU에서 원격 깨우기를 대기하고 스케줄러 IPI를 사용하여 처리합니다. rq->잠금
+ * 경합/바운스를 줄입니다.
+ */
 SCHED_FEAT(TTWU_QUEUE, true)
 
 /*

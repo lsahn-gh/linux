@@ -485,8 +485,8 @@ static DEFINE_PER_CPU_SHARED_ALIGNED(call_single_data_t, csd_data);
 
 /*
  * IAMROOT, 2023.05.18:
- * - call_single_queue에 @cpu를 추가한다. 만약 이전에 이미 있었을 경우
- *   @cpu에 IPI_CALL_FUNC를 요청한다.
+ * - call_single_queue에 @node를 추가하고 해당 cpu의 IPI_CALL_FUNC를 요청한다.
+ * - TODO  call 하는 func 의 실체는?
  */
 void __smp_call_single_queue(int cpu, struct llist_node *node)
 {

@@ -378,6 +378,10 @@ static int register_cpu_capacity_sysctl(void)
 }
 subsys_initcall(register_cpu_capacity_sysctl);
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - update(rebuild) 중임을 표시
+ */
 static int update_topology;
 
 int topology_update_cpu_topology(void)

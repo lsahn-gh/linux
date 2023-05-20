@@ -7687,11 +7687,22 @@ static void record_wakee(struct task_struct *p)
 	 * Only decay a single time; tasks that have less then 1 wakeup per
 	 * jiffy will not have built up many flips.
 	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * 1초에 한 번 decay합니다. jiffy당 깨우기가 1회 미만인 작업은 뒤집기를 많이 만들지
+	 * 않습니다.
+	 * - 1초에 한번 wakee_flips를 반으로
+	 */
 	if (time_after(jiffies, current->wakee_flip_decay_ts + HZ)) {
 		current->wakee_flips >>= 1;
 		current->wakee_flip_decay_ts = jiffies;
 	}
 
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - 마지막 깨운 task와 다른 task를 깨우는 상황이면 wakee_flips 증가
+	 */
 	if (current->last_wakee != p) {
 		current->last_wakee = p;
 		current->wakee_flips++;
@@ -8644,6 +8655,46 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
  * other use-cases too. So, until someone finds a better way to solve this,
  * let's keep things simple by re-using the existing slow path.
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * find_energy_efficient_cpu(): 깨우기 작업을 위한 가장 에너지 효율적인 대상 CPU를
+ * 찾습니다. find_energy_efficient_cpu()는 각 성능 도메인에서 최대 예비 용량을 가진
+ * CPU를 찾고 이를 잠재적인 후보로 사용하여 작업을 실행합니다. 그런 다음 에너지
+ * 모델을 사용하여 가장 에너지 효율적인 CPU 후보를 파악합니다.
+ *
+ * 이 휴리스틱의 근거는
+ * 다음과 같습니다. 성능 영역에서 가장 에너지 효율적인 모든 CPU 후보(에너지 모델에
+ * 따라)는 저주파를 요청하는 후보입니다. 주파수 요청이 동일한 여러 CPU가 있는 경우
+ * 에너지 모델에는 활성 전력 비용만 포함되기 때문에 이들 사이의 관계를 끊을 만큼
+ * 충분한 데이터가 없습니다. 이 모델에서 주파수 요청이 사용률(예: schedutil 사용)을
+ * 따른다고 가정하면 성능 도메인에서 최대 예비 용량을 가진 CPU가 성능 도메인의
+ * 최상의 후보 중 하나가 되도록 보장됩니다.
+ *
+ * 실제로 다른 CPU가 더 깊은 유휴 상태가
+ * 되도록 하기 위해 CPU에 작은 작업을 압축하는 것이 에너지 관점에서 바람직할 수
+ * 있지만, 이는 클러스터 유휴 상태가 될 기회를 손상시킬 수 있으며 우리는 이를 알 수
+ * 있는 방법이 없습니다. 이것이 실제로 좋은 생각인지 아닌지 현재 에너지
+ * 모델. 따라서 find_energy_efficient_cpu()는 기본적으로 클러스터 패킹과 클러스터
+ * 내부 확산을 선호합니다. 이는 대기 시간에 적어도 좋은 일이 되어야 하며, 이는
+ * EAS의 에너지 절약의 대부분이 시스템의 비대칭성에서 비롯되며 동일한 CPU 간의
+ * 연결을 끊는 데서 오는 것이 아니라는 생각과 일치합니다. 이는
+ * SD_ASYM_CPUCAPACITY가 설정된 시스템에 대해서만 토폴로지 코드에서 EAS가
+ * 활성화되는 이유이기도 합니다.
+ *
+ * 참고: 포크는 아직 유용한 활용 데이터가 없고 에너지
+ * 소비에 미치는 영향을 예측할 수 없기 때문에 에너지 인식 웨이크업 경로에서
+ * 허용되지 않습니다. 결과적으로 그들은 가장 로드가 적은 CPU에서
+ * find_idlest_cpu()에 의해 배치될 것이며 일부 사용 사례에서 에너지 비효율적인
+ * 것으로 판명될 수 있습니다. 대안은 새 작업을 특정 유형의 CPU로 먼저 편향시키거나
+ * 상위 작업에서 util_avg를 추론하는 것이지만 이러한 휴리스틱은 다른 사용 사례에도
+ * 해를 끼칠 수 있습니다. 따라서 누군가 이 문제를 해결할 수 있는 더 나은 방법을
+ * 찾을 때까지 기존 느린 경로를 재사용하여 작업을 단순하게 유지하겠습니다.
+ */
+/*
+ * IAMROOT, 2023.05.20:
+ * - sched_cpu_activate -> cpuset_cpu_active -> partition_sched_domains
+ */
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 {
 	unsigned long prev_delta = ULONG_MAX, best_delta = ULONG_MAX;
@@ -8769,9 +8820,25 @@ unlock:
  *
  * Returns the target CPU number.
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * select_task_rq_fair: 관련 SD 플래그가 설정된 도메인에서 깨우기 작업에 대한 대상
+ * 실행 대기열을 선택합니다. 실제로 이것은 SD_BALANCE_WAKE, SD_BALANCE_FORK 또는
+ * SD_BALANCE_EXEC입니다.
+ *
+ * 가장 유휴 그룹에서 가장 유휴 CPU를 선택하거나 도메인에 SD_WAKE_AFFINE이 설정된 경우
+ * 특정 조건에서 유휴 형제 CPU를 선택하여 로드 균형을 조정합니다.
+ *
+ * 대상 CPU 번호를 반환합니다.
+ */
 static int
 select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 {
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - sync : 종료중이 아니고 WF_SYNC flags 가 설정되었을때 1
+	 */
 	int sync = (wake_flags & WF_SYNC) && !(current->flags & PF_EXITING);
 	struct sched_domain *tmp, *sd = NULL;
 	int cpu = smp_processor_id();
@@ -9024,6 +9091,12 @@ static void set_skip_buddy(struct sched_entity *se)
 /*
  * Preempt the current task with a newly woken task if needed:
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * 필요한 경우 새로 깨어난 작업으로 현재 작업을 선점합니다.
+ * - TODO
+ */
 static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	struct task_struct *curr = rq->curr;
@@ -9045,6 +9118,10 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
 		return;
 
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - WF_FORK flags 가 없으면 curr의 다음 task 를 pse로 한다.
+	 */
 	if (sched_feat(NEXT_BUDDY) && scale && !(wake_flags & WF_FORK)) {
 		set_next_buddy(pse);
 		next_buddy_marked = 1;
@@ -13168,10 +13245,6 @@ more_balance:
 		if (idle != CPU_NEWLY_IDLE)
 			sd->nr_balance_failed++;
 
-		/*
-		 * IAMROOT, 2023.05.13:
-		 * - active balance 는 무조건 curr 를 migration 한다.
-		 */
 		if (need_active_balance(&env)) {
 			unsigned long flags;
 

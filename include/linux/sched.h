@@ -1017,10 +1017,6 @@ struct task_struct {
 	unsigned int			flags;
 	unsigned int			ptrace;
 
-	/*
-	 * IAMROOT, 2023.05.13:
-	 *
-	 */
 /*
  * IAMROOT, 2023.05.13:
  * - openai : on_cpu ?

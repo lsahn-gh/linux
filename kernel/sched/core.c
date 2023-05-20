@@ -4190,6 +4190,10 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
  * Returns: %true when the wakeup is done,
  *          %false otherwise.
  */
+/*
+ * IAMROOT, 2023.05.20:
+ * - @wake_flags 가 WF_FORK 가 아닌 경우는 curr의 다음 task 로 지정하고 1을 반환
+ */
 static int ttwu_runnable(struct task_struct *p, int wake_flags)
 {
 	struct rq_flags rf;
@@ -4263,6 +4267,13 @@ void send_call_function_single_ipi(int cpu)
  * via sched_ttwu_wakeup() for activation so the wakee incurs the cost
  * of the wakeup instead of the waker.
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * 대상 CPU의 wake_list에 작업을 대기시키고 필요한 경우 IPI를 통해 CPU를
+ * 깨웁니다. IPI를 수신한 wakee CPU는 활성화를 위해 sched_ttwu_wakeup()을 통해
+ * 작업을 대기하므로 wakee는 깨우기 대신 깨우기 비용을 발생시킵니다.
+ */
 static void __ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
 {
 	struct rq *rq = cpu_rq(cpu);
@@ -4297,16 +4308,31 @@ out:
 	rcu_read_unlock();
 }
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - 두 cpu간 llc cache 를 공유하는가?
+ */
 bool cpus_share_cache(int this_cpu, int that_cpu)
 {
 	return per_cpu(sd_llc_id, this_cpu) == per_cpu(sd_llc_id, that_cpu);
 }
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - llc cache를 공유하지 않으면 true
+ *   task가 하나 이하이면 true
+ */
 static inline bool ttwu_queue_cond(int cpu, int wake_flags)
 {
 	/*
 	 * Do not complicate things with the async wake_list while the CPU is
 	 * in hotplug state.
+	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * CPU가 핫플러그 상태에 있는 동안 async wake_list로 문제를 복잡하게 만들지
+	 * 마십시오.
 	 */
 	if (!cpu_active(cpu))
 		return false;
@@ -4314,6 +4340,12 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
 	/*
 	 * If the CPU does not share cache, then queue the task on the
 	 * remote rqs wakelist to avoid accessing remote data.
+	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * CPU가 캐시를 공유하지 않는 경우 원격 rqs 웨이크리스트에 작업을 대기시켜 원격
+	 * 데이터에 액세스하지 않도록 합니다.
 	 */
 	if (!cpus_share_cache(smp_processor_id(), cpu))
 		return true;
@@ -4324,12 +4356,23 @@ static inline bool ttwu_queue_cond(int cpu, int wake_flags)
 	 * the soon-to-be-idle CPU as the current CPU is likely busy.
 	 * nr_running is checked to avoid unnecessary task stacking.
 	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * 작업의 일정이 취소되고 CPU에서 유일하게 실행 중인 작업인 경우 웨이크리스트를
+	 * 사용하여 현재 CPU가 사용 중일 가능성이 있으므로 작업 활성화를 곧 유휴 상태가 될
+	 * CPU로 오프로드합니다. 불필요한 작업이 쌓이지 않도록 nr_running을 확인합니다.
+	 */
 	if ((wake_flags & WF_ON_CPU) && cpu_rq(cpu)->nr_running <= 1)
 		return true;
 
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - ttwu queue에 @p를 추가하고 ipi 요청을 한다.
+ */
 static bool ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
 {
 	if (sched_feat(TTWU_QUEUE) && ttwu_queue_cond(cpu, wake_flags)) {
@@ -4380,6 +4423,25 @@ static void ttwu_queue(struct task_struct *p, int cpu, int wake_flags)
  *
  *   The lock wait and lock wakeups happen via TASK_RTLOCK_WAIT. No other
  *   bits set. This allows to distinguish all wakeup scenarios.
+ */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * 작업을 깨울 수 있는지 확인하기 위해 try_to_wake_up()에서 호출됩니다.
+ *
+ * 호출자는 p != 현재인 경우 p::pi_lock을 유지하거나 p == 현재인 경우 선점을
+ * 비활성화합니다.
+ *
+ * PREEMPT_RT saved_state의 규칙:
+ *
+ * 관련 잠금 코드는 p::saved_state를 업데이트할 때 항상 p::pi_lock을 유지합니다. 즉,
+ * 두 경우 모두 코드가 완전히 직렬화됩니다. 잠금 대기 및 잠금 해제는 TASK_RTLOCK_WAIT를
+ * 통해 발생합니다.
+ *
+ * 다른 비트가 설정되지 않았습니다. 이를 통해 모든 웨이크업 시나리오를 구분할 수
+ * 있습니다.
+ *
+ * - @p의 상태가 @state 와 동일하면 @success를 1로 하고 true 반환
  */
 static __always_inline
 bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
@@ -4536,6 +4598,46 @@ bool ttwu_state_match(struct task_struct *p, unsigned int state, int *success)
  * Return: %true if @p->state changes (an actual wakeup was done),
  *	   %false otherwise.
  */
+/*
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * try_to_wake_up - 스레드 깨우기
+ * @p: 깨울 스레드
+ * @state: 깨울 수 있는 작업 상태의 마스크
+ * @wake_flags: 깨우기 수정자 플래그(WF_*)
+ *
+ * 개념적으로 수행:
+ *
+ * If (@state & @p->state) @p->상태 = TASK_RUNNING.
+ *
+ * 작업이 대기열에 있거나 실행 가능하지 않은 경우 실행 대기열에 다시 배치하십시오.
+ *
+ * 이 함수는 작업을 대기열에서 빼는 schedule()에 대해 원자적입니다.
+ *
+ * @p->state에 액세스하기 전에 전체 메모리 장벽을 발행합니다. set_current_state()의
+ * 주석을 참조하십시오.
+ *
+ * p->pi_lock을 사용하여 동시 웨이크업에 대해 직렬화합니다.
+ *
+ * p->pi_lock 안정화에 의존:
+ * - p->sched_class
+ * - p->cpus_ptr
+ * - p->sched_task_group
+ * 마이그레이션을 수행하려면 select_task_rq()/set_task_cpu() 사용을 참조하십시오.
+ *
+ * 성능을 위해 하나의 task_rq(p)->lock만 사용하기 위해 정말 열심히 노력합니다.
+ * rq->잠금을 취합니다:
+ * - ttwu_runnable() -- 이전 rq, 피할 수 없음, 주석 참조;
+ * - ttwu_queue() -- 새 rq, 태스크를 큐에 넣기 위한 것입니다.
+ * - psi_ttwu_dequeue() -- 많은 슬픔 :-( 회계는 우리를 죽일 것입니다.
+ *
+ * 결과적으로 우리는 거의 모든 것과 정말 심하게 경쟁합니다. 자세한 내용은 많은 메모리
+ * 장벽과 주석을 참조하십시오.
+ *
+ * 반환: @p->상태가 변경되면 %true (실제 웨이크업이 완료됨), 그렇지 않으면 %false입니다.
+ *
+ * - @p가 @state인 task를 깨운다.
+ */
 static int
 try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 {
@@ -4543,6 +4645,11 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	int cpu, success = 0;
 
 	preempt_disable();
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - @p 가 current 이면 이미 깨어있으므로 빠져나간다.
+	 *   @state 가 같으면 TASK_RUNNING도 설정후 빠져 나감.
+	 */
 	if (p == current) {
 		/*
 		 * We're waking current, this means 'p->on_rq' and 'task_cpu(p)
@@ -4554,6 +4661,19 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 		 *  - we rely on Program-Order guarantees for all the ordering,
 		 *  - we're serialized against set_special_state() by virtue of
 		 *    it disabling IRQs (this allows not taking ->pi_lock).
+		 */
+		/*
+		 * IAMROOT. 2023.05.20:
+		 * - google-translate
+		 * current를 깨우고 있습니다. 이것은 'p->on_rq' 및 'task_cpu(p)
+		 * == smp_processor_id()'를 의미합니다. 함께 이것은 우리가 어떤 잠금도
+		 * 취하지 않고 아래의 전체 'p->on_rq && ttwu_runnable()' 사례를
+		 * 특수한 경우로 만들 수 있음을 의미합니다.
+		 *
+		 * 특히:
+		 * - 우리는 모든 순서에 대해 Program-Order 보장에 의존합니다.
+		 * - 우리는 IRQ를 비활성화함으로써 set_special_state()에 대해
+		 *   직렬화됩니다(이것은 * ->pi_lock을 허용하지 않음).
 		 */
 		if (!ttwu_state_match(p, state, &success))
 			goto out;
@@ -4600,6 +4720,11 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * A similar smb_rmb() lives in try_invoke_on_locked_down_task().
 	 */
 	smp_rmb();
+	/*
+	 * IAMROOT, 2023.05.20:
+	 * - 여기에서 runqueue에 있는 예외 상황이면 wake_flags가 WF_FORK 가 아니면
+	 *   curr 다음 task 로 지정하고 unlock 으로 jump
+	 */
 	if (READ_ONCE(p->on_rq) && ttwu_runnable(p, wake_flags))
 		goto unlock;
 
@@ -4635,6 +4760,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * TASK_WAKING such that we can unlock p->pi_lock before doing the
 	 * enqueue, such as ttwu_queue_wakelist().
 	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - 잠깐 state를 TASK_WAKING 으로 변경한다.
+	 */
 	WRITE_ONCE(p->__state, TASK_WAKING);
 
 	/*
@@ -4656,6 +4785,25 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * to ensure we observe the correct CPU on which the task is currently
 	 * scheduling.
 	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * 소유(원격) CPU가 이 작업을 prev로 사용하여 schedule() 도중에 있는 경우 원격 CPU
+	 * wake_list에서 p->on_cpu를 회전시키는 대신 잠재적으로 IPI를 전송하여 웨이커가
+	 * 앞으로 진행할 수 있도록 하는 것을 고려하십시오. . 이것은 IRQ가 비활성화되고
+	 * on_cpu가 지워진 후에 IPI가 전달되기 때문에 안전합니다.
+	 *
+	 * p->on_cpu 다음에 task_cpu(p)를 로드하는지 확인합니다.
+	 *
+	 * set_task_cpu(p, cpu);
+	 *   STORE p->cpu = @cpu
+	 * __schedule() (switch to task 'p')
+	 *   LOCK rq->lock
+	 *   smp_mb__after_spin_lock()		smp_cond_load_acquire(&p->on_cpu)
+	 *   STORE p->on_cpu = 1		LOAD p->cpu
+	 *
+	 * 작업이 현재 예약되어 있는 올바른 CPU를 관찰하도록 합니다.
+	 */
 	if (smp_load_acquire(&p->on_cpu) &&
 	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags | WF_ON_CPU))
 		goto unlock;
@@ -4668,6 +4816,14 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 *
 	 * This ensures that tasks getting woken will be fully ordered against
 	 * their previous state and preserve Program Order.
+	 */
+	/*
+	 * IAMROOT. 2023.05.20:
+	 * - google-translate
+	 * 소유(원격) CPU가 이 작업을 prev로 사용하여 schedule() 도중에 있는 경우 작업
+	 * 참조가 완료될 때까지 기다리십시오. finish_task()에서 smp_store_release()와
+	 * 쌍을 이룹니다. 이렇게 하면 깨우는 작업이 이전 상태에 대해 완전히 정렬되고 프로그램
+	 * 순서가 유지됩니다.
 	 */
 	smp_cond_load_acquire(&p->on_cpu, !VAL);
 

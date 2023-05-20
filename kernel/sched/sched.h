@@ -3826,6 +3826,10 @@ unsigned long scale_irq_capacity(unsigned long util, unsigned long irq, unsigned
 
 DECLARE_STATIC_KEY_FALSE(sched_energy_present);
 
+/*
+ * IAMROOT, 2023.05.20:
+ * - mobile cpu 에서 주로 이용. EAS(energy aware scheduling) 활성화 여부
+ */
 static inline bool sched_energy_enabled(void)
 {
 	return static_branch_unlikely(&sched_energy_present);
