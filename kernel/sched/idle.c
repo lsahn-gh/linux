@@ -6,6 +6,14 @@
  * (NOTE: these are not related to SCHED_IDLE batch scheduled
  *        tasks which are handled in sched/fair.c )
  */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   유휴 스레드에 대한 일반 진입점 및 유휴 작업 스케줄링 클래스 구현.
+ *
+ *   (NOTE: 이들은 sched/fair.c에서 처리되는 SCHED_IDLE 일괄 예약 
+ *   작업과 관련이 없습니다. 
+ */
 #include "sched.h"
 
 #include <trace/events/power.h>

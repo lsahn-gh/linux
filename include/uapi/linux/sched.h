@@ -116,6 +116,27 @@ struct clone_args {
 /*
  * Scheduling policies
  */
+/*
+ * IAMROOT, 2023.05.24:
+ * ---- chatopenai ----
+ * - SCHED_IDLE과 idle task의 관계
+ *   Linux 커널에서 idle task과 SCHED_IDLE은 직접적인 관련이 없습니다. 
+ *   idle 태스크는 수행할 다른 task이 없을 때 CPU에서 실행되는 태스크를 
+ *   말합니다.
+ *
+ *   반면 SCHED_IDLE은 Linux 커널의 기본 스케줄러인 
+ *   CFS(Completely Fair Scheduler)의 "batch" 또는 우선 순위가 낮은 task을 
+ *   위해 특별히 설계된 스케줄링 정책 또는 클래스입니다. SCHED_IDLE은 
+ *   시간에 민감하지 않고 CPU가 idle 상태일 때만 실행되도록 예약할 수 
+ *   있는 백그라운드 task을 위한 것입니다.
+ *
+ *   SCHED_IDLE 정책으로 예약된 task은 다른 task에 비해 우선 순위가
+ *   낮으며 실행 준비가 된 우선 순위가 높은 다른 task이 없는 경우에만
+ *   실행됩니다. SCHED_IDLE 정책은 시스템에서 실행 중인 시간이 중요한 
+ *   또는 대화형 task을 방해하지 않아야 하는 백그라운드 task 또는 task을
+ *   실행하는 데 유용합니다. 
+ * --------------------
+ */
 #define SCHED_NORMAL		0
 #define SCHED_FIFO		1
 #define SCHED_RR		2

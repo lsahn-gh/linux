@@ -2449,12 +2449,17 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
  * IAMROOT, 2023.04.13:
  * - scheulder에 따른 schedule. @p와 @rq schedule가 같다면
  *   scheudler의 check_preempt_curr()에서 reschedule 요청 여부를 결정한다.
+ *   (reschedule or next_buddy로 선택만 or nothing)
  *   @p schduler의 우선순위가 크다면 @rq를 rechedule 요청 한다.
  *   그게 아니면 rechedule 요청을 안한다.
  *   (sched_class 비교는 __pick_next_task() 참고)
  */
 void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags)
 {
+/*
+ * IAMROOT, 2023.05.24:
+ * - ex) fair : check_preempt_wakeup
+ */
 	if (p->sched_class == rq->curr->sched_class)
 		rq->curr->sched_class->check_preempt_curr(rq, p, flags);
 	else if (p->sched_class > rq->curr->sched_class)
@@ -3964,6 +3969,7 @@ int select_task_rq(struct task_struct *p, int cpu, int wake_flags)
  * IAMROOT, 2023.04.13:
  * - cpu가 1개거나 migrate가 비활성화인경우 cpumask_any로 선택, 그게 아니면
  *   @p의 schedule에 따라서 cpu를 선택한다.
+ *   (ex. select_task_rq_fair)
  */
 	if (p->nr_cpus_allowed > 1 && !is_migration_disabled(p))
 		cpu = p->sched_class->select_task_rq(p, cpu, wake_flags);
@@ -4105,6 +4111,14 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
 /*
  * Mark the task runnable and perform wakeup-preemption.
  */
+/*
+ * IAMROOT, 2023.05.24:
+ * - 1. check_preempt_curr
+ *   (@p의 reschedule or next_buddy set or nothing 확인 및 수행.)
+ *   2. TASK_RUNNING 전환.
+ *   3. task_woken 수행(fair는 없음)
+ *   4. 직전에 idle이였다면 idle_avg 통계, wake stamp 관련 통계.
+ */
 static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 			   struct rq_flags *rf)
 {
@@ -4118,6 +4132,12 @@ static void ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags,
 		 * Our task @p is fully woken up and running; so it's safe to
 		 * drop the rq->lock, hereafter rq is only used for statistics.
 		 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   우리의 작업 @p는 완전히 깨어나 실행 중입니다. 따라서 rq->lock을 
+ *   삭제하는 것이 안전합니다. 이후 rq는 통계에만 사용됩니다.
+ */
 		rq_unpin_lock(rq, rf);
 		p->sched_class->task_woken(rq, p);
 		rq_repin_lock(rq, rf);
@@ -4192,7 +4212,31 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
  */
 /*
  * IAMROOT, 2023.05.20:
+ * - papago
+ *   @p가 대기 루프 안에 있는 것을 고려하십시오. 
+ *
+ *   for (;;) {
+ *      set_current_state(TASK_UNINTERRUPTIBLE);
+ *
+ *      if (CONDITION)
+ *         break;
+ *
+ *      schedule();
+ *   }
+ *   __set_current_state(TASK_RUNNING);
+ *
+ *   set_current_state()와 schedule() 사이. 이 경우 @p는 여전히 실행 가능하므로 
+ *   원자적 방식으로 p->state를 다시 TASK_RUNNING으로 변경하기만 하면 됩니다.
+ *
+ *   task_rq(p)->lock을 취함으로써 우리는 schedule()에 대해 직렬화합니다. 
+ *   @p->on_rq이면 schedule()은 여전히 발생해야 하며 p->state는 TASK_RUNNING으로 
+ *   변경될 수 있습니다. 그렇지 않으면 우리는 race에서 졌고 schedule()이 
+ *   발생했으며 enqueue를 사용하여 전체 웨이크업을 수행해야 합니다. 
+ *
+ *   Returns: 웨이크업이 완료되면 %true, 그렇지 않으면 %false입니다.
+ *
  * - @wake_flags 가 WF_FORK 가 아닌 경우는 curr의 다음 task 로 지정하고 1을 반환
+ * - rq에 이미 들어가있으면 wakeup을 수행하고 return 1. 그게 아니면 return 0
  */
 static int ttwu_runnable(struct task_struct *p, int wake_flags)
 {
@@ -4273,6 +4317,12 @@ void send_call_function_single_ipi(int cpu)
  * 대상 CPU의 wake_list에 작업을 대기시키고 필요한 경우 IPI를 통해 CPU를
  * 깨웁니다. IPI를 수신한 wakee CPU는 활성화를 위해 sched_ttwu_wakeup()을 통해
  * 작업을 대기하므로 wakee는 깨우기 대신 깨우기 비용을 발생시킵니다.
+ *
+ * - @cpu에 ipi를 보내 sched_ttwu_pending()을 수행하게한다.
+ *   wake_entry는 CSD_TYPE_TTWU의 flag로 설정되있다. CSD_TYPE_TTWU로 설정되었다면
+ *   최종적으로 ipi를 통해 깨어난 cpu에 의해,
+ *   do_handle_IPI() -> IPI_CALL_FUNC -> flush_smp_call_function_queue() ->
+ *   sched_ttwu_pending()을 실행하게 될것이다.
  */
 static void __ttwu_queue_wakelist(struct task_struct *p, int cpu, int wake_flags)
 {
@@ -4690,6 +4740,13 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * reordered with p->state check below. This pairs with smp_store_mb()
 	 * in set_current_state() that the waiting thread does.
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   CONDITION을 기다리는 스레드를 깨우려면 호출자가 수행한 CONDITION=1이 
+ *   아래의 p->state 검사로 재정렬될 수 없도록 해야 합니다. 이는 대기 중인 
+ *   스레드가 수행하는 set_current_state()의 smp_store_mb()와 쌍을 이룹니다.
+ */
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	smp_mb__after_spinlock();
 	if (!ttwu_state_match(p, state, &success))
@@ -4719,6 +4776,30 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 *
 	 * A similar smb_rmb() lives in try_invoke_on_locked_down_task().
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   p->on_rq _after_ p->state를 로드하는지 확인하십시오. 그렇지 않으면 
+ *   거짓으로 p->on_rq == 0을 관찰하고 아래 smp_cond_load_acquire()에서 
+ *   멈출 수 있습니다.
+ *   
+ *   sched_ttwu_pending()			try_to_wake_up()
+ *     STORE p->on_rq = 1			  LOAD p->state
+ *     UNLOCK rq->lock
+ *   
+ *   __schedule() (switch to task 'p')
+ *     LOCK rq->lock			  smp_rmb();
+ *     smp_mb__after_spinlock();
+ *     UNLOCK rq->lock
+ *   
+ *   [task p]
+ *     STORE p->state = UNINTERRUPTIBLE	  LOAD p->on_rq
+ *
+ *   __schedule()에서 rq->lock의 LOCK+smp_mb__after_spinlock()과 쌍을 
+ *   이룹니다. smp_mb__after_spinlock()에 대한 주석을 참조하십시오.
+ *
+ *   비슷한 smb_rmb()가 try_invoke_on_locked_down_task()에 있습니다.
+ */
 	smp_rmb();
 	/*
 	 * IAMROOT, 2023.05.20:
@@ -4745,13 +4826,37 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 *   smp_mb__after_spinlock();
 	 *   STORE p->on_rq = 0			  LOAD p->on_cpu
 	 *
-	 * Pairs with the LOCK+smp_mb__after_spinlock() on rq->lock in
-	 * __schedule().  See the comment for smp_mb__after_spinlock().
+	 * pairs with the lock+smp_mb__after_spinlock() on rq->lock in
+	 * __schedule().  see the comment for smp_mb__after_spinlock().
 	 *
-	 * Form a control-dep-acquire with p->on_rq == 0 above, to ensure
+	 * form a control-dep-acquire with p->on_rq == 0 above, to ensure
 	 * schedule()'s deactivate_task() has 'happened' and p will no longer
-	 * care about it's own p->state. See the comment in __schedule().
+	 * care about it's own p->state. see the comment in __schedule().
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   p->on_cpu _after_ p->on_rq를 로드하는지 확인하십시오. 그렇지 않으면 
+ *   p->on_cpu == 0을 잘못 관찰할 수 있습니다.
+ *
+ *   실행 대기열에서 자신을 제거하려면 실행 중(->on_cpu == 1)이어야 합니다.
+ *   
+ *   __schedule() (switch to task 'p')	try_to_wake_up()
+ *     STORE p->on_cpu = 1		  LOAD p->on_rq
+ *     UNLOCK rq->lock
+ *   
+ *   __schedule() (put 'p' to sleep)
+ *     LOCK rq->lock			  smp_rmb();
+ *     smp_mb__after_spinlock();
+ *     STORE p->on_rq = 0			  LOAD p->on_cpu
+ *
+ *  __schedule()에서 rq->lock의 lock+smp_mb__after_spinlock()과 쌍을 
+ *  이룹니다. smp_mb__after_spinlock()에 대한 주석을 참조하십시오.
+ *
+ *  위의 p->on_rq == 0으로 control-dep-acquire를 형성하여 schedule()의 
+ *  deactivate_task()가 '일어났고' p가 자신의 p->상태에 더 이상 신경쓰지 
+ *  않도록 합니다. __schedule()의 주석을 참조하십시오.
+ */
 	smp_acquire__after_ctrl_dep();
 
 	/*
@@ -4762,6 +4867,10 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 */
 	/*
 	 * IAMROOT. 2023.05.20:
+	 * - papago
+	 *   우리는 웨이크업(@success == 1)을 하고 있고, 그들은 대기열에서 
+	 *   제외(p->on_rq == 0)했습니다. -> ttwu_queue_wakelist()와 같은 
+	 *   대기열에 넣기 전에 pi_lock.
 	 * - 잠깐 state를 TASK_WAKING 으로 변경한다.
 	 */
 	WRITE_ONCE(p->__state, TASK_WAKING);
@@ -4803,6 +4912,8 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 *   STORE p->on_cpu = 1		LOAD p->cpu
 	 *
 	 * 작업이 현재 예약되어 있는 올바른 CPU를 관찰하도록 합니다.
+	 *
+	 * - @p가 prev로 사용되어 schedule()을 하고 있다. 이런 상황에 대한 예외처리.
 	 */
 	if (smp_load_acquire(&p->on_cpu) &&
 	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags | WF_ON_CPU))
@@ -4824,6 +4935,8 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * 참조가 완료될 때까지 기다리십시오. finish_task()에서 smp_store_release()와
 	 * 쌍을 이룹니다. 이렇게 하면 깨우는 작업이 이전 상태에 대해 완전히 정렬되고 프로그램
 	 * 순서가 유지됩니다.
+	 *
+	 * - 위에까지가 예외케이스였고, 일반적으로 아래 함수로 동작한다.
 	 */
 	smp_cond_load_acquire(&p->on_cpu, !VAL);
 

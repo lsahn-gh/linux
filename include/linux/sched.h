@@ -1043,6 +1043,12 @@ struct task_struct {
 	/* Current CPU: */
 	unsigned int			cpu;
 #endif
+/*
+ * IAMROOT, 2023.05.24:
+ * - wakee_flips(record_wakee() 참고)
+ *   마지막에 깨운 task와 현재(최신) task가 다른 경우에 대한 count.
+ *   1초단위로 절반으로 줄어든다.
+ */
 	unsigned int			wakee_flips;
 	unsigned long			wakee_flip_decay_ts;
 	struct task_struct		*last_wakee;

@@ -246,6 +246,10 @@ static inline int task_has_dl_policy(struct task_struct *p)
 
 #define cap_scale(v, s) ((v)*(s) >> SCHED_CAPACITY_SHIFT)
 
+/*
+ * IAMROOT, 2023.05.24:
+ * - 기존값(*avg)에 new 값(@sampe)에 대한 diff를 1/8 배 하여 기존값에 적산한다.
+ */
 static inline void update_avg(u64 *avg, u64 sample)
 {
 	s64 diff = sample - *avg;

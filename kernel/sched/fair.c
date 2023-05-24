@@ -7681,6 +7681,12 @@ static unsigned long capacity_of(int cpu)
 	return cpu_rq(cpu)->cpu_capacity;
 }
 
+/*
+ * IAMROOT, 2023.05.23:
+ * - wakee flip 통계를 낸다.
+ *   1. 1초에 한번씩 wakee_flips을 절반으로 줄인다.
+ *   2. 마지막에 깨운 task가 이전과 다르다면 기록하고 wakee_flips를 늘린다.
+ */
 static void record_wakee(struct task_struct *p)
 {
 	/*
@@ -7725,6 +7731,61 @@ static void record_wakee(struct task_struct *p)
  * Waker/wakee being client/server, worker/dispatcher, interrupt source or
  * whatever is irrelevant, spread criteria is apparent partner count exceeds
  * socket size.
+ */
+/*
+ * IAMROOT, 2023.05.23:
+ * - papago
+ *   스위칭 주파수 휴리스틱을 통해 M:N 웨이커/웨이키 관계를 감지합니다.
+ *
+ *   많은 웨이커는 마지막으로 깨어난 것과 다른 작업을 하나의 웨이크보다 대략 
+ *   N배 더 높은 빈도로 깨워야 합니다.
+ *
+ *   로드 분산과 공유 캐시로의 통합을 허용할지 여부를 결정하기 위해 한 파트너에서 
+ *   llc_size의 최소 '플립' 빈도를 찾고 다른 파트너에서는 lls_size의 더 높은 
+ *   빈도를 찾습니다.
+ *
+ *   두 조건이 모두 충족되면 파트너 수가 소켓 크기를 초과하여 일부일처제가 아닌 
+ *   관계임을 비교적 확신할 수 있습니다.
+ *
+ *   Waker/wakee는 클라이언트/서버, 작업자/디스패처, 인터럽트 소스 또는 관련이
+ *   없는 모든 것이므로 확산 기준은 명백한 파트너 수가 소켓 크기를 초과하는
+ *   것입니다.
+ * ----- chatopenai -----
+ * - llc를 wide의 기준으로 쓰는 이유
+ *   sd_llc_size는 웨이크업 관계가 넓은지를 판단하는 요인으로 사용된다. 
+ *   sd_llc_size로 표시되는 캐시 크기는 캐시 공유 및 잠재적인 캐시 충돌 측면에서 
+ *   작업 간의 관계를 추론하기 위한 휴리스틱으로 사용됩니다.
+ *
+ *   멀티 코어 시스템에서 서로 다른 CPU에서 실행되는 작업은 공유된 마지막 수준 
+ *   캐시(LLC)에 액세스할 수 있습니다. 작업이 자주 깨어나면 캐시 리소스를 놓고 
+ *   경합할 가능성이 있으며, 이로 인해 캐시 스래싱 및 성능 저하가 발생할 수 
+ *   있습니다.
+ *
+ *   깨우기 폭을 결정하는 요소로 캐시 크기를 사용하는 아이디어는 다음과 같습니다.
+ *
+ *   주어진 작업의 깨우기 뒤집기 횟수(슬레이브)가 캐시 크기(인자)보다 현저히 
+ *   적으면 해당 작업이 다른 작업과 캐시 경합을 일으킬 만큼 충분히 자주 깨우지 
+ *   않고 있음을 나타냅니다. 이 경우 웨이크업 관계는 좁은 것으로 간주되며 CPU에
+ *   부하를 분산시키는 것이 사용 가능한 캐시 리소스를 활용하는 데 도움이 될 수
+ *   있습니다.
+ *
+ *   반면 현재 태스크의 웨이크업 플립 횟수(마스터)가 슬레이브 * 인자보다 현저히
+ *   높으면 현재 태스크가 주어진 태스크보다 훨씬 더 자주 웨이크업하고 있음을
+ *   나타냅니다. 이는 광범위한 웨이크업 관계를 시사하며, 이는 현재 작업이
+ *   잠재적으로 캐시 리소스에 대한 여러 작업과 경합하고 있음을 의미합니다.
+ *   이러한 경우 캐시 스래싱을 줄이기 위해 동일한 CPU에서 관련 작업 실행을
+ *   통합하는 것이 좋습니다.
+ *
+ *   두 작업의 웨이크업 플립 수를 비교하고 캐시 크기를 고려하여 wake_wide 함수는
+ *   웨이크업 관계가 부하 통합을 보장할 만큼 충분히 넓은지 또는 부하를 서로 다른 
+ *   CPU에 분산시킬 만큼 충분히 좁은지 확인하려고 시도합니다. 
+ * ----------------------
+ *
+ * - master를 wakee_flips이 큰것으로, 작은것을 slave로 설정한다.
+ *   slave가 sd_llc_size보다 작거나 master가 sd_llc_size * slave보다 작다면
+ *   return 0(not wide), 아니면 return 1(wide)이다.
+ * - wakee_flips가 크다는것이 간접적으로 wakeup 범위가 넓다(wide)는 것을 의미하는데,
+ *   이것을 sd_llc_size를 socket size개념으로 하여 wide의 기준을 잡는다.
  */
 static int wake_wide(struct task_struct *p)
 {
@@ -8831,6 +8892,7 @@ unlock:
  * 특정 조건에서 유휴 형제 CPU를 선택하여 로드 균형을 조정합니다.
  *
  * 대상 CPU 번호를 반환합니다.
+ * - ING
  */
 static int
 select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
@@ -8851,6 +8913,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	 * required for stable ->cpus_allowed
 	 */
 	lockdep_assert_held(&p->pi_lock);
+/*
+ * IAMROOT, 2023.05.23:
+ * - try_to_wake_up()에서 진입.
+ */
 	if (wake_flags & WF_TTWU) {
 		record_wakee(p);
 
@@ -9106,6 +9172,10 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	int next_buddy_marked = 0;
 	int cse_is_idle, pse_is_idle;
 
+/*
+ * IAMROOT, 2023.05.23:
+ * - 이미 curr. 할의미가 없다.
+ */
 	if (unlikely(se == pse))
 		return;
 
@@ -9115,12 +9185,24 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * lead to a throttle).  This both saves work and prevents false
 	 * next-buddy nomination below.
 	 */
+/*
+ * IAMROOT, 2023.05.23:
+ * - papago
+ *   이것은 attach_tasks()와 같은 호출자에서 가능합니다. 여기서 우리는 
+ *   enqueue(스로틀로 이어질 수 있음) 후에 무조건적으로 check_preempt_curr()를 
+ *   수행합니다. 이것은 작업을 저장하고 아래에서 잘못된 다음 친구 지명을 
+ *   방지합니다.
+ * - group이 이미 throttle중이라면 깨어나봤자 의미가 없기때문에 return.
+ */
 	if (unlikely(throttled_hierarchy(cfs_rq_of(pse))))
 		return;
 
 	/*
 	 * IAMROOT, 2023.05.20:
 	 * - WF_FORK flags 가 없으면 curr의 다음 task 를 pse로 한다.
+	 * - curr다음에 많은 task가 대기중인경우(scale = 1), fork가 아니라면,
+	 *   buddy를 지원하는 경우 curr의 next로 설정해 다음에 즉시 wakeup
+	 *   되게 한다.
 	 */
 	if (sched_feat(NEXT_BUDDY) && scale && !(wake_flags & WF_FORK)) {
 		set_next_buddy(pse);
@@ -9137,10 +9219,27 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * prevents us from potentially nominating it as a false LAST_BUDDY
 	 * below.
 	 */
+/*
+ * IAMROOT, 2023.05.23:
+ * - papago
+ *   새 작업 깨우기 경로에서 이미 설정된 TIF_NEED_RESCHED를 사용하여 여기로 
+ *   올 수 있습니다.
+ *
+ *   Note: 이것은 또한 조절된 그룹(예: set_curr_task를 통해)에 있는 curr의 
+ *   엣지 케이스를 포착합니다. 이렇게 하면 잠재적으로 아래에서 잘못된 
+ *   LAST_BUDDY로 지명하는 것을 방지할 수 있습니다.
+ *
+ * - 이미 reschedule 요청이 있다.
+ */
 	if (test_tsk_need_resched(curr))
 		return;
 
 	/* Idle tasks are by definition preempted by non-idle tasks. */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   유휴 작업은 정의에 따라 유휴 작업이 아닌 작업에 의해 선점됩니다. 
+ */
 	if (unlikely(task_has_idle_policy(curr)) &&
 	    likely(!task_has_idle_policy(p)))
 		goto preempt;
@@ -9149,6 +9248,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Batch and idle tasks do not preempt non-idle tasks (their preemption
 	 * is driven by the tick):
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   배치 및 유휴 작업은 유휴가 아닌 작업을 선점하지 않습니다(선점은 틱에 
+ *   의해 구동됨).
+ */
 	if (unlikely(p->policy != SCHED_NORMAL) || !sched_feat(WAKEUP_PREEMPTION))
 		return;
 
@@ -9162,6 +9267,11 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	 * Preempt an idle group in favor of a non-idle group (and don't preempt
 	 * in the inverse case).
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   유휴가 아닌 그룹을 위해 유휴 그룹을 선점합니다(반대의 경우 선점하지 않음).
+ */
 	if (cse_is_idle && !pse_is_idle)
 		goto preempt;
 	if (cse_is_idle != pse_is_idle)
@@ -9173,6 +9283,11 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 		 * Bias pick_next to pick the sched entity that is
 		 * triggering this preemption.
 		 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   이 선점을 트리거하는 sched 엔터티를 선택하려면 pick_next를 바이어스합니다.
+ */
 		if (!next_buddy_marked)
 			set_next_buddy(pse);
 		goto preempt;
@@ -9191,6 +9306,17 @@ preempt:
 	 * Also, during early boot the idle thread is in the fair class,
 	 * for obvious reasons its a bad idea to schedule back to it.
 	 */
+/*
+ * IAMROOT, 2023.05.24:
+ * - papago
+ *   현재 작업이 여전히 rq에 있는 경우에만 역방향 버디를 설정하십시오. 
+ *   이것은 웨이크업이 ->pre_schedule() 또는 idle_balance() 지점에서 
+ *   일정과 인터리브될 때 발생할 수 있으며, 둘 중 하나가 
+ *   rq 잠금을 * 해제할 수 있습니다.
+ *
+ *   또한 초기 부팅 중에 유휴 스레드는 공정한 클래스에 속하며, 
+ *   분명한 이유 때문에 다시 예약하는 것은 좋지 않습니다.
+ */
 	if (unlikely(!se->on_rq || curr == rq->idle))
 		return;
 
