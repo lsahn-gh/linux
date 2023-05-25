@@ -17,6 +17,13 @@ SCHED_FEAT(START_DEBIT, true)
  * wakeup-preemption), since its likely going to consume data we
  * touched, increases cache locality.
  */
+/*
+ * IAMROOT. 2023.05.23:
+ * - google-translate
+ * 우리가 마지막으로 깨운 작업을 예약하는 것을 선호합니다(깨우기 선점에 실패했다고
+ * 가정). 우리가 접촉한 데이터를 소비할 가능성이 높기 때문에 캐시 지역성이
+ * 증가합니다.
+ */
 SCHED_FEAT(NEXT_BUDDY, false)
 
 /*

@@ -380,7 +380,8 @@ subsys_initcall(register_cpu_capacity_sysctl);
 
 /*
  * IAMROOT, 2023.05.20:
- * - update(rebuild) 중임을 표시
+ * - cpufreq notifier 로 부터 호출 되었는지(즉 cpufreq policy가 변경되었는지)를
+ *   표시.
  */
 static int update_topology;
 
@@ -392,6 +393,12 @@ int topology_update_cpu_topology(void)
 /*
  * Updating the sched_domains can't be done directly from cpufreq callbacks
  * due to locking, so queue the work for later.
+ */
+/*
+ * IAMROOT. 2023.05.21:
+ * - google-translate
+ * sched_domains 업데이트는 잠금으로 인해 cpufreq 콜백에서 직접 수행할 수 없으므로
+ * 나중을 위해 작업을 대기열에 추가하십시오.
  */
 static void update_topology_flags_workfn(struct work_struct *work)
 {

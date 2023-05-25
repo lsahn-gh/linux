@@ -3619,6 +3619,35 @@ static int dattrs_equal(struct sched_domain_attr *cur, int idx_cur,
  * 도메인을 생성하지 않습니다.
  *
  * 핫플러그 잠금 및 sched_domains_mutex 보류로 호출
+ *
+ * - 호출과정 예
+ * 1. cpufreq notifier 로 부터 호출되는 경우
+ * partition_sched_domains_locked
+ * ▶ partition_and_rebuild_sched_domains (cpuset.c:1006)
+ *   ▶ rebuild_sched_domains_locked (cpuset.c:1026)
+ *     ▶ rebuild_sched_domains (cpuset.c:1083)
+ *       ╸update_topology_flags_workfn (arch_topology.c:401)
+ * workfn 등록 과 호출은 아래과 같다
+ * - workq callback 함수 등록
+ *   DECLARE_WORK(update_topology_flags_work, update_topology_flags_workfn)
+ * - cpufreq notifier 등록
+ *   core_initcall(register_cpufreq_notifier) -> cpufreq_register_notifier
+ *   (&init_cpu_capacity_notifier, CPUFREQ_POLICY_NOTIFIER)
+ * - init_cpu_capacity_notifier 에서 init_cpu_capacity_callback 함수 설정.
+ * - cpufreq policy 가 변경되면 notifier에 의해 callback 함수 호출
+ *   init_cpu_capacity_callback -> schedule_work(&update_topology_flags_work)
+ *
+ * 2. cpu hotplug state 로 부터 호출되는 경우
+ * partition_sched_domains_locked
+ * ▶ partition_sched_domains (topology.c:3779)
+ *   ▶ cpuset_cpu_active (core.c:10449)
+ *      ╸sched_cpu_activate (core.c:10484)
+ * - cpu hotplug state 의 startup 함수로 호출된다.
+ *	[CPUHP_AP_ACTIVE] = {
+ *		.name			= "sched:active",
+ *		.startup.single		= sched_cpu_activate,
+ *		.teardown.single	= sched_cpu_deactivate,
+ *	},
  */
 void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 				    struct sched_domain_attr *dattr_new)
@@ -3630,13 +3659,15 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	lockdep_assert_held(&sched_domains_mutex);
 
 	/* Let the architecture update CPU core mappings: */
+	/*
+	 * IAMROOT. 2023.05.21:
+	 * - google-translate
+	 * 아키텍처가 CPU 코어 매핑을 업데이트하도록 합니다.
+	 * - cpufreq notifier 로 부터 호출된 경우(즉 cpufreq policy가 변경된 경우)만
+	 *   new_topology 가 1로 설정된다.
+	 */
 	new_topology = arch_update_cpu_topology();
 	/* Trigger rebuilding CPU capacity asymmetry data */
-	/*
-	 * IAMROOT, 2023.05.20:
-	 * - topology rebuild 중이다.
-	 * - XXX arch_update_cpu_topology 함수가 설정하는 것은?
-	 */
 	if (new_topology)
 		asym_cpu_capacity_scan();
 
@@ -3657,6 +3688,8 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	/*
 	 * IAMROOT, 2023.05.20:
 	 * - i: 기존 도메인, j: 새 도메인
+	 *   cpufreq notifier 로 부터 호출된 경우(즉 cpufreq policy가 변경된 경우)
+	 *   가 아니고
 	 *   기존 도메인과 새도메인의 cpumask와 속성이 일치 하는 것만 남겨두고
 	 *   (dl bandwidth정보만 삭제) 그렇지 않으면 기존 도메인 삭제
 	 *   (detach_destroy_domains)
@@ -3708,6 +3741,8 @@ match1:
 	/*
 	 * IAMROOT, 2023.05.20:
 	 * - i: 새도메인, j: 기존도메인
+	 *   cpufreq notifier 로 부터 호출된 경우(즉 cpufreq policy가 변경된 경우)
+	 *   이거나
 	 *   cpumask나 속성이 같지 않은 경우에만 domain build
 	 */
 	for (i = 0; i < ndoms_new; i++) {
@@ -3732,7 +3767,7 @@ match2:
 		for (j = 0; j < n && !sched_energy_update; j++) {
 			/*
 			 * IAMROOT, 2023.05.20:
-			 * - cpumask  같고 pd(power domain)의 첫번째 cpu일 때만
+			 * - cpumask  같고 pd(perf domain)의 첫번째 cpu일 때만
 			 *   pd를 만들지 않는다.
 			 */
 			if (cpumask_equal(doms_new[i], doms_cur[j]) &&

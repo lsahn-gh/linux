@@ -609,6 +609,21 @@ void generic_smp_call_function_single_interrupt(void)
  * Loop through the call_single_queue and run all the queued callbacks.
  * Must be called with interrupts disabled.
  */
+/*
+ * IAMROOT. 2023.05.21:
+ * - google-translate
+ * flush_smp_call_function_queue - 플러시 보류 중인 smp-call-function 콜백
+ *
+ * @warn_cpu_offline: 'true'로 설정하면 콜백이 오프라인 CPU에서 대기 중인 경우
+ * 경고합니다. 'false'로 설정되어 있으면 이 검사를 건너뜁니다.
+ *
+ * 이 CPU에서 대기 중인 모든 보류 중인 smp-call-function 콜백을 플러시합니다. 이것은
+ * 일반 IPI 핸들러와 오프라인으로 전환하려는 CPU에 의해 호출되어 보류 중인 모든 IPI 콜백이
+ * 완전히 오프라인으로 전환되기 전에 실행되도록 합니다.
+ *
+ * call_single_queue를 반복하고 대기 중인 모든 콜백을 실행합니다.
+ * 인터럽트를 비활성화한 상태에서 호출해야 합니다.
+ */
 static void flush_smp_call_function_queue(bool warn_cpu_offline)
 {
 	call_single_data_t *csd, *csd_next;

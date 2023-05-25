@@ -8754,7 +8754,11 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
  */
 /*
  * IAMROOT, 2023.05.20:
- * - sched_cpu_activate -> cpuset_cpu_active -> partition_sched_domains
+ * - pd(perf_domain) build 과정 예. partition_sched_domains_locked 주석 참조.
+ *   build_perf_domains
+ *     ▶ partition_sched_domains_locked (topology.c:3622)
+ *       ▼ partition_and_rebuild_sched_domains (cpuset.c:1006)
+ *       ▼ partition_sched_domains (topology.c:3770)
  */
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 {

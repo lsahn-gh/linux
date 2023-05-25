@@ -2015,6 +2015,19 @@ EXPORT_SYMBOL_GPL(cpufreq_get_driver_data);
  * This function may sleep and it has the same return values as
  * blocking_notifier_chain_register().
  */
+/*
+ * IAMROOT. 2023.05.21:
+ * - google-translate
+ * cpufreq_register_notifier - cpufreq에 알리미를 등록합니다.
+ * @nb: 등록할 알리미 기능.
+ * @list: CPUFREQ_TRANSITION_NOTIFIER 또는 CPUFREQ_POLICY_NOTIFIER.
+ *
+ * 두 목록 중 하나에 알림을 추가합니다. 클록 속도 변경 시 실행되는 알림 목록(모든 전환
+ * 전후에 한 번) 또는 cpufreq 정책 변경 시 실행되는 알림 목록입니다.
+ *
+ * 이 함수는 잠들 수 있으며 blocking_notifier_chain_register()와 동일한 반환 값을
+ * 갖습니다.
+ */
 int cpufreq_register_notifier(struct notifier_block *nb, unsigned int list)
 {
 	int ret;

@@ -4211,6 +4211,31 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
  *          %false otherwise.
  */
 /*
+ * IAMROOT. 2023.05.23:
+ * - google-translate
+ * 대기 루프 안에 있는 @p를 고려하십시오.
+ *
+ *   for (;;) {
+ *      set_current_state(TASK_UNINTERRUPTIBLE);
+ *
+ *      if (CONDITION)
+ *         break;
+ *
+ *      schedule();
+ *   }
+ *   __set_current_state(TASK_RUNNING);
+ *
+ * set_current_state()와 schedule() 사이. 이 경우 @p는 여전히 실행 가능하므로 원자적
+ * 방식으로 p->state를 다시 TASK_RUNNING으로 변경하기만 하면 됩니다.
+ *
+ * task_rq(p)->lock을 취함으로써 우리는 schedule()에 대해 직렬화합니다. @p->on_rq이면
+ * schedule()은 여전히 ​​발생해야 하며 p->state는 TASK_RUNNING으로 변경될 수 있습니다.
+ * 그렇지 않으면 우리는 경주에서 졌고 schedule()이 발생했으며 enqueue를 사용하여 전체
+ * 웨이크업을 수행해야 합니다.
+ *
+ * 반환: 웨이크업이 완료되면 %true, 그렇지 않으면 %false.
+ */
+/*
  * IAMROOT, 2023.05.20:
  * - papago
  *   @p가 대기 루프 안에 있는 것을 고려하십시오. 
