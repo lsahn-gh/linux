@@ -7686,6 +7686,14 @@ static unsigned long capacity_of(int cpu)
  * - wakee flip 통계를 낸다.
  *   1. 1초에 한번씩 wakee_flips을 절반으로 줄인다.
  *   2. 마지막에 깨운 task가 이전과 다르다면 기록하고 wakee_flips를 늘린다.
+ * - wake_wide()와 연계해서 생각한다.
+ * - ex) P0 thread가 P1, P2.. thread를 RR방식으로 깨우는 환경이라고 가정한다.
+ *
+ *   P0(Distributer) -> P1, P2, P3..
+ *
+ *   이경우 P0에서만 wakee_flips가 증가하고 나머지 PX에서는 wakee_flips가
+ *   증가하지 않을것이다.
+ *
  */
 static void record_wakee(struct task_struct *p)
 {
@@ -7786,6 +7794,9 @@ static void record_wakee(struct task_struct *p)
  *   return 0(not wide), 아니면 return 1(wide)이다.
  * - wakee_flips가 크다는것이 간접적으로 wakeup 범위가 넓다(wide)는 것을 의미하는데,
  *   이것을 sd_llc_size를 socket size개념으로 하여 wide의 기준을 잡는다.
+ * - 휴리스틱으로 sd_llc_size를 가지고 판단하며, return 1이면 캐시가 친화가 깨진것,
+ *   return 0이면 캐시 친화가 유지중이라고 생각한다.
+ * - record_wakee()와 연계해서 생각한다.
  */
 static int wake_wide(struct task_struct *p)
 {
@@ -8759,6 +8770,32 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
  *     ▶ partition_sched_domains_locked (topology.c:3622)
  *       ▼ partition_and_rebuild_sched_domains (cpuset.c:1006)
  *       ▼ partition_sched_domains (topology.c:3770)
+ *
+ * ---------------
+ *  - 절전을 위해선 빠른 응답, 에너지효율, 높은성능이 필요하다.
+ *    그걸 위해서 느린 반응속도인 PELT를 안하고 상승시 4배, 하향시 8배 빠른
+ *    WALT로 바꾸고, uclamp을 통해 적절한 core를 찾게 하는 방식을 사용한다.
+ *
+ * - 에너지이득 : cpufreq(DVFS)
+ *   빠른응답 : WLAT
+ *   높은 성능 : EAS
+ *
+ * - EAS는 다음과 같은 컴포넌트를 가진다.
+ *   > EAS Core
+ *    스케쥴러 내에서 에너지 모델로 동작하는 Task Placement 로직
+ *    WALT 또는 PELT
+ *   > schedutil
+ *    스케쥴러 결합된 새로운 CPUFreq(DVFS) based governor
+ *   > CPUidle
+ *    스케쥴러 결합된 새로운 CPUIdle based governor
+ *   > UtilClamp(uclamp)
+ *    Task Placement와 schedutil에 영향을 준다. 기존 SchedTune을 대체하여 사용한다.
+ *
+ * - Wake 밸런스에 깨우는 방법들
+ *   1. shallowest idle - state : C0(얕은 잠. ex, wfi)를 먼저 선택한다.
+ *   2. driven DVFS : freq를 변경해서 해결거나 깨우거나 한다.
+ * ---------------
+ *  
  */
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 {
@@ -8924,6 +8961,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 	if (wake_flags & WF_TTWU) {
 		record_wakee(p);
 
+/*
+ * IAMROOT, 2023.05.26:
+ * - EAS -> cache affinity의 순서로 cpu를 찾아본다.
+ */
 		if (sched_energy_enabled()) {
 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
 			if (new_cpu >= 0)
