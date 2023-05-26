@@ -4211,31 +4211,6 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
  *          %false otherwise.
  */
 /*
- * IAMROOT. 2023.05.23:
- * - google-translate
- * 대기 루프 안에 있는 @p를 고려하십시오.
- *
- *   for (;;) {
- *      set_current_state(TASK_UNINTERRUPTIBLE);
- *
- *      if (CONDITION)
- *         break;
- *
- *      schedule();
- *   }
- *   __set_current_state(TASK_RUNNING);
- *
- * set_current_state()와 schedule() 사이. 이 경우 @p는 여전히 실행 가능하므로 원자적
- * 방식으로 p->state를 다시 TASK_RUNNING으로 변경하기만 하면 됩니다.
- *
- * task_rq(p)->lock을 취함으로써 우리는 schedule()에 대해 직렬화합니다. @p->on_rq이면
- * schedule()은 여전히 ​​발생해야 하며 p->state는 TASK_RUNNING으로 변경될 수 있습니다.
- * 그렇지 않으면 우리는 경주에서 졌고 schedule()이 발생했으며 enqueue를 사용하여 전체
- * 웨이크업을 수행해야 합니다.
- *
- * 반환: 웨이크업이 완료되면 %true, 그렇지 않으면 %false.
- */
-/*
  * IAMROOT, 2023.05.20:
  * - papago
  *   @p가 대기 루프 안에 있는 것을 고려하십시오. 
@@ -4260,7 +4235,6 @@ ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags,
  *
  *   Returns: 웨이크업이 완료되면 %true, 그렇지 않으면 %false입니다.
  *
- * - @wake_flags 가 WF_FORK 가 아닌 경우는 curr의 다음 task 로 지정하고 1을 반환
  * - rq에 이미 들어가있으면 wakeup을 수행하고 return 1. 그게 아니면 return 0
  */
 static int ttwu_runnable(struct task_struct *p, int wake_flags)
@@ -4722,8 +4696,16 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	preempt_disable();
 	/*
 	 * IAMROOT, 2023.05.20:
-	 * - @p 가 current 이면 이미 깨어있으므로 빠져나간다.
-	 *   @state 가 같으면 TASK_RUNNING도 설정후 빠져 나감.
+	 * - @p 가 current 인 경우
+	 *   - @p의 state 에 전달된 @state가 존재
+	 *     1. @p의 state를 TASK_RUNNNIG 으로 설정
+	 *     2. success 1 설정 후 out
+	 *   - @p의 state 에 전달된 @state가 존재 x
+	 *     1. success 0 설정 후 out
+	 * - XXX
+	 *   1. @p가 current 이면 p->on_cpu and task_cpu(p)==smp_processor_id()
+	 *      가 아닌가?
+	 *   2. @p가 current 인데 TASK_RUNNNIG 이 아닌 경우는?
 	 */
 	if (p == current) {
 		/*
@@ -4828,8 +4810,9 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	smp_rmb();
 	/*
 	 * IAMROOT, 2023.05.20:
-	 * - 여기에서 runqueue에 있는 예외 상황이면 wake_flags가 WF_FORK 가 아니면
-	 *   curr 다음 task 로 지정하고 unlock 으로 jump
+	 * - 이미 rq에 있는 상황이면 ttwu_do_wakeup 실행.(activate_task 과정은
+	 *   생략된다.)
+	 * - XXX @p가 on_rq이면서 TASK_RUNNING이 아닌 상황은?
 	 */
 	if (READ_ONCE(p->on_rq) && ttwu_runnable(p, wake_flags))
 		goto unlock;
@@ -4939,6 +4922,13 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	 * 작업이 현재 예약되어 있는 올바른 CPU를 관찰하도록 합니다.
 	 *
 	 * - @p가 prev로 사용되어 schedule()을 하고 있다. 이런 상황에 대한 예외처리.
+	 */
+	/*
+	 * IAMROOT, 2023.05.26:
+	 * - XXX
+	 *   1. ttwu 가 호출되어졌는데 @p가 on_cpu(curr) 인 경우는
+	 *      @p 가 prev로 사용되어 schedule() ?
+	 *   2. 이 경우 처리는?
 	 */
 	if (smp_load_acquire(&p->on_cpu) &&
 	    ttwu_queue_wakelist(p, task_cpu(p), wake_flags | WF_ON_CPU))
