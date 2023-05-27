@@ -104,6 +104,10 @@ static void em_debug_create_pd(struct device *dev) {}
 static void em_debug_remove_pd(struct device *dev) {}
 #endif
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - opp table 값을 읽어서 @pd의 table 을 할당하고 구성한다(cost 포함)
+ */
 static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 				int nr_states, struct em_data_callback *cb)
 {
@@ -124,6 +128,38 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		 * lowest performance state of 'dev' above 'freq' and updates
 		 * 'power' and 'freq' accordingly.
 		 */
+		/*
+		 * IAMROOT. 2023.05.27:
+		 * - google-translate
+		 * active_power()는 'freq'를 'freq' 위의 'dev'의 가장 낮은 성능
+		 * 상태로 제한하고 그에 따라 'power' 및 'freq'를 업데이트하는
+		 * 드라이버 콜백입니다.
+		 * - DT: _get_power callback 함수가 등록 되어 있다
+		 * -  rk3399-opp.dtsi
+		 * 		opp00 {
+		 *	opp-hz = /bits/ 64 <408000000>;
+		 *	opp-microvolt = <825000 825000 1250000>;
+		 *	clock-latency-ns = <40000>;
+		 *    };
+		 *  - * rk3399.dtsi 리틀 코어
+		 *		cpu_l3: cpu@3 {
+		 *	device_type = "cpu";
+		 *	compatible = "arm,cortex-a53";
+		 *	reg = <0x0 0x3>;
+		 *	enable-method = "psci";
+		 *	capacity-dmips-mhz = <485>;
+		 *	clocks = <&cru ARMCLKL>;
+		 *	#cooling-cells = <2>;
+		 *	dynamic-power-coefficient = <100>;
+		 *	cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
+		 *      };
+                 *
+		 * - power 계산 예
+		 *   100 * 825 * 825 * (408000000/1000000) =
+		 *   27769500000 / 1000000000 = 27.7695 = 27
+		 * - freq 계산 예
+		 *   408000000 / 1000 = 408000
+		 */
 		ret = cb->active_power(&power, &freq, dev);
 		if (ret) {
 			dev_err(dev, "EM: invalid perf. state: %d\n",
@@ -135,6 +171,12 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		 * We expect the driver callback to increase the frequency for
 		 * higher performance states.
 		 */
+		/*
+		 * IAMROOT. 2023.05.27:
+		 * - google-translate
+		 * 우리는 드라이버 콜백이 더 높은 성능 상태를 위한 빈도를 증가시킬 것으로
+		 * 기대합니다.
+		 */
 		if (freq <= prev_freq) {
 			dev_err(dev, "EM: non-increasing freq: %lu\n",
 				freq);
@@ -144,6 +186,12 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		/*
 		 * The power returned by active_state() is expected to be
 		 * positive and to fit into 16 bits.
+		 */
+		/*
+		 * IAMROOT. 2023.05.27:
+		 * - google-translate
+		 * active_state()에 의해 반환된 전력은 양수이고 16비트에 맞을 것으로
+		 * 예상됩니다.
 		 */
 		if (!power || power > EM_MAX_POWER) {
 			dev_err(dev, "EM: invalid power: %lu\n",
@@ -160,6 +208,13 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		 * true in practice so warn the user if a higher OPP is more
 		 * power efficient than a lower one.
 		 */
+		/*
+		 * IAMROOT. 2023.05.27:
+		 * - google-translate
+		 * 정상적인 플랫폼에서 주파수가 증가함에 따라 헤르츠/와트 효율성 비율이
+		 * 감소해야 합니다. 그러나 이것이 실제로는 항상 사실이 아니므로 높은
+		 * OPP가 낮은 것보다 전력 효율이 더 높은 경우 사용자에게 경고하십시오.
+		 */
 		opp_eff = freq / power;
 		if (opp_eff >= prev_opp_eff)
 			dev_dbg(dev, "EM: hertz/watts ratio non-monotonically decreasing: em_perf_state %d >= em_perf_state%d\n",
@@ -168,11 +223,49 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 	}
 
 	/* Compute the cost of each performance state. */
+	/*
+	 * IAMROOT, 2023.05.27:
+	 * - 	cluster0_opp: opp-table0 {
+	 *	compatible = "operating-points-v2";
+	 *	opp-shared;
+	 *
+	 *	opp00 {
+	 *		opp-hz = /bits/ 64 <408000000>;
+	 *		opp-microvolt = <825000 825000 1250000>;
+	 *		clock-latency-ns = <40000>;
+	 *	};
+	 *	opp01 {
+	 *		opp-hz = /bits/ 64 <600000000>;
+	 *		opp-microvolt = <825000 825000 1250000>;
+	 *	};
+	 *	opp02 {
+	 *		opp-hz = /bits/ 64 <816000000>;
+	 *		opp-microvolt = <850000 850000 1250000>;
+	 *	};
+	 *	opp03 {
+	 *		opp-hz = /bits/ 64 <1008000000>;
+	 *		opp-microvolt = <925000 925000 1250000>;
+	 *	};
+	 *	opp04 {
+	 *		opp-hz = /bits/ 64 <1200000000>;
+	 *		opp-microvolt = <1000000 1000000 1250000>;
+	 *	};
+	 *	opp05 {
+	 *		opp-hz = /bits/ 64 <1416000000>;
+	 *		opp-microvolt = <1125000 1125000 1250000>;
+	 *	};
+	 *    };
+	 *
+	 * 위 dts의 경우 fmax = 1416000
+	 */
 	fmax = (u64) table[nr_states - 1].frequency;
 	for (i = 0; i < nr_states; i++) {
 		unsigned long power_res = em_scale_power(table[i].power);
-
-		table[i].cost = div64_u64(fmax * power_res,
+			/*
+			 * IAMROOT, 2023.05.27:
+			 * - 1416000 * 27 / 408000 = 93.7058823529 = 93
+			 */
+			table[i].cost = div64_u64(fmax * power_res,
 					  table[i].frequency);
 	}
 
@@ -186,6 +279,28 @@ free_ps_table:
 	return -EINVAL;
 }
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - empd 생성 과정
+ * - dt_cpufreq_probe ->
+ *   cpufreq_register_driver (cpufreq.c:2808) ->
+ *   subsys_interface_register ->
+ *   sif->add_dev(dev, sif); ->
+ *   ----
+ *   static struct subsys_interface cpufreq_interface = {
+ *	.name		= "cpufreq",
+ *	.subsys		= &cpu_subsys,
+ *	.add_dev	= cpufreq_add_dev,
+ *	.remove_dev	= cpufreq_remove_dev,
+ *   };
+ *   ----
+ *   cpufreq_add_dev (cpufreq.c:1561) ->
+ *   cpufreq_online ->
+ *   cpufreq_register_em_with_opp ->
+ *   dev_pm_opp_of_register_em ->
+ *   em_dev_register_perf_domain ->
+ *   em_create_pd
+ */
 static int em_create_pd(struct device *dev, int nr_states,
 			struct em_data_callback *cb, cpumask_t *cpus)
 {
@@ -229,6 +344,14 @@ static int em_create_pd(struct device *dev, int nr_states,
  * Returns the performance domain to which @dev belongs, or NULL if it doesn't
  * exist.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * em_pd_get() - 장치의 성능 도메인 반환
+ * @dev : 성능 도메인을 찾을 장치
+ *
+ * @dev가 속한 성능 도메인을 반환하거나 존재하지 않는 경우 NULL을 반환합니다.
+ */
 struct em_perf_domain *em_pd_get(struct device *dev)
 {
 	if (IS_ERR_OR_NULL(dev))
@@ -244,6 +367,15 @@ EXPORT_SYMBOL_GPL(em_pd_get);
  *
  * Returns the performance domain to which @cpu belongs, or NULL if it doesn't
  * exist.
+ */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * em_cpu_get() - CPU @cpu에 대한 성능 도메인 반환 :
+ *
+ * @cpu : CPU에 대한 성능 영역 찾기
+ *
+ * @cpu가 속한 성능 도메인을 반환하거나 존재하지 않는 경우 NULL을 반환합니다.
  */
 struct em_perf_domain *em_cpu_get(int cpu)
 {

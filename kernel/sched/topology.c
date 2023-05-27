@@ -292,6 +292,10 @@ static void free_pd(struct perf_domain *pd)
 	}
 }
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - pd 를 순회하며 pd cpumask 에 @cpu 가 있다면 pd를 반환하고 아니면 NULL 반환
+ */
 static struct perf_domain *find_pd(struct perf_domain *pd, int cpu)
 {
 	while (pd) {
@@ -303,6 +307,10 @@ static struct perf_domain *find_pd(struct perf_domain *pd, int cpu)
 	return NULL;
 }
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - pd를 할당하고 cpu에 대한 em_perf_domain을 연결한다.
+ */
 static struct perf_domain *pd_init(int cpu)
 {
 	struct em_perf_domain *obj = em_cpu_get(cpu);
@@ -391,6 +399,33 @@ static void sched_energy_set(bool has_eas)
  * arbitrary constraint below prevents that. It makes EAS usable up to 16 CPUs
  * with per-CPU DVFS and less than 8 performance states each, for example.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * 다음 조건을 모두 충족하는 경우 루트 도메인에서 EAS를 사용할 수
+ * 있습니다.
+ * 1. EM(에너지 모델)을 사용할 수 있습니다.
+ * 2. SD_ASYM_CPUCAPACITY 플래그가 sched_domain 계층 구조에 설정됩니다.
+ * 3. SMT가 감지되지 않습니다.
+ * 4. EM 복잡성은 일정 오버헤드를 낮게 유지하기에 충분히 낮습니다.
+ * 5. schedutil은 rd의 모든 CPU 주파수를 구동합니다.
+ * 6. 주파수 불변성 지원이 있습니다.
+ *
+ * 에너지 모델의 복잡성은 다음과 같이 정의됩니다.
+ *
+ * C = nr_pd * (nr_cpus + nr_ps)
+ *
+ * 매개변수는 다음과 같이 정의됩니다.
+ * - nr_pd: 성능 도메인 수
+ * - nr_cpus: CPU 수
+ * - nr_ps: 성능 상태 수의 합 모든 성능 도메인(예: 각각 10개의 성능 상태가 있는 2개의
+ * 성능 도메인이 있는 시스템에서 nr_ps = 2 * 10 = 20).
+ *
+ * 관련된 스케줄링 오버헤드 때문에 매우 복잡한 플랫폼의 웨이크업 경로에서 이러한 모델을
+ * 사용하는 것은 일반적으로 좋은 생각이 아닙니다. 아래의 임의 제약 조건은 이를 방지합니다.
+ * 예를 들어 CPU당 DVFS가 있는 최대 16개의 CPU와 각각 8개 미만의 성능 상태까지 EAS를
+ * 사용할 수 있습니다.
+ */
 #define EM_MAX_COMPLEXITY 2048
 
 extern struct cpufreq_governor schedutil_gov;
@@ -441,6 +476,10 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 			goto free;
 		gov = policy->governor;
 		cpufreq_cpu_put(policy);
+		/*
+		 * IAMROOT, 2023.05.27:
+		 * - 찾은 gov 가 schedutil_gov(default) 가 아니면 빠져나간다
+		 */
 		if (gov != &schedutil_gov) {
 			if (rd->pd)
 				pr_warn("rd %*pbl: Disabling EAS, schedutil is mandatory\n",
@@ -458,6 +497,12 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 		/*
 		 * Count performance domains and performance states for the
 		 * complexity check.
+		 */
+		/*
+		 * IAMROOT. 2023.05.27:
+		 * - google-translate
+		 * 복잡성 검사를 위해 성능 도메인 및 성능 상태를 계산합니다.
+		 * - cpumap 이 사용하는 cluster 만큼 pd가 만들어진다
 		 */
 		nr_pd++;
 		nr_ps += em_pd_nr_perf_states(pd->em_pd);

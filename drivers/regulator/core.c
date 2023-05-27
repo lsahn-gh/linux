@@ -4133,6 +4133,17 @@ EXPORT_SYMBOL_GPL(regulator_set_suspend_voltage);
  * calculate the time in microseconds required to rise or fall to this new
  * voltage.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * regulator_set_voltage_time - 상승/하강 시간 가져오기
+ * @regulator: 레귤레이터 소스
+ * @old_uV: 시작 전압(마이크로볼트)
+ * @new_uV: 대상 전압(마이크로볼트)
+ *
+ * 시작 및 종료 전압과 함께 제공되는 이 함수는 여기까지 상승 또는 하강하는 데 필요한
+ * 시간(마이크로초)을 계산하려고 시도합니다. 새로운 전압.
+ */
 int regulator_set_voltage_time(struct regulator *regulator,
 			       int old_uV, int new_uV)
 {

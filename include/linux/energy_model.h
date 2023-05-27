@@ -18,6 +18,16 @@
  * @cost:	The cost coefficient associated with this level, used during
  *		energy calculation. Equal to: power * max_frequency / frequency
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * struct em_perf_state - 성능 도메인의 성능 상태
+ * @frequency: CPUFreq와의 일관성을 위한 KHz 단위의 주파수
+ * @power: 이 수준에서 소비되는 전력(CPU 1개 또는 등록된 장치에 의해). 정적 및 동적 총
+ * 전력이 될 수 있습니다.
+ * @cost: 에너지 계산 중에 사용되는 이 수준과 관련된 비용 계수입니다.
+ * 같음: power * max_frequency / frequency
+ */
 struct em_perf_state {
 	unsigned long frequency;
 	unsigned long power;
@@ -205,6 +215,15 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
  * @pd		: performance domain for which this must be done
  *
  * Return: the number of performance states in the performance domain table
+ */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * em_pd_nr_perf_states() - 성능의 성능 상태 수를 가져옵니다. domain
+ *
+ * @pd : 이것이 수행되어야 하는 성능 도메인
+ *
+ * Return: 성능 도메인 테이블의 성능 상태 수
  */
 static inline int em_pd_nr_perf_states(struct em_perf_domain *pd)
 {

@@ -42,6 +42,10 @@ static struct freq_attr *cpufreq_dt_attr[] = {
 	NULL,
 };
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - 해당 @cpu에 대한 table 이 있는지 확인
+ */
 static struct private_data *cpufreq_dt_find_data(int cpu)
 {
 	struct private_data *priv;

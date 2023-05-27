@@ -1375,6 +1375,39 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_of_node);
  * Returns -EINVAL if the power calculation failed because of missing
  * parameters, 0 otherwise.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * 등록 시 에너지 모델 프레임워크에 제공되는 콜백 기능. 이는 @dev가 기존 OPP의
+ * 주파수인 경우 @kHz에서, 그렇지 않은 경우 @kHz 위의 첫 번째 OPP의 주파수에서
+ * 추정된 전력을 계산합니다(dev_pm_opp_find_freq_ceil() 참조). 이 기능은 @kHz를
+ * 천장 주파수로, @mW를 관련 전력으로 업데이트합니다. 전력은 P = C * V^2 * f로
+ * 추정되며 C는 장치의 정전 용량이고 V 및 f는 각각 OPP의 전압 및
+ * 주파수입니다.
+ *
+ * 누락된 매개변수로 인해 거듭제곱 계산이 실패하면 -EINVAL을 반환하고
+ * 그렇지 않으면 0을 반환합니다.
+ *
+ * - rk3399.dtsi
+ *                cpu_l0: cpu@0 {
+ *			device_type = "cpu";
+ *			compatible = "arm,cortex-a53";
+ *			reg = <0x0 0x0>;
+ *			enable-method = "psci";
+ *			capacity-dmips-mhz = <485>;
+ *			clocks = <&cru ARMCLKL>;
+ *			#cooling-cells = <2>;
+ *			dynamic-power-coefficient = <100>;
+ *			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
+ *		};
+ *
+ * - rk3399-opp.dtsi
+ * 		opp00 {
+ *			opp-hz = /bits/ 64 <408000000>;
+ *			opp-microvolt = <825000 825000 1250000>;
+ *			clock-latency-ns = <40000>;
+ *		};
+ */
 static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
 				     struct device *dev)
 {
@@ -1389,22 +1422,40 @@ static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
 	if (!np)
 		return -EINVAL;
 
+	/*
+	 * IAMROOT, 2023.05.27:
+	 * - rk3399 의 경우 little cpu cap = 100, big cpu cap = 436
+	 */
 	ret = of_property_read_u32(np, "dynamic-power-coefficient", &cap);
 	of_node_put(np);
 	if (ret)
 		return -EINVAL;
 
 	Hz = *kHz * 1000;
+	/*
+	 * IAMROOT, 2023.05.27:
+	 * - Hz(기존) 값보다 같거나 큰 값을 읽어온다. 처음은 0에서 시작
+	 * - rk3399-opp.dtsi 의 opp00 경우 Hz = 408000000
+	 */
 	opp = dev_pm_opp_find_freq_ceil(dev, &Hz);
 	if (IS_ERR(opp))
 		return -EINVAL;
 
+	/*
+	 * IAMROOT, 2023.05.27:
+	 * - rk3399-opp.dtsi 의 opp00 경우 mV = 825000
+	 */
 	mV = dev_pm_opp_get_voltage(opp) / 1000;
 	dev_pm_opp_put(opp);
 	if (!mV)
 		return -EINVAL;
 
 	tmp = (u64)cap * mV * mV * (Hz / 1000000);
+	/*
+	 * IAMROOT, 2023.05.27:
+	 * - 100 * 825 * 825 * (408000000/1000000) =
+	 *   27769500000 / 1000000000 = 27.7695
+	 */
 	do_div(tmp, 1000000000);
 
 	*mW = (unsigned long)tmp;
@@ -1423,6 +1474,18 @@ static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
  * been specified, and tries to register an Energy Model with it if it has.
  * Having this property means the voltages are known for OPPs and the EM
  * might be calculated.
+ */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * dev_pm_opp_of_register_em() - Energy Model 등록 시도
+ * @dev : Energy Model을 등록해야 하는 장치
+ * @cpus : Energy Model을 등록해야 하는 CPU. 다른 유형의 장치의 경우 NULL로 설정해야
+ *         합니다.
+ *
+ * 이는 "동적 전력 계수" devicetree 속성이 지정되었는지 여부를 확인하고 지정된 경우
+ * 에너지 모델 등록을 시도합니다. 이 속성이 있다는 것은 전압이 OPP에 대해 알려져 있고
+ * EM이 계산될 수 있음을 의미합니다.
  */
 int dev_pm_opp_of_register_em(struct device *dev, struct cpumask *cpus)
 {
@@ -1454,6 +1517,14 @@ int dev_pm_opp_of_register_em(struct device *dev, struct cpumask *cpus)
 	 * property is set since it is useless otherwise. If voltages are not
 	 * known, just let the EM registration fail with an error to alert the
 	 * user about the inconsistent configuration.
+	 */
+	/*
+	 * IAMROOT. 2023.05.27:
+	 * - google-translate
+	 * devicetree에 'dynamic-power-coefficient' 속성이 설정된 경우에만 EM을
+	 * 등록합니다. 그렇지 않으면 쓸모가 없기 때문에 해당 속성이 설정되어 있으면 전압
+	 * 값을 알고 있다고 가정합니다. 전압을 알 수 없는 경우 사용자에게 일관되지 않은
+	 * 구성에 대해 경고하는 오류와 함께 EM 등록이 실패하도록 하십시오.
 	 */
 	ret = of_property_read_u32(np, "dynamic-power-coefficient", &cap);
 	of_node_put(np);

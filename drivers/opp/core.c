@@ -26,6 +26,15 @@
  * from here, with each opp_table containing the list of opps it supports in
  * various states of availability.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * 모든 opp 테이블 목록의 루트입니다. 모든 opp_table 구조는 여기에서 분기되며 각
+ * opp_table에는 다양한 가용성 상태에서 지원하는 opps 목록이 포함됩니다.
+ * - cluster B M L 구조에서 opp_tables 에는 아래와 같이 3개의 opp_table이 등록 된다.
+ *   opp_tables - [B] [M] [L]
+ *   opp_table[B] ->dev_list - [cpu0] [cpu1] [cpu2] [cpu3]
+ */
 LIST_HEAD(opp_tables);
 
 /* OPP tables with uninitialized required OPPs */
@@ -36,6 +45,10 @@ DEFINE_MUTEX(opp_table_lock);
 /* Flag indicating that opp_tables list is being updated at the moment */
 static bool opp_tables_busy;
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - @dev 가 @opp_table 의 dev_list에 있는지 확인한다
+ */
 static bool _find_opp_dev(const struct device *dev, struct opp_table *opp_table)
 {
 	struct opp_device *opp_dev;
@@ -52,6 +65,10 @@ static bool _find_opp_dev(const struct device *dev, struct opp_table *opp_table)
 	return found;
 }
 
+/*
+ * IAMROOT, 2023.05.27:
+ * - @dev 가 @opp_table 의 dev_list에 있으면 가져온 opp_table을 반환한다.
+ */
 static struct opp_table *_find_opp_table_unlocked(struct device *dev)
 {
 	struct opp_table *opp_table;
@@ -76,6 +93,10 @@ static struct opp_table *_find_opp_table_unlocked(struct device *dev)
  * -EINVAL based on type of error.
  *
  * The callers must call dev_pm_opp_put_opp_table() after the table is used.
+ */
+/*
+ * IAMROOT, 2023.05.27:
+ * - @dev opp_table 에 있으면 opp_table 반환
  */
 struct opp_table *_find_opp_table(struct device *dev)
 {
@@ -202,6 +223,14 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_is_turbo);
  *
  * Return: This function returns the max clock latency in nanoseconds.
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * dev_pm_opp_get_max_clock_latency() - 나노초 단위로 최대 클럭 대기 시간 가져오기
+ * @dev: 이 작업을 수행하는 장치
+ *
+ * 반환: 이 함수는 나노초 단위로 최대 클럭 대기 시간을 반환합니다.
+ */
 unsigned long dev_pm_opp_get_max_clock_latency(struct device *dev)
 {
 	struct opp_table *opp_table;
@@ -224,6 +253,14 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_clock_latency);
  * @dev: device for which we do this operation
  *
  * Return: This function returns the max voltage latency in nanoseconds.
+ */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * dev_pm_opp_get_max_volt_latency() - 나노초 단위로 최대 전압 대기 시간 가져오기
+ * @dev: 이 작업을 수행하는 장치
+ *
+ * 반환: 이 함수는 나노초 단위로 최대 전압 대기 시간을 반환합니다.
  */
 unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 {
@@ -274,6 +311,12 @@ unsigned long dev_pm_opp_get_max_volt_latency(struct device *dev)
 	 * The caller needs to ensure that opp_table (and hence the regulator)
 	 * isn't freed, while we are executing this routine.
 	 */
+	/*
+	 * IAMROOT. 2023.05.27:
+	 * - google-translate
+	 * 호출자는 우리가 이 루틴을 실행하는 동안 opp_table(따라서 조절기)이 해제되지
+	 * 않도록 해야 합니다.
+	 */
 	for (i = 0; i < count; i++) {
 		reg = opp_table->regulators[i];
 		ret = regulator_set_voltage_time(reg, uV[i].min, uV[i].max);
@@ -296,6 +339,16 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_volt_latency);
  *
  * Return: This function returns the max transition latency, in nanoseconds, to
  * switch from one OPP to other.
+ */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * dev_pm_opp_get_max_transition_latency() - 최대 전환 대기 시간(나노초) 가져오기
+ *
+ * @dev: 이 작업을 수행하는 장치
+ *
+ * 반환: 이 함수는 하나의 OPP에서 다른 OPP로 전환하기 위한 최대 전환 대기 시간(나노초)을
+ * 반환합니다.
  */
 unsigned long dev_pm_opp_get_max_transition_latency(struct device *dev)
 {

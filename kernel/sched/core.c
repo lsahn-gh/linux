@@ -476,6 +476,95 @@ int sysctl_sched_rt_runtime = 950000;
  *    o dl_task_offline_migration()
  *
  */
+/*
+ * IAMROOT. 2023.05.27:
+ * - google-translate
+ * 직렬화 규칙:
+ *
+ * 잠금 순서:
+ *
+ *   p->pi_lock
+ *     rq->lock
+ *       hrtimer_cpu_base->lock (hrtimer_start() for bandwidth controls)
+ *
+ *  rq1->lock
+ *    rq2->lock  where: rq1 < rq2
+ *
+ * 일반 상태:
+ * 정상적인 스케줄링 상태는 rq-lock에 의해 직렬화됩니다. __schedule()은 로컬
+ * CPU의 rq->lock을 취하고, 선택적으로 실행 대기열에서 작업을 제거하고 항상 로컬 rq
+ * 데이터 구조를 살펴보고 다음에 실행할 가장 적합한 작업을 찾습니다.
+ *
+ * Task enqueue 는  rq->lock 상태에 있으며 다른 CPU에서 가져올 수 있습니다. 다른 LLC
+ * 도메인으로부터의 웨이크업은 IPI를 사용하여 실행 대기열 상태가 주변에서
+ * 바운싱되는 것을 방지하기 위해 인큐를 로컬 CPU로 전송할 수 있습니다. [
+ * ttwu_queue_wakelist() 참조 ]
+ *
+ * 특수 상태:
+ *
+ * 시스템 호출 및 외부의 모든 항목은 p->pi_lock 및 rq->lock을 모두 획득하는
+ * task_rq_lock()을 사용합니다. 결과적으로 그들이 변경하는 상태는 잠금을 유지하는 동안
+ * 안정적입니다.
+ *
+ *  - sched_setaffinity()/
+ *    set_cpus_allowed_ptr():	p->cpus_ptr, p->nr_cpus_allowed
+ *  - set_user_nice():		p->se.load, p->*prio
+ *  - __sched_setscheduler():	p->sched_class, p->policy, p->*prio,
+ *				p->se.load, p->rt_priority,
+ *				p->dl.dl_{runtime, deadline, period, flags, bw, density}
+ *  - sched_setnuma():		p->numa_preferred_nid
+ *  - sched_move_task()/
+ *    cpu_cgroup_fork():	p->sched_task_group
+ *  - uclamp_update_active()	p->uclamp*
+ *
+ * p->state <- TASK_*:
+ *
+ * set_current_state()를 사용하여 잠금 없이 변경됨, __set_current_state () 또는
+ * set_special_state(), 해당 주석을 참조하거나 try_to_wake_up()을
+ * 참조하십시오. 후자는 p->pi_lock을 사용하여 동시 자체에 대해
+ * 직렬화합니다.
+ *
+ * p->on_rq <- { 0, 1 = TASK_ON_RQ_QUEUED, 2 = TASK_ON_RQ_MIGRATING }:
+ *
+ *
+ * rq->lock에서 activate_task()에 의해 설정되고 deactivate_task()에 의해
+ * 지워집니다. 0이 아닌 값은 작업이 실행 가능함을 나타내며, 특별한 ON_RQ_MIGRATING
+ * 상태는 rq->잠금을 모두 유지하지 않고 마이그레이션에 사용됩니다. task_cpu()가
+ * 안정적이지 않음을 나타냅니다. task_rq_lock()을 참조하세요.
+ *
+ * p->on_cpu <- { 0, 1 }:
+ *
+ * p가 스케줄링되기 전에 설정되고 p가 스케줄아웃된 후에 지워지도록
+ * prepare_task()에 의해 설정되고 finish_task()에 의해 지워집니다. rq->lock에서. 0이
+ * 아닌 값은 작업이 CPU에서 실행 중임을 나타냅니다. [ 기민한 독자라면 하나의
+ * CPU에서 두 개의 작업이 동시에 ->on_cpu = 1이 되는 것이 가능하다는 것을 관찰할
+ * 것입니다. ]
+ *
+ * task_cpu(p): set_task_cpu()에 의해 변경되며 규칙은 다음과
+ * 같습니다.
+ *
+ * - 차단된 작업에서 set_task_cpu()를 호출하지 마십시오.
+ *
+ * 어떤 CPU에서 실행하지 않는지는 신경쓰지 않습니다. 이것은 핫플러그를
+ * 단순화합니다. 차단된 작업의 CPU 할당이 유효할 필요가 없습니다.
+ *
+ * - p->pi_lock에서 호출되는 try_to_wake_up()의 경우:
+ *
+ * 이것은 try_to_wake_up()이 하나의 rq->lock만 취하는 것을 허용합니다. 주석을
+ * 참조하십시오.
+ *
+ * - rq->lock에서 호출된 마이그레이션의 경우:
+ * [ task_rq_lock()의 task_on_rq_migrating() 참조]
+ *
+ * o move_queued_task()
+ * o detach_task()
+ *
+ * - double_rq_lock()에서 호출된 마이그레이션의 경우:
+ * o __migrate_swap_task()
+ * o push_rt_task() / pull_rt_task()
+ * o push_dl_task() / pull_dl_task()
+ * o dl_task_offline_migration()
+ */
 
 void raw_spin_rq_lock_nested(struct rq *rq, int subclass)
 {

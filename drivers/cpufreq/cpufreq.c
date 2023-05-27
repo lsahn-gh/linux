@@ -221,6 +221,7 @@ EXPORT_SYMBOL_GPL(cpufreq_generic_get);
  *   반환하거나 실패 시 NULL을 반환합니다. 이 함수에 의해 반환된 정책은 kobject 참조
  *   카운터의 균형을 적절히 맞추기 위해 cpufreq_cpu_put()의 도움으로 해제되어야
  *   합니다.
+ * - cpufreq policy를 찾아서 반환
  */
 struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
 {
