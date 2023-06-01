@@ -156,7 +156,7 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		 *      };
                  *
 		 * - power 계산 예
-		 *   100 * 825 * 825 * (408000000/1000000) =
+		 *   100 * 825 * 825 * (408000000/1000000) = 27769500000
 		 *   27769500000 / 1000000000 = 27.7695 = 27
 		 * - freq 계산 예
 		 *   408000000 / 1000 = 408000
@@ -226,6 +226,7 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 	/* Compute the cost of each performance state. */
 	/*
 	 * IAMROOT, 2023.05.27:
+	 * - ex. rk3399-opp.dtsi
 	 * - 	cluster0_opp: opp-table0 {
 	 *	compatible = "operating-points-v2";
 	 *	opp-shared;
@@ -263,8 +264,9 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 	for (i = 0; i < nr_states; i++) {
 		unsigned long power_res = em_scale_power(table[i].power);
 			/*
-			 * IAMROOT, 2023.05.27:
-			 * - 1416000 * 27 / 408000 = 93.7058823529 = 93
+			 * IAMROOT, 2023.05.31:
+			 * - ex. table[0].cost
+			 *   1416000 * 27000 / 408000 = 93705.8823529 =  93705
 			 */
 			table[i].cost = div64_u64(fmax * power_res,
 					  table[i].frequency);
@@ -297,6 +299,14 @@ free_ps_table:
  *   ----
  *   cpufreq_add_dev (cpufreq.c:1561) ->
  *   cpufreq_online ->
+ *   cpufreq_driver->register_em(policy) ->
+ *   ----
+ *     static struct cpufreq_driver dt_cpufreq_driver = {
+ *        ...
+ *	 .register_em = cpufreq_register_em_with_opp,
+ *	 ...
+ *     };
+ *   ----
  *   cpufreq_register_em_with_opp ->
  *   dev_pm_opp_of_register_em ->
  *   em_dev_register_perf_domain ->
@@ -375,7 +385,6 @@ EXPORT_SYMBOL_GPL(em_pd_get);
  * IAMROOT. 2023.05.27:
  * - google-translate
  * em_cpu_get() - CPU @cpu에 대한 성능 도메인 반환 :
- *
  * @cpu : CPU에 대한 성능 영역 찾기
  *
  * @cpu가 속한 성능 도메인을 반환하거나 존재하지 않는 경우 NULL을 반환합니다.
@@ -383,6 +392,8 @@ EXPORT_SYMBOL_GPL(em_pd_get);
  * - @cpu의 em_pd를 가져온다.
  * - em_pd
  *   dev_pm_opp_of_register_em()에 의해 등록될것이다.
+ *
+ * - p@cpu cpu_sys_devices 의 멤버 em_pd 반환
  */
 struct em_perf_domain *em_cpu_get(int cpu)
 {

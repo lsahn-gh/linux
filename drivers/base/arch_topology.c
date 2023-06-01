@@ -42,8 +42,7 @@ static bool supports_scale_freq_counters(const struct cpumask *cpus)
 /*
  * IAMROOT, 2022.12.14:
  * - freq invariance를 지원하거나, online cpu들이 scale_freq_counters에
- *   포함이 전부 된다면 true.
- * - freq invariance 지원가능하면 return true.
+ *   전부 포함이 된다면 true.
  */
 bool topology_scale_freq_invariant(void)
 {

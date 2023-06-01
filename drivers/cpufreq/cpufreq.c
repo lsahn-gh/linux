@@ -220,7 +220,7 @@ EXPORT_SYMBOL_GPL(cpufreq_generic_get);
  * IAMROOT. 2022.12.10:
  * - google-translate
  *   cpufreq_cpu_get - CPU에 대한 정책을 반환하고 사용 중인 것으로 표시합니다.
- *   @cpu: *   정책을 찾을 CPU.
+ *   @cpu: 정책을 찾을 CPU.
  *
  *   cpufreq_cpu_get_raw()를 호출하여 @cpu에 대한 cpufreq 정책을
  *   얻고 해당 정책의 kobject 참조 카운터를 증가시킵니다. 성공 시 유효한 정책을

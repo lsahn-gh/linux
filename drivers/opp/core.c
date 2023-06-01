@@ -77,7 +77,7 @@ static bool _find_opp_dev(const struct device *dev, struct opp_table *opp_table)
 
 /*
  * IAMROOT, 2023.05.27:
- * - @dev 가 @opp_table 의 dev_list에 있으면 가져온 opp_table을 반환한다.
+ * - @dev 가 @opp_table 의 dev_list에 있으면 opp_table을 반환한다.
  */
 static struct opp_table *_find_opp_table_unlocked(struct device *dev)
 {
@@ -106,7 +106,7 @@ static struct opp_table *_find_opp_table_unlocked(struct device *dev)
  */
 /*
  * IAMROOT, 2023.05.27:
- * - @dev opp_table 에 있으면 opp_table 반환
+ * - opp_tables 리스트에서 @dev가 존재하는 opp_table 찾아서 반환
  */
 struct opp_table *_find_opp_table(struct device *dev)
 {
@@ -136,6 +136,15 @@ struct opp_table *_find_opp_table(struct device *dev)
 /*
  * IAMROOT, 2023.06.01:
  * - return micro voltage
+ *
+ * IAMROOT. 2023.05.31:
+ * - google-translate
+ * dev_pm_opp_get_voltage() - opp에 해당하는 전압을 가져옵니다
+ * @opp: opp에 대해 전압을 반환해야 하는 opp
+ *
+ * 반환: opp에 해당하는 마이크로 볼트 단위의 전압, 그렇지 않으면 0을 반환합니다.
+ *
+ * 이것은 단일 전원 공급 장치가 있는 장치에만 유용합니다.
  */
 unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp)
 {
@@ -398,6 +407,10 @@ unsigned long dev_pm_opp_get_suspend_opp_freq(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_get_suspend_opp_freq);
 
+/*
+ * IAMROOT, 2023.05.30:
+ * - @opp_table 의 opp_list를 순회하며 available 한 opp 의 총 갯수 반환
+ */
 int _get_opp_count(struct opp_table *opp_table)
 {
 	struct dev_pm_opp *opp;
@@ -421,6 +434,17 @@ int _get_opp_count(struct opp_table *opp_table)
  *
  * Return: This function returns the number of available opps if there are any,
  * else returns 0 if none or the corresponding error value.
+ */
+/*
+ * IAMROOT. 2023.05.30:
+ * - google-translate
+ * dev_pm_opp_get_opp_count() - opp 테이블에서 사용 가능한 opps 수 가져오기
+ * @dev: 이 작업을 수행하는 장치
+ *
+ * 반환: 이 함수는 사용 가능한 opps의 수를 반환하고,
+ * 없으면 0을 반환하거나 해당 오류 값을 반환합니다.
+ *
+ * - @dev가 존재하는 opp_table 을 찾아 그 table에서 사용가능한 opp의 수 를 반환
  */
 int dev_pm_opp_get_opp_count(struct device *dev)
 {

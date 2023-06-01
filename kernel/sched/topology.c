@@ -243,6 +243,12 @@ sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 }
 
 #if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
+/*
+ * IAMROOT, 2023.05.30:
+ * - EAS also maintains a static key (sched_energy_present) which is enabled
+ *   when at least one root domain meets all conditions for EAS to start.
+ *   (Documentation/scheduler/sched-energy.rst)
+ */
 DEFINE_STATIC_KEY_FALSE(sched_energy_present);
 unsigned int sysctl_sched_energy_aware = 1;
 DEFINE_MUTEX(sched_energy_mutex);
@@ -425,6 +431,11 @@ static void sched_energy_set(bool has_eas)
  * 사용하는 것은 일반적으로 좋은 생각이 아닙니다. 아래의 임의 제약 조건은 이를 방지합니다.
  * 예를 들어 CPU당 DVFS가 있는 최대 16개의 CPU와 각각 8개 미만의 성능 상태까지 EAS를
  * 사용할 수 있습니다.
+ *
+ * IAMROOT, 2023.06.01:
+ * - 조건에 맞다면 @cpu_map 의 cpu에 대해 pd를 만들고 리스트로 서로 연결한다.
+ *   @cpu_map의 첫번째 cpu의 rd에 위에서 연결한 리스트의 처음 pd를 설정한다.
+ * - Return: 조건에 충족하여 pd 가 하나라도 생성되었다면 true 반환
  */
 #define EM_MAX_COMPLEXITY 2048
 
@@ -450,6 +461,11 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 		goto free;
 
 	/* EAS is enabled for asymmetric CPU capacity topologies. */
+	/*
+	 * IAMROOT. 2023.05.30:
+	 * - google-translate
+	 * EAS는 비대칭 CPU 용량 토폴로지에 대해 활성화됩니다.
+	 */
 	if (!per_cpu(sd_asym_cpucapacity, cpu)) {
 		if (sched_debug()) {
 			pr_info("rd %*pbl: CPUs do not have asymmetric capacities\n",
@@ -459,6 +475,11 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 	}
 
 	/* EAS definitely does *not* handle SMT */
+	/*
+	 * IAMROOT. 2023.05.30:
+	 * - google-translate
+	 * EAS는 확실히 SMT를 처리하지 *않습니다*
+	 */
 	if (sched_smt_active()) {
 		pr_warn("rd %*pbl: Disabling EAS, SMT is not supported\n",
 			cpumask_pr_args(cpu_map));
@@ -509,6 +530,12 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 		}
 
 		/* Create the new pd and add it to the local list. */
+		/*
+		 * IAMROOT. 2023.05.30:
+		 * - google-translate
+		 * 새 pd를 만들고 로컬 목록에 추가합니다.
+		 * - 새로 생성한 pd의 next에 이전 루프에서 생성한 pd를 연결한다.
+		 */
 		tmp = pd_init(i);
 		if (!tmp)
 			goto free;
@@ -545,6 +572,12 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 	perf_domain_debug(cpu_map, pd);
 
 	/* Attach the new list of performance domains to the root domain. */
+	/*
+	 * IAMROOT. 2023.05.30:
+	 * - google-translate
+	 * 새 성능 도메인 목록을 루트 도메인에 연결합니다.
+	 * - 리스트의 처음 pd를 rd 에 연결한다
+	 */
 	tmp = rd->pd;
 	rcu_assign_pointer(rd->pd, pd);
 	if (tmp)
@@ -3349,6 +3382,10 @@ static bool topology_span_sane(struct sched_domain_topology_level *tl,
  * to the individual CPUs
  */
 /*
+ * IAMROOT. 2023.05.29:
+ * - google-translate
+ * 주어진 CPU 집합에 대한 sched 도메인을 구축하고 sched 도메인을 개별 CPU에 연결
+ *
  * IAMROOT, 2023.04.15:
  * - 1. sd build 및 초기화 (span(cpumask), flag, vars etc)
  *   2. sg build - child domain 의 cpumask 값으로 설정. balance group 설정
@@ -3608,6 +3645,12 @@ int sched_init_domains(const struct cpumask *cpu_map)
  * Detach sched domains from a group of CPUs specified in cpu_map
  * These CPUs will now be attached to the NULL domain
  */
+/*
+ * IAMROOT. 2023.05.29:
+ * - google-translate
+ * cpu_map에 지정된 CPU 그룹에서 sched 도메인을 분리합니다. 이 CPU는 이제 NULL
+ * 도메인에 연결됩니다.
+ */
 static void detach_destroy_domains(const struct cpumask *cpu_map)
 {
 	unsigned int cpu = cpumask_any(cpu_map);
@@ -3720,6 +3763,9 @@ static int dattrs_equal(struct sched_domain_attr *cur, int idx_cur,
  *		.startup.single		= sched_cpu_activate,
  *		.teardown.single	= sched_cpu_deactivate,
  *	},
+ *
+ * - 조건이 되면 ndoms_new 만큼 새 pd를 build 하고 doms_new등을 doms_cur 등의
+ *   전역 변수에 설정한다.
  */
 void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 				    struct sched_domain_attr *dattr_new)
@@ -3740,6 +3786,13 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 	 */
 	new_topology = arch_update_cpu_topology();
 	/* Trigger rebuilding CPU capacity asymmetry data */
+	/*
+	 * IAMROOT. 2023.05.29:
+	 * - google-translate
+	 * CPU 용량 비대칭 데이터 재구성 트리거
+	 *
+	 * - cpufreq policy가 변경되었다면 asym_cap_list(cpu capa list) 재설정
+	 */
 	if (new_topology)
 		asym_cpu_capacity_scan();
 
@@ -3758,13 +3811,17 @@ void partition_sched_domains_locked(int ndoms_new, cpumask_var_t doms_new[],
 
 	/* Destroy deleted domains: */
 	/*
-	 * IAMROOT, 2023.05.20:
-	 * - i: 기존 도메인, j: 새 도메인
-	 *   cpufreq notifier 로 부터 호출된 경우(즉 cpufreq policy가 변경된 경우)
-	 *   가 아니고
-	 *   기존 도메인과 새도메인의 cpumask와 속성이 일치 하는 것만 남겨두고
-	 *   (dl bandwidth정보만 삭제) 그렇지 않으면 기존 도메인 삭제
-	 *   (detach_destroy_domains)
+	 * IAMROOT, 2023.05.29:
+	 * - google-translate
+	 * 삭제된 도메인 폐기:
+	 *
+	 * - 1. cpufreq policy가 변경된 경우
+	 *      기존 도메인 모두 제거
+	 *   2. cpufreq policy가 변경되지 않은경우
+	 *      1. cpumask 와 속성이 일치
+	 *         dl_bw->total_bw = 0
+	 *      2. cpumask 나 속성이 일치하지 않는 경우
+	 *         기존 도메인 제거
 	 */
 	for (i = 0; i < ndoms_cur; i++) {
 		for (j = 0; j < n && !new_topology; j++) {
@@ -3811,11 +3868,17 @@ match1:
 
 	/* Build new domains: */
 	/*
-	 * IAMROOT, 2023.05.20:
-	 * - i: 새도메인, j: 기존도메인
-	 *   cpufreq notifier 로 부터 호출된 경우(즉 cpufreq policy가 변경된 경우)
-	 *   이거나
-	 *   cpumask나 속성이 같지 않은 경우에만 domain build
+	 * IAMROOT, 2023.05.29:
+	 * - google-translate
+	 * 새 도메인 구축:
+	 *
+	 * - 1. cpufreq policy가 변경되었다.
+	 *      ndoms_new 갯수만큼 build_sched_domains 호출
+	 * - 2. cpufreq policy가 변경되지 않았다.
+	 *      1. cpumask와 속성이 같다.
+	 *         아무것도 하지 않음
+	 *      2. cpumask나 속성이 같지 않다
+	 *         build_sched_domains 호출
 	 */
 	for (i = 0; i < ndoms_new; i++) {
 		for (j = 0; j < n && !new_topology; j++) {
@@ -3832,8 +3895,19 @@ match2:
 #if defined(CONFIG_ENERGY_MODEL) && defined(CONFIG_CPU_FREQ_GOV_SCHEDUTIL)
 	/* Build perf. domains: */
 	/*
+	 * - google-translate
+	 * 빌드 perf domain:
+	 *
 	 * IAMROOT, 2023.05.20:
 	 * - pd 구성이 변경된 경우에만 build 한다.
+	 * - 1. sched_energy_update 가 true
+	 *      build_perf_domains 호출
+	 *   2. sched_energy_update 가 false
+	 *      1. 기존 도메인들중 하나와 cpumask 가 같고 그 기존 도메인 cpumask 의
+	 *         첫번째 cpu의 pd가 존재하는 new 도메인
+	 *         - has_eas = true로 설정
+	 *      2. 위가 아닌 new 도메인
+	 *         build_perf_domains 호출
 	 */
 	for (i = 0; i < ndoms_new; i++) {
 		for (j = 0; j < n && !sched_energy_update; j++) {

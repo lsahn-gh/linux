@@ -1454,11 +1454,15 @@ static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
 	tmp = (u64)cap * mV * mV * (Hz / 1000000);
 	/*
 	 * IAMROOT, 2023.05.27:
-	 * - 100 * 825 * 825 * (408000000/1000000) =
+	 * - tmp = 100 * 825 * 825 * (408000000/1000000) = 27769500000
 	 *   27769500000 / 1000000000 = 27.7695
 	 */
 	do_div(tmp, 1000000000);
 
+	/*
+	 * IAMROOT, 2023.05.31:
+	 * - *mW = 27, *kHz = 408000
+	 */
 	*mW = (unsigned long)tmp;
 	*kHz = Hz / 1000;
 

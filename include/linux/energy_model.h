@@ -73,6 +73,17 @@ struct em_perf_domain {
  * resolution (i.e. 64-bit). The costs for increasing resolution when 32-bit
  * are pretty high and the returns do not justify the increased costs.
  */
+/*
+ * IAMROOT. 2023.05.31:
+ * - google-translate
+ * 64비트 아키텍처에 대한 에너지 추정 계산의 해상도를 높입니다. 추가 해상도는 두
+ * 개의 성능 도메인이 유사한 에너지 추정 값을 제공할 수 있는 경우(더 나은 해상도
+ * 없이 값이 동일할 수 있음) 작업 배치에 대한 EAS의 결정을 개선합니다.
+ *
+ * 이 증가된 해상도(예: 64비트)를 허용하기에 충분한 비트가 있는 경우에만 해상도를
+ * 높입니다. 32비트에서 해상도를 높이는 데 드는 비용은 상당히 높고 수익은 증가된
+ * 비용을 정당화하지 못합니다.
+ */
 #ifdef CONFIG_64BIT
 #define em_scale_power(p) ((p) * 1000)
 #else
@@ -98,6 +109,22 @@ struct em_data_callback {
 	 * fit in the [0, EM_MAX_POWER] range.
 	 *
 	 * Return 0 on success.
+	 */
+	/*
+	 * IAMROOT. 2023.05.31:
+	 * - google-translate
+	 * active_power() - 장치의 다음 성능 상태에서 전력 제공
+	 * @power : 성능 상태에서 유효 전력(수정됨)
+	 * @freq : 성능 상태에서 kHz 단위의 주파수(수정됨)
+	 * @dev : 이 작업을 수행하는 장치( CPU일 수 있음)
+	 *
+	 * active_power()는 'freq' 위에서 'dev'의 가장 낮은 성능 상태를 찾고
+	 * 'power' 및 'freq'를 일치하는 활성 전력 및 주파수로 업데이트해야 합니다.
+	 *
+	 * CPU의 경우 전력은 도메인의 단일 CPU 중 하나이며 밀리와트 또는 추상적
+	 * 척도로 표현됩니다. [0, EM_MAX_POWER] 범위에 맞을 것으로 예상됩니다.
+	 *
+	 * 성공하면 0을 반환합니다.
 	 */
 	int (*active_power)(unsigned long *power, unsigned long *freq,
 			    struct device *dev);
@@ -219,8 +246,7 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 /*
  * IAMROOT. 2023.05.27:
  * - google-translate
- * em_pd_nr_perf_states() - 성능의 성능 상태 수를 가져옵니다. domain
- *
+ * em_pd_nr_perf_states() - perf domain의 performance states 수를 가져옵니다.
  * @pd : 이것이 수행되어야 하는 성능 도메인
  *
  * Return: 성능 도메인 테이블의 성능 상태 수
