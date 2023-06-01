@@ -1016,6 +1016,13 @@ void subsys_dev_iter_exit(struct subsys_dev_iter *iter)
 }
 EXPORT_SYMBOL_GPL(subsys_dev_iter_exit);
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - (init(), register_em() 호출여부만 보고 넘어간다.)
+ * - add_dev()(ex, cpufreq_add_dev())를 통해 
+ *   새로 추가되는 new_policy 상황이면 init(), register_em()
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
+ */
 int subsys_interface_register(struct subsys_interface *sif)
 {
 	struct bus_type *subsys;

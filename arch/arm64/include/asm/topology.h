@@ -22,6 +22,10 @@ void update_freq_counters_refs(void);
 #define arch_scale_freq_tick topology_scale_freq_tick
 #define arch_set_freq_scale topology_set_freq_scale
 #define arch_scale_freq_capacity topology_get_freq_scale
+/*
+ * IAMROOT, 2023.05.30:
+ * - freq invariance 지원가능하면 return true.
+ */
 #define arch_scale_freq_invariant topology_scale_freq_invariant
 
 /* Replace task scheduler's default cpu-invariant accounting */

@@ -35,6 +35,19 @@ enum dev_pm_opp_event {
  *
  * This structure stores the voltage/current values for a single power supply.
  */
+/*
+ * IAMROOT, 2023.06.01:
+ * - papago
+ *   struct dev_pm_opp_supply - 전원 전압/전류 값
+ *   @u_volt: 이 OPP에 해당하는 마이크로볼트 단위의 목표 전압
+ *   @u_volt_min: 이 OPP에 해당하는 마이크로볼트 단위의 최소 전압
+ *   @u_volt_max: 이 OPP에 해당하는 최대 전압(마이크로볼트)
+ *   @u_amp: 장치가 소비하는 최대 전류(마이크로암페어 단위) 이 구조는 
+ *   단일 전원 공급 장치의 전압/전류 값을 저장합니다.
+ *
+ * - ex) dt에서 opp-microvolt = <875000 875000 1150000>  와 같은 형식 (ms 단위)
+ *                               target   min    max
+ */
 struct dev_pm_opp_supply {
 	unsigned long u_volt;
 	unsigned long u_volt_min;

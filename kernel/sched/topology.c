@@ -429,6 +429,14 @@ static void sched_energy_set(bool has_eas)
 #define EM_MAX_COMPLEXITY 2048
 
 extern struct cpufreq_governor schedutil_gov;
+/*
+ * IAMROOT, 2023.05.30:
+ * - 1. EM_MAX_COMPLEXITY주석내용(1~6)대로의 조건검사를 수행한다.
+ *   2. pd가 등록되있지 않은 cpu를 찾아 pd를 등록한다.
+ *   3. complexity of the Energy Model 식에 따라 복잡성이 EM_MAX_COMPLEXITY을 넘는지
+ *   검사한다.
+ *   4. pd가 성공적으로 추가 됬으면 return true.
+ */
 static bool build_perf_domains(const struct cpumask *cpu_map)
 {
 	int i, nr_pd = 0, nr_ps = 0, nr_cpus = cpumask_weight(cpu_map);
@@ -465,12 +473,25 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 		goto free;
 	}
 
+/*
+ * IAMROOT, 2023.05.30:
+ * - pd가 등록되있지 않은 cpu를 찾는다. cpu의 cpufreq_policy로부터 governor를
+ *   얻어오고, 해당 governor가 schedutil_gov인 것만 pd 생성을 수행한다.
+ */
 	for_each_cpu(i, cpu_map) {
 		/* Skip already covered CPUs. */
+/*
+ * IAMROOT, 2023.05.30:
+ * - 이미 있으면 pass
+ */
 		if (find_pd(pd, i))
 			continue;
 
 		/* Do not attempt EAS if schedutil is not being used. */
+/*
+ * IAMROOT, 2023.05.30:
+ * - i cpu로부터 ref up하면서 policy를 가져와 gov를 가져오고 ref down을 한다.
+ */
 		policy = cpufreq_cpu_get(i);
 		if (!policy)
 			goto free;
@@ -509,6 +530,12 @@ static bool build_perf_domains(const struct cpumask *cpu_map)
 	}
 
 	/* Bail out if the Energy Model complexity is too high. */
+/*
+ * IAMROOT, 2023.06.01:
+ * - 에너지 복잡성식은 다음과 같다.(EM_MAX_COMPLEXITY 주석 참고)
+ *   C = nr_pd * (nr_cpus + nr_ps)
+ *   해당식이 EM_MAX_COMPLEXITY값을 넘는 경우엔 에러 처리한다.
+ */
 	if (nr_pd * (nr_ps + nr_cpus) > EM_MAX_COMPLEXITY) {
 		WARN(1, "rd %*pbl: Failed to start EAS, EM complexity is too high\n",
 						cpumask_pr_args(cpu_map));

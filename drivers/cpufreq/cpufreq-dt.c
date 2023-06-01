@@ -104,6 +104,12 @@ node_put:
 	return name;
 }
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - dt_cpufreq_probe()를 통해서 최초에 init된다.
+ *   가 호출된다. 해당함수는 ealry가 끝난 이후 새로운 cpu가 init 됫을때
+ *   불러와진다.
+ */
 static int cpufreq_init(struct cpufreq_policy *policy)
 {
 	struct private_data *priv;
@@ -323,6 +329,10 @@ static void dt_cpufreq_release(void)
  * IAMROOT, 2022.12.17: 
  * cpu freq 드라이버.
  * compatible="operating-points-v2" 드라이버에 있는 값들을 읽어와서 구성한다.
+ * - (init(), register_em() 호출여부만 보고 넘어간다. em_create_pd() 주석 참고)
+ * - cpufreq_register_driver()를 통해 
+ *   새로 추가되는 new_policy 상황이면 init(), register_em()
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
  */
 static int dt_cpufreq_probe(struct platform_device *pdev)
 {

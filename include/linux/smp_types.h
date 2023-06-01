@@ -10,7 +10,7 @@
  *   선점 flag.
  * - csd_unlock()에서 clear된다.
  * - CSD_TYPE에 따라 callback함수도 실행할수있고,
- *   정해진 함수를 실행하수도있다.
+ *   정해진 함수를 실행할수도있다.
  *   (flush_smp_call_function_queue(),
  *   __call_single_node 참고)
  */

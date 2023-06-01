@@ -224,6 +224,8 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
  * @pd : 이것이 수행되어야 하는 성능 도메인
  *
  * Return: 성능 도메인 테이블의 성능 상태 수
+ *
+ * - @pd의 em_pd_nr_perf_states를 가져온다.
  */
 static inline int em_pd_nr_perf_states(struct em_perf_domain *pd)
 {

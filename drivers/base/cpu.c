@@ -388,6 +388,10 @@ int register_cpu(struct cpu *cpu, int num)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.05.31:
+ * - @cpu에 대한 cpu_sys_devices를 가져온다.
+ */
 struct device *get_cpu_device(unsigned int cpu)
 {
 	if (cpu < nr_cpu_ids && cpu_possible(cpu))

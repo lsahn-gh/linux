@@ -134,7 +134,8 @@ static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,
 		 * active_power()는 'freq'를 'freq' 위의 'dev'의 가장 낮은 성능
 		 * 상태로 제한하고 그에 따라 'power' 및 'freq'를 업데이트하는
 		 * 드라이버 콜백입니다.
-		 * - DT: _get_power callback 함수가 등록 되어 있다
+		 * - DT: _get_power callback 함수가 등록 되어 있다는
+		 *   (dev_pm_opp_of_register_em() 참고)
 		 * -  rk3399-opp.dtsi
 		 * 		opp00 {
 		 *	opp-hz = /bits/ 64 <408000000>;
@@ -351,6 +352,8 @@ static int em_create_pd(struct device *dev, int nr_states,
  * @dev : 성능 도메인을 찾을 장치
  *
  * @dev가 속한 성능 도메인을 반환하거나 존재하지 않는 경우 NULL을 반환합니다.
+ *
+ * - @dev의 em_pd를 가져온다.
  */
 struct em_perf_domain *em_pd_get(struct device *dev)
 {
@@ -376,6 +379,10 @@ EXPORT_SYMBOL_GPL(em_pd_get);
  * @cpu : CPU에 대한 성능 영역 찾기
  *
  * @cpu가 속한 성능 도메인을 반환하거나 존재하지 않는 경우 NULL을 반환합니다.
+ *
+ * - @cpu의 em_pd를 가져온다.
+ * - em_pd
+ *   dev_pm_opp_of_register_em()에 의해 등록될것이다.
  */
 struct em_perf_domain *em_cpu_get(int cpu)
 {
@@ -411,6 +418,12 @@ EXPORT_SYMBOL_GPL(em_cpu_get);
  * registration will be ignored.
  *
  * Return 0 on success
+ */
+/*
+ * IAMROOT, 2023.06.01:
+ * @cb _get_power
+ * - em_create_pd() 주석 참고. em_dev_register_perf_domain()를 부르는 
+ *   함수는 dev_pm_opp_of_register_em().
  */
 int em_dev_register_perf_domain(struct device *dev, unsigned int nr_states,
 				struct em_data_callback *cb, cpumask_t *cpus,

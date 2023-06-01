@@ -150,6 +150,10 @@ static int mtk_cpu_create_freq_table(struct platform_device *pdev,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - ex) performance-domains = <&performance 0>;
+ */
 static int mtk_cpu_resources_init(struct platform_device *pdev,
 				  struct cpufreq_policy *policy,
 				  const u16 *offsets)
@@ -189,6 +193,11 @@ static int mtk_cpu_resources_init(struct platform_device *pdev,
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - (dtb에서 어떤값을 prase해서 가져오는지만 간단히 확인한다)
+ * - mtk_cpu_resources_init()에서 dtb를 parse한다.
+ */
 static int mtk_cpufreq_hw_cpu_init(struct cpufreq_policy *policy)
 {
 	struct platform_device *pdev = cpufreq_get_driver_data();
@@ -240,6 +249,16 @@ static int mtk_cpufreq_hw_cpu_exit(struct cpufreq_policy *policy)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - (dev_pm_opp_of_register_em()를 부르게 되는 연관관계만 가볍게 본다)
+ *   (더 최초는 cpufreq_init()확인)
+ * - mtk_cpufreq_hw_driver_probe()에 의해 cpufreq_mtk_hw_driver가 등록되고,
+ *   register_em() callback통해 사용할수있게 될것이다.
+ * - cpufreq_mtk_hw_driver()가 등록될때 probe에서 등록 될대
+ *   init() callback이 호출되어 dtb를 parse해서 기본값을 초기화된다
+ *   mtk_cpufreq_hw_cpu_init() 참고
+ */
 static void mtk_cpufreq_register_em(struct cpufreq_policy *policy)
 {
 	struct em_data_callback em_cb = EM_DATA_CB(mtk_cpufreq_get_cpu_power);

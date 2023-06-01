@@ -498,6 +498,10 @@ struct device {
 	struct dev_pm_domain	*pm_domain;
 
 #ifdef CONFIG_ENERGY_MODEL
+/*
+ * IAMROOT, 2023.06.01:
+ * - dev_pm_opp_of_register_em()에 의해 등록될것이다.
+ */
 	struct em_perf_domain	*em_pd;
 #endif
 

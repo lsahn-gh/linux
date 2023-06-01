@@ -179,6 +179,10 @@ void cpufreq_generic_init(struct cpufreq_policy *policy,
 }
 EXPORT_SYMBOL_GPL(cpufreq_generic_init);
 
+/*
+ * IAMROOT, 2023.05.30:
+ * - @cpu의 pcpu cpufreq_cpu_data로부터 policy를 얻어온다.
+ */
 struct cpufreq_policy *cpufreq_cpu_get_raw(unsigned int cpu)
 {
 	struct cpufreq_policy *policy = per_cpu(cpufreq_cpu_data, cpu);
@@ -215,13 +219,17 @@ EXPORT_SYMBOL_GPL(cpufreq_generic_get);
 /*
  * IAMROOT. 2022.12.10:
  * - google-translate
- *   cpufreq_cpu_get - CPU에 대한 정책을 반환하고 사용 중인 것으로 표시합니다. @cpu:
- *   정책을 찾을 CPU. cpufreq_cpu_get_raw()를 호출하여 @cpu에 대한 cpufreq 정책을
+ *   cpufreq_cpu_get - CPU에 대한 정책을 반환하고 사용 중인 것으로 표시합니다.
+ *   @cpu: *   정책을 찾을 CPU.
+ *
+ *   cpufreq_cpu_get_raw()를 호출하여 @cpu에 대한 cpufreq 정책을
  *   얻고 해당 정책의 kobject 참조 카운터를 증가시킵니다. 성공 시 유효한 정책을
- *   반환하거나 실패 시 NULL을 반환합니다. 이 함수에 의해 반환된 정책은 kobject 참조
- *   카운터의 균형을 적절히 맞추기 위해 cpufreq_cpu_put()의 도움으로 해제되어야
- *   합니다.
- * - cpufreq policy를 찾아서 반환
+ *   반환하거나 실패 시 NULL을 반환합니다.
+ *
+ *   이 함수에 의해 반환된 정책은 kobject 참조 카운터의 균형을 적절히 맞추기
+ *   위해 cpufreq_cpu_put()의 도움으로 해제되어야 합니다.
+ * - cpufreq policy를 찾아서 반환.
+ *   ref up
  */
 struct cpufreq_policy *cpufreq_cpu_get(unsigned int cpu)
 {
@@ -1325,6 +1333,12 @@ static void cpufreq_policy_free(struct cpufreq_policy *policy)
 	kfree(policy);
 }
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - (init(), register_em() 호출여부만 보고 넘어간다.)
+ * - 새로 추가되는 new_policy 상황이면 init(), register_em()
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
+ */
 static int cpufreq_online(unsigned int cpu)
 {
 	struct cpufreq_policy *policy;
@@ -1558,6 +1572,12 @@ out_free_policy:
  * cpufreq_add_dev - the cpufreq interface for a CPU device.
  * @dev: CPU device.
  * @sif: Subsystem interface structure pointer (not used)
+ */
+/*
+ * IAMROOT, 2023.06.01:
+ * - (init(), register_em() 호출여부만 보고 넘어간다.)
+ * - cpufreq_online()을 통해 init(), register_em() callback등이
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
  */
 static int cpufreq_add_dev(struct device *dev, struct subsys_interface *sif)
 {
@@ -2806,6 +2826,13 @@ static int cpuhp_cpufreq_offline(unsigned int cpu)
  * (and isn't unregistered in the meantime).
  *
  */
+/*
+ * IAMROOT, 2023.06.01:
+ * - (init(), register_em() 호출여부만 보고 넘어간다.)
+ * - subsys_interface_registe()를 통해 
+ *   새로 추가되는 new_policy 상황이면 init(), register_em()
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
+ */
 int cpufreq_register_driver(struct cpufreq_driver *driver_data)
 {
 	unsigned long flags;
@@ -2861,7 +2888,12 @@ int cpufreq_register_driver(struct cpufreq_driver *driver_data)
 		if (ret)
 			goto err_null_driver;
 	}
-
+/*
+ * IAMROOT, 2023.06.01:
+ * - add_dev()(ex, cpufreq_add_dev())를 통해 
+ *   새로 추가되는 new_policy 상황이면 init(), register_em()
+ *   (ex cpufreq_init(), cpufreq_register_em_with_opp())이 호출된다.
+ */
 	ret = subsys_interface_register(&cpufreq_interface);
 	if (ret)
 		goto err_boost_unreg;

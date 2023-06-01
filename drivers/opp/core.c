@@ -32,7 +32,17 @@
  * 모든 opp 테이블 목록의 루트입니다. 모든 opp_table 구조는 여기에서 분기되며 각
  * opp_table에는 다양한 가용성 상태에서 지원하는 opps 목록이 포함됩니다.
  * - cluster B M L 구조에서 opp_tables 에는 아래와 같이 3개의 opp_table이 등록 된다.
- *   opp_tables - [B] [M] [L]
+ *   ex) B,M,N
+ *   opp_tables - [B] [M]  [L]
+ *                 |   |    |
+ *               cpu0 cpu4 cpu8
+ *                 |   |    |
+ *               cpu1 cpu5 cpu9
+ *                 |   |    |
+ *               cpu2 cpu6 cpu10
+ *                 |   |    |
+ *               cpu3 cpu7 cpu11
+ *
  *   opp_table[B] ->dev_list - [cpu0] [cpu1] [cpu2] [cpu3]
  */
 LIST_HEAD(opp_tables);
@@ -122,6 +132,10 @@ struct opp_table *_find_opp_table(struct device *dev)
  * return 0
  *
  * This is useful only for devices with single power supply.
+ */
+/*
+ * IAMROOT, 2023.06.01:
+ * - return micro voltage
  */
 unsigned long dev_pm_opp_get_voltage(struct dev_pm_opp *opp)
 {
@@ -349,6 +363,8 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_max_volt_latency);
  *
  * 반환: 이 함수는 하나의 OPP에서 다른 OPP로 전환하기 위한 최대 전환 대기 시간(나노초)을
  * 반환합니다.
+ *
+ * - 
  */
 unsigned long dev_pm_opp_get_max_transition_latency(struct device *dev)
 {
@@ -581,6 +597,10 @@ struct dev_pm_opp *dev_pm_opp_find_level_ceil(struct device *dev,
 }
 EXPORT_SYMBOL_GPL(dev_pm_opp_find_level_ceil);
 
+/*
+ * IAMROOT, 2023.06.01:
+ * - @freq 이상의 값을 가진 opp를 가져온다.
+ */
 static noinline struct dev_pm_opp *_find_freq_ceil(struct opp_table *opp_table,
 						   unsigned long *freq)
 {
@@ -621,6 +641,10 @@ static noinline struct dev_pm_opp *_find_freq_ceil(struct opp_table *opp_table,
  *
  * The callers are required to call dev_pm_opp_put() for the returned OPP after
  * use.
+ */
+/*
+ * IAMROOT, 2023.06.01:
+ * - @*freq이상의 opp를 가져온다.
  */
 struct dev_pm_opp *dev_pm_opp_find_freq_ceil(struct device *dev,
 					     unsigned long *freq)

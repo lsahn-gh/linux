@@ -1407,6 +1407,7 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_of_node);
  *			opp-microvolt = <825000 825000 1250000>;
  *			clock-latency-ns = <40000>;
  *		};
+ * - 
  */
 static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
 				     struct device *dev)
@@ -1486,6 +1487,9 @@ static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
  * 이는 "동적 전력 계수" devicetree 속성이 지정되었는지 여부를 확인하고 지정된 경우
  * 에너지 모델 등록을 시도합니다. 이 속성이 있다는 것은 전압이 OPP에 대해 알려져 있고
  * EM이 계산될 수 있음을 의미합니다.
+ *
+ * - 사용예) mtk_cpufreq_register_em()
+ *   (더 최초는 cpufreq_init()확인)
  */
 int dev_pm_opp_of_register_em(struct device *dev, struct cpumask *cpus)
 {
