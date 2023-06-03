@@ -23,12 +23,21 @@ void cpufreq_add_update_util_hook(int cpu, struct update_util_data *data,
 void cpufreq_remove_update_util_hook(int cpu);
 bool cpufreq_this_cpu_can_update(struct cpufreq_policy *policy);
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - util의 cap대비 비율만큼 freq를 증감한다.
+ *   ex) util이 cap의 90%면 freq를 90%로 줄인다.
+ */
 static inline unsigned long map_util_freq(unsigned long util,
 					unsigned long freq, unsigned long cap)
 {
 	return freq * util / cap;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return 125%
+ */
 static inline unsigned long map_util_perf(unsigned long util)
 {
 	return util + (util >> 2);

@@ -1401,13 +1401,7 @@ EXPORT_SYMBOL_GPL(dev_pm_opp_get_of_node);
  *			cpu-idle-states = <&CPU_SLEEP &CLUSTER_SLEEP>;
  *		};
  *
- * - rk3399-opp.dtsi
- * 		opp00 {
- *			opp-hz = /bits/ 64 <408000000>;
- *			opp-microvolt = <825000 825000 1250000>;
- *			clock-latency-ns = <40000>;
- *		};
- * - 
+ * - em_perf_state 참고
  */
 static int __maybe_unused _get_power(unsigned long *mW, unsigned long *kHz,
 				     struct device *dev)

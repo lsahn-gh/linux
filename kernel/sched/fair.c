@@ -5171,6 +5171,11 @@ static inline void update_load_avg(struct cfs_rq *cfs_rq, struct sched_entity *s
 }
 
 #ifndef CONFIG_64BIT
+/*
+ * IAMROOT, 2023.06.03:
+ * - load_last_update_time_copy와 last_update_time이 sync할때까지
+ *   맞춘다.
+ */
 static inline u64 cfs_rq_last_update_time(struct cfs_rq *cfs_rq)
 {
 	u64 last_update_time_copy;
@@ -5194,6 +5199,10 @@ static inline u64 cfs_rq_last_update_time(struct cfs_rq *cfs_rq)
 /*
  * Synchronize entity load avg of dequeued entity without locking
  * the previous rq.
+ */
+/*
+ * IAMROOT, 2023.06.03:
+ * - @se cfs_rq의 last_update_time으로 decay한다.
  */
 static void sync_entity_load_avg(struct sched_entity *se)
 {
@@ -7617,6 +7626,10 @@ static struct {
 
 #endif /* CONFIG_NO_HZ_COMMON */
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return cfs load
+ */
 static unsigned long cpu_load(struct rq *rq)
 {
 	return cfs_rq_load_avg(&rq->cfs);
@@ -7823,6 +7836,22 @@ static int wake_wide(struct task_struct *p)
  *			  scheduling latency of the CPUs. This seems to work
  *			  for the overloaded case.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   wake_affine()의 목적은 우리가 가장 빨리 실행할 수 있는 CPU를 빠르게 
+ *   결정하는 것입니다. 속도를 위해 깨어 있는 CPU와 이전 CPU만 고려합니다.
+ *
+ *   wake_affine_idle() - '지금'만 고려하여 깨우는 CPU가 캐시 affine이고 
+ *   유휴 상태인지 확인합니다.
+ *
+ *   wake_affine_weight() - CPU의 평균 스케줄링 대기 시간을 반영하기 
+ *   위해 가중치를 고려합니다. 이것은 오버로드된 경우에 작동하는 것 같습니다.
+ *
+ * @sync WF_SYNC set여부. select_task_rq_fair() 참고
+ * - this_cpu, prev_cpu중에 cache affine cpu를 idle위주로 고려해서 선택한다.
+ *   둘다 대상이 없으면 return nr_cpumask_bits
+ */
 static int
 wake_affine_idle(int this_cpu, int prev_cpu, int sync)
 {
@@ -7838,9 +7867,32 @@ wake_affine_idle(int this_cpu, int prev_cpu, int sync)
 	 * a cpufreq perspective, it's better to have higher utilisation
 	 * on one CPU.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   this_cpu가 유휴 상태이면 깨우기가 인터럽트 컨텍스트에서 발생했음을 
+ *   의미합니다. 캐시가 공유된 경우에만 이동을 허용하십시오. 그렇지 
+ *   않으면 인터럽트 집중 워크로드가 IO 토폴로지 또는 IRQ 선호도 설정에 
+ *   따라 모든 작업을 하나의 노드로 강제 실행할 수 있습니다.
+ *
+ *   prev_cpu가 유휴 상태이고 캐시 관련성이 있는 경우 마이그레이션을 
+ *   피하십시오. 인터럽트의 캐시 핫 데이터가 prev_cpu의 캐시 핫 데이터보다 
+ *   더 중요하다는 보장은 없으며 cpufreq 관점에서 볼 때 하나의 CPU에서 더 
+ *   높은 활용도를 갖는 것이 좋습니다.
+ *
+ * - this_cpu가 idle, prev_cpu와 cache share.
+ *   prev_cpu가 idle이면 prev_cpu를 우선으로 고르고, 아니면 this_cpu
+ * - prev_cpu가 idle일 경우 migrate를 안하고 기존 cpu에서 동작하는 것이
+ *   l1 cache의 이득을 조금더 볼수있다고 생각한다.
+ */
 	if (available_idle_cpu(this_cpu) && cpus_share_cache(this_cpu, prev_cpu))
 		return available_idle_cpu(prev_cpu) ? prev_cpu : this_cpu;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - WF_SYNC참고. prev_cpu는 가능하면 sleep하러 가야된다. 그러므로 this_cpu에서
+ *   worker를 동작시켜도 되는 상황이다.
+ */
 	if (sync && cpu_rq(this_cpu)->nr_running == 1)
 		return this_cpu;
 
@@ -7850,6 +7902,12 @@ wake_affine_idle(int this_cpu, int prev_cpu, int sync)
 	return nr_cpumask_bits;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * @sync WF_SYNC set여부. select_task_rq_fair() 참고
+ * - load 비율 계산을 하여 @this_cpu가 prev_cpu비해 더 여유로우면 this_cpu
+ *   결정. this_cpu를 사용못하면 return nr_cpumask_bits
+ */
 static int
 wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
 		   int this_cpu, int prev_cpu, int sync)
@@ -7859,22 +7917,46 @@ wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
 
 	this_eff_load = cpu_load(cpu_rq(this_cpu));
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - sync가 있으면 곧 sleep을 할 예정이므로 load가 감소할 것이다.
+ *   그 보정을 취한다.
+ */
 	if (sync) {
 		unsigned long current_load = task_h_load(current);
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - this cpu에 current task가 워낙 큰 load를 차지하고 있어
+ *   없어지면 thi_cpu 부하가 없는거랑 마찬가지가 되니 그냥
+ *   this_cpu로 선택한다.
+ */
 		if (current_load > this_eff_load)
 			return this_cpu;
 
 		this_eff_load -= current_load;
 	}
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 새로 추가되는 @p에 대한 load를 더해본다.
+ */
 	task_load = task_h_load(p);
 
 	this_eff_load += task_load;
+/*
+ * IAMROOT, 2023.06.03:
+ * - WA_BIAS : default true. imbalance_pct - 100 의 절반을 보정하여 
+ *   계산한다.
+ *   ex) imbalance_pct = 117 -> 8을 더 보정한다.
+ */
 	if (sched_feat(WA_BIAS))
 		this_eff_load *= 100;
 	this_eff_load *= capacity_of(prev_cpu);
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 다른데로 옮겨갈 @p를 prev에서 빼준다.
+ */
 	prev_eff_load = cpu_load(cpu_rq(prev_cpu));
 	prev_eff_load -= task_load;
 	if (sched_feat(WA_BIAS))
@@ -7887,24 +7969,57 @@ wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
 	 * stacking the wakee on top of the waker if no other CPU is
 	 * idle.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   동기화된 경우 prev_eff == this_eff인 경우 select_idle_sibling()이 
+ *   다른 CPU가 유휴 상태가 아닌 경우 웨이커 위에 웨이크를 쌓는 것을 
+ *   고려하도록 prev_eff_load의 가중치를 조정합니다.
+ * - 동일한 점수일때 this_cpu가 더 유리하도록 한다.
+ */
 	if (sync)
 		prev_eff_load += 1;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - this_eff_load * prev_cpu_capa < prev_eff_load * this_cpu_capa
+ *   즉 this가 prev보다 비율적으로 덜 바쁘면 this를 선택한다.
+ *   그게 아니면 fail 처리.
+ */
 	return this_eff_load < prev_eff_load ? this_cpu : nr_cpumask_bits;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 1. idle로 우선 고려. prev / this / fail
+ *   2. load 비율 고려. this / fail
+ *   3. 그외 prev
+ */
 static int wake_affine(struct sched_domain *sd, struct task_struct *p,
 		       int this_cpu, int prev_cpu, int sync)
 {
 	int target = nr_cpumask_bits;
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - WA_IDLE default true
+ *   idle인 cpu를 우선으로해서 1차적으로 결정을 한다.
+ */
 	if (sched_feat(WA_IDLE))
 		target = wake_affine_idle(this_cpu, prev_cpu, sync);
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - WA_IDLE이 없거나 있었어도 못찾았다. WA_WEIGHT default true.
+ *   위에서 못찾앗으면 load 비율을 따져 this_cpu가 prev보다 유리하면
+ *   this_cpu로 선택한다.
+ */
 	if (sched_feat(WA_WEIGHT) && target == nr_cpumask_bits)
 		target = wake_affine_weight(sd, p, this_cpu, prev_cpu, sync);
 
 	schedstat_inc(p->se.statistics.nr_wakeups_affine_attempts);
+/*
+ * IAMROOT, 2023.06.03:
+ * - 못찾앗으면 prev_cpu
+ */
 	if (target == nr_cpumask_bits)
 		return prev_cpu;
 
@@ -8581,6 +8696,18 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
  * Predicts what cpu_util(@cpu) would return if @p was migrated (and enqueued)
  * to @dst_cpu.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   @p가 @dst_cpu로 마이그레이션(및 대기열에 포함)된 경우 cpu_util(@cpu)이 반환할
+ *   항목을 예측합니다.
+ *
+ *  @cpu 평가 cpu
+ *  @dst_cpu 목적 cpu 
+ *
+ *  - migrate 했을때의(next 상황에서의) util 예상치를 계산한다.
+ *    util 과 util_est끼리 따로 계산해서 max값을 계산한다.
+ */
 static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 {
 	struct cfs_rq *cfs_rq = &cpu_rq(cpu)->cfs;
@@ -8592,11 +8719,27 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 	 * the other cases, @cpu is not impacted by the migration, so the
 	 * util_avg should already be correct.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   @p가 @cpu에서 다른 것으로 마이그레이션하는 경우 해당 기여를 제거합니다. 
+ *   또는 @p가 다른 CPU에서 @cpu로 마이그레이션하는 경우 기여도를 추가합니다.
+ *   다른 경우에는 @cpu가 마이그레이션의 영향을 받지 않으므로 util_avg가 이미
+ *   정확해야 합니다.
+ *  - cpu == dst_cpu 인경우는 자신(cpu)한테 이동해오는 개념이라 추가되는 개념.
+ *    cpu != dst_cpu 인경우는 cpu -> dst_cpu로 가는 개념이라 빼야된다.
+ */
 	if (task_cpu(p) == cpu && dst_cpu != cpu)
 		lsub_positive(&util, task_util(p));
 	else if (task_cpu(p) != cpu && dst_cpu == cpu)
 		util += task_util(p);
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 증간된 util과 est를 비교해서 max로 보정한다.
+ *   est가 task가 적어도 이만큼은 동작을해야되는 추정치이므로 이에 대한 고려
+ *   (즉 저평가 방지)를 한다.
+ */
 	if (sched_feat(UTIL_EST)) {
 		util_est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
 
@@ -8606,6 +8749,15 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
 		 * so just add it (if needed) to "simulate" what will be
 		 * cpu_util() after the task has been enqueued.
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   깨우는 동안 작업은 아직 대기열에 추가되지 않고 rq의 
+ *   cfs_rq->avg.util_est.enqueued에 표시되지 않으므로 필요한 경우 추가하여 
+ *   작업 후 cpu_util()이 될 것을 시뮬레이트합니다. 인큐되었습니다.
+ * - 저평가를 방지하는 개념이므로, 빼야되는 상황(dst_cpu != cpu)에 대한 처리는 안하고,
+ *   더해야되는 상황에서만 수행한다.
+ */
 		if (dst_cpu == cpu)
 			util_est += _task_util_est(p);
 
@@ -8622,6 +8774,17 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
  * to compute what would be the energy if we decided to actually migrate that
  * task.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   compute_energy(): @p가 @dst_cpu로 마이그레이션된 경우 @pd가 소비할 
+ *   에너지를 추정합니다. compute_energy()는 작업 마이그레이션 후 @pd CPU의 
+ *   사용 환경을 예측하고 에너지 모델을 사용하여 해당 작업을 실제로 
+ *   마이그레이션하기로 결정한 경우 에너지가 무엇인지 계산합니다.
+ *
+ * - @p가 @dst_cpu로 migrate migrate후의 @pd에 대한 energy를 예측한다.
+ *   dst_cpu == -1이면 migrate없는 상황에서의 base값.
+ */
 static long
 compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 {
@@ -8631,6 +8794,10 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 	unsigned long _cpu_cap = cpu_cap;
 	int cpu;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 온도 capa보정
+ */
 	_cpu_cap -= arch_scale_thermal_pressure(cpumask_first(pd_mask));
 
 	/*
@@ -8642,6 +8809,21 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 	 * If an entire pd is outside of the current rd, it will not appear in
 	 * its pd list and will not be accounted by compute_energy().
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   현재 rd의 CPU 용량 상태는 동일한 pd에 속한 경우 다른 rd의 CPU에 
+ *   의해 구동될 수 있습니다. 따라서 rd span 대신 cpu_online_mask로 pd를 
+ *   마스킹하여 이러한 CPU의 사용률도 고려하십시오. 
+ *
+ *   전체 pd가 현재 rd 밖에 있는 경우 pd 목록에 나타나지 않으며 
+ *   compute_energy()에서 계산되지 않습니다.
+ *
+ * - sum_util
+ *   energy model 산출 총합
+ * - max_util
+ *   max freq util model
+ */
 	for_each_cpu_and(cpu, pd_mask, cpu_online_mask) {
 		unsigned long util_freq = cpu_util_next(cpu, p, dst_cpu);
 		unsigned long cpu_util, util_running = util_freq;
@@ -8656,6 +8838,17 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 		 * while cpu_util_next is: max(cpu_util + task_util,
 		 *			       cpu_util_est + _task_util_est)
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - @p가 @cpu로 migrate되는(즉 증가되는 상황) cpu에 대해서의 처리.
+ * - cpu_util_next(cpu, p, -1) 
+ *   dst_cpu가 없은 예측값을 가져온다.(max(cpu_util, cpu_util_est))
+ * - task_util_est(p) 
+ *   max(task_util, _task_util_est) 
+ *
+ * - cpu_util_next에서 dst_cpu를 넣어서 계산하는 것은 task_util만
+ *   고려가 되지만, 이렇게 task_util_est를 해 좀더 load를 추가 해준다.
+ */
 		if (cpu == dst_cpu) {
 			tsk = p;
 			util_running =
@@ -8668,9 +8861,19 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 		 * is already enough to scale the EM reported power
 		 * consumption at the (eventually clamped) cpu_capacity.
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   바쁜 시간 계산: 비율(sum_util / cpu_capacity)이 (결국 고정된) 
+ *   cpu_capacity에서 EM 보고된 전력 소비를 확장하기에 이미 충분하기 
+ *   때문에 사용률 고정이 필요하지 않습니다.
+ */
 		cpu_util = effective_cpu_util(cpu, util_running, cpu_cap,
 					      ENERGY_UTIL, NULL);
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - 계산된 util을 온도가 계산된 cpu_capa와 min 비교후 sum_util에 추가한다.
+ */
 		sum_util += min(cpu_util, _cpu_cap);
 
 		/*
@@ -8680,6 +8883,17 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
 		 * NOTE: in case RT tasks are running, by default the
 		 * FREQUENCY_UTIL's utilization can be max OPP.
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   Performance domain frequency: utilization 클램핑은 
+ *   Performance domain frequency 선택에 영향을 미치므로 반드시 
+ *   고려해야 합니다.
+ *   메모: RT 작업이 실행 중인 경우 기본적으로 FREQUENCY_UTIL의 
+ *   utilization는 최대 OPP가 될 수 있습니다.
+ *
+ * - freq 산출은 max_util로하여 max값을 갱신한다.
+ */
 		cpu_util = effective_cpu_util(cpu, util_freq, cpu_cap,
 					      FREQUENCY_UTIL, tsk);
 		max_util = max(max_util, min(cpu_util, _cpu_cap));
@@ -8796,6 +9010,18 @@ compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
  *   2. driven DVFS : freq를 변경해서 해결거나 깨우거나 한다.
  * ---------------
  *  
+ * @prev_cpu sleep을 햇던 cpu
+ * - ex)
+ *    pd0          pd1(max 못찾음)  pd2         pd3(max 못찾음)
+ *    cpu0<-max1   cpu2<-prev       cpu4<-max2  cpu6
+ *    cpu1         cpu3             cpu5        cpu7
+ *    > max를 찾은 pd0, pd2과 prev가 있는 pd1만을 대상으로 base_energy_pd값을 계산
+ * - 전력이득이 있는 cpu를 고른다.
+ *    > prev가 있는 pd는 prev_delta를 산출하고, best_delta min비교해서 갱신한다.
+ *    > max값이 있는 pd는 best_delta와 현재 pd를 min비교해서 best_delta, 
+ *      best_energy_cpu를 min 비교 갱신한다.
+ *    > 최종적으로, 6%이상의 이득이 있으면 best_energy_cpu를 선택하고, 그게 아니면
+ *      prev_cpu로 유지한다.
  */
 static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 {
@@ -8816,6 +9042,10 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 	 * from sd_asym_cpucapacity spanning over this_cpu and prev_cpu.
 	 */
 	sd = rcu_dereference(*this_cpu_ptr(&sd_asym_cpucapacity));
+/*
+ * IAMROOT, 2023.06.03:
+ * - @prev_cpu가 포함된 sd를 parent로 올라가면서 찾는다.
+ */
 	while (sd && !cpumask_test_cpu(prev_cpu, sched_domain_span(sd)))
 		sd = sd->parent;
 	if (!sd)
@@ -8823,16 +9053,32 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 
 	target = prev_cpu;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 경과시간만큼 decay
+ */
 	sync_entity_load_avg(&p->se);
+/*
+ * IAMROOT, 2023.06.03:
+ * - sleep전에 load가 없엇으면 out. EAS포기.
+ */
 	if (!task_util_est(p))
 		goto unlock;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - pd 순회 -> pd에 속한 cpu순회
+ */
 	for (; pd; pd = pd->next) {
 		unsigned long cur_delta, spare_cap, max_spare_cap = 0;
 		bool compute_prev_delta = false;
 		unsigned long base_energy_pd;
 		int max_spare_cap_cpu = -1;
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - pd, sd에 둘다 포함되는 cpu and @p에 허용된 cpu를 iterate 한다.
+ */
 		for_each_cpu_and(cpu, perf_domain_span(pd), sched_domain_span(sd)) {
 			if (!cpumask_test_cpu(cpu, p->cpus_ptr))
 				continue;
@@ -8840,6 +9086,10 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 			util = cpu_util_next(cpu, p, cpu);
 			cpu_cap = capacity_of(cpu);
 			spare_cap = cpu_cap;
+/*
+ * IAMROOT, 2023.06.03:
+ * - 예상 사용량(util)을 빼서, 남아있는 capa를 계산(spare_cap)한다.
+ */
 			lsub_positive(&spare_cap, util);
 
 			/*
@@ -8849,10 +9099,29 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 			 * much capacity we can get out of the CPU; this is
 			 * aligned with sched_cpu_util().
 			 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   capacity 요청을 충족할 수 없는 CPU는 건너뜁니다.
+ *   IOW, 거기에 작업을 배치하면 CPU가 과도하게 사용됩니다. uclamp를 
+ *   고려하여 CPU에서 얼마나 많은 용량을 얻을 수 있는지 확인하십시오. 
+ *   이것은 sched_cpu_util()과 일치합니다.
+ *
+ * - 가장 여유로은 pd를 찾고, 그 pd안에서 가장 여유로운 cpu를 찾는다.
+ * - @p가 uclamp를 사용할 경우 clamp 한다.
+ */
 			util = uclamp_rq_util_with(cpu_rq(cpu), util, p);
+/*
+ * IAMROOT, 2023.06.03:
+ * - util을 1.2배 해 적합한지 판별한다.
+ */
 			if (!fits_capacity(util, cpu_cap))
 				continue;
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - 이전 cpu가 대상 cpu에도 포함되어 대상이 된경우, compute_prev_delta를 
+ *   true로 한다.
+ */
 			if (cpu == prev_cpu) {
 				/* Always use prev_cpu as a candidate. */
 				compute_prev_delta = true;
@@ -8861,23 +9130,57 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 				 * Find the CPU with the maximum spare capacity
 				 * in the performance domain.
 				 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   현재 순회중인 pd에서 최대 여유 용량이 있는 CPU를 찾습니다.
+ * - max값 갱신.
+ */
 				max_spare_cap = spare_cap;
 				max_spare_cap_cpu = cpu;
 			}
+/*
+ * IAMROOT, 2023.06.03:
+ * - for문 종료
+ */
 		}
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - pd, sd, @p->cpus와 겹치는 span의 cpus의 iterate가 끝낫는데 
+ *   max_spare_cap_cpu을 못찾은 pd는 skip한다. 단 prev_cpu가 있는 pd는
+ *   skip하지 않는다.
+ */
 		if (max_spare_cap_cpu < 0 && !compute_prev_delta)
 			continue;
 
 		/* Compute the 'base' energy of the pd, without @p */
+/*
+ * IAMROOT, 2023.06.03:
+ * - base를 일단계산해 base끼리 합산을 한다.
+ */
 		base_energy_pd = compute_energy(p, -1, pd);
 		base_energy += base_energy_pd;
 
 		/* Evaluate the energy impact of using prev_cpu. */
+/*
+ * IAMROOT, 2023.06.03:
+ * - prev cpu가 있는 pd. prev_cpu로 energy를 계산하는데,
+ *   migrate를 안하는게 이득이라고 판단하면, 완전 best를 찾으러 가는 것보다
+ *   prev_cpu로 그냥 한다.
+ */
 		if (compute_prev_delta) {
 			prev_delta = compute_energy(p, prev_cpu, pd);
+/*
+ * IAMROOT, 2023.06.03:
+ * - migrate를 하지 않는게 더 energy 이득이라면 종료한다.
+ */
 			if (prev_delta < base_energy_pd)
 				goto unlock;
+/*
+ * IAMROOT, 2023.06.03:
+ * - prev_cpu가 현재 pd의 energy의 차이값을 best_delta에 min비교하여 저장한다.
+ */
 			prev_delta -= base_energy_pd;
 			best_delta = min(best_delta, prev_delta);
 		}
@@ -8885,8 +9188,16 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 		/* Evaluate the energy impact of using max_spare_cap_cpu. */
 		if (max_spare_cap_cpu >= 0) {
 			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
+/*
+ * IAMROOT, 2023.06.03:
+ * - 여기서도 위에처럼 이득만 본다면 바로 out(예외처리 개념)
+ */
 			if (cur_delta < base_energy_pd)
 				goto unlock;
+/*
+ * IAMROOT, 2023.06.03:
+ * - 전력량이 상승하는 상태. 최소한의 상승인것을 우선순위에한다.
+ */
 			cur_delta -= base_energy_pd;
 			if (cur_delta < best_delta) {
 				best_delta = cur_delta;
@@ -8900,6 +9211,25 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 	 * Pick the best CPU if prev_cpu cannot be used, or if it saves at
 	 * least 6% of the energy used by prev_cpu.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   prev_cpu를 사용할 수 없거나 prev_cpu에서 사용하는 에너지의 6% 이상을 절약하는 
+ *   경우 최상의 CPU를 선택합니다.
+. 
+ * - 여기 if문에서 target이 안바뀌면 prev_cpu가 target으로 된다.
+ * - prev_delta == ULONG_MAX. 즉 prev_cpu가 한번도 대상이 된적없음.
+ *   1. best_energy_cpu가 찾아졌었으면 그것이 cpu가 된다.
+ *   2. best_energy_cpu도 찾은적이 한번도 없으면 prev_cpu가 그냥 target이된다.
+ *
+ * - (prev_delta - best_delta) > ((prev_delta + base_energy) >> 4)
+ *   즉 prev_cpu가 찾아졌었다.
+ *   prev_cpu에서보다 에너지절약이 6%이상이 되는 경우 해당 target을 return한다.
+ * - prev_delta - best_delta
+ *   옮긴후의 이득되는 delta
+ * - (prev_delta + base_energy) >> 4
+ *   옮기기전의 energy 총합의 6%
+ */
 	if ((prev_delta == ULONG_MAX) ||
 	    (prev_delta - best_delta) > ((prev_delta + base_energy) >> 4))
 		target = best_energy_cpu;
@@ -8909,6 +9239,10 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 unlock:
 	rcu_read_unlock();
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return prev_cpu
+ */
 	return target;
 }
 
@@ -8971,7 +9305,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 				return new_cpu;
 			new_cpu = prev_cpu;
 		}
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - cache 친화여부를 알아온다.
+ */
 		want_affine = !wake_wide(p) && cpumask_test_cpu(cpu, p->cpus_ptr);
 	}
 
@@ -8981,6 +9318,13 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 		 * If both 'cpu' and 'prev_cpu' are part of this domain,
 		 * cpu is a valid SD_WAKE_AFFINE target.
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - cache친화를 찾아볼려고 노력을 하는상황. sd도 affine을 지원하고,
+ *   prev_cpu도 포함되어있다. 즉 affine가능한 상태다.
+ *   이때 대상 cpu가 prev_cpu 아니라면, 대상 cpu로 결정할지 정한다.
+ *   new_cpu는 prev_cpu or cpu로 무조건 골라진다.
+ */
 		if (want_affine && (tmp->flags & SD_WAKE_AFFINE) &&
 		    cpumask_test_cpu(prev_cpu, sched_domain_span(tmp))) {
 			if (cpu != prev_cpu)
@@ -8990,12 +9334,22 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 			break;
 		}
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - sd_flag와 겹치는 sd를 찾아 계속 iterate를 수행한다.. 만약 
+ *   못찾았는데, want_affine조차 없엇으면 그냥 종료한다.
+ */
 		if (tmp->flags & sd_flag)
 			sd = tmp;
 		else if (!want_affine)
 			break;
 	}
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - want_affine이 없었거나, affine flag가 있는 sd를 못찾았다.
+ *   ING
+ */
 	if (unlikely(sd)) {
 		/* Slow path */
 		new_cpu = find_idlest_cpu(sd, p, cpu, prev_cpu, sd_flag);

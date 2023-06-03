@@ -106,6 +106,7 @@ static void em_debug_remove_pd(struct device *dev) {}
 
 /*
  * IAMROOT, 2023.05.27:
+ * - em_perf_state 주석 참고
  * - opp table 값을 읽어서 @pd의 table 을 할당하고 구성한다(cost 포함)
  */
 static int em_create_perf_table(struct device *dev, struct em_perf_domain *pd,

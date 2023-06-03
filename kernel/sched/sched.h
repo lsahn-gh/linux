@@ -2627,6 +2627,10 @@ static inline int task_on_rq_migrating(struct task_struct *p)
  */
 #define WF_TTWU     0x08 /* Wakeup;            maps to SD_BALANCE_WAKE */
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - waker는 wakeup을 한 후 sleep을 하러 가야된다는 뜻.
+ */
 #define WF_SYNC     0x10 /* Waker goes to sleep after wakeup */
 #define WF_MIGRATED 0x20 /* Internal use, task got migrated */
 #define WF_ON_CPU   0x40 /* Wakee is on_cpu */
@@ -3654,6 +3658,25 @@ unsigned long uclamp_eff_value(struct task_struct *p, enum uclamp_id clamp_id);
  * will return the correct effective uclamp value of the task even if the
  * static key is disabled.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   uclamp_rq_util_with - @rq 및 @p 유효 uclamp 값을 사용하여 @util을 클램프합니다.
+ *   @rq: 클램프할 rq입니다. NULL이 아니어야 합니다.
+ *   @util: 클램프할 util 값입니다.
+ *   @p: 클램프할 작업입니다. @rq만 고정하려는 경우 NULL이 될 수 있습니다.
+ *
+ *   전달된 @util을 최대(@rq, @p) 유효 uclamp 값으로 고정합니다.
+ *
+ *   sched_uclamp_used 정적 키가 비활성화된 경우 빠른 경로의 rq 수준에서 uclamp 
+ *   집계가 비활성화되어 이 작업을 NOP로 렌더링하므로 클램핑 없이 util을 반환합니다.
+ *
+ *   rq 수준에서 uclamp 값을 신경 쓰지 않는다면 uclamp_eff_value()를 사용하십시오. 
+ *   정적 키가 비활성화된 경우에도 작업의 올바른 유효 uclamp 값을 반환합니다.
+ *
+ * - 1. 1차적으로 UCLAMP_FLAG_IDLE이 있는 경우 @p의 min max를 사용한다.
+ *   2. 그게 아니면 @p와 @rq에 대한 min max를 비교해 최대값을 사용한다.
+ */
 static __always_inline
 unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
 				  struct task_struct *p)
@@ -3672,6 +3695,12 @@ unsigned long uclamp_rq_util_with(struct rq *rq, unsigned long util,
 		 * Ignore last runnable task's max clamp, as this task will
 		 * reset it. Similarly, no need to read the rq's min clamp.
 		 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   마지막으로 실행 가능한 작업의 최대 클램프를 무시합니다. 이 작업은 
+ *   이를 재설정합니다. 마찬가지로 rq의 최소 클램프를 읽을 필요가 없습니다.
+ */
 		if (rq->uclamp_flags & UCLAMP_FLAG_IDLE)
 			goto out;
 	}
@@ -3684,6 +3713,12 @@ out:
 	 * RUNNABLE tasks with _different_ clamps, we can end up with an
 	 * inversion. Fix it now when the clamps are applied.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   CPU의 {min,max}_util 클램프는 _다른_ 클램프가 있는 RUNNABLE 작업을 고려하여 MAX 
+ *   집계되므로 반전으로 끝날 수 있습니다. 클램프가 적용되면 지금 수정하십시오.
+ */
 	if (unlikely(min_util >= max_util))
 		return min_util;
 
@@ -3740,6 +3775,20 @@ static inline unsigned long capacity_orig_of(int cpu)
  * enum is used within effective_cpu_util() to differentiate the types of
  * utilization expected by the callers, and adjust the aggregation accordingly.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   enum cpu_util_type - CPU 사용 유형
+ *   @FREQUENCY_UTIL: 주파수 선택에 사용되는 utilization
+ *   @ENERGY_UTIL: 에너지 계산 시 사용되는 utilization
+ *
+ *   모든 스케줄링 클래스(CFS/RT/DL)의 활용 신호와 IRQ 시간은 utilization에 따라 다르게 
+ *   집계해야 합니다. 이 열거형은 effective_cpu_util() 내에서 호출자가 예상하는 
+ *   사용 유형을 구별하고 그에 따라 집계를 조정하는 데 사용됩니다.
+ *
+ * - FREQUENCY_UTIL : 주파수 설정목적
+ *   ENERGY_UTIL : 에너지 산출목적
+ */
 enum cpu_util_type {
 	FREQUENCY_UTIL,
 	ENERGY_UTIL,
@@ -3748,17 +3797,28 @@ enum cpu_util_type {
 unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum cpu_util_type type,
 				 struct task_struct *p);
-
+/*
+ * IAMROOT, 2023.06.03:
+ * - return dl bw 
+ */
 static inline unsigned long cpu_bw_dl(struct rq *rq)
 {
 	return (rq->dl.running_bw * SCHED_CAPACITY_SCALE) >> BW_SHIFT;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return dl util
+ */
 static inline unsigned long cpu_util_dl(struct rq *rq)
 {
 	return READ_ONCE(rq->avg_dl.util_avg);
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return max(cfs util_avg, cfs util_est)
+ */
 static inline unsigned long cpu_util_cfs(struct rq *rq)
 {
 	unsigned long util = READ_ONCE(rq->cfs.avg.util_avg);
@@ -3771,6 +3831,10 @@ static inline unsigned long cpu_util_cfs(struct rq *rq)
 	return util;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - return rt util_avg
+ */
 static inline unsigned long cpu_util_rt(struct rq *rq)
 {
 	return READ_ONCE(rq->avg_rt.util_avg);

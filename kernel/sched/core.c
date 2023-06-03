@@ -1785,6 +1785,10 @@ uclamp_eff_get(struct task_struct *p, enum uclamp_id clamp_id)
 	return uc_req;
 }
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - @p의 clamp_id에 대한 값을 가져온다.
+ */
 unsigned long uclamp_eff_value(struct task_struct *p, enum uclamp_id clamp_id)
 {
 	struct uclamp_se uc_eff;
@@ -4448,7 +4452,7 @@ out:
 
 /*
  * IAMROOT, 2023.05.20:
- * - 두 cpu간 llc cache 를 공유하는가?
+ * - 두 cpu간 llc(last level cache) 를 공유하는가?
  */
 bool cpus_share_cache(int this_cpu, int that_cpu)
 {
@@ -8591,6 +8595,10 @@ int idle_cpu(int cpu)
  *
  * Return: 1 if the CPU is currently idle. 0 otherwise.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - @cpu가 idle이면 return 1.
+ */
 int available_idle_cpu(int cpu)
 {
 	if (!idle_cpu(cpu))
@@ -8634,6 +8642,34 @@ struct task_struct *idle_task(int cpu)
  * based on the task model parameters and gives the minimal utilization
  * required to meet deadlines.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   이 함수는 주어진 선형 관계(f = u * f_max)에서 주파수 선택에 사용되는 
+ *   주어진 CPU의 유효 사용률을 계산합니다.
+ *
+ *   스케줄러는 다음 메트릭을 추적합니다.
+ *
+ *   cpu_util_{cfs,rt,dl,irq}()
+ *   cpu_bw_dl()
+ *
+ *   여기서 cfs,rt 및 dl util 번호는 동일한 메트릭 및 동기화 창으로 추적되므로
+ *   직접 비교할 수 있습니다.
+ *
+ *   cfs,rt,dl 사용률은 rq->clock_task로 측정한 실행 시간이며 IRQ 및 도용
+ *   시간과 같은 것을 제외합니다. 이러한 후자는 irq 사용률에서 발생합니다.
+ *
+ *   DL 대역폭 수 otoh는 측정된 메트릭이 아니라 작업 모델 매개변수를 기반으로
+ *   계산된 값이며 데드라인을 맞추는 데 필요한 최소한의 사용률을 제공합니다.
+ *
+ * @max max cpu capa
+ * - 1. uclamp 미사용, freq 산출, rt가 동작중일때는 return max
+ * - freq 고려
+ *   return clamp(cfs + rt) + dl_bw
+ *
+ * - energy 고려
+ *   return cfs + rt + dl
+ */
 unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum cpu_util_type type,
 				 struct task_struct *p)
@@ -8641,6 +8677,10 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	unsigned long dl_util, util, irq;
 	struct rq *rq = cpu_rq(cpu);
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - uclamp가 없는 상황에서, freq 산출목적이고 rt_rq가 runnable이면 return max
+ */
 	if (!uclamp_is_used() &&
 	    type == FREQUENCY_UTIL && rt_rq_is_runnable(&rq->rt)) {
 		return max;
@@ -8651,6 +8691,15 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 * because of inaccuracies in how we track these -- see
 	 * update_irq_load_avg().
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   IRQ/steal time이 CPU를 포화 상태로 만드는지 확인하기 위한 조기 확인은
+ *   이러한 추적 방법이 부정확하기 때문일 수 있습니다. update_irq_load_avg()를
+ *   참조하십시오.
+ *
+ * - irq에서 사용했던 util이 max를 넘은거같다. return max.
+ */
 	irq = cpu_util_irq(rq);
 	if (unlikely(irq >= max))
 		return max;
@@ -8667,10 +8716,29 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 * When there are no CFS RUNNABLE tasks, clamps are released and
 	 * frequency will be gracefully reduced with the utilization decay.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   RT/DL 작업에 소요된 시간은 CFS 작업에 '손실된' 시간으로 표시되고 동일한 
+ *   메트릭을 사용하여 유효 사용률을 추적하기 때문에(PELT 창은 동기화됨) 직접 
+ *   추가하여 CPU의 실제 사용률을 얻을 수 있습니다.
+ *
+ *   CFS 및 RT 활용은 현재 RUNNABLE 작업에서 요청한 활용 클램프 제약 조건에 
+ *   따라 강화되거나 제한될 수 있습니다.
+ *
+ *   CFS RUNNABLE 작업이 없으면 클램프가 해제되고 사용률 감소에 따라 빈도가 
+ *   점진적으로 감소합니다.
+ * - rt 작업시간을 보정후 freq 산정이라면 clamp.
+ *   dl은 빼고, rt까지만 고려해서 clamp를 해주는개념이다.
+ */
 	util = util_cfs + cpu_util_rt(rq);
 	if (type == FREQUENCY_UTIL)
 		util = uclamp_rq_util_with(rq, util, p);
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - dl은 따로 가져와서 아래에서 clamp된 rt + dl로 max를 고려한다.
+ */
 	dl_util = cpu_util_dl(rq);
 
 	/*
@@ -8682,6 +8750,17 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 * NOTE: numerical errors or stop class might cause us to not quite hit
 	 * saturation when we should -- something for later.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   주파수 선택의 경우 나중에 cpu_bw_dl()을 사용하고 싶기 때문에 
+ *   cpu_util_dl()을 이 합계의 영구적인 부분으로 만들지는 않지만 CFS+RT+DL 
+ *   합계가 포화 상태인지(예: 유휴 시간 없음) 확인해야 합니다. 유휴 시간이 
+ *   없을 때 f_max를 선택합니다.
+ *
+ *   NOTE: 숫자 오류 또는 중지 클래스로 인해 채도에 도달해야 할 때 채도에 
+ *   도달하지 못할 수 있습니다. 나중에 설명하겠습니다.
+ */
 	if (util + dl_util >= max)
 		return max;
 
@@ -8689,6 +8768,13 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 * OTOH, for energy computation we need the estimated running time, so
 	 * include util_dl and ignore dl_bw.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   OTOH, 에너지 계산을 위해 예상 실행 시간이 필요하므로 util_dl을 포함하고 
+ *   dl_bw를 무시합니다.
+ * - energy 고려면, dl까지 util을 고려한다.
+ */
 	if (type == ENERGY_UTIL)
 		util += dl_util;
 
@@ -8701,6 +8787,14 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 *   U' = irq + --------- * U
 	 *                 max
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   아직 유휴 시간이 있습니다. irq 메트릭을 사용하여 숫자를 더 향상시킵니다. 
+ *   IRQ/도용 시간은 태스크 클럭에서 숨겨지기 때문에 태스크 번호를 조정해야 합니다.
+ *
+ * - max에 대한 irq비율만큼 util을 scaling한다음에 irq를 더한다.
+ */
 	util = scale_irq_capacity(util, irq, max);
 	util += irq;
 
@@ -8714,6 +8808,20 @@ unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 	 * bw_dl as requested freq. However, cpufreq is not yet ready for such
 	 * an interface. So, we only do the latter for now.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   DEADLINE에 필요한 대역폭은 항상 부여되어야 하는 반면, FAIR 및 RT의 경우 
+ *   더 오랜 시간 동안 작업이 표시되지 않을 때 빈도를 우아하게 줄이기 위한 
+ *   메커니즘으로 IDLE CPU의 차단된 활용을 사용합니다.
+ *
+ *   이상적으로는 bw_dl을 최소/보장 주파수로 설정하고 util + bw_dl을 요청 
+ *   주파수로 설정하고 싶습니다. 그러나 cpufreq는 아직 이러한 인터페이스를 
+ *   사용할 준비가 되어 있지 않습니다. 따라서 지금은 후자만 수행합니다.
+ *
+ * - freq일경우 bw_dl에 대한 보정을한다. 주석에선 bw_dl <= return <= util + bw_dl을
+ *   하고 싶어하지만 불가능해서 util + bw_dl만 한다는 설명이다.
+ */
 	if (type == FREQUENCY_UTIL)
 		util += cpu_bw_dl(rq);
 

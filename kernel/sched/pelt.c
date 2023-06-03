@@ -583,6 +583,10 @@ ___update_load_avg(struct sched_avg *sa, unsigned long load)
  *   load_avg = \Sum se->avg.load_avg
  */
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - @now의 시각으로 decay를 목적으로 진입한다.
+ */
 int __update_load_avg_blocked_se(u64 now, struct sched_entity *se)
 {
 	if (___update_load_sum(now, &se->avg, 0, 0, 0)) {

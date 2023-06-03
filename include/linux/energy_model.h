@@ -27,6 +27,32 @@
  * 전력이 될 수 있습니다.
  * @cost: 에너지 계산 중에 사용되는 이 수준과 관련된 비용 계수입니다.
  * 같음: power * max_frequency / frequency
+ *
+ * - cost 사용은 em_cpu_energy() 참고 
+ *
+ * - cost 계산은 _get_power(), em_create_perf_table() 함수 참고
+ * ------- ex --------
+ * - rk3399-opp.dtsi
+ * 		opp00 {
+ *			opp-hz = /bits/ 64 <408000000>;
+ *			opp-microvolt = <825000 825000 1250000>;
+ *		};
+ *		..
+ *		opp05 {
+ *			opp-hz = /bits/ 64 <1416000000>;
+ *			opp-microvolt = <1125000 1125000 1250000>;
+ *		};
+ *		
+ * - 가정 첫번째 408MHZ에 대한 opp를 산출
+ *   1. power 계산 예. power(mW) = (100 * mV * mV * MHZ)
+ *   100 * 825 * 825 * (408000000/1000000) = 27769500000
+ *   27769500000 / 1000000000 = 27.7695 = 27
+ *
+ *   2. frequency(kHZ) 계산 예
+ *   408000000 / 1000 = 408000
+ *
+ *   3. cost. cost = fMAX(kHZ) * power(uW) / dst_f(kHZ) 
+ *   1416000 * 27000 / 408000 = 93705.8823529 =  93705
  */
 struct em_perf_state {
 	unsigned long frequency;
@@ -154,6 +180,29 @@ void em_dev_unregister_perf_domain(struct device *dev);
  * Return: the sum of the energy consumed by the CPUs of the domain assuming
  * a capacity state satisfying the max utilization of the domain.
  */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   em_cpu_energy() - 성능 도메인의 CPU가 소비하는 에너지를 추정합니다.
+ *
+ *   @pd: 에너지를 추정해야 하는 성능 영역
+ *   @max_util: 도메인의 CPU 중 가장 사용률이 높음
+ *   @sum_util: 도메인의 모든 CPU 사용률 합계
+ *   @allowed_cpu_cap: 감소된 주파수를 반영할 수 있는 @pd의 최대 허용 CPU 용량(열로 인해)
+ *
+ *   이 기능은 CPU 장치에만 사용해야 합니다. 유효성 검사가 없습니다. 즉, 
+ *   EM이 CPU 유형이고 cpumask가 할당된 경우입니다. 스케줄러 코드에서 꽤 
+ *   자주 호출되기 때문에 검사가 없습니다.
+ *
+ *   Return: 도메인의 최대 사용률을 충족하는 용량 상태를 가정하여 도메인의
+ *   CPU에서 소비한 에너지의 합계입니다.
+ *
+ * @max_util max freq model 값
+ * @sum_util energy model 합값
+ * @allowed_cpu_cap 온도가 고려된 max cpu capa
+ *
+ * - @pd의 energy 소비량 추정. 수식결과는 아래 주석 참고.
+ */
 static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 				unsigned long max_util, unsigned long sum_util,
 				unsigned long allowed_cpu_cap)
@@ -173,10 +222,30 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 	 * max utilization to the allowed CPU capacity before calculating
 	 * effective frequency.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   성능 상태를 예측하기 위해 성능 영역에서 가장 많이 사용되는 CPU의 
+ *   사용률을 schedutil과 같이 요청된 빈도에 매핑합니다. 실제 주파수가 
+ *   더 낮게 설정될 수 있다는 점도 고려하십시오(열 캡핑으로 인해). 
+ *   따라서 유효 주파수를 계산하기 전에 최대 사용률을 허용된 CPU 용량으로 
+ *   고정합니다.
+ *
+ * - 최대 freq를 가르키는 ps를 가져온다.
+ */
 	cpu = cpumask_first(to_cpumask(pd->cpus));
 	scale_cpu = arch_scale_cpu_capacity(cpu);
 	ps = &pd->table[pd->nr_perf_states - 1];
 
+/*
+ * IAMROOT, 2023.06.03:
+ * - 125%증가를 한후 온도가 고려된 cpu capa와 min비교를 하여 max_utll
+ *   로 결과값을 내고, 계산된 결과값의 본래 cpu capa비율만큼 ps->frequency를
+ *   줄인 값을 freq에 저장한다.
+ *
+ * - ex) max_util = 215, scale_cpu = 430, ps->frequency = 1.8G
+ *   freq = 900M
+ */
 	max_util = map_util_perf(max_util);
 	max_util = min(max_util, allowed_cpu_cap);
 	freq = map_util_freq(max_util, ps->frequency, scale_cpu);
@@ -185,6 +254,14 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 	 * Find the lowest performance state of the Energy Model above the
 	 * requested frequency.
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   요청된 주파수보다 높은 에너지 모델의 가장 낮은 성능 상태를 찾습니다.
+ *
+ * - freq랑 제일 높은쪽으로 가까운 ps를 찾는다.
+ *   ex) freq = 900M, ps0 = 890, ps1 = 910 일때 ps1를 고른다.
+ */
 	for (i = 0; i < pd->nr_perf_states; i++) {
 		ps = &pd->table[i];
 		if (ps->frequency >= freq)
@@ -233,6 +310,49 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 	 *   pd_nrg = ------------------------                       (4)
 	 *                  scale_cpu
 	 */
+/*
+ * IAMROOT, 2023.06.03:
+ * - papago
+ *   performance state(ps)에서 도메인의 CPU 용량은 다음과 같이 계산할 수 있습니다.
+ *             ps->freq * scale_cpu
+ *   ps->cap = --------------------                          (1)
+ *                 cpu_max_freq
+ *
+ *  따라서 유휴 상태 비용(EM에서는 사용할 수 없음)을 무시하면 해당 성능 
+ *  상태에서 이 CPU가 소비하는 에너지는 다음과 같이 추정됩니다.
+ *  (nrg : energy)
+ *
+ *             ps->power * cpu_util
+ *   cpu_nrg = --------------------                          (2)
+ *                   ps->cap
+ *
+ *  'cpu_util / ps->cap'은 바쁜 시간의 백분율을 나타냅니다.
+ *
+ *  NOTE: 이 계산의 결과는 실제로 전력 단위이지만 일정 기간 동안 
+ *  일정하다고 가정하기 때문에 일정 기간 동안 에너지 값으로 조작할 수 있습니다.
+ *
+ *  (2)에 (1)을 삽입하면 'cpu_nrg'는 두 항의 곱으로 다시 표현할 수 있습니다.
+ *
+ *             ps->power * cpu_max_freq   cpu_util
+ *   cpu_nrg = ------------------------ * ---------          (3)
+ *                    ps->freq            scale_cpu
+ *            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ *                    ps->cost
+ *
+ *  첫 번째 용어는 정적이며 em_perf_state 구조체에 'ps->cost'로 저장됩니다.
+ *
+ *  도메인의 모든 CPU는 동일한 마이크로 아키텍처를 가지므로 동일한 'ps->cost'과 
+ *  동일한 CPU 용량을 공유합니다. 따라서 도메인의 총 에너지 
+ *  (모든 CPU 에너지의 단순 합)는 다음과 같이 분해할 수 있습니다.
+ *
+ *            ps->cost * \Sum cpu_util
+ *   pd_nrg = ------------------------                       (4)
+ *                  scale_cpu
+ *
+ * - ps : max_util의 값은 근전한 freq를 고를 때사용하여 ps를 골랐다.
+ *   sun_util : energy model 합산값.
+ *   scale_cpu : cpu최대성능
+ */
 	return ps->cost * sum_util / scale_cpu;
 }
 
