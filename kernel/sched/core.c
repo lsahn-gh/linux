@@ -8669,6 +8669,20 @@ struct task_struct *idle_task(int cpu)
  *
  * - energy 고려
  *   return cfs + rt + dl
+ *
+ * IAMROOT, 2023.06.04:
+ * - @type 별 util 값 계산
+ * -- FREQUENCY_UTIL
+ *    1. cfs, rt 합:      util_cfs + util_rt
+ *    2. uclamp 적용 []:  [util_cfs + util_rt]
+ *    3. irq_cap 적용 (): ([util_cfs + util_rt])
+ *    4. irq 더하기:       ([util_cfs + util_rt]) + irq
+ *    5. dw bw 더하기:     ([util_cfs + util_rt]) + irq + dl.running_bw =
+ *                        ([util_cfs + util_rt]) + dl.running_bw + irq
+ * -- ENERGY_UTIL
+ *    1. cfs,util,dl 합:  util_cfs + util_rt + dl_util
+ *    2. irq_cap 적용 (): (util_cfs  + util_rt    + dl_util)
+ *    3. irq 더하기:       (util_cfs  + util_rt    + dl_util)     + irq
  */
 unsigned long effective_cpu_util(int cpu, unsigned long util_cfs,
 				 unsigned long max, enum cpu_util_type type,

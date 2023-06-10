@@ -5203,6 +5203,10 @@ static inline u64 cfs_rq_last_update_time(struct cfs_rq *cfs_rq)
 /*
  * IAMROOT, 2023.06.03:
  * - @se cfs_rq의 last_update_time으로 decay한다.
+ *
+ * IAMROOT. 2023.06.02:
+ * - google-translate
+ * 이전 rq를 잠그지 않고 큐에서 제거된 엔터티의 엔터티 로드 평균을 동기화합니다.
  */
 static void sync_entity_load_avg(struct sched_entity *se)
 {
@@ -7815,6 +7819,10 @@ static int wake_wide(struct task_struct *p)
 {
 	unsigned int master = current->wakee_flips;
 	unsigned int slave = p->wakee_flips;
+	/*
+	 * IAMROOT, 2023.06.09:
+	 * - SD_SHARE_PKG_RESOURCE가 설정된 가장 높은 sched_domain의 cpumask_weight
+	 */
 	int factor = __this_cpu_read(sd_llc_size);
 
 	if (master < slave)
@@ -7907,6 +7915,8 @@ wake_affine_idle(int this_cpu, int prev_cpu, int sync)
  * @sync WF_SYNC set여부. select_task_rq_fair() 참고
  * - load 비율 계산을 하여 @this_cpu가 prev_cpu비해 더 여유로우면 this_cpu
  *   결정. this_cpu를 사용못하면 return nr_cpumask_bits
+ * IAMROOT, 2023.06.09:
+ * - @p가 @this_cpu로 이동했을 때 @prev_cpu 보다 load가 낮다면 this_cpu를 반환
  */
 static int
 wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
@@ -8102,6 +8112,12 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 	/*
 	 * We need task's util for cpu_util_without, sync it up to
 	 * prev_cpu's last_update_time.
+	 */
+	/*
+	 * IAMROOT. 2023.06.09:
+	 * - google-translate
+	 * 우리는 cpu_util_without에 대한 작업의 util이 필요하며, prev_cpu의
+	 * last_update_time까지 동기화합니다.
 	 */
 	if (!(sd_flag & SD_BALANCE_FORK))
 		sync_entity_load_avg(&p->se);
@@ -8489,7 +8505,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 		 */
 		if (sd) {
 			i = select_idle_capacity(p, sd, target);
-			return ((unsigned)i < nr_cpumask_bits) ? i : target;
+n			return ((unsigned)i < nr_cpumask_bits) ? i : target;
 		}
 	}
 
@@ -8740,6 +8756,13 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
  *   est가 task가 적어도 이만큼은 동작을해야되는 추정치이므로 이에 대한 고려
  *   (즉 저평가 방지)를 한다.
  */
+	/*
+	 * IAMROOT, 2023.06.04:
+	 * - XXX if(task_cpu(p) = cpu && dst_cpu == cpu) 의 경우 아래 조건
+	 *   if (dst_cpu == cpu) 에서 참이 되어 util_est 에 값을 더하게 되는데
+	 *   위의 util 조건에서는 이런 경우 같은 cpu가 dst이므로 아무 계산을
+	 *   하지 않는다. util_est에서는 task의 이동이 없는 데도 더해주는 이유는?
+	 */
 	if (sched_feat(UTIL_EST)) {
 		util_est = READ_ONCE(cfs_rq->avg.util_est.enqueued);
 
@@ -8784,6 +8807,10 @@ static unsigned long cpu_util_next(int cpu, struct task_struct *p, int dst_cpu)
  *
  * - @p가 @dst_cpu로 migrate migrate후의 @pd에 대한 energy를 예측한다.
  *   dst_cpu == -1이면 migrate없는 상황에서의 base값.
+ *
+ * IAMROOT, 2023.06.07:
+ * - @pd 내에서의 최대 util(max_util) 값과 util의 총합(sum_util)을 구하여 이를 인수로
+ *   em_cpu_energy 를 호출한다.
  */
 static long
 compute_energy(struct task_struct *p, int dst_cpu, struct perf_domain *pd)
@@ -9041,16 +9068,28 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 	 * Energy-aware wake-up happens on the lowest sched_domain starting
 	 * from sd_asym_cpucapacity spanning over this_cpu and prev_cpu.
 	 */
+	/*
+	 * IAMROOT. 2023.06.02:
+	 * - google-translate
+	 * 에너지 인식 웨이크업은 this_cpu 및 prev_cpu에 걸쳐 있는
+	 * sd_asym_cpucapacity에서 시작하여 가장 낮은 sched_domain에서 발생합니다.
+	 * - 현재 cpu에 대하여 가장 낮은 레벨의 비대칭 구조 sd를 찾는다.
+	 */
 	sd = rcu_dereference(*this_cpu_ptr(&sd_asym_cpucapacity));
 /*
  * IAMROOT, 2023.06.03:
- * - @prev_cpu가 포함된 sd를 parent로 올라가면서 찾는다.
+ * - @prev_cpu가 위에서 구한 비대칭 구조 sd에 없다면 sd를 parent로 올라가면서 찾는다.
  */
 	while (sd && !cpumask_test_cpu(prev_cpu, sched_domain_span(sd)))
 		sd = sd->parent;
 	if (!sd)
 		goto unlock;
 
+	/*
+	 * IAMROOT, 2023.06.04:
+	 * - prev_cpu가 포함된 비대칭 구조 sd(ex.B,M,L구조)를 찾았다면
+	 *   prev_cpu를 이 함수의 반환값인 target으로 지정해 둔다.
+	 */
 	target = prev_cpu;
 
 /*
@@ -9067,7 +9106,7 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 
 /*
  * IAMROOT, 2023.06.03:
- * - pd 순회 -> pd에 속한 cpu순회
+ * - rd에 속한 pd 순회 -> pd에 속한 cpu순회
  */
 	for (; pd; pd = pd->next) {
 		unsigned long cur_delta, spare_cap, max_spare_cap = 0;
@@ -9170,6 +9209,10 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
  *   prev_cpu로 그냥 한다.
  */
 		if (compute_prev_delta) {
+			/*
+			 * IAMROOT, 2023.06.07:
+			 * - @p가 @prev_cpu로 이동했을때 @pd의 예상 에너지 총합 계산
+			 */
 			prev_delta = compute_energy(p, prev_cpu, pd);
 /*
  * IAMROOT, 2023.06.03:
@@ -9187,6 +9230,11 @@ static int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu)
 
 		/* Evaluate the energy impact of using max_spare_cap_cpu. */
 		if (max_spare_cap_cpu >= 0) {
+			/*
+			 * IAMROOT, 2023.06.07:
+			 * - @p가 @max_spare_cap_cpu로 이동했을때 @pd의
+			 *   예상 에너지 총합 계산
+			 */
 			cur_delta = compute_energy(p, max_spare_cap_cpu, pd);
 /*
  * IAMROOT, 2023.06.03:
@@ -9303,6 +9351,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 			new_cpu = find_energy_efficient_cpu(p, prev_cpu);
 			if (new_cpu >= 0)
 				return new_cpu;
+			/*
+			 * IAMROOT, 2023.06.07:
+			 * - prev_cpu가 포함된 asym_cap 을 못찾은 경우
+			 */
 			new_cpu = prev_cpu;
 		}
 /*

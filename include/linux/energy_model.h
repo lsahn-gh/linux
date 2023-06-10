@@ -202,6 +202,9 @@ void em_dev_unregister_perf_domain(struct device *dev);
  * @allowed_cpu_cap 온도가 고려된 max cpu capa
  *
  * - @pd의 energy 소비량 추정. 수식결과는 아래 주석 참고.
+ *
+ * IAMROOT, 2023.06.07:
+ * - @max_util에 해당하는 cost를 @sum_util에 적용한 pd의 총 에너지 합을 반환한다
  */
 static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
 				unsigned long max_util, unsigned long sum_util,
@@ -232,6 +235,9 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
  *   고정합니다.
  *
  * - 최대 freq를 가르키는 ps를 가져온다.
+ *
+ * IAMROOT, 2023.06.06:
+ * - pd->cpus는 capa가 모두 같을 것이므로 그중에 하나(아래서는 첫번째)를 가져온다.
  */
 	cpu = cpumask_first(to_cpumask(pd->cpus));
 	scale_cpu = arch_scale_cpu_capacity(cpu);
@@ -245,6 +251,9 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
  *
  * - ex) max_util = 215, scale_cpu = 430, ps->frequency = 1.8G
  *   freq = 900M
+ *
+ * IAMROOT, 2023.06.06:
+ * - @max_util에 해당하는 freq를 비율을 사용하여 예측하여 계산한다.
  */
 	max_util = map_util_perf(max_util);
 	max_util = min(max_util, allowed_cpu_cap);
@@ -261,6 +270,10 @@ static inline unsigned long em_cpu_energy(struct em_perf_domain *pd,
  *
  * - freq랑 제일 높은쪽으로 가까운 ps를 찾는다.
  *   ex) freq = 900M, ps0 = 890, ps1 = 910 일때 ps1를 고른다.
+ *
+ * IAMROOT, 2023.06.06:
+ * - 위에서 계산한 freq 이상인 첫번째 table을 찾는다. 찾은 ps는 ps->cost를
+ *   가져와서 최종 nrg 계산에 사용한다.
  */
 	for (i = 0; i < pd->nr_perf_states; i++) {
 		ps = &pd->table[i];

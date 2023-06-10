@@ -1024,6 +1024,18 @@ partition_and_rebuild_sched_domains(int ndoms_new, cpumask_var_t doms_new[],
  *
  * Call with cpuset_rwsem held.  Takes cpus_read_lock().
  */
+/*
+ * IAMROOT. 2023.06.03:
+ * - google-translate
+ * 스케줄러 도메인을 재구축합니다.
+ *
+ * 비어 있지 않은 'cpus'가 있는 cpuset의 'sched_load_balance' 플래그가 변경되거나
+ * 'cpus'가 해당 플래그가 활성화된 cpuset에서 변경을 허용하거나 비어 있지 않은 'cpus'가
+ * 있는 cpuset이 제거된 경우, 그런 다음 이 루틴을 호출하여 스케줄러의 동적 sched 도메인을
+ * 재구축하십시오.
+ *
+ * cpuset_rwsem이 보류된 상태에서 호출합니다. cpus_read_lock()을 받습니다.
+ */
 static void rebuild_sched_domains_locked(void)
 {
 	struct cgroup_subsys_state *pos_css;
@@ -1044,6 +1056,16 @@ static void rebuild_sched_domains_locked(void)
 	 * should be the same as the active CPUs, so checking only top_cpuset
 	 * is enough to detect racing CPU offlines.
 	 */
+	/*
+	 * IAMROOT. 2023.06.03:
+	 * - google-translate
+	 * CPU 핫플러그와 경쟁한 경우 오프라인 CPU가 있는 dom을
+	 * partition_sched_domains()에 전달하지 않도록 일찍 돌아갑니다. 어쨌든
+	 * cpuset_hotplug_workfn()은 sched 도메인을 재구축합니다.
+	 *
+	 * 하위 파티션에 CPU가 없으면 top_cpuset의 유효 CPU는 활성 CPU와
+	 * 같아야 하므로 top_cpuset만 확인하면 CPU 오프라인 경합을 감지하기에 충분합니다.
+	 */
 	if (!top_cpuset.nr_subparts_cpus &&
 	    !cpumask_equal(top_cpuset.effective_cpus, cpu_active_mask))
 		return;
@@ -1052,6 +1074,13 @@ static void rebuild_sched_domains_locked(void)
 	 * With subpartition CPUs, however, the effective CPUs of a partition
 	 * root should be only a subset of the active CPUs.  Since a CPU in any
 	 * partition root could be offlined, all must be checked.
+	 */
+	/*
+	 * IAMROOT. 2023.06.03:
+	 * - google-translate
+	 * 그러나 하위 파티션 CPU의 경우 파티션 루트의 유효 CPU는 활성 CPU의 하위
+	 * 집합이어야 합니다. 모든 파티션 루트의 CPU는 오프라인 상태가 될 수 있으므로 모두
+	 * 확인해야 합니다.
 	 */
 	if (top_cpuset.nr_subparts_cpus) {
 		rcu_read_lock();

@@ -74,6 +74,11 @@ SCHED_FEAT(TTWU_QUEUE, true)
 /*
  * When doing wakeups, attempt to limit superfluous scans of the LLC domain.
  */
+/*
+ * IAMROOT. 2023.06.09:
+ * - google-translate
+ * 웨이크업을 수행할 때 LLC 도메인의 불필요한 스캔을 제한하십시오.
+ */
 SCHED_FEAT(SIS_PROP, true)
 
 /*
