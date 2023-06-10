@@ -1612,6 +1612,13 @@ bool cfs_prio_less(struct task_struct *a, struct task_struct *b, bool fi);
  * A special case is that the task's cookie always matches with CPU's core
  * cookie if the CPU is in an idle core.
  */
+/*
+ * IAMROOT. 2023.06.10:
+ * - google-translate
+ * 코어 스케줄링이 활성화되었을 때 CPU의 코어 쿠키가 작업의 쿠키와 일치하는지
+ * 확인하는 도우미. 특별한 경우는 CPU가 유휴 코어에 있는 경우 작업의 쿠키가 항상
+ * CPU의 코어 쿠키와 일치한다는 것입니다.
+ */
 static inline bool sched_cpu_cookie_match(struct rq *rq, struct task_struct *p)
 {
 	/* Ignore cookie match if core scheduler is not enabled on the CPU. */
@@ -1705,6 +1712,10 @@ static inline void queue_core_balance(struct rq *rq)
 {
 }
 
+/*
+ * IAMROOT, 2023.06.10:
+ * - skip
+ */
 static inline bool sched_cpu_cookie_match(struct rq *rq, struct task_struct *p)
 {
 	return true;

@@ -70,6 +70,13 @@ extern int sched_domain_level_max;
 
 struct sched_group;
 
+/*
+ * IAMROOT, 2023.06.10:
+ * - has_idle_cores : smt 시스템에서만 사용.
+ * - 설정 경로
+ *   set_next_task_idle (idle.c:740) -> update_idle_core (sched.h:1792) ->
+ *   __update_idle_core (fair.c:8215) -> set_idle_cores
+ */
 struct sched_domain_shared {
 	atomic_t	ref;
 	atomic_t	nr_busy_cpus;
