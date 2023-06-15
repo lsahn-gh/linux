@@ -9,7 +9,7 @@ extern struct static_key_false sched_smt_present;
 
 /*
  * IAMROOT, 2023.05.30:
- * - arm6는 smt가 없으므로 무조건 false.
+ * - arm6는 smt가 없으므로 무조건 false.(hyper thread)
  *   cpu_smt_mask가 2로 증가 되면(sched_cpu_activate()) true,
  *   cpu_smt_mask가 2로 감소 되면(sched_cpu_deactivate()) false.
  */

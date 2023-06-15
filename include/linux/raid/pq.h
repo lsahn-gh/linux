@@ -167,6 +167,11 @@ void raid6_dual_recov(int disks, size_t bytes, int faila, int failb,
 /* Some definitions to allow code to be compiled for testing in userspace */
 #ifndef __KERNEL__
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - linux kernel에서 사용하는 jiffies는 include/linux/jiffies.h
+ *   get_jiffies_64() 근처 참고
+ */
 # define jiffies	raid6_jiffies()
 # define printk 	printf
 # define pr_err(format, ...) fprintf(stderr, format, ## __VA_ARGS__)

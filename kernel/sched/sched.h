@@ -1444,6 +1444,11 @@ struct rq {
 	u64			idle_stamp;
 	u64			avg_idle;
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - wake_stamp: 그전에 깨울때(ttwu_do_wakeup)의 시간.
+ * - wake_avg_idle : 일어날때까지 평균 idle시간
+ */
 	unsigned long		wake_stamp;
 	u64			wake_avg_idle;
 

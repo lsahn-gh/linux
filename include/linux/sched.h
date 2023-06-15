@@ -1068,6 +1068,9 @@ struct task_struct {
  *   웨이크업으로 이동하는 CPU 주변에서 작업을 푸시할 수 있습니다.
  *   최근에 사용된 CPU를 추적하면 유휴 상태일 수 있는 최근에 사용된 CPU를 
  *   빠르게 검색할 수 있습니다.
+ * - recent_used_cpu
+ *   ex) 1 -> 2 -> 3 -> 4 로 cpu가 바뀐다고 했을때, task의 현재 cpu가 3인경우
+ *   recent_used_cpu는 2가 된다.
  * - wake_cpu : 깨어날때 사용한 cpu 번호.
  */
 	int				recent_used_cpu;

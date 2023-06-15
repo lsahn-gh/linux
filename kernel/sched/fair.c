@@ -7708,6 +7708,10 @@ static unsigned long cpu_runnable_without(struct rq *rq, struct task_struct *p)
 	return runnable;
 }
 
+/*
+ * IAMROOT, 2023.06.13:
+ * - return cpu_capacity
+ */
 static unsigned long capacity_of(int cpu)
 {
 	return cpu_rq(cpu)->cpu_capacity;
@@ -8118,6 +8122,10 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 	return shallowest_idle_cpu != -1 ? shallowest_idle_cpu : least_loaded_cpu;
 }
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - 
+ */
 static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p,
 				  int cpu, int prev_cpu, int sd_flag)
 {
@@ -8139,11 +8147,23 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 	if (!(sd_flag & SD_BALANCE_FORK))
 		sync_entity_load_avg(&p->se);
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - sd는 select_idle_cpu()에서 sd_flag가 있는 최상위의 sd일것이다.
+ *   아래로 내려가면서 찾는다.
+ * - 기본적으로 가능한한 최상위의 sd에서 idle cpu을 먼저 찾아보고,
+ *   그다음 한단계식 낮춰가며 하위의 sd에서 idle cpu를 찾아보는 개념이된다.
+ */
 	while (sd) {
 		struct sched_group *group;
 		struct sched_domain *tmp;
 		int weight;
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - select_idle_cpu()에서 상위로 올라갈때, 만약 sd_flag가 없었으면 그냥 parent로
+ *   간적이 있었을수도 있을것이다. 그런 경우 skip한다.
+ */
 		if (!(sd->flags & sd_flag)) {
 			sd = sd->child;
 			continue;
@@ -8156,6 +8176,10 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 		}
 
 		new_cpu = find_idlest_group_cpu(group, p, cpu);
+/*
+ * IAMROOT, 2023.06.15:
+ * - 같은 cpu가 나왔으면 child로 내려간다.
+ */
 		if (new_cpu == cpu) {
 			/* Now try balancing at a lower domain level of 'cpu': */
 			sd = sd->child;
@@ -8166,6 +8190,24 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 		cpu = new_cpu;
 		weight = sd->span_weight;
 		sd = NULL;
+/*
+ * IAMROOT, 2023.06.15:
+ * - 새로찾은 cpu의 sd에서 weight가 작은 sd_flag가 겹치는 sd가 잇는지를
+ *   parent로 올라가면서 찾아본다.
+ *
+ * - 즉 new cpu sd->weight 이내의 범위에서 최상위의 sd_flag가 겹치는
+ *   sd를 찾는다.
+ *   cpu를 일단 찾고, 해당 cpu의 sd에서 sd_flag가 겹치는 더 하위의 sd가
+ *   있는지 한번더 스캔해본다.
+ *  - ex) sd flag가 겹치는것을 O, 아니면 라고 표시, span_weight를 기준으로
+ *  순회 표시. 16에서 시작했다고 가정
+ *
+ *  1) 2(X) -> 4(O) -> 8(O) -> 16(O)
+ *                     ^8가 다음 대상 sd가 된다.
+ *
+ *  2) 2(X) -> 4(X) -> 8(X) -> 16(O)
+ *    대상을 못찾고 sd == NULL로 끝나고 while을 빠져나간다.
+ */
 		for_each_domain(cpu, tmp) {
 			if (weight <= tmp->span_weight)
 				break;
@@ -8194,6 +8236,10 @@ static inline int __select_idle_cpu(int cpu, struct task_struct *p)
 DEFINE_STATIC_KEY_FALSE(sched_smt_present);
 EXPORT_SYMBOL_GPL(sched_smt_present);
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - @val(true or false)로 update.
+ */
 static inline void set_idle_cores(int cpu, int val)
 {
 	struct sched_domain_shared *sds;
@@ -8203,6 +8249,10 @@ static inline void set_idle_cores(int cpu, int val)
 		WRITE_ONCE(sds->has_idle_cores, val);
 }
 
+/*
+ * IAMROOT, 2023.06.13:
+ * - @cpu의 sd_llc_shared에서 idle core가 있다면 true. 없으면 return @def
+ */
 static inline bool test_idle_cores(int cpu, bool def)
 {
 	struct sched_domain_shared *sds;
@@ -8261,9 +8311,18 @@ unlock:
  * 전체 LLC 도메인에서 유휴 코어를 검색합니다. 시스템에 유휴 코어가 남아 있지
  * 않으면 동적으로 꺼집니다. sd_llc->shared->has_idle_cores를 통해 추적되고 위의
  * update_idle_core()를 통해 활성화됩니다.
+ *
  * - Return: 1. @core에 속한 모든 하드웨어 thread가 idle인 경우 @core retrun
- *           2. @core에 속한 일부 thread가 idle이 아닌 경우 -1
+ *           2. @core에 속한 일부 thread가 idle이 아닌 경우 -1. 그리고 @cpus에서 core smt제거
  *   @idle_cpu: 하드웨어 thread중 idle 인 첫번째 cpu
+ *
+ * - arm64는 smt가 없으므로 무조건 __select_idle_cpu()로 진입한다.
+ *   @core가 idle이면 return true. idle_cpu는 초기값(-1)
+ *
+ * - smt인시스템인 경우 목적은 다음과같다.
+ *   1. core내의 thread가 전부idle인 core를 찾는게 최선의 목표. (return >= 0)
+ *   2. run thread가 중간에 있을경우 그전에 감지한 idle thread를 @idle_cpu에 기록해놓는다.
+ *      모든 core가 run중이면(return -1) @idle_cpu를 사용할것이다.
  */
 static int select_idle_core(struct task_struct *p, int core, struct cpumask *cpus, int *idle_cpu)
 {
@@ -8273,6 +8332,24 @@ static int select_idle_core(struct task_struct *p, int core, struct cpumask *cpu
 	if (!static_branch_likely(&sched_smt_present))
 		return __select_idle_cpu(core, p);
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - ex) smt cpu 0, 1, ,2가 있다고 가정한다. 0,1,2는 cpus_ptr에 모두 포함되있다고 가정,
+ *       run cpu는 sched_idle이 아니라고 가정.
+ *
+ *   1. 0(idle) 1(idle) 2(idle)
+ *   idle_cpu = 0, return core
+ *
+ *   2. 0(idle) 1(idle) 2(run) 인경우
+ *   idle_cpu = 0, 2을 만남 시점에서 idle = false가 된다.
+ *   return -1, idle_cpu = 0, cpus에서 core smt제거
+ *
+ *   3. 0(run) 1(idle) 2(idle) 인경우
+ *   return -1, idle_cpu = -1(초기값), cpus에서 core smt 제거
+ *
+ *  4. 0(idle) 1(run) 2(idle) 인경우
+ *  return -1, idle_cpu = 0, cpus에서 core smt제거
+ */
 	for_each_cpu(cpu, cpu_smt_mask(core)) {
 		if (!available_idle_cpu(cpu)) {
 			idle = false;
@@ -8353,10 +8430,15 @@ static inline int select_idle_smt(struct task_struct *p, struct sched_domain *sd
  * 비용(sd->avg_scan_cost에서 추적됨)과 이 rq의 평균 유휴 시간(rq->avg_idle에서
  * 확인됨)을 비교하여 동적으로 조정됩니다.
  *
+ * - 범위는 p->cpus_ptr, @sd의 span의 and 영역을 @target + 1부터 순회.
  * - has_idle_core 가 true: 하드웨어 thread가 모두 idle인 코어를 찾아서 찾은 cpu
- *   번호 반환
+ *   번호 반환. 없다면 thread 라도 반환.
+ *   idle이 없엇따면 pcpu llc share측의 has_idle_core를 false로 update.
+ *
  * - has_idle_core 가 false : 평균 스캔 비용과 이 rq의 평균 유휴 시간을 비교하여 동적
- *   으로 조정된  nr 수 이내의 idle 하드웨어 thread를 찾아 cpu 번호를 반환
+ *   으로 조정된  nr 수 이내의 idle 하드웨어 thread를 찾아 cpu 번호를 반환 및
+ *   wake_avg_idle, avg_scan_cost update.
+ *
  */
 static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool has_idle_core, int target)
 {
@@ -8393,7 +8475,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 		 * 우리가 바쁘다면 마지막 유휴 기간이 미래를 예측한다는 가정에 결함이
 		 * 있습니다. 남은 예상 유휴 시간을 에이징합니다.
 		 *
-		 * - wake_stamp: 그전에 깨울때(ttwu_do_wakeup)의 시간.
+		 * - 틱으로 wake_avg_idle을 반감시킨다.
 		 */
 		if (unlikely(this_rq->wake_stamp < now)) {
 			while (this_rq->wake_stamp < now && this_rq->wake_avg_idle) {
@@ -8411,6 +8493,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 		 * - nr: has_idle_core가 아닐 경우 idle_cpu 찾기 시도 횟수.
 		 *       span_avg가 충분히 크다면 avg_cost를 나눈 값
 		 *       아니면 최대 4회까지는 시도해 본다.
+		 * - idle시간이 길었을수록 or span weight가 클수록 nr이 커진다.
 		 */
 		if (span_avg > 4*avg_cost)
 			nr = div_u64(span_avg, avg_cost);
@@ -8420,6 +8503,26 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 		time = cpu_clock(this);
 	}
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - 이전에 idle core가 있다고 예상됬으면 fullscan. 없었으면 nr 제한만큼만
+ *   scan한다.
+ * - smt가 아닐경우(arm64)
+ *   기본적으로 has_idle_core의 차이는 nr번의 loop를 하느냐 안하느냐의 
+ *   차이고, 이것도 SIS_PROP에 의존한다 SIS_PROP는 false인경우 
+ *   has_idle_core의 true/ false여부의 차이는 없다. 즉 같은동작수행.
+ *
+ * - smt일 경우
+ *   1. has_idle_core == true
+ *   idle core가 있다는걸 기대하고 찾으며, idle thread가 있다는걸
+ *   가정하고 상세하게 찾는 시도를 한다. 
+ *   has_idle_core가 true임에도 idle core를 못찾았다면 그나마 찾은 
+ *   idle thread를 최종적으로 return return한다.
+ *
+ *   2. has_idle_core == false
+ *   nr번만 적당히 찾아보고 넘어간다. SIS_PROP == false였으면 다 돌긴할것이다.
+ *
+ */
 	for_each_cpu_wrap(cpu, cpus, target + 1) {
 		if (has_idle_core) {
 			i = select_idle_core(p, cpu, cpus, &idle_cpu);
@@ -8447,10 +8550,17 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 	/*
 	 * IAMROOT, 2023.06.10:
 	 * - XXX has_idle_core 가 있다고 설정되었지만 못찾았음.
+	 *   idle core가 없는것으로 pcpu에 false로 update.
 	 */
 	if (has_idle_core)
 		set_idle_cores(target, false);
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - 이 함수 진입전에서 wake_avg_idle을 재게산하였고, 시작시간또한 time에
+ *   기록하였다. scan시간만큼 wake_avg_idle을 보정하고 avg_scan_cost를
+ *   update한다.
+ */
 	if (sched_feat(SIS_PROP) && !has_idle_core) {
 		time = cpu_clock(this) - time;
 
@@ -8515,6 +8625,11 @@ select_idle_capacity(struct task_struct *p, struct sched_domain *sd, int target)
 	return best_cpu;
 }
 
+/*
+ * IAMROOT, 2023.06.13:
+ * @return true  @task_util의 1.2배가 @cpu capa를 초과 안한다.
+ *         false @task_util의 1.2배가 @cpu capa를 넘는다.
+ */
 static inline bool asym_fits_capacity(int task_util, int cpu)
 {
 	if (static_branch_unlikely(&sched_asym_cpucapacity))
@@ -8530,6 +8645,31 @@ static inline bool asym_fits_capacity(int task_util, int cpu)
  * IAMROOT. 2023.06.10:
  * - google-translate
  * LLC 캐시 도메인에서 유휴 코어/스레드를 찾으십시오.
+ *
+ * - idle cpu를 찾는다.
+ *   target, prev, p->recent_used_cpu, asym domain, smt, asym domain(cache 무시)의 순서로 무엇을 사용할지 결정한다.
+ *
+ * - 선택 우선순위
+ *   1. target 이 idle(idle cpu or idle sched)이고 asym fits인경우
+ *      -> target
+ *   2. @target과 cache 친화이고 idle(idle cpu or idle sched)이고 asym fits인 경우
+ *      -> prev
+ *   3. this_rq가 kthread 한개만 돌고있고, this cpu가 @prev인경우.
+ *      -> prev
+ *   4. p->recent_used_cpu가 cache친화, asym fits한경우
+ *      -> p->recent_used_cpu
+ *   5. asym domain일 경우, 캐시친화포기. idle중에서 capa가 가장 높은 cpu을 선택
+ *      -> asym domain중 capa가 가장 높은 cpu.
+ *      -> idle인 cpu가 없었으면 target.
+ *   6. sd_llc가 없을경우
+ *      -> target
+ *   7. smt일경우, idle core가 없다면 smt 내에서 idle인것을 찾는다.
+ *      -> smt내의 idle cpu
+ *   8. asym sd span와 p->cpus의 and영역에서 target + 1부터 순회를 하며
+ *      idle core를 찾는다.
+ *      -> asym sd span, p->cpus의 and영역에서 찾아진 idle core or idle thread
+ *   9. 여지껏 못찾은경우. idle이 하나도 없었을 경우
+ *      -> cpu
  */
 static int select_idle_sibling(struct task_struct *p, int prev, int target)
 {
@@ -8613,8 +8753,18 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	 * 잠재적 유휴 후보로 최근에 사용된 CPU를 확인합니다.
 	 *
 	 * - 위 조건이 아니고 @target 과 recent_used_cpu가 cache 공유상태이고
-	 *   recent_used_cpu가 idle 이면서 capa를 만족하면
-	 *   recent_used_cpu(전전 cpu)를 반환
+	 *   recent_used_cpu가 idle 이면서 capa를 만족하면 recent_used_cpu(전전 cpu)를 반환.
+	 *
+	 *   ex) 1 -> 2, target = 3, if문 진입. (recent_used_cpu = 1, prev = 2)
+	 *       1 -> 1, target = 3, if문 진입X. (recent_used_cpu = 1, prev = 1)
+	 *       1 -> 2, target = 1, if문 진입X. (recent_used_cpu = 1, prev = 2)
+	 *
+	 * - 위에 if문까지를 통해서 여기까지 왔으면 target, prev사용하지 못하는 상태이다.
+	 *   p->recent_used_cpu를 사용할수있는지 결정한다.
+	 *   target이 최근에 사용한 cpu가 아닌상황에서, 이전에 사용한 cpu가
+	 *   cache친화라면 target을 이전cpu로 사용한다는것이다.
+	 *
+	 * - 여기서부턴 p->recent_used_cpu가 갱신이되는 것이되므로 prev로 갱신한다.
 	 */
 	recent_used_cpu = p->recent_used_cpu;
 	p->recent_used_cpu = prev;
@@ -8640,6 +8790,13 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 		return recent_used_cpu;
 	}
 
+/*
+ * IAMROOT, 2023.06.13:
+ * - 여기까지 왔으면 target, prev, p->recent_used_cpu가 전부 idle이 아니거나 
+ *   asym fit이 아니던가, cache친화가 아니던가, @p의 범위에 설정이 안되있던가
+ *   하는 상황일 것이다. 캐시친화는 포기한다.
+ *   sd에서 idle인것들중에서 capa가 가장큰것을 선택한다.
+ */
 	/*
 	 * For asymmetric CPU capacity systems, our domain of interest is
 	 * sd_asym_cpucapacity rather than sd_llc.
@@ -8678,16 +8835,25 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 		}
 	}
 
+/*
+ * IAMROOT, 2023.06.13:
+ * - asym가 아니였을경우, target의 sd_llc을 가져온다.
+ */
 	sd = rcu_dereference(per_cpu(sd_llc, target));
 	if (!sd)
 		return target;
 
+/*
+ * IAMROOT, 2023.06.13:
+ * - arm64는 진입안한다.
+ */
 	if (sched_smt_active()) {
 		has_idle_core = test_idle_cores(target, false);
 
 		/*
 		 * IAMROOT, 2023.06.10:
-		 * - idle core가 없는 경우는 smt 내에서 찾는다
+		 * - idle core가 없는 경우, prev와 target이 같은 cache라면
+		 *   smt 내에서 찾는다
 		 */
 		if (!has_idle_core && cpus_share_cache(prev, target)) {
 			/*
@@ -8699,8 +8865,19 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 			if ((unsigned int)i < nr_cpumask_bits)
 				return i;
 		}
+/*
+ * IAMROOT, 2023.06.13:
+ * - smt였을경우, idle core가 있거나, smt내부에서 idle이 없었거나,
+ *   cache공유를 안한다면 아랫쪽으로 진입한다.
+ */
 	}
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - 1순위로 idle core를 찾는다. 2순위로 has_idle_core가 true라면, idle core
+ *   가 없는 경우 idle thread라도 찾는다.
+ *   has_idle_core가 false라면 적당히 idle core를 찾는다.
+ */
 	i = select_idle_cpu(p, sd, has_idle_core, target);
 	if ((unsigned)i < nr_cpumask_bits)
 		return i;
@@ -9581,7 +9758,7 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
 
 /*
  * IAMROOT, 2023.06.03:
- * - sd_flag와 겹치는 sd를 찾아 계속 iterate를 수행한다.. 만약 
+ * - sd_flag와 겹치는 tmp sd를 sd에서 저장해놓는다. 만약 
  *   못찾았는데, want_affine조차 없엇으면 그냥 종료한다.
  */
 		if (tmp->flags & sd_flag)
@@ -9597,6 +9774,10 @@ select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
  */
 	if (unlikely(sd)) {
 		/* Slow path */
+/*
+ * IAMROOT, 2023.06.15:
+ * - sd는 sd_flag가 있는 최상위일 것이다.
+ */
 		new_cpu = find_idlest_cpu(sd, p, cpu, prev_cpu, sd_flag);
 	} else if (wake_flags & WF_TTWU) { /* XXX always ? */
 		/* Fast path */
@@ -12530,6 +12711,8 @@ static inline bool allow_numa_imbalance(int dst_running, int dst_weight)
  * - google-translate
  * find_idles_group()은 도메인 내에서 가장 사용량이 적은 CPU 그룹을 찾아서
  * 반환합니다. p는 sd에 있는 하나 이상의 CPU에서 허용된다고 가정합니다.
+ *
+ * - ING
  */
 static struct sched_group *
 find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
@@ -12558,6 +12741,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		local_group = cpumask_test_cpu(this_cpu,
 					       sched_group_span(group));
 
+/*
+ * IAMROOT, 2023.06.15:
+ * - local이면 sgs를 local_sds, local = group, 아니라면 local은 남겨놓고
+ *   sgs를 tmp_sgs로 설정한다.
+ */
 		if (local_group) {
 			sgs = &local_sgs;
 			local = group;

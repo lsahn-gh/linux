@@ -78,6 +78,7 @@ extern int register_refined_jiffies(long clock_tick_rate);
  */
 /*
  * IAMROOT, 2022.08.27:
+ * - 틱
  * - jiffies    : kernel/time/jiffies.c에 export symbol
  *                arm/arm64/kernel/vmlinux.lkds.S에서
  *                jiffies_64를 jiffies로 사용하는것이 확인된다.
