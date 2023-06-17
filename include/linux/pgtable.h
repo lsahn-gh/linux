@@ -953,6 +953,10 @@ static inline int pmd_none_or_clear_bad(pmd_t *pmd)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @addr의 내용을 가져오면서 clear한다.
+ */
 static inline pte_t __ptep_modify_prot_start(struct vm_area_struct *vma,
 					     unsigned long addr,
 					     pte_t *ptep)
@@ -962,6 +966,12 @@ static inline pte_t __ptep_modify_prot_start(struct vm_area_struct *vma,
 	 * non-present, preventing the hardware from asynchronously
 	 * updating it.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   현재 pte 상태를 가져오지만 0으로 지정하여 존재하지 않게 하여 
+ *   하드웨어가 비동기식으로 업데이트하는 것을 방지합니다.
+ */
 	return ptep_get_and_clear(vma->vm_mm, addr, ptep);
 }
 
@@ -990,6 +1000,28 @@ static inline void __ptep_modify_prot_commit(struct vm_area_struct *vma,
  * ptep_modify_prot_commit may not actually update the pte, but merely
  * queue the update to be done at some later time.  The update must be
  * actually committed before the pte lock is released, however.
+ */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   pte에 대한 비동기 하드웨어 수정을 방지하는 pte 보호 읽기-수정-쓰기 
+ *   트랜잭션을 시작합니다.
+ *   의도는 하드웨어가 pte 업데이트를 수행하는 것을 방지하는 것이 아니라 
+ *   수행할 수 있는 모든 업데이트가 손실되는 것을 방지하는 것입니다.
+ *
+ *   이것은 pte의 다른 소프트웨어 수정으로부터 보호하지 않습니다. 
+ *   트랜잭션에 대해 적절한 pte 잠금을 유지해야 합니다.
+ *
+ *   이 인터페이스는 일괄 처리가 가능하다는 점에 유의하십시오. 즉, 
+ *   ptep_modify_prot_commit은 실제로 pte를 업데이트하지 않고 
+ *   나중에 수행되도록 업데이트를 대기시킬 수 있습니다. 그러나 업데이트는 
+ *   pte 잠금이 해제되기 전에 실제로 커밋되어야 합니다.
+ * - old를 가져오면서 0로 clear한다.
+ *
+ * - arm v8.2에 비동기 관련이 생겼다.(dbm)
+ *   tlb cache에 dirty가 생기면서 software가 update를 해줘야되는 상황이 있다.
+ *   tlb cache가 어떤 상황에서 이런 비동기 상황에서 memory값을 바꿀수도있는 상황이
+ *   있다. 이러한 상황을 방지하기 위해 0 clear를 해준다.
  */
 static inline pte_t ptep_modify_prot_start(struct vm_area_struct *vma,
 					   unsigned long addr,

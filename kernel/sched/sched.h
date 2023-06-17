@@ -2188,9 +2188,24 @@ static inline int sched_numa_find_closest(const struct cpumask *cpus, int cpu)
 
 #ifdef CONFIG_NUMA_BALANCING
 /* The regions in numa_faults array from task_struct */
+/*
+ * IAMROOT, 2023.06.17:
+ * - MEM : memory node
+ *   CPU : cpu node
+ */
 enum numa_faults_stats {
+/*
+ * IAMROOT, 2023.06.17:
+ * - NUMA_MEM, NUMA_CPU
+ *   avg계산하여 저장을 해놓는 개념.
+ */
 	NUMA_MEM = 0,
 	NUMA_CPU,
+/*
+ * IAMROOT, 2023.06.17:
+ * - NUMA_MEMBUF, NUMA_CPUBUF
+ *   temp buf. 즉시 sum이되는 buf
+ */
 	NUMA_MEMBUF,
 	NUMA_CPUBUF
 };

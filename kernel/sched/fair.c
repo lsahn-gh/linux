@@ -1532,13 +1532,26 @@ update_stats_curr_start(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * calculated based on the tasks virtual memory size and
  * numa_balancing_scan_size.
  */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 1 sec ~ 60 sec
+ */
 unsigned int sysctl_numa_balancing_scan_period_min = 1000;
 unsigned int sysctl_numa_balancing_scan_period_max = 60000;
 
 /* Portion of address space to scan in MB */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 256MB
+ *   0이면 disable과 마찬가지다.
+ */
 unsigned int sysctl_numa_balancing_scan_size = 256;
 
 /* Scan @scan_size MB every @scan_period after an initial @scan_delay in ms */
+/*
+ * IAMROOT, 2023.06.17:
+ * - default 1 sec
+ */
 unsigned int sysctl_numa_balancing_scan_delay = 1000;
 
 struct numa_group {
@@ -1571,6 +1584,10 @@ static struct numa_group *deref_task_numa_group(struct task_struct *p)
 		(lockdep_is_held(__rq_lockp(task_rq(p))) && !READ_ONCE(p->on_cpu)));
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @p의 numa_group을 가져온다.
+ */
 static struct numa_group *deref_curr_numa_group(struct task_struct *p)
 {
 	return rcu_dereference_protected(p->numa_group, p == current);
@@ -1579,6 +1596,12 @@ static struct numa_group *deref_curr_numa_group(struct task_struct *p)
 static inline unsigned long group_faults_priv(struct numa_group *ng);
 static inline unsigned long group_faults_shared(struct numa_group *ng);
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @p의 rss에 대한 numa scan 개수를 return 한다.
+ * - 한번에 scan할 scan pages를 구하고, 이걸로 몇번 돌려야 rss를 스캔할지를
+ *   계산해낸다.
+ */
 static unsigned int task_nr_scan_windows(struct task_struct *p)
 {
 	unsigned long rss = 0;
@@ -1589,29 +1612,92 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
 	 * by the PTE scanner and NUMA hinting faults should be trapped based
 	 * on resident pages
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   존재하지 않는 빈 페이지로 RSS를 기반으로 하는 계산은 PTE 스캐너에서 
+ *   건너뛰고 NUMA 힌트 오류는 상주 페이지를 기반으로 트랩되어야 합니다. 
+ * - ex) PAGE_SIZE = 12
+ *   nr_scan_pages * 2^8 = 256 * 256 = 65536 = 64kb = 2^16
+ */
 	nr_scan_pages = sysctl_numa_balancing_scan_size << (20 - PAGE_SHIFT);
 	rss = get_mm_rss(p->mm);
 	if (!rss)
 		rss = nr_scan_pages;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - ex) rss = 2^16 + 1, nr_scan_pages = 2^16 
+ *   rss = 2^17
+ *   return  = 2
+ *
+ *   ex) rss = 2^10, nr_scan_pages = 2^16
+ *   rss = 2^16
+ *   return = 1
+ *
+ *   ex) rss = 2^20 + 1, nr_scan_pages = 2^16
+ *   rss = 2^21
+ *   return = 2^5
+ */
 	rss = round_up(rss, nr_scan_pages);
 	return rss / nr_scan_pages;
 }
 
 /* For sanity's sake, never scan more PTEs than MAX_SCAN_WINDOW MB/sec. */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 2560MB
+ */
 #define MAX_SCAN_WINDOW 2560
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - kernel의 목표는 1초에 최대 2560MB처리를 하기를 원한다. 이에 대한 scan 간격을 정한다.
+ *   scan이 너무 자주 일어나지 않게 floor라는 제한을 둔다. 기본 100ms
+ *
+ * - task rss가 충분히 작을경우. 
+ *   task = 384MB - > scan = 1000 / 2 = 500ms. max(500, 100)
+ *   제한인 100ms보다 크므로 500ms마다 천천히 scan하면된다.
+ *   
+ * - task rss가 충분히 클경우
+ *   task = 5120MB -> scan = 1000 / 20 = 50ms. -> max(50, 100)
+ *   제한인 100ms보다 작으므로 너무 자주 scan하는 상황이 된다. 제한인 100ms로 제한한다.
+ */
 static unsigned int task_scan_min(struct task_struct *p)
 {
 	unsigned int scan_size = READ_ONCE(sysctl_numa_balancing_scan_size);
 	unsigned int scan, floor;
 	unsigned int windows = 1;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - scan_size 단위로 window 개수 증가.
+ *   windows : scan_size만큼 할수있는 횟수
+ */
 	if (scan_size < MAX_SCAN_WINDOW)
 		windows = MAX_SCAN_WINDOW / scan_size;
+/*
+ * IAMROOT, 2023.06.17:
+ * - ex) scan_size = 256MB
+ *   windows = 10, floor = 100
+ *   floor : 1초당 2560MB를 기준. windows 256MB -> 100ms라는 개념으로 floor = 100
+ *   ex) windows 2560MB -> floor = 1000(ms)
+ *       windows 256MB -> floor = 100(ms)
+ */
 	floor = 1000 / windows;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - scan = (최소시간) / (rss fullscan시 필요한 횟수)
+ *        = scan 1번당 쓸수있는 최소시간
+ */
 	scan = sysctl_numa_balancing_scan_period_min / task_nr_scan_windows(p);
+/*
+ * IAMROOT, 2023.06.17:
+ * - ex) task의 rss가 256MB보다 크면 계산된 scan이되고, 그게 아니면 100ms가 된다.
+ *   task = 384MB - > scan = 1000 / 2 = 500ms. return 500ms
+ *   task = 5120MB -> scan = 1000 / 20 = 50ms. return 100ms
+ */
 	return max_t(unsigned int, floor, scan);
 }
 
@@ -1637,6 +1723,11 @@ static unsigned int task_scan_start(struct task_struct *p)
 	return max(smin, period);
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * @return max msec
+ * - numa scan max값을 구해온다.
+ */
 static unsigned int task_scan_max(struct task_struct *p)
 {
 	unsigned long smin = task_scan_min(p);
@@ -1644,15 +1735,34 @@ static unsigned int task_scan_max(struct task_struct *p)
 	struct numa_group *ng;
 
 	/* Watch for min being lower than max due to floor calculations */
+/*
+ * IAMROOT, 2023.06.17:
+ * - task = 384MB - > scan = 1000 / 2 = 500ms. max(500, 100)
+ *   min = 500ms, max = 30000ms
+ *   
+ * - task = 5120MB -> scan = 1000 / 20 = 50ms. -> max(50, 100)
+ *   min = 100ms, max = 3000ms
+ */
 	smax = sysctl_numa_balancing_scan_period_max / task_nr_scan_windows(p);
 
 	/* Scale the maximum scan period with the amount of shared memory. */
 	ng = deref_curr_numa_group(p);
 	if (ng) {
+/*
+ * IAMROOT, 2023.06.17:
+ * - ng에 대한 shared, priv faults avg sum을 구해온다.
+ */
 		unsigned long shared = group_faults_shared(ng);
 		unsigned long private = group_faults_priv(ng);
 		unsigned long period = smax;
-
+/*
+ * IAMROOT, 2023.06.17:
+ * - period * refcount * (shared + 1) / (private + shared + 1) 
+ *   shared + private에서 shared의 비율을 구하는데, 이때 refcount로 곱하기보정한다.
+ *   shared 하는 thread가 많으면 smax가 늘어날수있다.
+ * - ex) shared = 10%, ref = 10개라면 10 * 10 = 100% 해서 priv와 동등해지는 개념(변함없음)
+ *       shared = 20%, ref = 10개라면 10 * 20 = 200% 해서 priv 보다 2배가 될수있는 개념
+ */
 		period *= refcount_read(&ng->refcount);
 		period *= shared + 1;
 		period /= private + shared + 1;
@@ -1676,12 +1786,28 @@ static void account_numa_dequeue(struct rq *rq, struct task_struct *p)
 }
 
 /* Shared or private faults. */
+/*
+ * IAMROOT, 2023.06.17:
+ * - shared, private해서 2개라는 의미.
+ */
 #define NR_NUMA_HINT_FAULT_TYPES 2
 
 /* Memory and CPU locality */
+/*
+ * IAMROOT, 2023.06.17:
+ * - memory shared
+ *   memory private
+ *   cpu shared
+ *   cpu private
+ *   해서 총 4개라는 의미.
+ */
 #define NR_NUMA_HINT_FAULT_STATS (NR_NUMA_HINT_FAULT_TYPES * 2)
 
 /* Averaged statistics, and temporary buffers. */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 임시버퍼를 한쌍을 더 둬서 2배를 하는 개념.
+ */
 #define NR_NUMA_HINT_FAULT_BUCKETS (NR_NUMA_HINT_FAULT_STATS * 2)
 
 pid_t task_numa_group_id(struct task_struct *p)
@@ -1703,6 +1829,16 @@ pid_t task_numa_group_id(struct task_struct *p)
  * occupy the first half of the array. The second half of the
  * array is for current counters, which are averaged into the
  * first set by task_numa_placement.
+ */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   평균 통계, 공유 및 개인, 메모리 및 CPU가 어레이의 전반부를 차지합니다. 
+ *   배열의 두 번째 절반은 task_numa_placement에 의해 첫 번째 세트로 
+ *   평균화되는 현재 카운터용입니다.
+ *   
+ * @priv 1이면 priv, 0이면 shared
+ * - @s, @nid, @priv에 대한 idx를 계산한다.
  */
 static inline int task_faults_idx(enum numa_faults_stats s, int nid, int priv)
 {
@@ -1735,6 +1871,10 @@ static inline unsigned long group_faults_cpu(struct numa_group *group, int nid)
 		group->faults_cpu[task_faults_idx(NUMA_MEM, nid, 1)];
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - NUMA_MEM의 @ng에 속한 모든 node에 대한 priv fault avg sum을 구한다.
+ */
 static inline unsigned long group_faults_priv(struct numa_group *ng)
 {
 	unsigned long faults = 0;
@@ -1747,6 +1887,10 @@ static inline unsigned long group_faults_priv(struct numa_group *ng)
 	return faults;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - NUMA_MEM의 @ng에 속한 모든 node에 대한 shared fault avg sum를 구한다.
+ */
 static inline unsigned long group_faults_shared(struct numa_group *ng)
 {
 	unsigned long faults = 0;
@@ -3164,6 +3308,10 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	p->numa_faults_locality[local] += pages;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - numa_scan_seq를 up하고 시작위치를 초기화한다..
+ */
 static void reset_ptenuma_scan(struct task_struct *p)
 {
 	/*
@@ -3174,6 +3322,15 @@ static void reset_ptenuma_scan(struct task_struct *p)
 	 * statistical sampling. Use READ_ONCE/WRITE_ONCE, which are not
 	 * expensive, to avoid any form of compiler optimizations:
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   우리는 mmap sem의 읽기 획득만 수행했으므로 p->mm->numa_scan_seq는 
+ *   독점 액세스 없이 기록되며 업데이트가 원자적임을 보장하지 않습니다. 
+ *   통계적 샘플링에만 사용되기 때문에 큰 문제는 아닙니다. 비싸지 않은 
+ *   READ_ONCE/WRITE_ONCE를 사용하여 모든 형태의 컴파일러 최적화를 
+ *   피하십시오.
+ */
 	WRITE_ONCE(p->mm->numa_scan_seq, READ_ONCE(p->mm->numa_scan_seq) + 1);
 	p->mm->numa_scan_offset = 0;
 }
@@ -3181,6 +3338,12 @@ static void reset_ptenuma_scan(struct task_struct *p)
 /*
  * The expensive part of numa migration is done from task_work context.
  * Triggered from task_tick_numa().
+ */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   numa 마이그레이션의 비용이 많이 드는 부분은 task_work 컨텍스트에서 수행됩니다.
+ *   task_tick_numa()에서 트리거됩니다.
  */
 static void task_numa_work(struct callback_head *work)
 {
@@ -3204,9 +3367,21 @@ static void task_numa_work(struct callback_head *work)
 	 * without p->mm even though we still had it when we enqueued this
 	 * work.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   죽을 때 누가 NUMA 배치에 신경을 쓰겠어요.
+ *
+ *   참고: 이 검사 전에 exit_task_work()가 _exit_mm() 이후에 발생하므로 
+ *   이 작업을 대기열에 넣을 때에도 p->mm가 없어도 호출할 수 있습니다.
+ */
 	if (p->flags & PF_EXITING)
 		return;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 최초수행이면 지금시각기준으로 갱신
+ */
 	if (!mm->numa_next_scan) {
 		mm->numa_next_scan = now +
 			msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
@@ -3225,6 +3400,10 @@ static void task_numa_work(struct callback_head *work)
 	}
 
 	next_scan = now + msecs_to_jiffies(p->numa_scan_period);
+/*
+ * IAMROOT, 2023.06.17:
+ * - atomic 검사. 경합발생시. return.
+ */
 	if (cmpxchg(&mm->numa_next_scan, migrate, next_scan) != migrate)
 		return;
 
@@ -3232,11 +3411,26 @@ static void task_numa_work(struct callback_head *work)
 	 * Delay this task enough that another task of this mm will likely win
 	 * the next time around.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   이 mm의 다른 작업이 다음에 이길 가능성이 높도록 이 작업을 충분히 지연시킵니다.
+. 
+ * - 다른 task가 혹시 검사하러 들어올줄 모르니 갭을 더 준다.
+ */
 	p->node_stamp += 2 * TICK_NSEC;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 그전에 마지막으로 했던 offset.
+ */
 	start = mm->numa_scan_offset;
 	pages = sysctl_numa_balancing_scan_size;
 	pages <<= 20 - PAGE_SHIFT; /* MB in pages */
+/*
+ * IAMROOT, 2023.06.17:
+ * - virt page는 scan용량의 8배
+ */
 	virtpages = pages * 8;	   /* Scan up to this much virtual space */
 	if (!pages)
 		return;
@@ -3244,6 +3438,10 @@ static void task_numa_work(struct callback_head *work)
 
 	if (!mmap_read_trylock(mm))
 		return;
+/*
+ * IAMROOT, 2023.06.17:
+ * - 이전에 기록했던 start를 못찾던가 최초인상황. 처음부터 다시한다.
+ */
 	vma = find_vma(mm, start);
 	if (!vma) {
 		reset_ptenuma_scan(p);
@@ -3251,6 +3449,14 @@ static void task_numa_work(struct callback_head *work)
 		vma = mm->mmap;
 	}
 	for (; vma; vma = vma->vm_next) {
+/*
+ * IAMROOT, 2023.06.17:
+ * - 다음과 같은 vma는 scan을 지원하지 않는다.
+ *   1. migrate 불가능
+ *   2. MOF(migrate on fault) 미지원
+ *   3. hugetlb 불가능
+ *   4. VM_MIXEDMAP은 지원 안한다.
+ */
 		if (!vma_migratable(vma) || !vma_policy_mof(vma) ||
 			is_vm_hugetlb_page(vma) || (vma->vm_flags & VM_MIXEDMAP)) {
 			continue;
@@ -3262,6 +3468,16 @@ static void task_numa_work(struct callback_head *work)
 		 * hinting faults in read-only file-backed mappings or the vdso
 		 * as migrating the pages will be of marginal benefit.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   여러 프로세스에 의해 매핑된 공유 라이브러리 페이지는 캐시 복제될 것으로 
+ *   예상되므로 마이그레이션되지 않습니다. 읽기 전용 파일 지원 매핑 또는 
+ *   vdso에서 힌트 결함을 피하십시오. 페이지를 마이그레이션하는 것이 약간의 
+ *   이점이 있을 것입니다.
+ *
+ * - library(readonly file)은 안한다. 주석내용확인.
+ */
 		if (!vma->vm_mm ||
 		    (vma->vm_file && (vma->vm_flags & (VM_READ|VM_WRITE)) == (VM_READ)))
 			continue;
@@ -3287,6 +3503,15 @@ static void task_numa_work(struct callback_head *work)
 			 * PTEs, scan up to virtpages, to skip through those
 			 * areas faster.
 			 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   아직 pte-numa가 아닌 현재 PTE가 하나 이상 있는 hpage의 
+ *   sysctl_numa_balancing_size에 해당하는 스캔을 시도합니다. 
+ *   VMA에 사용되지 않았거나 이미 prot_numa PTE로 가득 찬 영역이 
+ *   포함된 경우 해당 영역을 더 빨리 건너뛰려면 virtpages까지 
+ *   스캔하십시오.
+ */
 			if (nr_pte_updates)
 				pages -= (end - start) >> PAGE_SHIFT;
 			virtpages -= (end - start) >> PAGE_SHIFT;
@@ -3306,6 +3531,14 @@ out:
 	 * would find the !migratable VMA on the next scan but not reset the
 	 * scanner to the start so check it now.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   VMA 목록의 끝에 도달하는 것이 가능하지만 마지막 몇 개의 VMA는 
+ *   vma_migratable에 대해 보장되지 않습니다. 그렇지 않은 경우 다음 스캔에서 
+ *   !migrateable VMA를 찾을 수 있지만 스캐너를 시작으로 재설정하지 않으므로 
+ *   지금 확인하십시오.
+ */
 	if (vma)
 		mm->numa_scan_offset = start;
 	else
@@ -3318,19 +3551,46 @@ out:
 	 * Usually update_task_scan_period slows down scanning enough; on an
 	 * overloaded system we need to limit overhead on a per task basis.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   NUMA PTE 스캐닝 오버헤드를 최대 3%로 제한하기 위해 태스크가 여기에서 
+ *   사용된 것보다 다른 코드를 실행하는 데 최소 32배의 시간을 사용하는지 
+ *   확인하십시오.
+ *   일반적으로 update_task_scan_period는 스캔 속도를 충분히 늦춥니다. 
+ *   오버로드된 시스템에서는 작업별로 오버헤드를 제한해야 합니다.
+ */
 	if (unlikely(p->se.sum_exec_runtime != runtime)) {
 		u64 diff = p->se.sum_exec_runtime - runtime;
 		p->node_stamp += 32 * diff;
 	}
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - tick
+ *   task_tick_fair()의 task_tick_numa()
+ *
+ * - callstack
+ *   copy_process() -> sched_fork() ->  __sched_fork() -> init_numa_balancing()
+ *
+ * - numa scan관련 파라미터를 초기화한다.
+ */
 void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 {
 	int mm_users = 0;
 	struct mm_struct *mm = p->mm;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - mm == NULL이면 kernel
+ */
 	if (mm) {
 		mm_users = atomic_read(&mm->mm_users);
+/*
+ * IAMROOT, 2023.06.17:
+ * - thread가 없다는 의미. 현재시각 + 1sec후로 
+ */
 		if (mm_users == 1) {
 			mm->numa_next_scan = jiffies + msecs_to_jiffies(sysctl_numa_balancing_scan_delay);
 			mm->numa_scan_seq = 0;
@@ -3349,6 +3609,10 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 	init_task_work(&p->numa_work, task_numa_work);
 
 	/* New address space, reset the preferred nid */
+/*
+ * IAMROOT, 2023.06.17:
+ * - thread가 아닌 경우. 즉 일반 process
+ */
 	if (!(clone_flags & CLONE_VM)) {
 		p->numa_preferred_nid = NUMA_NO_NODE;
 		return;
@@ -3358,6 +3622,20 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 	 * New thread, keep existing numa_preferred_nid which should be copied
 	 * already by arch_dup_task_struct but stagger when scans start.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - new thread가 있는 경우.
+ *
+ * - task = 384MB - > scan = 1000 / 2 = 500ms. max(500, 100)
+ *   min = 500ms, max = 30000ms 
+ *   mm_user가 2이라면 2초. mm_user가 31이라면 30초. max가 30이므로.
+ *   
+ * - task = 5120MB -> scan = 1000 / 20 = 50ms. -> max(50, 100)
+ *   min = 100ms, max = 3000ms
+ *   mm_user가 2이라면 2초. mm_user가 4라면 3초. max가 3초이므로.
+ *
+ * - thread이면 node scan시각을 max대비 계산된 시간 + 2틱여유를 둬서 정한다.
+ */
 	if (mm) {
 		unsigned int delay;
 
@@ -3371,6 +3649,13 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
 /*
  * Drive the periodic memory faults..
  */
+/*
+ * IAMROOT, 2023.06.17:
+ * - callstack
+ *   task_tick_fair() -> task_tick_numa()
+ * - numa scan시간이 됬으면 task work(task_numa_work)를 add한다.
+ *   즉 work수행요청.
+ */
 static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 {
 	struct callback_head *work = &curr->numa_work;
@@ -3379,6 +3664,10 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	/*
 	 * We don't care about NUMA placement if we don't have memory.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 나가고있거나, kernel thread거나, 이미 work로 정해져있으면 안한다.
+ */
 	if ((curr->flags & (PF_EXITING | PF_KTHREAD)) || work->next != work)
 		return;
 
@@ -3388,14 +3677,30 @@ static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 	 * task needs to have done some actual work before we bother with
 	 * NUMA placement.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   walltime(realtime) 대신 런타임을 사용하면 (대부분) 바쁜 스레드에서 선택을 
+ *   유도하고 NUMA 배치를 방해하기 전에 작업이 실제 작업을 완료해야 
+ *   한다는 이중 이점이 있습니다.
+ */
 	now = curr->se.sum_exec_runtime;
 	period = (u64)curr->numa_scan_period * NSEC_PER_MSEC;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - thread기준의 node scan 확인 -> mm 기준의 node scan확인. 다른 task에 
+ *   의해 같은 mm이 중복으로 scan을 안하기 위함이다.
+ */
 	if (now > curr->node_stamp + period) {
 		if (!curr->node_stamp)
 			curr->numa_scan_period = task_scan_start(curr);
 		curr->node_stamp += period;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - task_numa_work()에서 갱신된다. sysctl_numa_balancing_scan_delay간격(기본 1초)
+ */
 		if (!time_before(jiffies, curr->mm->numa_next_scan))
 			task_work_add(curr, work, TWA_RESUME);
 	}
@@ -7690,6 +7995,10 @@ static unsigned long cpu_runnable(struct rq *rq)
 	return cfs_rq_runnable_avg(&rq->cfs);
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @p에 대한 runnable을 뺀 runnable 값을 return한다.
+ */
 static unsigned long cpu_runnable_without(struct rq *rq, struct task_struct *p)
 {
 	struct cfs_rq *cfs_rq;
@@ -8065,6 +8374,15 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu);
 /*
  * find_idlest_group_cpu - find the idlest CPU among the CPUs in the group.
  */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 기본적으로 idle cpu를 고른다.  sched idle이 있으면 우선 선택된다.
+ * - 선택우선순위
+ *   1. sched idle(cpu run상태)
+ *   2. 기동이 가장짧은 cpu
+ *   3. 가장 최근에 잠든 cpu
+ *   4. load가 적은 cpu
+ */
 static int
 find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this_cpu)
 {
@@ -8080,6 +8398,12 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 		return cpumask_first(sched_group_span(group));
 
 	/* Traverse only the allowed CPUs */
+/*
+ * IAMROOT, 2023.06.17:
+ * - @p와 @group의 and 범위의 cpu들을 순회한다.
+ *   1. sched idle(cpu가 깨어있는 상태)
+ *   2. cpu가 idle
+ */
 	for_each_cpu_and(i, sched_group_span(group), p->cpus_ptr) {
 		struct rq *rq = cpu_rq(i);
 
@@ -8089,6 +8413,10 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 		if (sched_idle_cpu(i))
 			return i;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - idle인 cpu깨워야된다. 시간이 덜걸리는것을 골라본다.
+ */
 		if (available_idle_cpu(i)) {
 			struct cpuidle_state *idle = idle_get_state(rq);
 			if (idle && idle->exit_latency < min_exit_latency) {
@@ -8097,9 +8425,19 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 				 * has the smallest exit latency irrespective
 				 * of any idle timestamp.
 				 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   우리는 유휴 타임스탬프와 관계없이 유휴 상태에서 종료 대기 시간이 
+ *   가장 짧은 CPU에 우선 순위를 부여합니다.
+ */
 				min_exit_latency = idle->exit_latency;
 				latest_idle_timestamp = rq->idle_stamp;
 				shallowest_idle_cpu = i;
+/*
+ * IAMROOT, 2023.06.17:
+ * - 최소 동작시간이 같은경우, 최근에 잠든것을 먼저 선택한다.
+ */
 			} else if ((!idle || idle->exit_latency == min_exit_latency) &&
 				   rq->idle_stamp > latest_idle_timestamp) {
 				/*
@@ -8107,9 +8445,19 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 				 * the most recently idled CPU might have
 				 * a warmer cache.
 				 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   활성 유휴 상태가 같거나 없는 경우 가장 최근에 유휴 상태가 
+ *   된 CPU에 더 따뜻한 warmer가 있을 수 있습니다.
+ */
 				latest_idle_timestamp = rq->idle_stamp;
 				shallowest_idle_cpu = i;
 			}
+/*
+ * IAMROOT, 2023.06.17:
+ * - idle이 없는상태인 경우 . load기준으로 골라놓는다.
+ */
 		} else if (shallowest_idle_cpu == -1) {
 			load = cpu_load(cpu_rq(i));
 			if (load < min_load) {
@@ -8119,12 +8467,21 @@ find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this
 		}
 	}
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - idle이 있으면 idle기준이였것으로 고르고 아니면 load로 고른것을 고른다.
+ */
 	return shallowest_idle_cpu != -1 ? shallowest_idle_cpu : least_loaded_cpu;
 }
 
 /*
  * IAMROOT, 2023.06.15:
- * - 
+ * - 1. sd에서 idlest group을 찾는다.
+ *   2. idlest group에서 idlest cpu를 찾는다.
+ *   3. sd의 범위를 좁힌다.
+ *   4. 좁혀진 sd에서 1부터 반복한다.
+ *   이렇게 함으로써 group 단위의 idle 분산이 일어날것이다.
+ *   (idlest group을 cpu보다 먼저 고름으로써 idlest group쪽으로 선택이 되므로)
  */
 static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p,
 				  int cpu, int prev_cpu, int sd_flag)
@@ -8151,8 +8508,11 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
  * IAMROOT, 2023.06.15:
  * - sd는 select_idle_cpu()에서 sd_flag가 있는 최상위의 sd일것이다.
  *   아래로 내려가면서 찾는다.
- * - 기본적으로 가능한한 최상위의 sd에서 idle cpu을 먼저 찾아보고,
- *   그다음 한단계식 낮춰가며 하위의 sd에서 idle cpu를 찾아보는 개념이된다.
+ *   1. @p를 제외한 상태의 group중에서 가장 idle group을 고른다.
+ *     - this group이면 child로 이동
+ *   2. idle group중에 idle cpu를 고른다.
+ *     - 이전과 같은 cpu를 찾았으면 child로 이동
+ *   3. cpu의 최하위 sd부터 현재 찾은 sd보다 낮은 sd를 한번 좁힌다.
  */
 	while (sd) {
 		struct sched_group *group;
@@ -8170,6 +8530,21 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 		}
 
 		group = find_idlest_group(sd, p, cpu);
+/*
+ * IAMROOT, 2023.06.17:
+ * - NULL이라는 것은 local group(this보다 idle이 없다는것)이
+ *   선택됬다는것.
+ *
+ * - ex)
+ *   +-------------top---------------+
+ *   +------A-------+ +-----B--------+
+ *   +----+ +-------+ +----+ +-------+
+ *    idle   this             idle
+ *  
+ *    위의 경우에서, top인 상일때 A와 B가 비슷한 상황이라면
+ *    이번 loop에서는 local group측인 A를 선택할것이다.
+ *    그리고 다음 loop에서 idle, this중에 고르게 될것이다.
+ */
 		if (!group) {
 			sd = sd->child;
 			continue;
@@ -9000,7 +9375,9 @@ static inline unsigned long cpu_util(int cpu)
  * 이 메서드는 작업이 현재 CPU 사용률에 기여할 때마다 지정된 작업의 사용률을 할인하여 지정된
  * CPU의 사용률을 반환합니다.
  *
- * - ING
+ * - util or est util중에 max를 선택한다.
+ *   return (rq util sum - task util_est)
+ *   return (rq util est sum - rq util_est)
  */
 static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 {
@@ -9043,7 +9420,34 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 	 * covered by the following code when estimated utilization is
 	 * enabled.
 	 */
-	if (sched_feat(UTIL_EST)) {
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   a) *p가 이 CPU에서 잠자고 있는 유일한 작업이면: 
+ *      cpu_util (== task_util) > util_est (== 0)
+ *    and thus we return:
+ *      cpu_util_without = (cpu_util - task_util) = 0
+ *
+ *   b) 이 CPU에서 다른 작업이 SLEEPING중이고, 다른 task가 깨어나면서
+ *   CPU가 IDLE을 벗어나는 경우
+ *    then:
+ *      cpu_util >= task_util
+ *      cpu_util > util_est (== 0)
+ *    and thus we discount *p's blocked utilization to return:
+ *      cpu_util_without = (cpu_util - task_util) >= 0
+ *
+ *  c) 다른 작업이 해당 CPU에서 실행 가능하고 
+ *  util_est > cpu_util인 경우 해당 CPU에서 이미 실행 가능한 작업의
+ *  예상 사용률을 고려하여 해당 CPU의 예비 용량에 대한 보다 제한적인
+ *  추정치를 반환하므로 util_est를 사용합니다.    
+ *  
+ *  a)와 b)의 경우는 위의 코드로 처리되며, c)의 경우는 사용량 추정이 
+ *  활성화된 경우 다음 코드로 처리됩니다. 
+ *
+ * - 보통 rq의 est와, task의 est중 max값을 보통 사용하면 되는데, race time에 대한
+ *   처리가 조금 추가되있다.
+ */  
+	 if (sched_feat(UTIL_EST)) {
 		unsigned int estimated =
 			READ_ONCE(cfs_rq->avg.util_est.enqueued);
 
@@ -9064,6 +9468,28 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 		 * properly fix the execl regression and it helps in further
 		 * reducing the chances for the above race.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   다음 검사에도 불구하고 execl의 select_task_rq_fair()가 LB의 
+ *   detach_task()와 경쟁할 때 가능한 경쟁에 대한 작은 window이 여전히 
+ *   있습니다. 
+ *
+ *   detach_task()
+ *     p->on_rq = TASK_ON_RQ_MIGRATING;
+ *     ---------------------------------- A
+ *    deactivate_task()                   \
+ *      dequeue_task()                     + RaceTime
+ *        util_est_dequeue()              /
+ *     ---------------------------------- B
+ *
+ *   current == p에 대한 추가 검사는 execl 회귀를 올바르게 수정하는 
+ *   데 필요하며 위 경쟁의 기회를 더 줄이는 데 도움이 됩니다. 
+ *
+ * - flag가 TASK_ON_RQ_MIGRATING로 바뀐후에 util_est_dequeue()를 나중에 하는게
+ *   보인다. 원래 대로라면 lock을 사용하면되겠지만, lock을 안하기 위해 그냥 
+ *   racetime인것이 확인되면 @p에 대한 util을 제거해서 계산한다.
+ */
 		if (unlikely(task_on_rq_queued(p) || current == p))
 			lsub_positive(&estimated, _task_util_est(p));
 
@@ -9075,6 +9501,12 @@ static unsigned long cpu_util_without(int cpu, struct task_struct *p)
 	 * clamp to the maximum CPU capacity to ensure consistency with
 	 * the cpu_util call.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   사용률(예상)은 CPU 용량을 초과할 수 있으므로 cpu_util 호출과의 
+ *   일관성을 보장하기 위해 최대 CPU 용량으로 고정합니다.
+ */
 	return min_t(unsigned long, util, capacity_orig_of(cpu));
 }
 
@@ -9685,7 +10117,18 @@ unlock:
  * 특정 조건에서 유휴 형제 CPU를 선택하여 로드 균형을 조정합니다.
  *
  * 대상 CPU 번호를 반환합니다.
- * - ING
+ * - TTWU, cache친화
+ *   1. wakee 기록
+ *   2. EAS. 전력효율기준으로 선택.
+ *   --- EAS 미지원 ---
+ *   3. cache 친화여부 기록(want affine)
+ *   4. SD_WAKE_AFFINE를 지원하는 sd에서 cache친화 new_cpu(prev or this)를 얻어옴
+ *   5. new_cpu를 얻었다면 new_cpu, prev_cpu를 기준으로 cache 친화중에서 중에서 고른다.
+ *     (select_idle_sibling())
+ *
+ * - TTWU가 아니거나, EAS 미지원, cache친화가 아님.
+ *   1. 최상위 sd를 찾는다.
+ *   2. 최상위 sd부터 slowpath로 idle cpu를 찾는다.
  */
 static int
 select_task_rq_fair(struct task_struct *p, int prev_cpu, int wake_flags)
@@ -12519,6 +12962,10 @@ struct sg_lb_stats;
  * task_running_on_cpu - return 1 if @p is running on @cpu.
  */
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @p가 cpu에 on이라면 return 1.
+ */
 static unsigned int task_running_on_cpu(int cpu, struct task_struct *p)
 {
 	/* Task has no contribution or is new */
@@ -12576,7 +13023,7 @@ static int idle_cpu_without(int cpu, struct task_struct *p)
  * @sgs: 이 그룹에 대한 통계를 보유하는 변수입니다.
  * @p: 가장 유휴 그룹/CPU를 찾는 작업입니다.
  *
- * ING cpu_util_without
+ * - @sgs에 @group에서 @p를 제외한 통계값을 산출한다.
  */
 static inline void update_sg_wakeup_stats(struct sched_domain *sd,
 					  struct sched_group *group,
@@ -12587,6 +13034,11 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
 
 	memset(sgs, 0, sizeof(*sgs));
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - group에서 속한 cpu를 순회한다.
+ *   @p에 대한 load를 제외한 값을 통계한다.
+ */
 	for_each_cpu(i, sched_group_span(group)) {
 		struct rq *rq = cpu_rq(i);
 		unsigned int local;
@@ -12609,11 +13061,19 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
 	}
 
 	/* Check if task fits in the group */
+/*
+ * IAMROOT, 2023.06.17:
+ * - asym인데 @p가 @group에 fit이 안되면 misfit이라는것을 표시한다.
+ */
 	if (sd->flags & SD_ASYM_CPUCAPACITY &&
 	    !task_fits_capacity(p, group->sgc->max_capacity)) {
 		sgs->group_misfit_task_load = 1;
 	}
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @group 값들로 채운다.
+ */
 	sgs->group_capacity = group->sgc->capacity;
 
 	sgs->group_weight = group->group_weight;
@@ -12624,12 +13084,20 @@ static inline void update_sg_wakeup_stats(struct sched_domain *sd,
 	 * Computing avg_load makes sense only when group is fully busy or
 	 * overloaded
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - fully_busy나 overloaded라면 avg_load를 계산한다..
+ */
 	if (sgs->group_type == group_fully_busy ||
 		sgs->group_type == group_overloaded)
 		sgs->avg_load = (sgs->group_load * SCHED_CAPACITY_SCALE) /
 				sgs->group_capacity;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * @return @sgs가 @idlest_sgs보다 idle하면 return true. 아니면 false.
+ */
 static bool update_pick_idlest(struct sched_group *idlest,
 			       struct sg_lb_stats *idlest_sgs,
 			       struct sched_group *group,
@@ -12645,7 +13113,10 @@ static bool update_pick_idlest(struct sched_group *idlest,
 	 * The candidate and the current idlest group are the same type of
 	 * group. Let check which one is the idlest according to the type.
 	 */
-
+/*
+ * IAMROOT, 2023.06.17:
+ * - group_type 같은 경우에 따른 처리.
+ */
 	switch (sgs->group_type) {
 	case group_overloaded:
 	case group_fully_busy:
@@ -12712,7 +13183,8 @@ static inline bool allow_numa_imbalance(int dst_running, int dst_weight)
  * find_idles_group()은 도메인 내에서 가장 사용량이 적은 CPU 그룹을 찾아서
  * 반환합니다. p는 sd에 있는 하나 이상의 CPU에서 허용된다고 가정합니다.
  *
- * - ING
+ * @return NULL local 선택. != NULL이면 local이 아닌 idlest group
+ * - @group을 순회하며 @p를 제외한 통계값을 산출하여 idlest group을 찾는다.
  */
 static struct sched_group *
 find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
@@ -12726,6 +13198,10 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 			.group_type = group_overloaded,
 	};
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - @group을 순회하하며 통계값을 산출하고 local과 idlest group을 찾는다.
+ */
 	do {
 		int local_group;
 
@@ -12755,6 +13231,10 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 
 		update_sg_wakeup_stats(sd, group, sgs, p);
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - local상황이 아닌 경우, idlest를 갱신한다.
+ */
 		if (!local_group && update_pick_idlest(idlest, &idlest_sgs, group, sgs)) {
 			idlest = group;
 			idlest_sgs = *sgs;
@@ -12768,13 +13248,27 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		return NULL;
 
 	/* The local group has been skipped because of CPU affinity */
+/*
+ * IAMROOT, 2023.06.17:
+ * - local이 범위에 없었다면 즉시 idlest로 선택한다.
+ */
 	if (!local)
 		return idlest;
-
+/*
+ * IAMROOT, 2023.06.17:
+ * - 지금부터 local과 idlest 비교를 시작한다.
+ *   local과 idlest중에 더 idle한것을 고른다.
+ */
 	/*
 	 * If the local group is idler than the selected idlest group
 	 * don't try and push the task.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   로컬 그룹이 선택한 가장 유휴 그룹보다 유휴 상태이면 작업을 푸시하지 
+ *   마십시오.
+ */
 	if (local_sgs.group_type < idlest_sgs.group_type)
 		return NULL;
 
@@ -12782,6 +13276,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	 * If the local group is busier than the selected idlest group
 	 * try and push the task.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   로컬 그룹이 선택한 가장 유휴 그룹보다 더 바쁘면 작업을 푸시하십시오.
+ */
 	if (local_sgs.group_type > idlest_sgs.group_type)
 		return idlest;
 
@@ -12790,6 +13289,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	case group_fully_busy:
 
 		/* Calculate allowed imbalance based on load */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   부하에 따라 허용되는 불균형을 계산합니다. 
+ */
 		imbalance = scale_load_down(NICE_0_LOAD) *
 				(sd->imbalance_pct-100) / 100;
 
@@ -12801,6 +13305,14 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		 * cross-domain, add imbalance to the load on the remote node
 		 * and consider staying local.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   NUMA 도메인 전체에서 그룹을 비교할 때 로컬 도메인이 원격 도메인에 
+ *   비해 매우 가볍게 로드될 수 있지만 불균형으로 인해 비교가 왜곡되어 
+ *   원격 CPU가 훨씬 더 유리해 보입니다. 교차 도메인을 고려할 때 원격 
+ *   노드의 부하에 불균형을 추가하고 로컬 유지를 고려하십시오.
+ */
 
 		if ((sd->flags & SD_NUMA) &&
 		    ((idlest_sgs.avg_load + imbalance) >= local_sgs.avg_load))
@@ -12810,6 +13322,12 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		 * If the local group is less loaded than the selected
 		 * idlest group don't try and push any tasks.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   로컬 그룹이 선택한 가장 유휴 그룹보다 로드가 적으면 어떤 작업도 
+ *   시도하지 마십시오.
+ */
 		if (idlest_sgs.avg_load >= (local_sgs.avg_load + imbalance))
 			return NULL;
 
@@ -12820,15 +13338,35 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 	case group_imbalanced:
 	case group_asym_packing:
 		/* Those type are not used in the slow wakeup path */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   이러한 유형은 느린 웨이크업 경로에서 사용되지 않습니다. 
+ * - group_imbalance, group_asym_packing은 cache 비친화 유형에서는 무시한다.  
+ */
 		return NULL;
 
 	case group_misfit_task:
 		/* Select group with the highest max capacity */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   최대 용량이 가장 큰 그룹 선택.
+ */
 		if (local->sgc->max_capacity >= idlest->sgc->max_capacity)
 			return NULL;
 		break;
 
 	case group_has_spare:
+/*
+ * IAMROOT, 2023.06.17:
+ * - NUMA인경우
+ *   1. preferred를 먼저 확인한다.
+ *   2. local에서 적게 돌고있으면 그냥 local을 선택한다.
+ *   
+ * - 위의 2번까지도 대상이 아니였거나 그냥 numa가 아닌 경우엔
+ *   idle cpu가 많은 group을 선택한다.
+ */
 		if (sd->flags & SD_NUMA) {
 #ifdef CONFIG_NUMA_BALANCING
 			int idlest_cpu;
@@ -12836,6 +13374,11 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 			 * If there is spare capacity at NUMA, try to select
 			 * the preferred node
 			 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   NUMA에 여유 용량이 있으면 선호하는 노드를 선택해 보십시오. 
+ */
 			if (cpu_to_node(this_cpu) == p->numa_preferred_nid)
 				return NULL;
 
@@ -12849,6 +13392,13 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 			 * a real need of migration, periodic load balance will
 			 * take care of it.
 			 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   그렇지 않으면 이 노드에 작업을 유지하여 웨이크업 소스 가까이에 유지하고 
+ *   지역성을 개선합니다. 실제로 마이그레이션이 필요한 경우 정기적인 로드 
+ *   밸런싱이 이를 처리합니다.
+ */
 			if (allow_numa_imbalance(local_sgs.sum_nr_running, sd->span_weight))
 				return NULL;
 		}
@@ -12859,6 +13409,13 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
 		 * up that the group has less spare capacity but finally more
 		 * idle CPUs which means more opportunity to run task.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   유휴 CPU 수가 가장 많은 그룹을 선택합니다. 보다 안정적인 사용률을 
+ *   비교할 수도 있지만 그룹의 여유 용량은 적지만 마지막으로 유휴 CPU가 
+ *   많아 작업을 실행할 기회가 더 많아질 수 있습니다.
+ */
 		if (local_sgs.idle_cpus >= idlest_sgs.idle_cpus)
 			return NULL;
 		break;
@@ -15840,10 +16397,10 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 		entity_tick(cfs_rq, se, queued);
 	}
 
-	/*
-	 * IAMROOT, 2023.01.14:
-	 * - TODO
-	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - numa balance
+ */
 	if (static_branch_unlikely(&sched_numa_balancing))
 		task_tick_numa(rq, curr);
 

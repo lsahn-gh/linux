@@ -735,6 +735,15 @@ struct mm_struct {
 		 * pte_numa. NUMA hinting faults will gather statistics and
 		 * migrate pages to new nodes if necessary.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   numa_next_scan은 다음에 PTE가 pte_numa로 표시되는 시간입니다. 
+ *   NUMA 힌트 결함은 통계를 수집하고 필요한 경우 페이지를 새 노드로 
+ *   마이그레이션합니다.
+ *
+ * - 최초 fork()시 현재시각 + 1 sec가 기준
+ */
 		unsigned long numa_next_scan;
 
 		/* Restart point for scanning and setting pte_numa */

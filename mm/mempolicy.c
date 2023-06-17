@@ -640,6 +640,17 @@ unlock:
  * an architecture makes a different choice, it will need further
  * changes to the core.
  */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   액세스할 수 없는 가상 주소 범위를 표시하는 데 사용됩니다.
+ *   이들은 나중에 NUMA hinting fault에 의해 지워집니다. 이러한 faults에 
+ *   따라 더 나은 NUMA 배치를 위해 페이지가 마이그레이션될 수 있습니다.
+ *
+ *   이것은 NUMA fault가 PROT_NONE을 사용하여 처리된다고 가정합니다. 
+ *   아키텍처가 다른 선택을 하면 코어에 추가 변경이 필요합니다.
+ * - 
+ */
 unsigned long change_prot_numa(struct vm_area_struct *vma,
 			unsigned long addr, unsigned long end)
 {
@@ -1746,6 +1757,10 @@ static struct mempolicy *get_vma_policy(struct vm_area_struct *vma,
 	return pol;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - migrate on fault 지원 여부 확인.
+ */
 bool vma_policy_mof(struct vm_area_struct *vma)
 {
 	struct mempolicy *pol;

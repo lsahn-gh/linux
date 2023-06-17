@@ -134,6 +134,8 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 /*
  * IAMROOT, 2022.06.04:
  * - hardware mapping이나 numa fault가 되있으면 mapping이 됬다는것을 의미한다.
+ *   numa fault page는 원래 mapping이 안되있는 상태이지만 잠시 지운 상태의 개념이므로
+ *   마치 entry가 있는것처럼 취급한다.
  */
 #define pte_present(pte)	(!!(pte_val(pte) & (PTE_VALID | PTE_PROT_NONE)))
 #define pte_young(pte)		(!!(pte_val(pte) & PTE_AF))

@@ -35,6 +35,12 @@
 
 #include "internal.h"
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - numa fault page 전환인 경우(change_prot_numa() 확인)
+ *   @cp_flags  MM_CP_PROT_NUMA.
+ *   @newprot PAGE_NONE
+ */
 static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 		unsigned long addr, unsigned long end, pgprot_t newprot,
 		unsigned long cp_flags)
@@ -54,6 +60,13 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 	 * changing from under us from pmd_none to pmd_trans_huge
 	 * and/or the other way around.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   prot_numa에서 읽기 위해 mmap_lock으로만 호출할 수 있으므로 
+ *   pmd가 계속해서 pmd_none에서 pmd_trans_huge로 변경되거나 
+ *   그 반대가 아닌지 확인해야 합니다.
+ */
 	if (pmd_trans_unstable(pmd))
 		return 0;
 
@@ -62,9 +75,19 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 	 * from under us even if the mmap_lock is only hold for
 	 * reading.
 	 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   pmd는 일반 pte를 가리키므로 mmap_lock이 읽기 전용인 경우에도 
+ *   pmd가 변경되지 않습니다.
+ */
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
 
 	/* Get target node for single threaded private VMAs */
+/*
+ * IAMROOT, 2023.06.17:
+ * - numa fault일때 single task이면 this cpu node로 옮긴다.
+ */
 	if (prot_numa && !(vma->vm_flags & VM_SHARED) &&
 	    atomic_read(&vma->vm_mm->mm_users) == 1)
 		target_node = numa_node_id();
@@ -73,6 +96,12 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 	arch_enter_lazy_mmu_mode();
 	do {
 		oldpte = *pte;
+/*
+ * IAMROOT, 2023.06.17:
+ * - pte가 vaild하거나 numa scan중인 경우
+ *   numa fault page는 원래 mapping이 안되있는 상태이지만 잠시 지운 상태의 개념이므로
+ *   마치 entry가 있는것처럼 취급한다.
+ */
 		if (pte_present(oldpte)) {
 			pte_t ptent;
 			bool preserve_write = prot_numa && pte_write(oldpte);
@@ -81,18 +110,36 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 			 * Avoid trapping faults against the zero or KSM
 			 * pages. See similar comment in change_huge_pmd.
 			 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   0 또는 KSM 페이지에 대한 트래핑 fault를 피하십시오. 
+ *   change_huge_pmd에서 유사한 설명을 참조하십시오.
+ */
 			if (prot_numa) {
 				struct page *page;
 
 				/* Avoid TLB flush if possible */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 이미 numa fault 되있다. skip
+ */
 				if (pte_protnone(oldpte))
 					continue;
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - phy page얻어옴
+ */
 				page = vm_normal_page(vma, addr, oldpte);
 				if (!page || PageKsm(page))
 					continue;
 
 				/* Also skip shared copy-on-write pages */
+/*
+ * IAMROOT, 2023.06.17:
+ * - cow이면서 mapcount면 skip. 1: N의 mapping이라 cost가 너무 크다.
+ */
 				if (is_cow_mapping(vma->vm_flags) &&
 				    page_mapcount(page) != 1)
 					continue;
@@ -102,6 +149,14 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 				 * it cannot move them all from MIGRATE_ASYNC
 				 * context.
 				 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   마이그레이션은 일부 더러운 페이지를 이동할 수 있지만 
+ *   MIGRATE_ASYNC 컨텍스트에서 모두 이동할 수는 없습니다.
+ * - dirty는 memory가 정말 부족할때만 이동하는 개념이다. cost가 너무 높다.
+ *   skip
+ */
 				if (page_is_file_lru(page) && PageDirty(page))
 					continue;
 
@@ -109,10 +164,22 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 				 * Don't mess with PTEs if page is already on the node
 				 * a single-threaded process is running on.
 				 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   단일 스레드 프로세스가 실행 중인 노드에 페이지가 이미 있는 경우 PTE를 
+ *   건드리지 마십시오.
+ * - single task이면 this node에 이미 있는경우 옮길 필요없으므로 skip 
+ */
 				if (target_node == page_to_nid(page))
 					continue;
 			}
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - old를 가져오면서 0clear를 한다.
+ * - ING
+ */
 			oldpte = ptep_modify_prot_start(vma, addr, pte);
 			ptent = pte_modify(oldpte, newprot);
 			if (preserve_write)
@@ -219,6 +286,10 @@ static inline int pmd_none_or_clear_bad_unless_trans_huge(pmd_t *pmd)
 	return 0;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 
+ */
 static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		pud_t *pud, unsigned long addr, unsigned long end,
 		pgprot_t newprot, unsigned long cp_flags)
@@ -245,6 +316,14 @@ static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		 * Hence, it's necessary to atomically read the PMD value
 		 * for all the checks.
 		 */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *   자동 NUMA 밸런싱은 mmap_lock이 읽기용으로 유지된 상태에서 테이블을 
+ *   탐색합니다. pmd_trans_huge()와 pmd_none_or_clear_bad() 검사 사이에 
+ *   병렬 업데이트가 발생하여 거짓 긍정 및 지우기로 이어질 수 있습니다. 
+ *   따라서 모든 검사에 대해 PMD 값을 원자적으로 읽어야 합니다.
+ */
 		if (!is_swap_pmd(*pmd) && !pmd_devmap(*pmd) &&
 		     pmd_none_or_clear_bad_unless_trans_huge(pmd))
 			goto next;
@@ -291,6 +370,10 @@ next:
 	return pages;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 
+ */
 static inline unsigned long change_pud_range(struct vm_area_struct *vma,
 		p4d_t *p4d, unsigned long addr, unsigned long end,
 		pgprot_t newprot, unsigned long cp_flags)
@@ -311,6 +394,10 @@ static inline unsigned long change_pud_range(struct vm_area_struct *vma,
 	return pages;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 
+ */
 static inline unsigned long change_p4d_range(struct vm_area_struct *vma,
 		pgd_t *pgd, unsigned long addr, unsigned long end,
 		pgprot_t newprot, unsigned long cp_flags)
@@ -331,6 +418,10 @@ static inline unsigned long change_p4d_range(struct vm_area_struct *vma,
 	return pages;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 
+ */
 static unsigned long change_protection_range(struct vm_area_struct *vma,
 		unsigned long addr, unsigned long end, pgprot_t newprot,
 		unsigned long cp_flags)
@@ -361,6 +452,10 @@ static unsigned long change_protection_range(struct vm_area_struct *vma,
 	return pages;
 }
 
+/*
+ * IAMROOT, 2023.06.17:
+ * - 
+ */
 unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
 		       unsigned long end, pgprot_t newprot,
 		       unsigned long cp_flags)

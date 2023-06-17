@@ -25,7 +25,8 @@
 #define PTE_DEVMAP		(_AT(pteval_t, 1) << 57)
 /*
  * IAMROOT, 2022.06.04:
- * - PTE_PROT_NONE : numa fault인지 여부.
+ * - PTE_PROT_NONE : numa fault인지 여부. change_prot_numa() 주석 확인
+ *   numa scan을 하는걸로 인식한다.
  */
 #define PTE_PROT_NONE		(_AT(pteval_t, 1) << 58) /* only when !PTE_VALID */
 
@@ -112,6 +113,7 @@ extern bool arm64_use_ng_mappings;
  * - PTE_PXN : kernel 공간에서 실행 불가
  *   PTE_UXN : user 공간에서 실행 불가.
  *   PTE_NG  : not global. 다른 cpu core에서도 mapping을 사용안하겠다는것.
+ * - PAGE_NONE : numa fault page. change_prot_numa() 확인
  */
 #define PAGE_NONE		__pgprot(((_PAGE_DEFAULT) & ~PTE_VALID) | PTE_PROT_NONE | PTE_RDONLY | PTE_NG | PTE_PXN | PTE_UXN)
 /* shared+writable pages are clean by default, hence PTE_RDONLY|PTE_WRITE */

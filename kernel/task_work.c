@@ -30,8 +30,31 @@ static struct callback_head work_exited; /* all we need is ->next == NULL */
  * 0 if succeeds or -ESRCH.
  */
 /*
- * IAMROOT, 2022.10.15:
- * - TODO
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *  task_work_add - @task에게 @work->func()를 실행하도록 요청합니다.
+ *  @task: 콜백을 실행해야 하는 작업 
+ *  @work: 실행할 콜백
+ *  @notify: 대상 작업을 알리는 방법
+ *
+ *  아래의 task_work_run()에 대해 @work를 대기열에 넣고 @notify가 @TWA_RESUME 
+ *  또는 @TWA_SIGNAL인 경우 @task에 알립니다. @TWA_SIGNAL은 대상 작업을 중단하고 
+ *  task_work를 실행한다는 점에서 신호처럼 작동합니다. @TWA_RESUME 작업은 태스크가 
+ *  커널을 종료하고 사용자 모드로 돌아가거나 게스트 모드로 들어가기 전에만 실행됩니다. 
+ *  @task가 종료/종료되어 이 @work를 처리할 수 없는 경우 실패합니다. 그렇지 않으면 
+ *  @task가 앞서 언급한 전환 중 하나를 거치거나 종료될 때 @work->func()가 
+ *  호출됩니다.
+ *
+ *  대상 작업이 종료되면 오류가 반환되고 작업 항목이 대기하지 않습니다. 이 경우 
+ *  대체 메커니즘을 준비하는 것은 호출자에게 달려 있습니다.
+ *
+ *  NOTE: 여기에 대기 중인 작품에 대한 주문 보장은 없습니다. task_work 목록은 
+ *  LIFO입니다.
+ *
+ *  RETURNS:
+ *  0 if succeeds or -ESRCH.
+ *
+ *  - @task에게 @work->func()를 실행하도록 요청합니다.
  */
 int task_work_add(struct task_struct *task, struct callback_head *work,
 		  enum task_work_notify_mode notify)

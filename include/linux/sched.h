@@ -697,6 +697,10 @@ struct sched_entity {
 	 * - update_curr 에서 시간을 갱신(ns)
 	 */
 	u64				exec_start;
+/*
+ * IAMROOT, 2023.06.17:
+ * - 실행누적시간
+ */
 	u64				sum_exec_runtime;
 /*
  * IAMROOT, 2022.12.21:
@@ -1638,15 +1642,29 @@ struct task_struct {
 	short				pref_node_fork;
 #endif
 #ifdef CONFIG_NUMA_BALANCING
+/*
+ * IAMROOT, 2023.06.17:
+ * - numa_scan_seq : user라면 mm->numa_scan_seq로 초기화된다.
+ *   numa_scan_period : 기본 1000 msec
+ */
 	int				numa_scan_seq;
 	unsigned int			numa_scan_period;
 	unsigned int			numa_scan_period_max;
 	int				numa_preferred_nid;
 	unsigned long			numa_migrate_retry;
 	/* Migration stamp: */
+/*
+ * IAMROOT, 2023.06.17:
+ * - 계산된 task(thread)기준의 node scan 간격(msec)
+ *   실제 scan은 mm->numa_next_scan
+ */
 	u64				node_stamp;
 	u64				last_task_numa_placement;
 	u64				last_sum_exec_runtime;
+/*
+ * IAMROOT, 2023.06.17:
+ * - task_numa_work()가 등록된다.
+ */
 	struct callback_head		numa_work;
 
 	/*

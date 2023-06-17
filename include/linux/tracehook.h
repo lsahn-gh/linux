@@ -156,6 +156,18 @@ static inline void tracehook_signal_handler(int stepping)
  * it will enter the kernel and call tracehook_notify_resume() soon.
  * If it's blocked, it will not be woken.
  */
+/*
+ * IAMROOT, 2023.06.17:
+ * - papago
+ *  set_notify_resume - tracehook_notify_resume()이 호출되도록 합니다.
+ *  @task: tracehook_notify_resume()을 호출할 작업
+ *
+ *  이것을 호출하면 @task가 사용자 모드로 돌아가기 전에 
+ *  tracehook_notify_resume()을 호출하도록 정렬됩니다. 이미 사용자 
+ *  모드에서 실행 중인 경우 커널에 들어가 곧 tracehook_notify_resume()을 
+ *  호출합니다.
+ *  차단된 경우 깨우지 않습니다.
+ */
 static inline void set_notify_resume(struct task_struct *task)
 {
 #ifdef TIF_NOTIFY_RESUME
