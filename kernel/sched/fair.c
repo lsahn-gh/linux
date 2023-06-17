@@ -8382,6 +8382,24 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu);
  *   2. 기동이 가장짧은 cpu
  *   3. 가장 최근에 잠든 cpu
  *   4. load가 적은 cpu
+ *
+ * IAMROOT. 2023.06.12:
+ * - google-translate
+ * find_idlest_group_cpu - 그룹의 CPU 중에서 가장 유휴 상태인 CPU를 찾습니다.
+ *
+ * - Return: 가장 idle한 cpu
+ *   1. group 내 idle policy 만 동작하는 rq가 있으면 바로 cpu 반환
+ *   2. group 내 idle cpu 가 있다. 가장 얕게 잠든 cpu(shallowest_idle_cpu)를 선택
+ *      하는데 shallowest_idle_cpu 판단은 cpuidle_state 여부에 따라 다르다.
+ *      1. cpuidle_state를 가져올 수 있다. exit_latency 로 판단
+ *         -> exit_latency가 가장 작은 cpu 반환
+ *      2. cpuidle_state를 가져올 수 없다. idle_stamp로 판단
+ *         -> idle_stamp가 가장 큰(가장 최근에 idle 된) cpu 반환
+ *   3. group 내 idle cpu 가 없다. cpu_load로 판단
+ *      -> cpu_load 가장 작은 cpu 반환
+ *   4. group cpumask 와 @p cpumask 가 겹치지 않는다.
+ *      -> @this_cpu 반환
+ *   XXX 4번이 아니고 @this_cpu를 반환하는 조건은 찾지 못했다.
  */
 static int
 find_idlest_group_cpu(struct sched_group *group, struct task_struct *p, int this_cpu)
@@ -8555,6 +8573,11 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
  * IAMROOT, 2023.06.15:
  * - 같은 cpu가 나왔으면 child로 내려간다.
  */
+		/*
+		 * IAMROOT, 2023.06.12:
+		 * - group cpumask와 @p cpumask 가 겹치지 않는 경우. 즉 group cpu
+		 *   모두가 task @p에서 허용되지 않음
+		 */
 		if (new_cpu == cpu) {
 			/* Now try balancing at a lower domain level of 'cpu': */
 			sd = sd->child;
@@ -8562,6 +8585,12 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
 		}
 
 		/* Now try balancing at a lower domain level of 'new_cpu': */
+		/*
+		 * IAMROOT, 2023.06.15:
+		 * - @현재 커서의 @sd 에서 가장 idle한 그룹을 찾아 그 그룹에서 가장
+		 *   idle한 cpu를 찾았다. cpu를 찾은 newcpu로 변경하고 sd_flag가
+		 *   있는 한단계 아래 도메인에서 검색할 준비를 한다.
+		 */
 		cpu = new_cpu;
 		weight = sd->span_weight;
 		sd = NULL;
@@ -8583,6 +8612,11 @@ static inline int find_idlest_cpu(struct sched_domain *sd, struct task_struct *p
  *  2) 2(X) -> 4(X) -> 8(X) -> 16(O)
  *    대상을 못찾고 sd == NULL로 끝나고 while을 빠져나간다.
  */
+		/*
+		 * IAMROOT, 2023.06.15:
+		 * - 현재 루프의 sd 보다 sd_flag가 있는 한단계 아래 레벨의
+		 *   도메인에서 break
+		 */
 		for_each_domain(cpu, tmp) {
 			if (weight <= tmp->span_weight)
 				break;
@@ -8688,7 +8722,8 @@ unlock:
  * update_idle_core()를 통해 활성화됩니다.
  *
  * - Return: 1. @core에 속한 모든 하드웨어 thread가 idle인 경우 @core retrun
- *           2. @core에 속한 일부 thread가 idle이 아닌 경우 -1. 그리고 @cpus에서 core smt제거
+ *           2. @core에 속한 일부 thread가 idle이 아닌 경우 -1. 그리고 @cpus에서
+ *              core smt제거
  *   @idle_cpu: 하드웨어 thread중 idle 인 첫번째 cpu
  *
  * - arm64는 smt가 없으므로 무조건 __select_idle_cpu()로 진입한다.
@@ -9045,6 +9080,9 @@ static inline bool asym_fits_capacity(int task_util, int cpu)
  *      -> asym sd span, p->cpus의 and영역에서 찾아진 idle core or idle thread
  *   9. 여지껏 못찾은경우. idle이 하나도 없었을 경우
  *      -> cpu
+ *
+ * - fast path(캐쉬친화)이므로 @target, @prev 가 idle이면 먼저 선택하고 그다음
+ *   recent_used_cpu, hmp, llc 순서로 idle cpu를 선택해서 반환한다.
  */
 static int select_idle_sibling(struct task_struct *p, int prev, int target)
 {
@@ -9088,6 +9126,7 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 	 * IAMROOT. 2023.06.10:
 	 * - google-translate
 	 * 이전 CPU가 캐시 아핀 및 유휴 상태인 경우 어리석지 마십시오.
+	 *
 	 * - @target 과 @prev가 cache 공유상태이고 @prev가 idle 이면서 capa를 만족하면
 	 *   @prev return
 	 */
@@ -9200,9 +9239,9 @@ static int select_idle_sibling(struct task_struct *p, int prev, int target)
 		 * 설정되지만 해당 cpuset 내의 CPU에는 SD_ASYM_CPUCAPACITY가 있는
 		 * 도메인이 없습니다. 이들은 일반적인 대칭 용량 경로를 따라야 합니다.
 		 *
-		 * 비대칭 구조인 cluster @sd 내에서 idle cpu를 대상으로 task_util의
-		 * capa가 적합하면 해당 cpu를 선택하고 적합한 cpu가 없으면 가장
-		 * capa 가 높은 idle cpu를 선택한다.
+		 * - 비대칭 구조인 cluster @sd 내에서 idle cpu를 대상으로
+		 *   task_util의 capa가 적합하면 해당 cpu를 선택하고 적합한
+		 *   cpu가 없으면 가장 capa 가 높은 idle cpu를 선택한다.
 		 */
 		if (sd) {
 			i = select_idle_capacity(p, sd, target);
@@ -13185,6 +13224,10 @@ static inline bool allow_numa_imbalance(int dst_running, int dst_weight)
  *
  * @return NULL local 선택. != NULL이면 local이 아닌 idlest group
  * - @group을 순회하며 @p를 제외한 통계값을 산출하여 idlest group을 찾는다.
+ *
+ * - @sd 내에 group들을 순회하며 @this_cpu가 속한 local group 과 그외의 그룹들중
+ *   가장 idle한 그룹을 비교하여 더 idle한 그룹을 반환한다. local이 더 idle 한 경우는
+ *   NULL 반환.
  */
 static struct sched_group *
 find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
