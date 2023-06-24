@@ -941,7 +941,7 @@ static void __enqueue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 
 /*
  * IAMROOT, 2023.01.28:
- * - cfs_rq에서 제거한다.
+ * - node(@se->run_node)를 rbtree(@cfs_rq->tasks_timeline)에서 제거
  */
 static void __dequeue_entity(struct cfs_rq *cfs_rq, struct sched_entity *se)
 {
@@ -4209,6 +4209,12 @@ account_entity_dequeue(struct cfs_rq *cfs_rq, struct sched_entity *se)
  * and is thus optimized for local variable updates.
  */
 /*
+ * IAMROOT. 2023.05.11:
+ * - google-translate
+ * 지역 변수에서 음수를 제거하고 고정합니다. 명시적 로드 저장소를 사용하지 않으므로
+ * 로컬 변수 업데이트에 최적화된 sub_positive()의 변형입니다.
+ */
+/*
  * IAMROOT, 2023.05.06:
  * - *_ptr = *_ptr - _val
  *   0보다 작아지면 *_ptr = 0
@@ -6109,6 +6115,9 @@ done:
  * IAMROOT, 2023.05.03:
  * - return uclamp_task_util(p) * 1.2 <= capacity
  * - uclamp_task_util에 20%의 가중치를 둔값이, capacity보다 큰지를 확인한다.
+ *
+ * IAMROOT, 2023.05.19:
+ * - @p가 cpu에서 curr로 선택된게 80% 이하인가?
  */
 static inline int task_fits_capacity(struct task_struct *p, long capacity)
 {
@@ -6537,7 +6546,7 @@ check_preempt_tick(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 /*
  * IAMROOT, 2023.01.28:
  * - 1. @se에 대한 buddy정보를 다 지운다.
- *   2. on_rq일시 cfs_rq에서 @se를 dequeue한다.
+ *   2. on_rq일시 rbtree에서 @se node 제거
  *   3. load avg재계산.
  *   4. @se를 curr로 선택한다.
  *   5. stats 및 debug처리.
@@ -11917,6 +11926,16 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	 */
 	env->flags &= ~LBF_ALL_PINNED;
 
+	/*
+	 * IAMROOT, 2023.05.15:
+	 * - 1. detach_tasks 에서 호출
+	 *      @p 중 하나가 on_cpu(curr) 가 될 수 있고 @가 on_cpu(curr)이면
+	 *      migration 할 수 없다.
+	 *   2. active balance 에서 호출
+	 *      on_cpu(curr)는 stop_thread 일 것이다. stop_thread 라면 위
+	 *      kthread_is_per_cpu 에서 걸러졌을 것이라 생각할 수 있지만 @p 가
+	 *      cfs_tasks 리스트 중 하나가 전달되었다
+	 */
 	if (task_running(env->src_rq, p)) {
 		schedstat_inc(p->se.statistics.nr_failed_migrations_running);
 		return 0;
@@ -12004,6 +12023,12 @@ static struct task_struct *detach_one_task(struct lb_env *env)
 	 */
 	list_for_each_entry_reverse(p,
 			&env->src_rq->cfs_tasks, se.group_node) {
+		/*
+		 * IAMROOT, 2023.05.18:
+		 * - task 가 하나인 경우는 can_migrate_task 를 하지 않았으므로
+		 *   여기서 확인한다. 또 중간에 cpu affinity 제한이 변경된 경우가
+		 *   있을지는 모르겠다.
+		 */
 		if (!can_migrate_task(p, env))
 			continue;
 
@@ -12115,12 +12140,18 @@ static int detach_tasks(struct lb_env *env)
 			 * scheduler fails to find a good waiting task to
 			 * migrate.
 			 */
+			/*
+			 * IAMROOT. 2023.05.12:
+			 * - google-translate
+			 * 너무 많은 부하를 마이그레이션하지 않도록 합니다. 그럼에도
+			 * 불구하고 스케줄러가 마이그레이션할 좋은 대기 작업을 찾는 데
+			 * 실패하면 제약 조건을 완화하십시오.
+			 */
 			if (shr_bound(load, env->sd->nr_balance_failed) > env->imbalance)
 				goto next;
 
 			env->imbalance -= load;
 			break;
-
 		case migrate_util:
 			util = task_util_est(p);
 
@@ -12161,6 +12192,11 @@ static int detach_tasks(struct lb_env *env)
 		/*
 		 * We only want to steal up to the prescribed amount of
 		 * load/util/tasks.
+		 */
+		/*
+		 * IAMROOT. 2023.05.12:
+		 * - google-translate
+		 * 우리는 load/util/tasks의 규정된 양까지만 훔치기를 원합니다.
 		 */
 		if (env->imbalance <= 0)
 			break;
@@ -12753,6 +12789,19 @@ void update_group_capacity(struct sched_domain *sd, int cpu)
  * IAMROOT, 2023.04.22:
  * - child group들을 합산하여 sgc에 넣는다.
  */
+		/*
+		 * IAMROOT. 2023.04.22:
+		 * - google-translate
+		 * !SD_OVERLAP 도메인은 하위 그룹이 현재 그룹에 걸쳐 있다고 가정할 수
+		 * 있습니다.
+		 * - numa가 아닌 경우 도메인 하위 그룹을 순회하며 capacity, min, max
+		 *   를 설정한다.
+		 *
+		 * IAMROOT, 2023.05.10:
+		 * - group 은 child->groups 이므로 첫번째 손자에 해당한다. 손자의
+		 *   capacity sum, min, max 등을 구해 아들(sdg) 통계에 업데이트하는
+		 *   개념.
+		 */
 		group = child->groups;
 		do {
 			struct sched_group_capacity *sgc = group->sgc;
@@ -12965,6 +13014,11 @@ group_is_overloaded(unsigned int imbalance_pct, struct sg_lb_stats *sgs)
  * IAMROOT, 2023.05.06:
  * - group runnable이 group cap을 넘은 경우 return true.
  */
+	/*
+	 * IAMROOT, 2023.05.10:
+	 * - XXX group_util 과 group_runnable 에서 imbalance_pct 를 cross
+	 *   로 곱하는 이유는?
+	 */
 	if ((sgs->group_capacity * imbalance_pct) <
 			(sgs->group_runnable * 100))
 		return true;
@@ -13148,6 +13202,12 @@ static inline void update_sg_lb_stats(struct lb_env *env,
  *  3. group_type이 높은게 우선 순위가 높다. 
  *  4. group_type이 같은 경우 group_type에 따른 비교를 한다.
  *  5. asym일 경우 cap이 높은 경우가 우선시된다.
+ *
+ * IAMROOT, 2023.05.11:
+ * - @sg 의 stat(@sgs)를 @sds와 비교해서 @sg가 더 빠르다면 update 하라는 의미로
+ *   true를 반환한다.
+ * - @sds에 현재 설정된 busiest stats와 @sg에 설정된 stats(@sgs)를 비교하여
+ *   현재 루프의 @sg가 더 바쁘다고(busiest) 판단되면 true를 리턴한다.
  */
 static bool update_sd_pick_busiest(struct lb_env *env,
 				   struct sd_lb_stats *sds,
@@ -13187,6 +13247,9 @@ static bool update_sd_pick_busiest(struct lb_env *env,
 /*
  * IAMROOT, 2023.05.06:
  * - group_type으로 우선순위를 먼저 판별한다.
+ * - 맨처음 진입할 땐 init_sd_lb_stats 에서 설정된 group_has_spare 가
+ *   busiest->group_type 이다. 후에 group_has_spare 보다 더 바쁜 그룹이 있으면
+ *   계속 루프에서 업데이트 된다.
  */
 	if (sgs->group_type > busiest->group_type)
 		return true;
@@ -13316,6 +13379,9 @@ static bool update_sd_pick_busiest(struct lb_env *env,
  * IAMROOT, 2023.05.06:
  * - fbq_type을 판별해 return 한다. 
  *   group 기준으로 판별한다.
+ *
+ * IAMROOT, 2023.05.11:
+ * - XXX regular, remote가 무엇을 뜻하는지 모르겠다.
  */
 static inline enum fbq_type fbq_classify_group(struct sg_lb_stats *sgs)
 {
@@ -13954,6 +14020,10 @@ next_group:
  * - imbalance를 그대로 사용할지 여부를 정한다. dest에 cpu대비 running이 이미 
  *   많을때 imbalance값이 적다면 그냥 0 return.
  *   아닌 경우 그대로 imbalance 사용
+ *
+ * IAMROOT, 2023.05.11:
+ * - dst의 running task 가 cpu 갯수의 25% 미만이고 @imbalnce 값이 1 이나 2
+ *   이면 0 으로 조정한다.
  */
 static inline long adjust_numa_imbalance(int imbalance,
 				int dst_running, int dst_weight)
@@ -14058,6 +14128,16 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
  * - local이 놀고있는 경우 busiest->group_type > group_fully_busy(실질적으로 overload)
  *   이면서 SD_SHARE_PKG_RESOURCES를 가지지 않은 경우(numa or die)
  */
+	/*
+	 * IAMROOT, 2023.05.11:
+	 * - 남은 busiest->group_type
+	 *   group_has_spare
+	 *   group_fully_busy,
+	 *   [x]group_misfit_task,
+	 *   [x]group_asym_packing,
+	 *   [x]group_imbalanced,
+	 *   group_overloaded
+	 */
 	if (local->group_type == group_has_spare) {
 		if ((busiest->group_type > group_fully_busy) &&
 		    !(env->sd->flags & SD_SHARE_PKG_RESOURCES)) {
@@ -14165,6 +14245,16 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
  * - local이 overload이하인경우, local avg_load, sds avg_load를 계산을 한다.
  *   그 후 local이 busiest보다 바쁘다면 imbalance는 0으로 하고 return.
  */
+	/*
+	 * IAMROOT, 2023.05.11:
+	 * - 아래 조건으로 중간 단계 type의 local group 들만 적용됨
+	 *   [x]group_has_spare
+	 *   group_fully_busy,
+	 *   group_misfit_task,
+	 *   group_asym_packing,
+	 *   group_imbalanced,
+	 *   [x]group_overloaded
+	 */
 	if (local->group_type < group_overloaded) {
 		/*
 		 * Local will become overloaded so the avg_load metrics are
@@ -14184,6 +14274,10 @@ static inline void calculate_imbalance(struct lb_env *env, struct sd_lb_stats *s
  * IAMROOT, 2023.05.06:
  * - local 평균이 더 바쁘면 balance 하지 않는다.
  */
+		/*
+		 * IAMROOT, 2023.05.11:
+		 * - balancing 하지 않을 것이므로 migration_type을 지정하지 않는다.
+		 */
 		if (local->avg_load >= busiest->avg_load) {
 			env->imbalance = 0;
 			return;
@@ -14594,6 +14688,9 @@ static struct rq *find_busiest_queue(struct lb_env *env,
  *   두 경우 모두 전체 수렴 복잡성에만 영향을 미칩니다.
  *
  * - 해당 cpu의 fbq_type이 group fbq_type보다 좋은경우 continue
+ * - numa의 경우 busiset 그룹에 preferred node 나 아닌 곳에서 동작하는 cpu가 있다면
+ *   그 cpu를 먼저 pull 해오기 위해 preferred node 에서 동작하는 cpu는 건너 뛴다.
+ *   또 numa node가 아닌 곳에서 동작하는 cpu가 있을 때도 위와 같이 적용한다.
  */
 		if (rt > env->fbq_type)
 			continue;
@@ -14753,6 +14850,11 @@ static struct rq *find_busiest_queue(struct lb_env *env,
  * Max backoff if we encounter pinned tasks. Pretty arbitrary value, but
  * so long as it is large enough.
  */
+/*
+ * IAMROOT. 2023.05.15:
+ * - google-translate
+ * 고정된 작업이 발생하는 경우 최대 백오프. 꽤 임의의 값이지만 충분히 크면 됩니다.
+ */
 #define MAX_PINNED_INTERVAL	512
 
 /*
@@ -14876,8 +14978,8 @@ static int should_we_balance(struct lb_env *env)
 /*
  * IAMROOT, 2023.05.06:
  * - papago
- *   밸런싱 환경이 일관성이 있는지 확인합니다. 
- *   softirq가 핫플러그 'during'을 트리거할 
+ *   밸런싱 환경이 일관성이 있는지 확인합니다.
+ *   softirq가 핫플러그 'during'을 트리거할
  *   때 발생할 수 있습니다.
  */
 	if (!cpumask_test_cpu(env->dst_cpu, env->cpus))
@@ -14890,7 +14992,7 @@ static int should_we_balance(struct lb_env *env)
 /*
  * IAMROOT, 2023.05.06:
  * - papago
- *   새로 유휴 상태인 경우 모든 CPU가 새로 유휴 로드 밸런싱을 
+ *   새로 유휴 상태인 경우 모든 CPU가 새로 유휴 로드 밸런싱을
  *   수행하도록 허용합니다.
  */
 	if (env->idle == CPU_NEWLY_IDLE)
@@ -14923,11 +15025,16 @@ static int should_we_balance(struct lb_env *env)
  * tasks if there is an imbalance.
  */
 /*
- * IAMROOT. 2023.05.13:
+ * IAMROOT. 2023.05.11:
  * - google-translate
  * this_cpu를 확인하여 도메인 내에서 균형이 맞는지 확인하십시오. 불균형이 있는 경우
  * 작업 이동을 시도합니다.
- * - ING
+ *
+ * - rebalance_domains 에서 호출되었을 때 인자
+ *   @this_cpu: softirq를 처리하는 cpu
+ *   @this_rq: @this_cpu의 rq
+ *   @sd: @this_cpu의 최하위 domain 부터 최상위 까지 loop
+ *   @idle: CPU_IDLE 또는 CPU_NOT_IDLE
  */
 static int load_balance(int this_cpu, struct rq *this_rq,
 			struct sched_domain *sd, enum cpu_idle_type idle,
@@ -14940,6 +15047,14 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 	struct rq_flags rf;
 	struct cpumask *cpus = this_cpu_cpumask_var_ptr(load_balance_mask);
 
+	/*
+	 * IAMROOT, 2023.05.11:
+	 * - .sd: dst_cpu의 최하위 domain 부터 최상위 까지 loop
+	 *   .dst_cpu: softirq를 처리하는 cpu
+	 *   .dst_rq: dst_cpu의 rq
+	 *   .dst_grpmask: sd 의 첫번째 그룹
+	 *   .cpus: 아래에서 domain_span & active_mask
+	 */
 	struct lb_env env = {
 		.sd		= sd,
 		.dst_cpu	= this_cpu,
@@ -14963,7 +15078,7 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 redo:
 /*
  * IAMROOT, 2023.05.06:
- * - @idle이 CPU_NEWLY_IDLE가 아니였다면, balance cpu중에 
+ * - @idle이 CPU_NEWLY_IDLE가 아니였다면, balance cpu중에
  *   dest cpu가 있는지 확인한다. 없다면 out_balanced.
  */
 	if (!should_we_balance(&env)) {
@@ -15107,9 +15222,7 @@ more_balance:
 		 * given_cpu로 이동하도록 결정) 과도한 로드가 given_cpu로 이동되도록
 		 * 합니다. 그러나 이것은 실제로 그렇게 많이 발생하지 않아야 하며, 또한
 		 * 후속 로드 균형 주기는 이동된 초과 로드를 수정해야 합니다.
-		 */
-		/*
-		 * IAMROOT, 2023.05.13:
+		 *
 		 * - dst_cpu 가 available 하지 않아 new_dst_cpu로 교체해서
 		 *   재시도
 		 * - dst를 범위에서 지운후 new_dst_cpu로 교체한다.
@@ -15130,6 +15243,12 @@ more_balance:
 			/*
 			 * Go back to "more_balance" rather than "redo" since we
 			 * need to continue with same src_cpu.
+			 */
+			/*
+			 * IAMROOT. 2023.05.12:
+			 * - google-translate
+			 * 동일한 src_cpu로 계속해야 하므로 "redo"가 아닌
+			 * "more_balance"로 돌아갑니다.
 			 */
 			goto more_balance;
 		}
@@ -15176,6 +15295,11 @@ more_balance:
 			 * 로드를 끌어올 수 있는 가장 바쁜 CPU로 남아 있는 활성
 			 * CPU가 있는 경우에만 의미가 있습니다.
 			 * - dst_grpmask에 없는 cpus 가 아직 있으니 재시도 한다.
+			 *
+			 * IAMROOT. 2023.05.09:
+			 * - cpus 가 domain span 이므로 당연히 sd->groups 의 subset
+			 *   이 아니지만 위에서 계속 clear 된다면 subset 이 될 수도
+			 *   있다.
 			 */
 			if (!cpumask_subset(cpus, env.dst_grpmask)) {
 				env.loop = 0;
@@ -15186,6 +15310,13 @@ more_balance:
 		}
 	}
 
+	/*
+	 * IAMROOT, 2023.05.18:
+	 * - 1. busiest rq에 nr_running 이 1 이하 이거나
+	 *   2. 2이상이지만 하나도 옮기지 못한 경우
+	 *   아래로 진입한다.
+	 *   2의 경우는 detach_tasks 에서 사용한 list와 같을 것이다
+	 */
 	if (!ld_moved) {
 		schedstat_inc(sd->lb_failed[idle]);
 		/*
@@ -15204,6 +15335,10 @@ more_balance:
 		if (idle != CPU_NEWLY_IDLE)
 			sd->nr_balance_failed++;
 
+		/*
+		 * IAMROOT, 2023.05.13:
+		 * - active balance 의 src는 busiest의 curr이다.
+		 */
 		if (need_active_balance(&env)) {
 			unsigned long flags;
 
@@ -15272,6 +15407,18 @@ more_balance:
  * - lb_moved의 유무에 상관없이 active_balance를 안했거나, active_balance가
  *   필요한 상황이면 unbalanced라고 판단해 min interval로 고친다.
  */
+	/*
+	 * IAMROOT, 2023.05.16:
+	 * - 아래 경우는 min_interval로 지정하여 빠르게 재시도 하도록 한다.
+	 *   1. active_balance 가 0 인 경우
+	 *      1. ld_moved 가 0이 아닌 경우, 즉 pull 에서 하나이상 옮긴 경우
+	 *      2. need_active_balance 가 0 인 경우. 즉 active_balance
+	 *         조건에 해당하지 않는 경우
+	 *   2. active_balance 가 1 인 경우
+	 *      1. need_active_balance 가 1인 경우. 즉 active_balance를
+	 *         실행했지만 아직 active_balance 조건인 경우. push migration에
+	 *         실패 한 경우(검증 필요)
+	 */
 	if (likely(!active_balance) || need_active_balance(&env)) {
 		/* We were unbalanced, so reset the balancing interval */
 		/*
@@ -15468,6 +15615,10 @@ static int active_load_balance_cpu_stop(void *data)
 		goto out_unlock;
 
 	/* Is there any task to move? */
+	/*
+	 * IAMROOT, 2023.05.18:
+	 * - active balance 이므로 stopper 외에 다른 task 가 있어야 한다.
+	 */
 	if (busiest_rq->nr_running <= 1)
 		goto out_unlock;
 
@@ -15827,6 +15978,11 @@ static void kick_ilb(unsigned int flags)
  *      있는 경우
  *      4. @rq cpu가 sd_asym_cpucapacity에 있는 상황에서,
  *         @rq에 misfit load가 있고, 더 좋은 cpu로 옮길수 있는 경우
+ *
+ * IAMROOT. 2023.05.20:
+ * - google-translate
+ * 시스템에 유휴 CPU가 있는 경우 유휴 로드 밸런서를 제거하기 위한 현재 결정
+ * 지점입니다.
  */
 static void nohz_balancer_kick(struct rq *rq)
 {
