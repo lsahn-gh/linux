@@ -1610,7 +1610,7 @@ static inline unsigned long group_faults_shared(struct numa_group *ng);
 
 /*
  * IAMROOT, 2023.06.17:
- * - @p의 rss에 대한 numa scan 개수를 return 한다.
+ * - @p의 rss에 대한 numa scan 갯수를 return 한다.
  * - 한번에 scan할 scan pages를 구하고, 이걸로 몇번 돌려야 rss를 스캔할지를
  *   계산해낸다.
  */
@@ -1674,6 +1674,16 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
  * - task rss가 충분히 클경우
  *   task = 5120MB -> scan = 1000 / 20 = 50ms. -> max(50, 100)
  *   제한인 100ms보다 작으므로 너무 자주 scan하는 상황이 된다. 제한인 100ms로 제한한다.
+ *
+ * IAMROOT, 2023.06.23:
+ * - @p의 rss 크기 만큼을 256MB씩 scan 하고 총 소요시간이 1초(...period_min) 라고
+ *   했을때 한번 scan 에 사용할 수 있는 최소 주기.
+ *   단 rss 가 2560MB를 초과 하면 2560MB 에 해당하는 주기(100ms) 사용.
+ *                                                               floor
+ *               |----|----|----|----|----|----|----|----|----|----|----|----|
+ * - rss크기(MB): 0   256  512  768 1024 1280 1536 1792 2048 2304 2560 2816 3072
+ *   scan횟수:      1    2    3    4    5    6    7    8    9    10   11   12
+ *   scan(ms):    1000  500  333  250  200  166  143  125  111  100  100  100
  */
 static unsigned int task_scan_min(struct task_struct *p)
 {
@@ -1713,6 +1723,10 @@ static unsigned int task_scan_min(struct task_struct *p)
 	return max_t(unsigned int, floor, scan);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - task_scan_min 값 기준으로 설정하고 refcount 가 클수록 상향 조정된다.
+ */
 static unsigned int task_scan_start(struct task_struct *p)
 {
 	unsigned long smin = task_scan_min(p);
@@ -1755,6 +1769,13 @@ static unsigned int task_scan_max(struct task_struct *p)
  * - task = 5120MB -> scan = 1000 / 20 = 50ms. -> max(50, 100)
  *   min = 100ms, max = 3000ms
  */
+	/*
+	 * IAMROOT, 2023.06.23:
+	 * - rss 전체를 스캔하는 시간을 60초(...period_max)라 보고 256MB 크기 단위로
+	 *   스캔했을때 한번 scan 간격.
+	 * - ex. rss 크기가 2560MB 라면 task_nr_scan_windows = 10
+	 *   60000 / 10 = 6000(ms) = 6(sec)
+	 */
 	smax = sysctl_numa_balancing_scan_period_max / task_nr_scan_windows(p);
 
 	/* Scale the maximum scan period with the amount of shared memory. */
@@ -1775,6 +1796,13 @@ static unsigned int task_scan_max(struct task_struct *p)
  * - ex) shared = 10%, ref = 10개라면 10 * 10 = 100% 해서 priv와 동등해지는 개념(변함없음)
  *       shared = 20%, ref = 10개라면 10 * 20 = 200% 해서 priv 보다 2배가 될수있는 개념
  */
+		/*
+		 * IAMROOT, 2023.06.23:
+		 * - refcount 를 shared에 곱한 값이 shared에 private를 더한 값보다
+		 *   크게 되면 smax 값이 상향 조정된다. 즉 shared thread가 많으면
+		 *   refcount가 커져서 원래 smax 값보다 크게 조정한다. 하지만 원래값
+		 *   보다 작은 경우에는 원래값을 유지한다.
+		 */
 		period *= refcount_read(&ng->refcount);
 		period *= shared + 1;
 		period /= private + shared + 1;
@@ -1782,6 +1810,10 @@ static unsigned int task_scan_max(struct task_struct *p)
 		smax = max(smax, period);
 	}
 
+	/*
+	 * IAMROOT, 2023.06.23:
+	 * - rss 값이 매우 큰 경우(256MB * 60 보다 클 때)는 smin 보다 작아 질 수 있다
+	 */
 	return max(smin, smax);
 }
 
@@ -1851,12 +1883,21 @@ pid_t task_numa_group_id(struct task_struct *p)
  *   
  * @priv 1이면 priv, 0이면 shared
  * - @s, @nid, @priv에 대한 idx를 계산한다.
+ *
+ * IAMROOT, 2023.06.22:
+ * - 각각의 numa 노드에 대해 faults_stats(mem,cpu,membuf,cpubuf)별
+ *   fault_type(priv,shared)별 index를 반환.
+ *   node가 4개이면 총 32(4*4*2)개 index 가 있다.
  */
 static inline int task_faults_idx(enum numa_faults_stats s, int nid, int priv)
 {
 	return NR_NUMA_HINT_FAULT_TYPES * (s * nr_node_ids + nid) + priv;
 }
 
+/*
+ * IAMROOT, 2023.06.22:
+ * - Return: @nid에 대한 NUMA_MEM stats의 shared와 private type faults 합
+ */
 static inline unsigned long task_faults(struct task_struct *p, int nid)
 {
 	if (!p->numa_faults)
@@ -1869,6 +1910,10 @@ static inline unsigned long task_faults(struct task_struct *p, int nid)
 /*
  * IAMROOT, 2023.06.24:
  * - @group에 대한 @nid의 전체 memory node fault값(private + shared fault)
+ * IAMROOT, 2023.06.22:
+ * - Return: task(@p) 의 numa_group faults 배열값들을 더해서 반환.
+ *   더하는 값들은 numa node id(@nid)에 대해 stats가 NUMA_MEM 인 각각의
+ *   fault type(priv,shared)의 index에 해당하는 faults를 더한 값
  */
 static inline unsigned long group_faults(struct task_struct *p, int nid)
 {
@@ -1950,6 +1995,14 @@ static bool numa_is_active_node(int nid, struct numa_group *ng)
 }
 
 /* Handle placement on systems where not all nodes are directly connected. */
+/*
+ * IAMROOT. 2023.06.22:
+ * - google-translate
+ * 모든 노드가 직접 연결되지 않은 시스템에서 배치를 처리합니다.
+ *
+ * - Return: 각 online node에 대하여 task @p(또는 @p가 속한 그룹)에 대한 faults 값에
+ *           dist 비율(@nid와 가까운 노드 일수록 높은 비율)을 적용하여 모두 더한 score.
+ */
 static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 					int maxdist, bool task)
 {
@@ -1960,12 +2013,27 @@ static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 	 * All nodes are directly connected, and the same distance
 	 * from each other. No need for fancy placement algorithms.
 	 */
+	/*
+	 * IAMROOT. 2023.06.22:
+	 * - google-translate
+	 * 모든 노드는 직접 연결되어 있으며 서로 같은 거리에 있습니다. 멋진 배치 알고리즘이
+	 * 필요하지 않습니다.
+	 */
 	if (sched_numa_topology_type == NUMA_DIRECT)
 		return 0;
 
 	/*
 	 * This code is called for each node, introducing N^2 complexity,
 	 * which should be ok given the number of nodes rarely exceeds 8.
+	 */
+	/*
+	 * IAMROOT. 2023.06.22:
+	 * - google-translate
+	 * 이 코드는 각 노드에 대해 호출되며 N^2 복잡성을 도입하며 노드 수가 8을 거의
+	 * 초과하지 않는 경우 괜찮을 것입니다.
+	 *
+	 * - 각 online node에 대하여 task @p(또는 @p가 속한 그룹)에 대한 faults 값에
+	 *   dist 비율(@nid와 가까운 노드 일수록 높은 비율)을 적용하여 모두 더한다.
 	 */
 	for_each_online_node(node) {
 		unsigned long faults;
@@ -1974,6 +2042,14 @@ static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 		/*
 		 * The furthest away nodes in the system are not interesting
 		 * for placement; nid was already counted.
+		 */
+		/*
+		 * IAMROOT. 2023.06.22:
+		 * - google-translate
+		 * 시스템에서 가장 멀리 떨어진 노드는 배치에 관심이 없습니다. nid는 이미
+		 * 계산되었습니다.
+		 *
+		 * - local node와 가장 먼 node는 제외
 		 */
 		if (dist == sched_max_numa_distance || node == nid)
 			continue;
@@ -1984,6 +2060,14 @@ static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 		 * memory accesses. When comparing two nodes at distance
 		 * "hoplimit", only nodes closer by than "hoplimit" are part
 		 * of each group. Skip other nodes.
+		 */
+		/*
+		 * IAMROOT. 2023.06.22:
+		 * - google-translate
+		 * 백플레인 NUMA 토폴로지가 있는 시스템에서 노드 그룹을 비교하고 메모리
+		 * 액세스가 가장 많은 그룹으로 작업을 이동합니다. "hoplimit" 거리에 있는
+		 * 두 노드를 비교할 때 "hoplimit"보다 가까운 노드만 각 그룹의
+		 * 일부입니다. 다른 노드를 건너뜁니다.
 		 */
 		if (sched_numa_topology_type == NUMA_BACKPLANE &&
 					dist >= maxdist)
@@ -2002,6 +2086,17 @@ static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 		 * nodes; a numa_group can occupy any set of nodes.
 		 * The further away a node is, the less the faults count.
 		 * This seems to result in good task placement.
+		 */
+		/*
+		 * IAMROOT. 2023.06.22:
+		 * - google-translate
+		 * glueless mesh NUMA 토폴로지가 있는 시스템에는 고정된 "노드 그룹"이
+		 * 없습니다. 대신 직접 연결되지 않은 노드는 중간 노드를 통해 트래픽을
+		 * 바운스합니다. numa_group은 모든 노드 집합을 차지할 수 있습니다.
+		 * 노드가 멀리 떨어져 있을수록 오류 수가 적습니다. 이것은 좋은 작업
+		 * 배치를 초래하는 것 같습니다.
+		 *
+		 * - @nid에 가까운 노드 일수록 faults 반영 비율이 높다.
 		 */
 		if (sched_numa_topology_type == NUMA_GLUELESS_MESH) {
 			faults *= (sched_max_numa_distance - dist);
@@ -2834,6 +2929,13 @@ static void numa_migrate_preferred(struct task_struct *p)
  * be different from the set of nodes where the workload's memory is currently
  * located.
  */
+/*
+ * IAMROOT. 2023.06.24:
+ * - google-translate
+ * 워크로드에서 활발하게 실행 중인 노드 수를 확인합니다. NUMA 힌트 결함이
+ * 트리거되는 노드를 추적하여 이를 수행하십시오. 이는 워크로드의 메모리가 현재
+ * 위치한 노드 집합과 다를 수 있습니다.
+ */
 static void numa_group_count_active_nodes(struct numa_group *numa_group)
 {
 	unsigned long faults, max_faults = 0;
@@ -2871,6 +2973,13 @@ static void numa_group_count_active_nodes(struct numa_group *numa_group)
  * the page accesses are shared with other processes.
  * Otherwise, decrease the scan period.
  */
+/*
+ * IAMROOT. 2023.06.24:
+ * - google-translate
+ * 대부분의 메모리가 이미 로컬 노드에 있거나 대부분의 페이지 액세스가 다른
+ * 프로세스와 공유되는 경우 스캔 기간을 늘립니다(스캔 속도 저하). 그렇지 않으면
+ * 스캔 기간을 줄이십시오.
+ */
 static void update_task_scan_period(struct task_struct *p,
 			unsigned long shared, unsigned long private)
 {
@@ -2887,6 +2996,14 @@ static void update_task_scan_period(struct task_struct *p,
 	 * to automatic numa balancing. Related to that, if there were failed
 	 * migration then it implies we are migrating too quickly or the local
 	 * node is overloaded. In either case, scan slower
+	 */
+	/*
+	 * IAMROOT. 2023.06.24:
+	 * - google-translate
+	 * 레코드 암시 오류가 없는 경우 작업이 완전히 유휴 상태이거나 모든 활동이 자동 누마
+	 * 밸런싱에 관심이 없는 영역입니다. 이와 관련하여 마이그레이션에 실패한 경우
+	 * 마이그레이션이 너무 빠르거나 로컬 노드에 과부하가 걸린 것입니다. 두 경우 모두 더
+	 * 느리게 스캔
 	 */
 	if (local + shared == 0 || p->numa_faults_locality[2]) {
 		p->numa_scan_period = min(p->numa_scan_period_max,
@@ -2913,7 +3030,7 @@ static void update_task_scan_period(struct task_struct *p,
 		 * Most memory accesses are local. There is no need to
 		 * do fast NUMA scanning, since memory is already local.
 		 */
-		int slot = ps_ratio - NUMA_PERIOD_THRESHOLD;
+		int slot = ps_ratio - NUMA_PERIOD_THRESHOLD; /*  */
 		if (!slot)
 			slot = 1;
 		diff = slot * period_slot;
@@ -2949,6 +3066,14 @@ static void update_task_scan_period(struct task_struct *p,
  * from the dozens-of-seconds NUMA balancing period. Use the scheduler
  * stats only if the task is so new there are no NUMA statistics yet.
  */
+/*
+ * IAMROOT. 2023.06.21:
+ * - google-translate
+ * 마지막 NUMA 배치 주기 이후 작업이 실행된 시간의 일부를 가져옵니다. 스케줄러는
+ * 유사한 통계를 유지하지만 수십 초의 NUMA 밸런싱 기간에서 훨씬 벗어난 32ms 기간의
+ * 통계를 감소시킵니다. 작업이 너무 새로운 경우에만 스케줄러 통계를 사용하여 아직
+ * NUMA 통계가 없습니다.
+ */
 static u64 numa_get_avg_runtime(struct task_struct *p, u64 *period)
 {
 	u64 runtime, delta, now;
@@ -2978,6 +3103,13 @@ static u64 numa_get_avg_runtime(struct task_struct *p, u64 *period)
  * Determine the preferred nid for a task in a numa_group. This needs to
  * be done in a way that produces consistent results with group_weight,
  * otherwise workloads might not converge.
+ */
+/*
+ * IAMROOT. 2023.06.24:
+ * - google-translate
+ * numa_group의 작업에 대해 선호하는 nid를 결정합니다. 이는 group_weight와 일관된
+ * 결과를 생성하는 방식으로 수행되어야 합니다. 그렇지 않으면 워크로드가 수렴되지
+ * 않을 수 있습니다.
  */
 static int preferred_group_nid(struct task_struct *p, int nid)
 {
@@ -3630,12 +3762,20 @@ static void task_numa_work(struct callback_head *work)
  * - 그전에 마지막으로 했던 offset.
  */
 	start = mm->numa_scan_offset;
+	/*
+	 * IAMROOT, 2023.06.24:
+	 * - 2^8(256) * 2^8 * 2^12(page size) = 2^28 = 256MB
+	 */
 	pages = sysctl_numa_balancing_scan_size;
 	pages <<= 20 - PAGE_SHIFT; /* MB in pages */
 /*
  * IAMROOT, 2023.06.17:
  * - virt page는 scan용량의 8배
  */
+	/*
+	 * IAMROOT, 2023.06.24:
+	 * - 2^28 * 2^3 = 2^31 = 2G
+	 */
 	virtpages = pages * 8;	   /* Scan up to this much virtual space */
 	if (!pages)
 		return;
@@ -3858,6 +3998,11 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
  *
  * - thread이면 node scan시각을 max대비 계산된 시간 + 2틱여유를 둬서 정한다.
  */
+	/*
+	 * IAMROOT, 2023.06.23:
+	 * - XXX task_scan_max의 반환값은 ms 단위인데 ns 단위와 비교하고 있다.
+	 *   실제로 delay는 nsec 단위로 보인다
+	 */
 	if (mm) {
 		unsigned int delay;
 
@@ -13502,6 +13647,10 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p, int this_cpu)
  * IAMROOT, 2023.06.17:
  * - local상황이 아닌 경우, idlest를 갱신한다.
  */
+		/*
+		 * IAMROOT, 2023.06.15:
+		 * - local_group이 아닌 group 들중 가장 idle한 group을 찾는다.
+		 */
 		if (!local_group && update_pick_idlest(idlest, &idlest_sgs, group, sgs)) {
 			idlest = group;
 			idlest_sgs = *sgs;
