@@ -149,6 +149,11 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 	 pte_index((address)))
 #define pte_unmap(pte) kunmap_atomic((pte))
 #else
+/*
+ * IAMROOT, 2023.06.24:
+ * - 64bit
+ *   address에 해당하는 pte page table entry주소를 가져온다.
+ */
 #define pte_offset_map(dir, address)	pte_offset_kernel((dir), (address))
 #define pte_unmap(pte) ((void)(pte))	/* NOP */
 #endif
@@ -975,6 +980,10 @@ static inline pte_t __ptep_modify_prot_start(struct vm_area_struct *vma,
 	return ptep_get_and_clear(vma->vm_mm, addr, ptep);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - pte entry(@ptep)에 @pte값을 기록한다.
+ */
 static inline void __ptep_modify_prot_commit(struct vm_area_struct *vma,
 					     unsigned long addr,
 					     pte_t *ptep, pte_t pte)
@@ -1033,6 +1042,13 @@ static inline pte_t ptep_modify_prot_start(struct vm_area_struct *vma,
 /*
  * Commit an update to a pte, leaving any hardware-controlled bits in
  * the PTE unmodified.
+ */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   PTE에 대한 업데이트를 커밋하고 PTE의 모든 하드웨어 제어 비트를 수정하지
+ *   않은 상태로 둡니다.
+ * - pte entry(@ptep)에 @pte값을 기록한다.
  */
 static inline void ptep_modify_prot_commit(struct vm_area_struct *vma,
 					   unsigned long addr,
@@ -1114,6 +1130,22 @@ static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
  * the page table locks for all page tables which may be modified.  In the UP
  * case, this is required so that preemption is disabled, and in the SMP case,
  * it must synchronize the delayed page table writes properly on other CPUs.
+ */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   lazy MMU 일괄 처리를 제공하는 기능입니다. 이렇게 하면 lazy MMU 모드를 
+ *   종료하라는 호출이 발행될 때까지 PTE 업데이트 및 페이지 무효화를 지연할 수 
+ *   있습니다. 일부 아키텍처는 이 작업을 통해 이점을 얻을 수 있으며 이 기간 동안 
+ *   발생하는 PTE 업데이트를 일괄 처리할 수 있는 섀도우 및 dirty mode hypervisor 
+ *   모두에 유용합니다. 이 인터페이스를 사용하려면 코드에서 읽기 위험을 제거해야 
+ *   합니다. 읽기 위험은 페이지 테이블에 대한 실제 쓰기가 아직 발생하지 않았을 수
+ *   있으므로 수정된 후 원시 PTE 포인터를 통한 읽기가 최신 상태임을 보장하지 않기
+ *   때문에 dirty mode hypervisor 사례에서 발생할 수 있습니다. 이 모드는 수정될
+ *   수 있는 모든 페이지 테이블에 대한 페이지 테이블 잠금의 보호 하에서만 들어갈
+ *   수 있고 남을 수 있습니다. UP의 경우 선점을 비활성화하기 위해 필요하며,
+ *   SMP의 경우 다른 CPU에서 지연된 페이지 테이블 쓰기를 적절하게 동기화해야 합니다.
+ * - sparc, x86, powerpc
  */
 #ifndef __HAVE_ARCH_ENTER_LAZY_MMU_MODE
 #define arch_enter_lazy_mmu_mode()	do {} while (0)

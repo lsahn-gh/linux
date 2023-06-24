@@ -591,6 +591,10 @@ struct vm_fault {
 					 * the 'address'
 					 */
 	union {
+/*
+ * IAMROOT, 2023.06.24:
+ * - fault 당시의 pte, pmd entry value
+ */
 		pte_t orig_pte;		/* Value of PTE at the time of fault */
 		pmd_t orig_pmd;		/* Value of PMD at the time of fault,
 					 * used by PMD fault only.
@@ -1632,6 +1636,10 @@ static inline int page_to_nid(const struct page *page)
 #endif
 
 #ifdef CONFIG_NUMA_BALANCING
+/*
+ * IAMROOT, 2023.06.24:
+ * - cpuid 생성
+ */
 static inline int cpu_pid_to_cpupid(int cpu, int pid)
 {
 	return ((cpu & LAST__CPU_MASK) << LAST__PID_SHIFT) | (pid & LAST__PID_MASK);
@@ -1652,6 +1660,10 @@ static inline int cpupid_to_nid(int cpupid)
 	return cpu_to_node(cpupid_to_cpu(cpupid));
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @cpupid가 아직 unset인지 확인한다.
+ */
 static inline bool cpupid_pid_unset(int cpupid)
 {
 	return cpupid_to_pid(cpupid) == (-1 & LAST__PID_MASK);
@@ -1662,11 +1674,19 @@ static inline bool cpupid_cpu_unset(int cpupid)
 	return cpupid_to_cpu(cpupid) == (-1 & LAST__CPU_MASK);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @task_pid 와 cpupid에서 각각 pid를 추출해 비교한다.
+ */
 static inline bool __cpupid_match_pid(pid_t task_pid, int cpupid)
 {
 	return (task_pid & LAST__PID_MASK) == cpupid_to_pid(cpupid);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @task_pid 와 cpupid에서 각각 pid를 추출해 비교한다.
+ */
 #define cpupid_match_pid(task, cpupid) __cpupid_match_pid(task->pid, cpupid)
 /*
  * IAMROOT, 2021.12.11:
@@ -2164,6 +2184,13 @@ extern unsigned long move_page_tables(struct vm_area_struct *vma,
  * that we can pass in multiple flags just like parameters.  However
  * for now all the callers are only use one of the flags at the same
  * time.
+ */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *  change_protection()에서 사용하는 플래그입니다. 지금은 매개변수처럼
+ *  여러 플래그를 전달할 수 있도록 비트맵으로 만듭니다. 그러나 지금은
+ *  모든 호출자가 동시에 플래그 중 하나만 사용합니다.
  */
 /* Whether we should allow dirty bit accounting */
 #define  MM_CP_DIRTY_ACCT                  (1UL << 0)

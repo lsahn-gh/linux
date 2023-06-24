@@ -340,6 +340,11 @@ struct page {
 #endif /* WANT_PAGE_VIRTUAL */
 
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
+/*
+ * IAMROOT, 2023.06.24:
+ * - page를 마지막으로 썻던 cpu + pid
+ * - 초기값 / reset = -1 & LAST_CPUPID_MASK
+ */
 	int _last_cpupid;
 #endif
 } _struct_page_alignment;

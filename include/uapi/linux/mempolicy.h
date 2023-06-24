@@ -82,6 +82,10 @@ enum {
  */
 #define MPOL_F_SHARED  (1 << 0)	/* identify shared policies */
 #define MPOL_F_MOF	(1 << 3) /* this policy wants migrate on fault */
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa balaning에서 사용하는 flag
+ */
 #define MPOL_F_MORON	(1 << 4) /* Migrate On protnone Reference On Node */
 
 /*

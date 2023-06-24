@@ -95,6 +95,10 @@ void lruvec_init(struct lruvec *lruvec)
 }
 
 #if defined(CONFIG_NUMA_BALANCING) && !defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS)
+/*
+ * IAMROOT, 2023.06.24:
+ * - @cpupid로 교체하면서 oldcpuid를 가져온다.
+ */
 int page_cpupid_xchg_last(struct page *page, int cpupid)
 {
 	unsigned long old_flags, flags;

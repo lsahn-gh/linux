@@ -9,6 +9,11 @@
 
 #include <linux/sched.h>
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - TNF(task numa fault)
+ *   TNF_NO_GROUP : rdonly에서는 group화 하지 않는다.(do_numa_page() 참고)
+ */
 #define TNF_MIGRATED	0x01
 #define TNF_NO_GROUP	0x02
 #define TNF_SHARED	0x04

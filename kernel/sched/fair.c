@@ -1564,12 +1564,24 @@ struct numa_group {
 
 	struct rcu_head rcu;
 	unsigned long total_faults;
+/*
+ * IAMROOT, 2023.06.24:
+ * - 전체 노드에 대해서 fault cpu를 더해놓은 통계값.
+ */
 	unsigned long max_faults_cpu;
 	/*
 	 * Faults_cpu is used to decide whether memory should move
 	 * towards the CPU. As a consequence, these stats are weighted
 	 * more by CPU use than by memory faults.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   Faults_cpu는 메모리가 CPU 쪽으로 이동해야 하는지 여부를 결정하는
+ *   데 사용됩니다. 결과적으로 이러한 통계는 메모리 fault보다 CPU 사용에
+ *   더 많은 가중치를 부여합니다.
+ * - numa_faults 참고
+ */
 	unsigned long *faults_cpu;
 	unsigned long faults[];
 };
@@ -1586,7 +1598,7 @@ static struct numa_group *deref_task_numa_group(struct task_struct *p)
 
 /*
  * IAMROOT, 2023.06.17:
- * - @p의 numa_group을 가져온다.
+ * - @p가 curr인경우에만 @p의 numa_group을 가져온다.
  */
 static struct numa_group *deref_curr_numa_group(struct task_struct *p)
 {
@@ -1616,7 +1628,7 @@ static unsigned int task_nr_scan_windows(struct task_struct *p)
  * IAMROOT, 2023.06.17:
  * - papago
  *   존재하지 않는 빈 페이지로 RSS를 기반으로 하는 계산은 PTE 스캐너에서 
- *   건너뛰고 NUMA 힌트 오류는 상주 페이지를 기반으로 트랩되어야 합니다. 
+ *   건너뛰고 NUMA 힌트 fault는 상주 페이지를 기반으로 트랩되어야 합니다. 
  * - ex) PAGE_SIZE = 12
  *   nr_scan_pages * 2^8 = 256 * 256 = 65536 = 64kb = 2^16
  */
@@ -1833,7 +1845,7 @@ pid_t task_numa_group_id(struct task_struct *p)
 /*
  * IAMROOT, 2023.06.17:
  * - papago
- *   평균 통계, 공유 및 개인, 메모리 및 CPU가 어레이의 전반부를 차지합니다. 
+ *   평균 통계, 공유 및 private, 메모리 및 CPU가 어레이의 전반부를 차지합니다. 
  *   배열의 두 번째 절반은 task_numa_placement에 의해 첫 번째 세트로 
  *   평균화되는 현재 카운터용입니다.
  *   
@@ -1854,6 +1866,10 @@ static inline unsigned long task_faults(struct task_struct *p, int nid)
 		p->numa_faults[task_faults_idx(NUMA_MEM, nid, 1)];
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @group에 대한 @nid의 전체 memory node fault값(private + shared fault)
+ */
 static inline unsigned long group_faults(struct task_struct *p, int nid)
 {
 	struct numa_group *ng = deref_task_numa_group(p);
@@ -1865,6 +1881,10 @@ static inline unsigned long group_faults(struct task_struct *p, int nid)
 		ng->faults[task_faults_idx(NUMA_MEM, nid, 1)];
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @group에 대한 @nid의 전체 memory node fault cpu값(private + shared fault)
+ */
 static inline unsigned long group_faults_cpu(struct numa_group *group, int nid)
 {
 	return group->faults_cpu[task_faults_idx(NUMA_MEM, nid, 0)] +
@@ -1908,8 +1928,22 @@ static inline unsigned long group_faults_shared(struct numa_group *ng)
  * considered part of a numa group's pseudo-interleaving set. Migrations
  * between these nodes are slowed down, to allow things to settle down.
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   최대값의 1/3보다 많은 NUMA 결함을 트리거하는 노드는 numa 그룹의
+ *   의사 인터리빙 세트의 일부로 간주됩니다. 이러한 노드 간의
+ *   마이그레이션은 속도가 느려지므로 문제가 해결됩니다.
+ */
 #define ACTIVE_NODE_FRACTION 3
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - max_faults_cpu의 1/3배 초과로 cpu fault가 많이 일어난경우.
+ *   즉 @ng fault개수에서 @nid의 fault cpu 비중이 많은경우이다.
+ * - 전체 노드대비 비율로 되기때문에 acitve인 node가 있고, inactive인 node가 있을것이다.
+ * - 비율상 active node는 최대 2개.
+ */
 static bool numa_is_active_node(int nid, struct numa_group *ng)
 {
 	return group_faults_cpu(ng, nid) * ACTIVE_NODE_FRACTION > ng->max_faults_cpu;
@@ -2025,6 +2059,16 @@ static inline unsigned long group_weight(struct task_struct *p, int nid,
 	return 1000 * faults / total_faults;
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @dst_cpu로 numa migrate가 가능한지 확인한다.
+ *   1. scan 횟수가 적은경우 true
+ *   2. 
+ *   3. private fault인경우 true.
+ *   4. dst_nid의 fault cpu이 src_nid fault cpu보다 3배초과인경우 true
+ *   5. fault cpu / falut mem의 비율이  dst가 1.33배이상 많은경우 true.
+ *      아니면 false
+ */
 bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 				int src_nid, int dst_cpu)
 {
@@ -2041,6 +2085,16 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 	 * two full passes of the "multi-stage node selection" test that is
 	 * executed below.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   첫 번째 fault 또는 private fault가 task lifetime 초기에 즉시 마이그레이션되도록 
+ *   허용합니다. 매직 넘버 4는 아래에서 실행되는 다단계 노드 선택 테스트의
+ *   두 번의 전체 패스를 기다리는 것을 기반으로 합니다.
+ * - 초기에는(numa_scan 횟수 2번이하), 설정이 안됬거나, @p가 last_cpuid로 설정되있다면
+ *   return true.
+ *   
+ */
 	if ((p->numa_preferred_nid == NUMA_NO_NODE || p->numa_scan_seq <= 4) &&
 	    (cpupid_pid_unset(last_cpupid) || cpupid_match_pid(p, last_cpupid)))
 		return true;
@@ -2062,15 +2116,42 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 	 * This quadric squishes small probabilities, making it less likely we
 	 * act on an unlikely task<->page relation.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   다단계 노드 선택은 임시 작업<->페이지 관계를 구축하기 위해 주기적
+ *   마이그레이션 fault와 함께 사용됩니다. 2단계 필터를 사용하여 짧거나
+ *   가능성이 없는 관계를 제거합니다.  빈도주의자 확률에 따라
+ *   P(p) ~ n_p / n_t를 사용하여 이 페이지의 총 사용량(n_t)당 특정
+ *   페이지의 작업 사용량(n_p)을 확률과 동일시할 수 있습니다.
+ *
+ *   주기적인 fault은 이 확률을 샘플링하고 이러한 샘플이 완전히 독립적인
+ *   경우 연속으로 두 번 동일한 결과를 얻고 샘플 기간이 사용 패턴에 비해
+ *   충분히 짧은 경우 P(n)^2로 제공됩니다.
+ *
+ *   이 2차 함수는 작은 확률을 찌그러뜨려 우리가 있을 법하지 않은
+ *   작업<->페이지 관계에서 행동할 가능성을 줄입니다.
+ *
+ * - last_cpupid가 설정되있었고, 그게 dst_nid가 아니라면 return false
+ */
 	if (!cpupid_pid_unset(last_cpupid) &&
 				cpupid_to_nid(last_cpupid) != dst_nid)
 		return false;
 
 	/* Always allow migrate on private faults */
+/*
+ * IAMROOT, 2023.06.24:
+ * - @p의 last pid와 @page의 lastpid가 같으면 private fault라고 판단하여
+ *   return true.
+ */
 	if (cpupid_match_pid(p, last_cpupid))
 		return true;
 
 	/* A shared fault, but p->numa_group has not been set up yet. */
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa group이 아직 설정이 안됬으면 그냥 migrate 수행.
+ */
 	if (!ng)
 		return true;
 
@@ -2078,6 +2159,10 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 	 * Destination node is much more heavily used than the source
 	 * node? Allow migration.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - @ng dst_nid가 src_nid보다 3배초과로 fault cpu 가 많이 발생했으면 옮긴다.
+ */
 	if (group_faults_cpu(ng, dst_nid) > group_faults_cpu(ng, src_nid) *
 					ACTIVE_NODE_FRACTION)
 		return true;
@@ -2090,6 +2175,18 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 	 * --------------- * - > ---------------
 	 * faults_mem(dst)   4   faults_mem(src)
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   불필요한 메모리 마이그레이션을 방지하기 위해 3/4 히스테리시스를
+ *   사용하여 각 노드의 CPU 및 메모리 사용에 따라 메모리를 분배합니다.
+ *
+ *   faults_cpu(dst)   3   faults_cpu(src)
+ *   --------------- * - > ---------------
+ *   faults_mem(dst)   4   faults_mem(src)
+ *
+ * - dst의 fault가 src보다 1.33배 이상 많다면 dst로 옮긴다.
+ */
 	return group_faults_cpu(ng, dst_nid) * group_faults(p, src_nid) * 3 >
 	       group_faults_cpu(ng, src_nid) * group_faults(p, dst_nid) * 4;
 }
@@ -3086,6 +3183,12 @@ static inline void put_numa_group(struct numa_group *grp)
 		kfree_rcu(grp, rcu);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @p 요청
+ *   tsk : @cpupid(page)의 cpu에서 동작중인 curr
+ *   cpupid의 pid : @cpupid)를 마지막에 썻던 task
+ */
 static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 			int *priv)
 {
@@ -3095,7 +3198,16 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	int cpu = cpupid_to_cpu(cpupid);
 	int i;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - first access시 grp를 만든다. @p의 값을 초기값으로 해서 생성한다.
+ *   ING
+ */
 	if (unlikely(!deref_curr_numa_group(p))) {
+/*
+ * IAMROOT, 2023.06.24:
+ * - mem shared, mem priv, cpu shard, cpu priv 이렇게해서 4쌍
+ */
 		unsigned int size = sizeof(struct numa_group) +
 				    4*nr_node_ids*sizeof(unsigned long);
 
@@ -3109,9 +3221,17 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 		spin_lock_init(&grp->lock);
 		grp->gid = p->pid;
 		/* Second half of the array tracks nids where faults happen */
+/*
+ * IAMROOT, 2023.06.24:
+ * - faults 뒤에 address를 계산하여 faults_cpu에 넣는것.
+ */
 		grp->faults_cpu = grp->faults + NR_NUMA_HINT_FAULT_TYPES *
 						nr_node_ids;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - task것을 초기값으로 가져온다.
+ */
 		for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++)
 			grp->faults[i] = p->numa_faults[i];
 
@@ -3122,11 +3242,24 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	}
 
 	rcu_read_lock();
+/*
+ * IAMROOT, 2023.06.24:
+ * - cpupid의 cpu에서 동작중인 task를 가져온다.
+ */
 	tsk = READ_ONCE(cpu_rq(cpu)->curr);
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - 해당 page를 마지막에 접근했던 task와 page를 사용했던 cpu의 curr와
+ *   동일한지 비교한다.
+ */
 	if (!cpupid_match_pid(tsk, cpupid))
 		goto no_join;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - tsk(cpupid의 curr)의 ng가 없으면 return.
+ @*/
 	grp = rcu_dereference(tsk->numa_group);
 	if (!grp)
 		goto no_join;
@@ -3139,16 +3272,28 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	 * Only join the other group if its bigger; if we're the bigger group,
 	 * the other task will join us.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - my_grp -> grp로 옮길려고한다. my_grp이 작은데 괜히 옮길 필욘 없을것이다.
+ */
 	if (my_grp->nr_tasks > grp->nr_tasks)
 		goto no_join;
 
 	/*
 	 * Tie-break on the grp address.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - 같다면, grp가 address가 큰경우에만 움직인다.
+ */
 	if (my_grp->nr_tasks == grp->nr_tasks && my_grp > grp)
 		goto no_join;
 
 	/* Always join threads in the same process. */
+/*
+ * IAMROOT, 2023.06.24:
+ * - 같은 process면 무조건 join
+ */
 	if (tsk->mm == current->mm)
 		join = true;
 
@@ -3159,6 +3304,10 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	/* Update priv based on whether false sharing was detected */
 	*priv = !join;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - grp로 get ref한다.
+ */
 	if (join && !get_numa_group(grp))
 		goto no_join;
 
@@ -3170,6 +3319,10 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	BUG_ON(irqs_disabled());
 	double_lock_irq(&my_grp->lock, &grp->lock);
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - @p(current)에 대한 값들을 my_group -> grp으로 옮긴다.
+ */
 	for (i = 0; i < NR_NUMA_HINT_FAULT_STATS * nr_node_ids; i++) {
 		my_grp->faults[i] -= p->numa_faults[i];
 		grp->faults[i] += p->numa_faults[i];
@@ -3183,8 +3336,16 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	spin_unlock(&my_grp->lock);
 	spin_unlock_irq(&grp->lock);
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - 최종적으로 curr를 grp로 옮긴다.
+ */
 	rcu_assign_pointer(p->numa_group, grp);
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - grp로 다 옮겨졌고, my_group은 ref down한다.
+ */
 	put_numa_group(my_grp);
 	return;
 
@@ -3236,6 +3397,10 @@ void task_numa_free(struct task_struct *p, bool final)
 /*
  * Got a PROT_NONE fault for a page on @node.
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * -
+ */
 void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 {
 	struct task_struct *p = current;
@@ -3253,6 +3418,10 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 		return;
 
 	/* Allocate buffer to track faults on a per-node basis */
+/*
+ * IAMROOT, 2023.06.24:
+ * - 최초 memory 할당.
+ */
 	if (unlikely(!p->numa_faults)) {
 		int size = sizeof(*p->numa_faults) *
 			   NR_NUMA_HINT_FAULT_BUCKETS * nr_node_ids;
@@ -3269,10 +3438,18 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	 * First accesses are treated as private, otherwise consider accesses
 	 * to be private if the accessing pid has not changed
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - first access는 priv 으로 처리.
+ */
 	if (unlikely(last_cpupid == (-1 & LAST_CPUPID_MASK))) {
 		priv = 1;
 	} else {
 		priv = cpupid_match_pid(p, last_cpupid);
+/*
+ * IAMROOT, 2023.06.24:
+ * - shared고, no group요청이 없엇으면 group화 한다.
+ */
 		if (!priv && !(flags & TNF_NO_GROUP))
 			task_numa_group(p, last_cpupid, flags, &priv);
 	}
@@ -3283,6 +3460,19 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	 * actively using should be counted as local. This allows the
 	 * scan rate to slow down when a workload has settled down.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   워크로드가 여러 NUMA 노드에 걸쳐 있는 경우 워크로드가 적극적으로
+ *   사용하는 노드 세트 내에서 전적으로 발생하는 공유 fault은 로컬로
+ *   계산되어야 합니다. 이렇게 하면 워크로드가 안정되었을 때 스캔
+ *   속도가 느려질 수 있습니다.
+ *
+ * - shared fault가 local로 처리가 되야되는 경우에 대한 처리.
+ *   1. workload가 여러 numa node에 걸쳐있다.
+ *   2. active node가 많다.
+ *   3. 그중에서도 cpu node, mem node 둘다 활성화되있다.
+ */
 	ng = deref_curr_numa_group(p);
 	if (!priv && !local && ng && ng->active_nodes > 1 &&
 				numa_is_active_node(cpu_node, ng) &&
@@ -3293,6 +3483,14 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	 * Retry to migrate task to preferred node periodically, in case it
 	 * previously failed, or the scheduler moved us.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   이전에 실패했거나 스케줄러가 이동한 경우 주기적으로 작업을 기본
+ *   노드로 마이그레이션을 다시 시도하십시오.
+ * - 실패했을경우 이번에 다시 한번 한다는 개념인듯
+ * - ING
+ */
 	if (time_after(jiffies, p->numa_migrate_retry)) {
 		task_numa_placement(p);
 		numa_migrate_preferred(p);
@@ -3344,6 +3542,13 @@ static void reset_ptenuma_scan(struct task_struct *p)
  * - papago
  *   numa 마이그레이션의 비용이 많이 드는 부분은 task_work 컨텍스트에서 수행됩니다.
  *   task_tick_numa()에서 트리거됩니다.
+ *
+ * - 1. next scan 시간 갱신
+ *   2. 이미 scan 중이라고 판단되면 return
+ *   3. scan 갯수만큼의 pages를 vma를 순회하며 numa fault 시킨다.
+ *   4. scan 완료 next scan offset 갱신
+ * - 이 함수에서 numa fault의해서 mapping해제된 page는 fault 발생시
+ *   handle_pte_fault()에서 do_numa_page()를 통해 수행할것이다.
  */
 static void task_numa_work(struct callback_head *work)
 {
@@ -3448,6 +3653,10 @@ static void task_numa_work(struct callback_head *work)
 		start = 0;
 		vma = mm->mmap;
 	}
+/*
+ * IAMROOT, 2023.06.24:
+ * - vma를 순회하며 pages개수만큼 numa fault 시킨다.
+ */
 	for (; vma; vma = vma->vm_next) {
 /*
  * IAMROOT, 2023.06.17:
@@ -3473,7 +3682,7 @@ static void task_numa_work(struct callback_head *work)
  * - papago
  *   여러 프로세스에 의해 매핑된 공유 라이브러리 페이지는 캐시 복제될 것으로 
  *   예상되므로 마이그레이션되지 않습니다. 읽기 전용 파일 지원 매핑 또는 
- *   vdso에서 힌트 결함을 피하십시오. 페이지를 마이그레이션하는 것이 약간의 
+ *   vdso에서 힌트 fault을 피하십시오. 페이지를 마이그레이션하는 것이 약간의 
  *   이점이 있을 것입니다.
  *
  * - library(readonly file)은 안한다. 주석내용확인.
@@ -3489,10 +3698,18 @@ static void task_numa_work(struct callback_head *work)
 		if (!vma_is_accessible(vma))
 			continue;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - HPAGE_SIZE단위로 ALIGN을 한 범위를 순회하며 numa fault시킨다.
+ */
 		do {
 			start = max(start, vma->vm_start);
 			end = ALIGN(start + (pages << PAGE_SHIFT), HPAGE_SIZE);
 			end = min(end, vma->vm_end);
+/*
+ * IAMROOT, 2023.06.24:
+ * - start ~ end까지 PAGE_NONE으로 numa fault식으로 update한다.
+ */
 			nr_pte_updates = change_prot_numa(vma, start, end);
 
 			/*
@@ -3511,11 +3728,15 @@ static void task_numa_work(struct callback_head *work)
  *   VMA에 사용되지 않았거나 이미 prot_numa PTE로 가득 찬 영역이 
  *   포함된 경우 해당 영역을 더 빨리 건너뛰려면 virtpages까지 
  *   스캔하십시오.
+ * - 남은것을 pages, virtpages에 기록한다.
  */
 			if (nr_pte_updates)
 				pages -= (end - start) >> PAGE_SHIFT;
 			virtpages -= (end - start) >> PAGE_SHIFT;
-
+/*
+ * IAMROOT, 2023.06.24:
+ * - 범위갱신
+ */
 			start = end;
 			if (pages <= 0 || virtpages <= 0)
 				goto out;
@@ -3559,6 +3780,7 @@ out:
  *   확인하십시오.
  *   일반적으로 update_task_scan_period는 스캔 속도를 충분히 늦춥니다. 
  *   오버로드된 시스템에서는 작업별로 오버헤드를 제한해야 합니다.
+ * - ex) numa fault하는 데 1초 걸렸으면, 최소 32초후에 하겠다는 의미.
  */
 	if (unlikely(p->se.sum_exec_runtime != runtime)) {
 		u64 diff = p->se.sum_exec_runtime - runtime;
@@ -3653,8 +3875,10 @@ void init_numa_balancing(unsigned long clone_flags, struct task_struct *p)
  * IAMROOT, 2023.06.17:
  * - callstack
  *   task_tick_fair() -> task_tick_numa()
+ *
  * - numa scan시간이 됬으면 task work(task_numa_work)를 add한다.
  *   즉 work수행요청.
+ * - numa balance time은 최대 task의 실행시간의 3%로 제한된다.
  */
 static void task_tick_numa(struct rq *rq, struct task_struct *curr)
 {
@@ -8882,7 +9106,7 @@ static int select_idle_cpu(struct task_struct *p, struct sched_domain *sd, bool 
 		/*
 		 * IAMROOT. 2023.06.10:
 		 * - google-translate
-		 * 우리가 바쁘다면 마지막 유휴 기간이 미래를 예측한다는 가정에 결함이
+		 * 우리가 바쁘다면 마지막 유휴 기간이 미래를 예측한다는 가정에 fault이
 		 * 있습니다. 남은 예상 유휴 시간을 에이징합니다.
 		 *
 		 * - 틱으로 wake_avg_idle을 반감시킨다.
@@ -16442,7 +16666,8 @@ static void task_tick_fair(struct rq *rq, struct task_struct *curr, int queued)
 
 /*
  * IAMROOT, 2023.06.17:
- * - numa balance
+ * - numa balance수행한다. 내부에서 numa balance시간이 도래했으면 수행하고 아니면
+ *   아무것도 안할것이다.
  */
 	if (static_branch_unlikely(&sched_numa_balancing))
 		task_tick_numa(rq, curr);

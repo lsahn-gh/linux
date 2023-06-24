@@ -40,6 +40,10 @@
  * - numa fault page 전환인 경우(change_prot_numa() 확인)
  *   @cp_flags  MM_CP_PROT_NUMA.
  *   @newprot PAGE_NONE
+ *   @addr부터 @end까지에 대해 다음을 처리한다.
+ *   1. old를 가져오면서 0 clear를 한다.(modify중 잠깐)
+ *   2. hw dirty가 발생했을경우 sw dirty를 기록해준다.
+ *   3. @newprot(PTE_PROT_NONE)를 설정해준다.(기존 oldpte중에 일부 bit는 가져온다.)
  */
 static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 		unsigned long addr, unsigned long end, pgprot_t newprot,
@@ -94,6 +98,13 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 
 	flush_tlb_batched_pending(vma->vm_mm);
 	arch_enter_lazy_mmu_mode();
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa fault인 경우
+ *  1. old를 가져오면서 0 clear를 한다.
+ *  2. hw dirty가 발생했을경우 sw dirty를 기록해준다.
+ *  3. @newprot(PTE_PROT_NONE)중 pte_modity()의 mask에 해당하는 부분들을 old에서 update한다.
+ */
 	do {
 		oldpte = *pte;
 /*
@@ -177,14 +188,29 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 
 /*
  * IAMROOT, 2023.06.17:
- * - old를 가져오면서 0clear를 한다.
- * - ING
+ * - old를 가져오면서 0 clear를 한다.
  */
 			oldpte = ptep_modify_prot_start(vma, addr, pte);
+/*
+ * IAMROOT, 2023.06.24:
+ * - mask (PTE_USER | PTE_PXN | PTE_UXN | PTE_RDONLY | 
+ *   PTE_PROT_NONE | PTE_VALID | PTE_WRITE | PTE_GP |
+ *   PTE_ATTRINDX_MASK)에서 @newprot에 포함된것들을 oldpte에
+ *   추가해서 가져온다. 그리고 oldpte가 hw dirty라면 sw dirty를
+ *   추가한다.
+ */
 			ptent = pte_modify(oldpte, newprot);
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa fault면서 hw dirty였으면 rdonly를 지우는 개념으로 해준다.
+ */
 			if (preserve_write)
 				ptent = pte_mk_savedwrite(ptent);
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - uffd pass
+ */
 			if (uffd_wp) {
 				ptent = pte_wrprotect(ptent);
 				ptent = pte_mkuffd_wp(ptent);
@@ -199,11 +225,19 @@ static unsigned long change_pte_range(struct vm_area_struct *vma, pmd_t *pmd,
 			}
 
 			/* Avoid taking write faults for known dirty pages */
+/*
+ * IAMROOT, 2023.06.24:
+ * - dirty account pass
+ */
 			if (dirty_accountable && pte_dirty(ptent) &&
 					(pte_soft_dirty(ptent) ||
 					 !(vma->vm_flags & VM_SOFTDIRTY))) {
 				ptent = pte_mkwrite(ptent);
 			}
+/*
+ * IAMROOT, 2023.06.24:
+ * - pte에 ptent를 최종적으로 기록한다.
+ */
 			ptep_modify_prot_commit(vma, addr, pte, oldpte, ptent);
 			pages++;
 		} else if (is_swap_pte(oldpte)) {
@@ -288,7 +322,7 @@ static inline int pmd_none_or_clear_bad_unless_trans_huge(pmd_t *pmd)
 
 /*
  * IAMROOT, 2023.06.17:
- * - 
+ * - pte를 순회한다.
  */
 static inline unsigned long change_pmd_range(struct vm_area_struct *vma,
 		pud_t *pud, unsigned long addr, unsigned long end,
@@ -372,7 +406,7 @@ next:
 
 /*
  * IAMROOT, 2023.06.17:
- * - 
+ * - pmd를 순회한다.
  */
 static inline unsigned long change_pud_range(struct vm_area_struct *vma,
 		p4d_t *p4d, unsigned long addr, unsigned long end,
@@ -396,7 +430,7 @@ static inline unsigned long change_pud_range(struct vm_area_struct *vma,
 
 /*
  * IAMROOT, 2023.06.17:
- * - 
+ * - pud를 순회한다
  */
 static inline unsigned long change_p4d_range(struct vm_area_struct *vma,
 		pgd_t *pgd, unsigned long addr, unsigned long end,
@@ -420,7 +454,7 @@ static inline unsigned long change_p4d_range(struct vm_area_struct *vma,
 
 /*
  * IAMROOT, 2023.06.17:
- * - 
+ * - p4d를 순회한다.
  */
 static unsigned long change_protection_range(struct vm_area_struct *vma,
 		unsigned long addr, unsigned long end, pgprot_t newprot,
@@ -454,7 +488,7 @@ static unsigned long change_protection_range(struct vm_area_struct *vma,
 
 /*
  * IAMROOT, 2023.06.17:
- * - 
+ * - @start ~ @end까지 @newprot를 적용한다.
  */
 unsigned long change_protection(struct vm_area_struct *vma, unsigned long start,
 		       unsigned long end, pgprot_t newprot,
