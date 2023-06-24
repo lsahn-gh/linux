@@ -1657,6 +1657,7 @@ struct task_struct {
  * IAMROOT, 2023.06.17:
  * - 계산된 task(thread)기준의 node scan 간격(msec)
  *   실제 scan은 mm->numa_next_scan
+ *   task_numa_work()에서 scan후, task 실행시간의 최대 3%로 제한한다.
  */
 	u64				node_stamp;
 	u64				last_task_numa_placement;
@@ -1691,6 +1692,19 @@ struct task_struct {
 	 * during the current scan window. When the scan completes, the counts
 	 * in faults_memory and faults_cpu decay and these values are copied.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   numa_faults는 4개의 영역으로 분할된 배열입니다.
+ *   faults_memory, faults_cpu, faults_memory_buffer, faults_cpu_buffer 이 정확한 순서대로.
+ *
+ *   faults_memory: 노드당 기준으로 결함의 기하급수적 감쇠 평균. 일정 배치
+ *   결정은 이러한 수를 기반으로 이루어집니다. 값은 PTE 스캔 기간 동안 정적
+ *   상태로 유지됩니다.
+ *   faults_cpu: NUMA 힌트 오류가 발생했을 때 프로세스가 실행 중인 노드를 추적합니다.
+ *   faults_memory_buffer 및 faults_cpu_buffer: 현재 스캔 기간 동안 노드당 오류를 기록합니다.
+ *   스캔이 완료되면 faults_memory 및 faults_cpu의 카운트가 감소하고 이러한 값이 복사됩니다. 
+ */
 	unsigned long			*numa_faults;
 	unsigned long			total_numa_faults;
 
@@ -1700,6 +1714,15 @@ struct task_struct {
 	 * period is adapted based on the locality of the faults with different
 	 * weights depending on whether they were shared or private faults
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   numa_faults_locality는 마지막 스캔 기간 동안 기록된 결함이
+ *   원격/로컬인지 또는 마이그레이션에 실패했는지 추적합니다. 태스크
+ *   스캔 기간은 공유 결함인지 개인 결함인지에 따라 가중치가 다른 결함의
+ *   위치에 따라 조정됩니다. 
+ * - remote / local / fail
+ */
 	unsigned long			numa_faults_locality[3];
 
 	unsigned long			numa_pages_migrated;

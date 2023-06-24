@@ -4797,6 +4797,14 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - local이면 이전이랑 같은 node에서 fault됬다는 의미이다.
+ *   TNF_FAULT_LOCAL를 표시한다.
+ *
+ * - @return NUMA_NO_NODE : 이전 node유지
+ *           != NUMA_NO_NODE : 추천 migrate node.
+ */
 int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags)
 {
@@ -4811,6 +4819,11 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 	return mpol_misplaced(page, vma, addr);
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa fault(task_numa_work() 참고)
+ * - 
+ */
 static vm_fault_t do_numa_page(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -4827,7 +4840,18 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	 * validation through pte_unmap_same(). It's of NUMA type but
 	 * the pfn may be screwed if the read is non atomic.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   이때 pte는 pte_unmap_same()을 통한 유효성 검사 없이는 안전하게 
+ *   사용할 수 없습니다. NUMA 유형이지만 읽기가 원자적이지 않으면 
+ *   pfn이 망가질 수 있습니다.
+ */
 	vmf->ptl = pte_lockptr(vma->vm_mm, vmf->pmd);
+/*
+ * IAMROOT, 2023.06.24:
+ * - lock을 걸어서 확인.
+ */
 	spin_lock(vmf->ptl);
 	if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte))) {
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
@@ -4836,6 +4860,11 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 
 	/* Get the normal PTE  */
 	old_pte = ptep_get(vmf->pte);
+/*
+ * IAMROOT, 2023.06.24:
+ * - fault를 시켜놨던 page다. 다시 정상으로 만들어주기 위해 원래의 prot로
+ *   원복을 시켜준다.
+ */
 	pte = pte_modify(old_pte, vma->vm_page_prot);
 
 	page = vm_normal_page(vma, vmf->address, pte);
@@ -4854,6 +4883,17 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	 * pte_dirty has unpredictable behaviour between PTE scan updates,
 	 * background writeback, dirty balancing and application behaviour.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   일반적으로 RO 페이지에서 그룹화하지 마십시오. RO 페이지는 공유 캐시 
+ *   상태에 있을 수 있으므로 어쨌든 많이 손상되지 않아야 합니다. 
+ *   이는 매핑이 쓰기 가능하지만 프로세스가 매핑에 쓰지 않지만 보호 
+ *   업데이트 중에 pte_write가 지워지고 pte_dirty가 PTE 스캔 업데이트, 
+ *   백그라운드 쓰기 저장, 더티 밸런싱 및 애플리케이션 동작 간에 예측할
+ *   수 없는 동작을 하는 경우를 놓치고 있습니다.
+ * - readonly page에서는 group하지 말라는것.
+ */
 	if (!was_writable)
 		flags |= TNF_NO_GROUP;
 
@@ -4861,13 +4901,28 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	 * Flag if the page is shared between multiple address spaces. This
 	 * is later used when determining whether to group tasks together
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   페이지가 여러 주소 공간 간에 공유되는 경우 플래그를 지정합니다.
+ *   이것은 나중에 작업을 함께 그룹화할지 여부를 결정할 때 사용됩니다. 
+ * - user가 여러명이다. shared page라는것을 표시한다.
+ */
 	if (page_mapcount(page) > 1 && (vma->vm_flags & VM_SHARED))
 		flags |= TNF_SHARED;
 
 	last_cpupid = page_cpupid_last(page);
 	page_nid = page_to_nid(page);
+/*
+ * IAMROOT, 2023.06.24:
+ * - mpol 및 fault count를 비교하여 추천 nid를 알아온다.
+ */
 	target_nid = numa_migrate_prep(page, vma, vmf->address, page_nid,
 			&flags);
+/*
+ * IAMROOT, 2023.06.24:
+ * - 이전 node 유지면 별거 안한다.
+ */
 	if (target_nid == NUMA_NO_NODE) {
 		put_page(page);
 		goto out_map;
@@ -4876,12 +4931,24 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 
 	/* Migrate to the requested node */
 	if (migrate_misplaced_page(page, vma, target_nid)) {
+/*
+ * IAMROOT, 2023.06.24:
+ * - migrate가 전부 성공
+ */
 		page_nid = target_nid;
 		flags |= TNF_MIGRATED;
 	} else {
+/*
+ * IAMROOT, 2023.06.24:
+ * - migrate 실패(전부 실패 or 일부만 성공)
+ */
 		flags |= TNF_MIGRATE_FAIL;
 		vmf->pte = pte_offset_map(vmf->pmd, vmf->address);
 		spin_lock(vmf->ptl);
+/*
+ * IAMROOT, 2023.06.24:
+ * - fault당시 pte와 현재 pte를 비교해서 변경이 생겼으면 out.
+ */
 		if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte))) {
 			pte_unmap_unlock(vmf->pte, vmf->ptl);
 			goto out;
@@ -4890,9 +4957,19 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	}
 
 out:
+/*
+ * IAMROOT, 2023.06.24:
+ * - 1. 
+ * - migrate를 성공했다면 page_nid는 target_nid,
+ *   아니라면 원래 자신의 nid를 가리킨다.
+ */
 	if (page_nid != NUMA_NO_NODE)
 		task_numa_fault(last_cpupid, page_nid, 1, flags);
 	return 0;
+/*
+ * IAMROOT, 2023.06.24:
+ * - 아무것도 안하고 나가는겨ㅓㅇ우
+ */
 out_map:
 	/*
 	 * Make it present again, depending on how arch implements
@@ -5056,13 +5133,23 @@ static vm_fault_t handle_pte_fault(struct vm_fault *vmf)
 /*
  * IAMROOT, 2022.06.04:
  * - vmf->pte가 있지만 present가 안된. 즉 invalid. swap 상태라는의미.
+ * - 즉 mapping이 없는 상태.
  */
 	if (!pte_present(vmf->orig_pte))
 		return do_swap_page(vmf);
 
 /*
  * IAMROOT, 2022.06.04:
+ * - fault는 일반적으로 mapping이 없다. 하지만 이 이후는 mapping이 있어도
+ *   fault가 발생한 page들이다. 여기에 대한 case를 진행한다.
+ *   대표적으로 2개의 case가 있다.
+ *   1. numa fault
+ *   2. write protect
+ *
+ * - numa fault(task_numa_work() 참고)
  * - numa_balancing으로 fault가 발생한지 확인한다.
+ *   numa fault시 PTE_PROT_NONE으로 설정했었다. 그렇기 때문에 prot none인지
+ *   확인하는것이다.
  */
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
 		return do_numa_page(vmf);

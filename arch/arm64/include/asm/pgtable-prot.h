@@ -13,6 +13,10 @@
 /*
  * Software defined PTE bits definition.
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * - PTE_DBM은 hw, PTE_DIRTY은 sw(원래부터 kernel이 관리하는 flag)
+ */
 #define PTE_WRITE		(PTE_DBM)		 /* same as DBM (51) */
 #define PTE_DIRTY		(_AT(pteval_t, 1) << 55)
 

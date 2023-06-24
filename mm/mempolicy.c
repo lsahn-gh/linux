@@ -649,7 +649,7 @@ unlock:
  *
  *   이것은 NUMA fault가 PROT_NONE을 사용하여 처리된다고 가정합니다. 
  *   아키텍처가 다른 선택을 하면 코어에 추가 변경이 필요합니다.
- * - 
+ * - @addr ~ @end까지 numa fault방법(MM_CP_PROT_NUMA)으로 PAGE_NONE를 적용한다.
  */
 unsigned long change_prot_numa(struct vm_area_struct *vma,
 			unsigned long addr, unsigned long end)
@@ -1951,7 +1951,7 @@ unsigned int mempolicy_slab_node(void)
  */
 /*
  * IAMROOT, 2022.05.14:
- * - @p에 따라 node를 선택한다.
+ * - @pol에 따라 node를 선택한다.
  */
 static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 {
@@ -2563,6 +2563,30 @@ static void sp_free(struct sp_node *n)
  * Return: NUMA_NO_NODE if the page is in a node that is valid for this
  * policy, or a suitable node ID to allocate a replacement page from.
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   mpol_misplaced - 현재 페이지 노드가 정책에서 유효한지 확인합니다.
+ *
+ *   @page: 확인할 페이지.
+ *   @vma: 페이지가 매핑된 vm 영역.
+ *   @addr: 페이지가 매핑된 가상 주소.
+ *
+ *   vma,addr에 대한 현재 정책 노드 ID를 조회하고 페이지의 노드 ID와 
+ *   비교합니다. 정책 결정은 alloc_page_vma()를 모방합니다.
+ *   vma 및 결함 주소를 알고 있는 결함 경로에서 호출됩니다. 
+ *
+ *   Return: 페이지가 이 정책에 유효한 노드에 있는 경우 NUMA_NO_NODE
+ *   또는 교체 페이지를 할당하는 데 적합한 노드 ID입니다.
+ *
+ * - return NUMA_NO_NODE : @vma의 mpol 정책에 유효한 상황. 이전 nid유지
+ *          특정 node    : @vma의 mpol에 적당한 node 번호.
+ * - mpol에 따른 node 번호를 가져온다.
+ * - 아래의 상황에따라 node를 선택한다.
+ *   1. 이전 node 유지(return NUMA_NO_NODE)
+ *   2. 특수한 상황 this node로 강제설정(MPOL_F_MORON이 있고, mpol, fault count비교등)
+ *   3. mpol에 따라 새로 선택한 node.
+ */
 int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long addr)
 {
 	struct mempolicy *pol;
@@ -2575,9 +2599,26 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 	int ret = NUMA_NO_NODE;
 
 	pol = get_vma_policy(vma, addr);
+/*
+ * IAMROOT, 2023.06.24:
+ * - MOF면 못옮긴다. 즉 그냥 써야된다. 그런 의미에서 현재 node가 유효하다는
+ *   의미로 return NUMA_NO_NODE.
+ */
 	if (!(pol->flags & MPOL_F_MOF))
 		goto out;
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - MPOL_F_MORON이 설정되있을경우(즉 thisnid로 강제설정 및 fault count 비교)
+ *   MPOL_INTERLEAVE     -> MPOL_F_MORON
+ *   MPOL_PREFERRED      -> 1. curnid가 pol에 소속 O -> curnid선택
+ *                          2. MPOL_F_MORON
+ *   MPOL_LOCAL          -> MPOL_F_MORON
+ *   MPOL_BIND           -> 1. thisnid가 pol에 소속 O -> MPOL_F_MORON
+ *                          2. NUMA_NO_NODE
+ *   MPOL_PREFERRED_MANY -> 1. curnid가 pol에 소속 O-> NUMA_NO_NODE
+ *                          2. MPOL_F_MORON
+ */
 	switch (pol->mode) {
 	case MPOL_INTERLEAVE:
 		pgoff = vma->vm_pgoff;
@@ -2624,6 +2665,10 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 	}
 
 	/* Migrate the page towards the node whose CPU is referencing it */
+/*
+ * IAMROOT, 2023.06.24:
+ * - numa policy였을경우 위 MPOL에 상관없이 thisnid로 교체한다.
+ */
 	if (pol->flags & MPOL_F_MORON) {
 		polnid = thisnid;
 
@@ -2631,6 +2676,10 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 			goto out;
 	}
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - 그전에 있었던 node와 새로 구한 node가 일치지 않은 경우만 return값 갱신
+ */
 	if (curnid != polnid)
 		ret = polnid;
 out:

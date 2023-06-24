@@ -2617,6 +2617,34 @@ static unsigned long isolate_lru_pages(unsigned long nr_to_scan,
  * (2) the lru_lock must not be held.
  * (3) interrupts must be enabled.
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   isolate_lru_page - LRU 목록에서 페이지를 분리하려고 시도합니다.
+ *   @page: LRU 목록에서 격리할 페이지
+ *
+ *   LRU 목록에서 @page를 분리하고 PageLRU를 지우고 페이지가 있던
+ *   LRU 목록에 해당하는 vmstat 통계를 조정합니다.
+ *
+ *   페이지가 LRU 목록에서 제거된 경우 0을 반환합니다.
+ *   페이지가 LRU 목록에 없으면 -EBUSY를 반환합니다.
+ *
+ *   반환된 페이지는 PageLRU()가 지워집니다. 활성 목록에서 찾은 경우
+ *   PageActive가 설정됩니다. 제거할 수 없는 목록에서 찾은 경우
+ *   PageUnevictable 비트가 설정됩니다. 해당 플래그는 페이지를
+ *   이동하기 전에 호출자가 지워야 할 수 있습니다.
+ *
+ *   페이지가 발견된 목록에 해당하는 vmstat 통계가 감소합니다.
+ *
+ *   제한:
+ *   (1) 페이지에서 높은 refcount로 호출해야 합니다. 이것은
+ *   isolate_lru_pages(안정적인 참조 없이 호출됨)와 근본적인 차이점입니다.
+ *   (2) lru_lock을 보유하지 않아야 합니다.
+ *   (3) 인터럽트를 활성화해야 합니다.
+ * - lru list에서 page를 분리한다.
+ *
+ *   return 0 : lru page에서 삭제 성공.
+ */
 int isolate_lru_page(struct page *page)
 {
 	int ret = -EBUSY;

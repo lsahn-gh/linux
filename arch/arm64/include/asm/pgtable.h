@@ -169,6 +169,18 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 	(__boundary - 1 < (end) - 1) ? __boundary : (end);			\
 })
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - dirty flag가 설정되었는지 여부를 알아온다. (write flag == dirty flag)
+ * - DBM (Dirty Bit Management)
+ *   예전에서는 kernel이 어떤 물리페이지에 접근했는지 cpu가 몰랐다.
+ *   하지만 현재는 cpu가 알게 하기위해 fault를 발생하기 위해 mapping을 끊고
+ *   page access의 시도를 알게 한다.
+ *   arm 8.2부터는 DBM이라는 개념을 넣어 access page에(tlb cache) dirty flag에
+ *   hw가 기록한다. 이렇게 함으로써 mapping을 지우지 않아도 접근여부를
+ *   알수있게됬다.
+ *   dirty상태면 메모리에 아직 기록이 안됬다는것을 알수있을것이다.
+ */
 #define pte_hw_dirty(pte)	(pte_write(pte) && !(pte_val(pte) & PTE_RDONLY))
 #define pte_sw_dirty(pte)	(!!(pte_val(pte) & PTE_DIRTY))
 #define pte_dirty(pte)		(pte_sw_dirty(pte) || pte_hw_dirty(pte))
@@ -254,12 +266,17 @@ static inline pte_t pte_mkclean(pte_t pte)
 
 /*
  * IAMROOT, 2022.06.04:
- * - @pte에 PTE_DIRTY bit를 set한다.
+ * - @pte에 PTE_DIRTY bit(sw dirty)를 set한다.
  */
 static inline pte_t pte_mkdirty(pte_t pte)
 {
 	pte = set_pte_bit(pte, __pgprot(PTE_DIRTY));
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - wr와 rdonly는 공존이 안된다. wr이 set되있으면
+ *   rdonly는 그냥 한번 지워주는 개념인듯하다.
+ */
 	if (pte_write(pte))
 		pte = clear_pte_bit(pte, __pgprot(PTE_RDONLY));
 
@@ -965,18 +982,39 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
 #define pgd_set_fixmap(addr)	((pgd_t *)set_fixmap_offset(FIX_PGD, addr))
 #define pgd_clear_fixmap()	clear_fixmap(FIX_PGD)
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - 1. @pte가 hw dirty이면 sw dirty set한다.
+ *   2. @pte에서 mask를 제외한 부분 유지하고, @newprot에서 mask에 해당하는
+ *   것만 추가해서 return한다.
+ */
 static inline pte_t pte_modify(pte_t pte, pgprot_t newprot)
 {
 	/*
 	 * Normal and Normal-Tagged are two different memory types and indices
 	 * in MAIR_EL1. The mask below has to include PTE_ATTRINDX_MASK.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   Normal 및 Normal-Tagged는 MAIR_EL1의 두 가지 메모리 유형 및 
+ *   인덱스입니다. 아래 마스크는 PTE_ATTRINDX_MASK를 포함해야 합니다.
+ */
 	const pteval_t mask = PTE_USER | PTE_PXN | PTE_UXN | PTE_RDONLY |
 			      PTE_PROT_NONE | PTE_VALID | PTE_WRITE | PTE_GP |
 			      PTE_ATTRINDX_MASK;
 	/* preserve the hardware dirty information */
+/*
+ * IAMROOT, 2023.06.24:
+ * - hw dirty여부를 알아온다 hw dirty라면. sw dirty도 set한다.
+ */
 	if (pte_hw_dirty(pte))
 		pte = pte_mkdirty(pte);
+/*
+ * IAMROOT, 2023.06.24:
+ * - @pte에서 mask를 뺀것은 그대로 유지하고, @newprot의 mask에 있는것만
+ *   추가한다.
+ */
 	pte_val(pte) = (pte_val(pte) & ~mask) | (pgprot_val(newprot) & mask);
 	return pte;
 }

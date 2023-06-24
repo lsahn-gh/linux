@@ -2385,6 +2385,15 @@ SYSCALL_DEFINE6(move_pages, pid_t, pid, unsigned long, nr_pages,
  * Returns true if this is a safe migration target node for misplaced NUMA
  * pages. Currently it only checks the watermarks which crude
  */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   잘못 배치된 NUMA 페이지에 대한 안전한 마이그레이션 대상 노드인 경우 
+ *   true를 반환합니다. 현재는 조잡한 워터마크만 확인합니다. 
+ *
+ * - @nr_migrate_pages만큼 migrate할 page가 있는지 확인한다. 있다면
+ *   return true.
+ */
 static bool migrate_balanced_pgdat(struct pglist_data *pgdat,
 				   unsigned long nr_migrate_pages)
 {
@@ -2407,6 +2416,12 @@ static bool migrate_balanced_pgdat(struct pglist_data *pgdat,
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - migrate_misplaced_page() 참고
+ * - @nid에서만 할당. movable(user용 memory) page할당. reclaim 및 retry
+ *   할필요없음등의 조건을 사용하여 할당을 받아온다.
+ */
 static struct page *alloc_misplaced_dst_page(struct page *page,
 					   unsigned long data)
 {
@@ -2422,6 +2437,10 @@ static struct page *alloc_misplaced_dst_page(struct page *page,
 	return newpage;
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - PASS
+ */
 static struct page *alloc_misplaced_dst_page_thp(struct page *page,
 						 unsigned long data)
 {
@@ -2439,6 +2458,13 @@ out:
 	return newpage;
 }
 
+/*
+ * IAMROOT, 2023.06.24:
+ * - lru list에서 @page를 isolate한다.
+ *
+ * - return 0 : isolate 실패
+ *          1 : isolate성공.
+ */
 static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 {
 	int page_lru;
@@ -2466,6 +2492,12 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
 	 * caller's reference can be safely dropped without the page
 	 * disappearing underneath us during migration.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   페이지를 분리하면 다른 참조가 있으므로 마이그레이션 중에 페이지가
+ *   사라지지 않고 호출자의 참조를 안전하게 삭제할 수 있습니다.
+ */
 	put_page(page);
 	return 1;
 }
@@ -2474,6 +2506,15 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
  * Attempt to migrate a misplaced page to the specified destination
  * node. Caller is expected to have an elevated reference count on
  * the page that will be dropped by this function before returning.
+ */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   잘못 배치된 페이지를 지정된 대상 노드로 마이그레이션하려고 
+ *   시도합니다. 호출자는 반환하기 전에 이 함수에 의해 삭제될 
+ *   페이지에서 높은 참조 횟수를 가질 것으로 예상됩니다.
+ *
+ * - lru page에서 isolate후 @node로 migrate한다.
  */
 int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 			   int node)
@@ -2491,6 +2532,13 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	 * be either base page or THP.  And it must be head page if it is
 	 * THP.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   PTE 매핑된 THP 또는 HugeTLB 페이지는 여기에 도달할 수 없으므로
+ *   페이지는 기본 페이지 또는 THP일 수 있습니다. 그리고 THP라면 반드시
+ *   헤드페이지여야 합니다.
+ */ 
 	compound = PageTransHuge(page);
 
 	if (compound)
@@ -2502,6 +2550,13 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	 * Don't migrate file pages that are mapped in multiple processes
 	 * with execute permissions as they are probably shared libraries.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   실행 권한이 있는 여러 프로세스에서 매핑된 파일 페이지는 아마도 
+ *   공유 라이브러리일 수 있으므로 마이그레이션하지 마십시오.
+ * - 실행가능한 공유라이브러리는 옮기지 않는다.
+ */
 	if (page_mapcount(page) != 1 && page_is_file_lru(page) &&
 	    (vma->vm_flags & VM_EXEC))
 		goto out;
@@ -2510,6 +2565,14 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	 * Also do not migrate dirty pages as not all filesystems can move
 	 * dirty pages in MIGRATE_ASYNC mode which is a waste of cycles.
 	 */
+/*
+ * IAMROOT, 2023.06.24:
+ * - papago
+ *   또한 모든 파일 시스템이 순환 낭비인 MIGRATE_ASYNC 모드에서
+ *   더티 페이지를 이동할 수 있는 것은 아니므로 더티 페이지를
+ *   마이그레이션하지 마십시오.
+ * - 쓰기 기록중인 file page는 옮기지 않는다.
+ */
 	if (page_is_file_lru(page) && PageDirty(page))
 		goto out;
 
@@ -2520,6 +2583,11 @@ int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 	list_add(&page->lru, &migratepages);
 	nr_remaining = migrate_pages(&migratepages, *new, NULL, node,
 				     MIGRATE_ASYNC, MR_NUMA_MISPLACED, NULL);
+/*
+ * IAMROOT, 2023.06.24:
+ * - migrate 못한것들은 원래 있던 lru로 복귀 시킨다.
+ *   일부만 성공했을경우 실패로 간주한다.
+ */
 	if (nr_remaining) {
 		if (!list_empty(&migratepages)) {
 			list_del(&page->lru);
