@@ -1725,7 +1725,8 @@ static unsigned int task_scan_min(struct task_struct *p)
 
 /*
  * IAMROOT, 2023.06.24:
- * - task_scan_min 값 기준으로 설정하고 refcount 가 클수록 상향 조정된다.
+ * - task_scan_min 값 기준으로 설정하고 refcount 가 크고 shared 비율이 높을수록
+ *   상향 조정된다.
  */
 static unsigned int task_scan_start(struct task_struct *p)
 {
@@ -1910,10 +1911,10 @@ static inline unsigned long task_faults(struct task_struct *p, int nid)
 /*
  * IAMROOT, 2023.06.24:
  * - @group에 대한 @nid의 전체 memory node fault값(private + shared fault)
- * IAMROOT, 2023.06.22:
- * - Return: task(@p) 의 numa_group faults 배열값들을 더해서 반환.
- *   더하는 값들은 numa node id(@nid)에 대해 stats가 NUMA_MEM 인 각각의
- *   fault type(priv,shared)의 index에 해당하는 faults를 더한 값
+ *
+ * IAMROOT, 2023.07.02:
+ * - Return: task(@p) 의 numa_group 에서 @nid 에 해당하는 NUMA_MEM stats 의
+ *           faults 값 반환
  */
 static inline unsigned long group_faults(struct task_struct *p, int nid)
 {
@@ -1929,6 +1930,12 @@ static inline unsigned long group_faults(struct task_struct *p, int nid)
 /*
  * IAMROOT, 2023.06.24:
  * - @group에 대한 @nid의 전체 memory node fault cpu값(private + shared fault)
+ *
+ * IAMROOT, 2023.07.02:
+ * - Return: @group 에서 @nid 에 해당하는 NUMA_CPU stats 의 faults 값 반환
+ *
+ * - XXX faults_cpu 가 NUMA_CPU stats의 시작을 가리키므로 idx 계산에 NUMA_MEM
+ *   를 사용했지만 실지로는 NUMA_CPU 의 faults 에 대한 idx가 된다.
  */
 static inline unsigned long group_faults_cpu(struct numa_group *group, int nid)
 {
@@ -2002,6 +2009,11 @@ static bool numa_is_active_node(int nid, struct numa_group *ng)
  *
  * - Return: 각 online node에 대하여 task @p(또는 @p가 속한 그룹)에 대한 faults 값에
  *           dist 비율(@nid와 가까운 노드 일수록 높은 비율)을 적용하여 모두 더한 score.
+ * - sched_numa_topology_type 에 따른 반환값
+ *   @nid 와 가장 먼 노드는 제외
+ *   1. NUMA_DIRECT - 0
+ *   2. NUMA_BACKPLANE - @maxdist보다 가까운 online 노드들의 faults 합
+ *   3. NUMA_GLUELESS_MESH - 가까울 수록 높은 비율을 적용한 online 노드들의 faults 합
  */
 static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
 					int maxdist, bool task)
@@ -2115,6 +2127,22 @@ static unsigned long score_nearby_nodes(struct task_struct *p, int nid,
  * larger multiplier, in order to group tasks together that are almost
  * evenly spread out between numa nodes.
  */
+/*
+ * IAMROOT. 2023.07.02:
+ * - google-translate
+ * 특정 numa 노드에서 특정 작업 또는 작업 그룹이 수행한 액세스의 일부를
+ * 반환합니다. 그룹 가중치에는 numa 노드 간에 거의 균등하게 분산된 작업을 함께
+ * 그룹화하기 위해 더 큰 승수가 지정됩니다.
+ *
+ * - sched_numa_topology_type 에 따른 faults 값
+ *   가장 먼 노드는 제외
+ *   1. NUMA_DIRECT - @p의 @nid에 해당하는 faults 값
+ *   2. NUMA_BACKPLANE - @dist보다 가까운 online 노드들의 faults 합
+ *   3. NUMA_GLUELESS_MESH - 가까울 수록 높은 비율을 적용한 online 노드들의 faults 합
+ *
+ * - Return: total_faults 에 대한 faults 의 비율
+ *
+ */
 static inline unsigned long task_weight(struct task_struct *p, int nid,
 					int dist)
 {
@@ -2134,6 +2162,10 @@ static inline unsigned long task_weight(struct task_struct *p, int nid,
 	return 1000 * faults / total_faults;
 }
 
+/*
+ * IAMROOT, 2023.07.04:
+ * - faults 값 계산에서 group faults 값을 사용하는 것 외에는 task_weight 과 동일하다
+ */
 static inline unsigned long group_weight(struct task_struct *p, int nid,
 					 int dist)
 {
@@ -2163,6 +2195,12 @@ static inline unsigned long group_weight(struct task_struct *p, int nid,
  *   4. dst_nid의 fault cpu이 src_nid fault cpu보다 3배초과인경우 true
  *   5. fault cpu / falut mem의 비율이  dst가 1.33배이상 많은경우 true.
  *      아니면 false
+ *
+ * IAMROOT, 2023.07.01:
+ * - @p: current
+ *   @page: fault 가 발생한 page
+ *   @src_nid: @page에 설정된 node id
+ *   @dst_cpu: raw_smp_processor_id
  */
 bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 				int src_nid, int dst_cpu)
@@ -2281,6 +2319,11 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
  *   faults_mem(dst)   4   faults_mem(src)
  *
  * - dst의 fault가 src보다 1.33배 이상 많다면 dst로 옮긴다.
+ *
+ * IAMROOT, 2023.07.08:
+ * - memory less node를 가지고 있는 numa system(ex.threadripper)에서는 메모리를
+ *   가지고 있는 노드가 가지고 있지 않는 노드보다 1.33배 이상 access가 많은 경우
+ *   해당 페이지를 옮긴다.
  */
 	return group_faults_cpu(ng, dst_nid) * group_faults(p, src_nid) * 3 >
 	       group_faults_cpu(ng, src_nid) * group_faults(p, dst_nid) * 4;
@@ -2356,6 +2399,23 @@ static unsigned long cpu_util(int cpu);
 static inline long adjust_numa_imbalance(int imbalance,
 					int dst_running, int dst_weight);
 
+/*
+ * IAMROOT, 2023.07.04:
+ * - Return:
+ *   1. node_overloaded - 다음 경우 노드가 과부하 되었다고 볾
+ *      1. running task 수가 전체 online node cpu 수보다 많고
+ *         전체 capa 가 전체 util avg 합에 가중치를 준 값보다 작다.
+ *      2. running task 수가 전체 online node cpu 수보다 많고
+ *         전체 capa 에 가중치를 준 값이 전체 runnable avg 합보다 작다.
+ *   2. node_has_spare - 다음 경우 노드가 여유가 있다고 볾
+ *      1. running task 수가 전체 online node cpu 수보다 작다.
+ *      2. 전체 capa 가 전체 util avg 합에 가중치를 준 값보다 크고
+ *         전체 capa 에 가중치를 준 값이 전체 runnable avg 합보다 작다.
+ *   3. node_fully_busy - 다음 경우 fully_busy
+ *      1. running task 수가 전체 online node cpu 수 이상이고
+ *         전체 capa 가 전체 util avg 합에 가중치를 준 값보다 크고
+ *         전체 capa 에 가중치를 준 값이 전체 runnable avg 합보다 작다.
+ */
 static inline enum
 numa_type numa_classify(unsigned int imbalance_pct,
 			 struct numa_stats *ns)
@@ -2376,8 +2436,19 @@ numa_type numa_classify(unsigned int imbalance_pct,
 #ifdef CONFIG_SCHED_SMT
 /* Forward declarations of select_idle_sibling helpers */
 static inline bool test_idle_cores(int cpu, bool def);
+/*
+ * IAMROOT, 2023.07.07:
+ * - Return:
+ *   1. idle_core 설정 조건이고 cpu 의 smt가 전부 idle 이면 cpu
+ *   2. 그렇지 않으면 전달된 @idle_core
+ */
 static inline int numa_idle_core(int idle_core, int cpu)
 {
+	/*
+	 * IAMROOT, 2023.07.04:
+	 * - smt 가 아니거나 이미 idle_core cpu가 설정되었거나 llc_shared_domain
+	 *   에 idle_core가 없으면 @idle_core 그냥 반환
+	 */
 	if (!static_branch_likely(&sched_smt_present) ||
 	    idle_core >= 0 || !test_idle_cores(cpu, false))
 		return idle_core;
@@ -2385,6 +2456,11 @@ static inline int numa_idle_core(int idle_core, int cpu)
 	/*
 	 * Prefer cores instead of packing HT siblings
 	 * and triggering future load balancing.
+	 */
+	/*
+	 * IAMROOT. 2023.07.04:
+	 * - google-translate
+	 * HT 형제를 묶고 향후 로드 밸런싱을 트리거하는 대신 코어를 선호합니다.
 	 */
 	if (is_core_idle(cpu))
 		idle_core = cpu;
@@ -2403,6 +2479,17 @@ static inline int numa_idle_core(int idle_core, int cpu)
  * decisions that are compatible with standard load balancer. This
  * borrows code and logic from update_sg_lb_stats but sharing a
  * common implementation is impractical.
+ */
+/*
+ * IAMROOT. 2023.07.04:
+ * - google-translate
+ * 표준 로드 밸런서와 호환되는 NUMA 균형 배치 결정을 내리는 데 필요한 모든 정보를
+ * 수집합니다. 이것은 update_sg_lb_stats에서 코드와 논리를 차용하지만 공통 구현을
+ * 공유하는 것은 비실용적입니다.
+ */
+/*
+ * IAMROOT, 2023.07.07:
+ * - @ns 의 멤버를 설정한다.
  */
 static void update_numa_stats(struct task_numa_env *env,
 			      struct numa_stats *ns, int nid,
@@ -2428,6 +2515,10 @@ static void update_numa_stats(struct task_numa_env *env,
 			    !cpumask_test_cpu(cpu, env->p->cpus_ptr))
 				continue;
 
+			/*
+			 * IAMROOT, 2023.07.04:
+			 * - 첫번째 idle cpu 를 idle_cpu로설정
+			 */
 			if (ns->idle_cpu == -1)
 				ns->idle_cpu = cpu;
 
@@ -2440,16 +2531,37 @@ static void update_numa_stats(struct task_numa_env *env,
 
 	ns->node_type = numa_classify(env->imbalance_pct, ns);
 
+	/*
+	 * IAMROOT, 2023.07.07:
+	 * - idle_core가 있으면 idle_core의 첫번째 cpu, 없으면 첫번째 idle cpu
+	 */
 	if (idle_core >= 0)
 		ns->idle_cpu = idle_core;
 }
 
+/*
+ * IAMROOT, 2023.07.04:
+ * - env->dst_cpu로 migrate 하려는 상황
+ *   1. env->best_task = @p, env->best_imp = @imp, env->best_cpu = env->dst_cpu
+ *      설정.
+ *   2. env->dst_cpu 가 이미 migrate 중이라면 노드의 다른 idle cpu를 찾아서 best_cpu
+ *      에 할당한다.
+ *   3. env->dst_cpu 가 이미 migrate 중이고 노드의 다른 idle cpu를 못 찾았다면
+ *      아무것도 하지 않고 return
+ */
 static void task_numa_assign(struct task_numa_env *env,
 			     struct task_struct *p, long imp)
 {
 	struct rq *rq = cpu_rq(env->dst_cpu);
 
 	/* Check if run-queue part of active NUMA balance. */
+	/*
+	 * IAMROOT. 2023.07.04:
+	 * - google-translate
+	 * active NUMA balance의 run-queue 부분인지 확인하십시오.
+	 *
+	 * - 이미 migrate 중이라면 노드에서 다른 idle cpu를 찾는다.
+	 */
 	if (env->best_cpu != env->dst_cpu && xchg(&rq->numa_migrate_on, 1)) {
 		int cpu;
 		int start = env->dst_cpu;
@@ -2476,6 +2588,12 @@ assign:
 	 * Clear previous best_cpu/rq numa-migrate flag, since task now
 	 * found a better CPU to move/swap.
 	 */
+	/*
+	 * IAMROOT. 2023.07.04:
+	 * - google-translate
+	 * 이전의 best_cpu/rq numa-migrate 플래그를 지웁니다. 작업이 이제 이동/스왑하기에
+	 * 더 나은 CPU를 찾았기 때문입니다.
+	 */
 	if (env->best_cpu != -1 && env->best_cpu != env->dst_cpu) {
 		rq = cpu_rq(env->best_cpu);
 		WRITE_ONCE(rq->numa_migrate_on, 0);
@@ -2491,6 +2609,11 @@ assign:
 	env->best_cpu = env->dst_cpu;
 }
 
+/*
+ * IAMROOT, 2023.07.04:
+ * - task가 dst 로 옮겨가고 dst 와 src의 load 불균형이 더 심해졌나?
+ * - Return: load 불균형이 더 심혀졌으면 true
+ */
 static bool load_too_imbalanced(long src_load, long dst_load,
 				struct task_numa_env *env)
 {
@@ -2532,6 +2655,18 @@ static bool load_too_imbalanced(long src_load, long dst_load,
  * into account that it might be best if task running on the dst_cpu should
  * be exchanged with the source task
  */
+/*
+ * IAMROOT. 2023.07.04:
+ * - google-translate
+ * 이는 dst_cpu에서 실행 중인 작업을 소스 작업과 교환해야 하는 경우가 가장 좋을 수
+ * 있다는 점을 고려하여 소스 작업이 대상 dst_cpu로 마이그레이션된 경우 시스템의
+ * 전체 컴퓨팅 및 NUMA 액세스가 개선되는지 확인합니다.
+ *
+ * - @env->p: current
+ *   @env->dst_cpu: current task의 numa_preferred_nid 의 cpu중 현재 loop의 cpu
+ *   @taskimp: dst node 와 src node의 fault 차이
+ *   @groupimp: dst node 와 src node의 group fault 차이
+ */
 static bool task_numa_compare(struct task_numa_env *env,
 			      long taskimp, long groupimp, bool maymove)
 {
@@ -2550,6 +2685,10 @@ static bool task_numa_compare(struct task_numa_env *env,
 
 	rcu_read_lock();
 	cur = rcu_dereference(dst_rq->curr);
+	/*
+	 * IAMROOT, 2023.07.05:
+	 * - dst_cpu의 curr가 종료중이거나 idle인 경우
+	 */
 	if (cur && ((cur->flags & PF_EXITING) || is_idle_task(cur)))
 		cur = NULL;
 
@@ -2557,12 +2696,25 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * Because we have preemption enabled we can get migrated around and
 	 * end try selecting ourselves (current == env->p) as a swap candidate.
 	 */
+	/*
+	 * IAMROOT. 2023.07.04:
+	 * - google-translate
+	 * 우리는 선점을 활성화했기 때문에 마이그레이션을 수행하고 스왑 후보로 자신(current
+	 * == env->p)을 선택하려고 시도할 수 있습니다.
+	 * - XXX 이 조건이 발생할 수 있나?
+	 */
 	if (cur == env->p) {
 		stopsearch = true;
 		goto unlock;
 	}
 
 	if (!cur) {
+		/*
+		 * IAMROOT, 2023.07.05:
+		 * - dst_cpu의 curr가 종료중이거나 idle task이고
+		 *   이동하면 load balance가 유지되고
+		 *   dst node로의 faults도 best_imp 이상이다
+		 */
 		if (maymove && moveimp >= env->best_imp)
 			goto assign;
 		else
@@ -2570,12 +2722,25 @@ static bool task_numa_compare(struct task_numa_env *env,
 	}
 
 	/* Skip this swap candidate if cannot move to the source cpu. */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 소스 CPU로 이동할 수 없는 경우 이 스왑 후보를 건너뜁니다.
+	 * - XXX dst cpu로 이동할 수 없는 경우가 되어야 하는게 아닌가?
+	 *   swap 후보이므로 dst->src 가 가능한지도 체크
+	 */
 	if (!cpumask_test_cpu(env->src_cpu, cur->cpus_ptr))
 		goto unlock;
 
 	/*
 	 * Skip this swap candidate if it is not moving to its preferred
 	 * node and the best task is.
+	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 선호하는 노드로 이동하지 않고 최선의 작업인 경우 이 스왑 후보를 건너뜁니다.
+	 * - best_task의 preffered_nid가 src_nid와 같다면 할당을 건너뛴다?
 	 */
 	if (env->best_task &&
 	    env->best_task->numa_preferred_nid == env->src_nid &&
@@ -2593,13 +2758,38 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * If dst and source tasks are in the same NUMA group, or not
 	 * in any group then look only at task weights.
 	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * "imp"는 소스 노드와 대상 노드 사이의 소스 작업에 대한 결함 차이입니다. 원본
+	 * 작업과 잠재적인 대상 작업에 대한 총 차이를 계산합니다. 값이 음수일수록 태스크가
+	 * 교환된 경우 발생할 것으로 예상되는 원격 액세스가 더 많습니다. dst 및 소스 작업이
+	 * 동일한 NUMA 그룹에 있거나 어떤 그룹에도 없는 경우 작업 가중치만 확인합니다.
+	 *
+	 * - current task 가 preferred node로 이동시 faults 차이와
+	 *   preferred node의 cpu 중 현재 loop의 cpu에서 current task 의 노드로
+	 *   이동시 faults 차이의 합을 구한다. 값이 음수일수록 원격 억세스가 많다.
+	 *   즉 src task 를 dst 로 이동하려는데 swap 으로 이동한다면 dst -> src
+	 *   의 이동에 대한 faults도 염두에 두어야 한다.
+	 */
 	cur_ng = rcu_dereference(cur->numa_group);
 	if (cur_ng == p_ng) {
+		/*
+		 * IAMROOT, 2023.07.05:
+		 * - src task 가 dst node 로 옮겨 갈 경우 faults 차이와
+		 *   dst task 가 src node 로 옮겨 갈 경우 faults 차이를 더한다.
+		 */
 		imp = taskimp + task_weight(cur, env->src_nid, dist) -
 		      task_weight(cur, env->dst_nid, dist);
 		/*
 		 * Add some hysteresis to prevent swapping the
 		 * tasks within a group over tiny differences.
+		 */
+		/*
+		 * IAMROOT. 2023.07.05:
+		 * - google-translate
+		 * 약간의 히스테리시스를 추가하여 그룹 내에서 작은 차이로 작업이 바뀌는 것을
+		 * 방지합니다.
 		 */
 		if (cur_ng)
 			imp -= imp / 16;
@@ -2607,6 +2797,12 @@ static bool task_numa_compare(struct task_numa_env *env,
 		/*
 		 * Compare the group weights. If a task is all by itself
 		 * (not part of a group), use the task weight instead.
+		 */
+		/*
+		 * IAMROOT. 2023.07.05:
+		 * - google-translate
+		 * 그룹 가중치를 비교합니다. 작업이 그룹의 일부가 아닌 그 자체인 경우,
+		 * 대신 작업 가중치를 사용합니다.
 		 */
 		if (cur_ng && p_ng)
 			imp += group_weight(cur, env->src_nid, dist) -
@@ -2617,6 +2813,11 @@ static bool task_numa_compare(struct task_numa_env *env,
 	}
 
 	/* Discourage picking a task already on its preferred node */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 선호하는 노드에 이미 있는 작업을 선택하지 않도록 합니다.
+	 */
 	if (cur->numa_preferred_nid == env->dst_nid)
 		imp -= imp / 16;
 
@@ -2626,9 +2827,22 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * 1998 (see SMALLIMP and task_weight for why) but in this
 	 * case, it does not matter.
 	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 선호하는 노드로 이동하는 작업을 선택하도록 권장합니다. 이로 인해 잠재적으로
+	 * imp가 최대값인 1998보다 커질 수 있지만(이유는 SMALLIMP 및 task_weight 참조) 이
+	 * 경우에는 중요하지 않습니다.
+	 */
 	if (cur->numa_preferred_nid == env->src_nid)
 		imp += imp / 8;
 
+	/*
+	 * IAMROOT, 2023.07.07:
+	 * - 스왑에 의해 dst->src 이동으로 faults 감소가 있고 best_imp도 감소된
+	 *   값이라면 imp를 전달된 @moveimp로 설정
+	 * - best_imp를 전달된 @moveimp 보다는 작지않게 설정하려 한다
+	 */
 	if (maymove && moveimp > imp && moveimp > env->best_imp) {
 		imp = moveimp;
 		cur = NULL;
@@ -2638,6 +2852,11 @@ static bool task_numa_compare(struct task_numa_env *env,
 	/*
 	 * Prefer swapping with a task moving to its preferred node over a
 	 * task that is not.
+	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 그렇지 않은 작업보다 선호하는 노드로 이동하는 작업으로 교체하는 것을 선호합니다.
 	 */
 	if (env->best_task && cur->numa_preferred_nid == env->src_nid &&
 	    env->best_task->numa_preferred_nid != env->src_nid) {
@@ -2650,11 +2869,29 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * of tasks and also hurt performance due to cache
 	 * misses.
 	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * NUMA 중요도가 SMALLIMP보다 낮으면 작업 마이그레이션으로 인해 작업의 핑퐁만
+	 * 발생하고 캐시 누락으로 인해 성능이 저하될 수 있습니다.
+	 */
+	/*
+	 * IAMROOT, 2023.07.06:
+	 * - faults 차이가 많지 않다면 다음 루프를 진행한다
+	 */
 	if (imp < SMALLIMP || imp <= env->best_imp + SMALLIMP / 2)
 		goto unlock;
 
 	/*
 	 * In the overloaded case, try and keep the load balanced.
+	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 과부하된 경우 부하 균형을 유지하도록 노력하십시오.
+	 *
+	 * - XXX src 와 dst load의 차이를 구하는 이유는 swap 할 것이므로
+	 *   차이를 더하거나 빼야 한다.
 	 */
 	load = task_h_load(env->p) - task_h_load(cur);
 	if (!load)
@@ -2663,21 +2900,48 @@ static bool task_numa_compare(struct task_numa_env *env,
 	dst_load = env->dst_stats.load + load;
 	src_load = env->src_stats.load - load;
 
+	/*
+	 * IAMROOT, 2023.07.07:
+	 * - swap후 load 불균형이 더 심해진다면 다음 루프를 진행한다
+	 */
 	if (load_too_imbalanced(src_load, dst_load, env))
 		goto unlock;
 
 assign:
 	/* Evaluate an idle CPU for a task numa move. */
+	/*
+	 * IAMROOT, 2023.07.06:
+	 * - cur 가 NULL 인 조건
+	 *   1. dst_cpu의 curr가 종료중이거나 idle task이고 이동하면 load balance가
+	 *      나아지고 dst node로의 faults도 best_imp 이상이다
+	 *   2. 이동하면 load balance가 나아지고 swap 후에도 faults가 반대편 이동대비
+	 *      이득이 있고 설정된 best_imp 보다 인자로 전달된 값이 크다
+	 * - env->dst_cpu 설정(cur 이 NULL 인 경우)
+	 *   1. dst node에 idle cpu 가 있으면 idle_cpu
+	 *   2. dst node에 idle cpu 가 없고 best_cpu가 idle이면 best_cpu
+	 *   3. 나머지 조건은 전달된 dst_cpu
+	 */
 	if (!cur) {
 		int cpu = env->dst_stats.idle_cpu;
 
 		/* Nothing cached so current CPU went idle since the search. */
+		/*
+		 * IAMROOT. 2023.07.06:
+		 * - google-translate
+		 * 캐시된 것이 없으므로 검색 이후 현재 CPU가 유휴 상태가 되었습니다.
+		 */
 		if (cpu < 0)
 			cpu = env->dst_cpu;
 
 		/*
 		 * If the CPU is no longer truly idle and the previous best CPU
 		 * is, keep using it.
+		 */
+		/*
+		 * IAMROOT. 2023.07.06:
+		 * - google-translate
+		 * CPU가 더 이상 실제로 유휴 상태가 아니고 이전에 best CPU가
+		 * 있는 경우 계속 사용하십시오.
 		 */
 		if (!idle_cpu(cpu) && env->best_cpu >= 0 &&
 		    idle_cpu(env->best_cpu)) {
@@ -2694,6 +2958,14 @@ assign:
 	 * balance improves then stop the search. While a better swap
 	 * candidate may exist, a search is not free.
 	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 용량이 있거나 부하 균형이 개선되어 유휴 상태로 전환이 허용되면 검색을
+	 * 중지합니다. 더 나은 스왑 후보가 존재할 수 있지만 검색은 무료가 아닙니다.
+	 * - @maymove가 true 로 전달되었을 경우 검색 중단 조건
+	 *   preffered node의 idle cpu 로 이동할 수 있으면 검색 중단
+	 */
 	if (maymove && !cur && env->best_cpu >= 0 && idle_cpu(env->best_cpu))
 		stopsearch = true;
 
@@ -2701,16 +2973,45 @@ assign:
 	 * If a swap candidate must be identified and the current best task
 	 * moves its preferred node then stop the search.
 	 */
+	/*
+	 * IAMROOT. 2023.07.05:
+	 * - google-translate
+	 * 스왑 후보를 식별해야 하고 현재 최상의 작업이 선호하는 노드를 이동하면 검색을
+	 * 중지합니다.
+	 * - XXX 이 조건의 의미는?
+	 *  - @maymove가 false 로 전달되었을 경우 검색 중단 조건
+	 *    src->dst 이동은 load 불균형이 나빠지지만 best_task가 설정되었고
+	 *    src_nid가 preffered 이다
+	 * - best_task 가 설정되는 조건
+	 *   1. cur 가 NULL 이 아니다
+	 *   2. swap 후에는 불균형이 유지나 개선된다.
+	 */
 	if (!maymove && env->best_task &&
 	    env->best_task->numa_preferred_nid == env->src_nid) {
 		stopsearch = true;
 	}
 unlock:
+	/*
+	 * IAMROOT, 2023.07.08:
+	 * - task_numa_assign을 호출 하지 않고 다음 루프로 검색을 진행하는 조건
+	 *   1. cur == env->p (dst_rq->curr == current).(예외로 검색도 중단)
+	 *   2. cur 가 종료중이거나 idle task
+	 *      1. @maymove 가 false
+	 *      2. moveimp >= env->best_imp
+	 *   3. cur가 src_cpu로 이동할 수 없는 경우
+	 *   4. cur는 preffered_nid 로 이동하지 않지만 best_task는 그럴경우
+	 *   5. faults 차이가 많지 않을때
+	 *   6. swap후 로드 불균형이 더 심해질 경우
+	 */
 	rcu_read_unlock();
 
 	return stopsearch;
 }
 
+/*
+ * IAMROOT, 2023.07.08:
+ * - ING
+ */
 static void task_numa_find_cpu(struct task_numa_env *env,
 				long taskimp, long groupimp)
 {
@@ -2720,6 +3021,12 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 	/*
 	 * If dst node has spare capacity, then check if there is an
 	 * imbalance that would be overruled by the load balancer.
+	 */
+	/*
+	 * IAMROOT. 2023.07.04:
+	 * - google-translate
+	 * dst 노드에 여유 용량이 있는 경우 로드 밸런서에 의해 무시되는 불균형이 있는지
+	 * 확인하십시오.
 	 */
 	if (env->dst_stats.node_type == node_has_spare) {
 		unsigned int imbalance;
@@ -2731,6 +3038,13 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 		 * move improves the imbalance from the perspective of the
 		 * CPU load balancer.
 		 * */
+		/*
+		 * IAMROOT. 2023.07.04:
+		 * - google-translate
+		 * 움직임으로 인해 불균형이 발생합니까? src에 실행 중인 작업이 더 많은 경우
+		 * 이동으로 인해 CPU 로드 밸런서의 관점에서 불균형이 개선되므로 불균형이
+		 * 무시됩니다.
+		 */
 		src_running = env->src_stats.nr_running - 1;
 		dst_running = env->dst_stats.nr_running + 1;
 		imbalance = max(0, dst_running - src_running);
@@ -2738,6 +3052,13 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 							env->dst_stats.weight);
 
 		/* Use idle CPU if there is no imbalance */
+		/*
+		 * IAMROOT. 2023.07.06:
+		 * - google-translate
+		 * 불균형이 없으면 유휴 CPU 사용
+		 *
+		 * - 이동후 running task 수가 같다면 idle_cpu를 best_cpu로 지정
+		 */
 		if (!imbalance) {
 			maymove = true;
 			if (env->dst_stats.idle_cpu >= 0) {
@@ -2747,14 +3068,31 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 			}
 		}
 	} else {
+		/*
+		 * IAMROOT, 2023.07.04:
+		 * - node_type이 overloaded 이거나 fully_busy
+		 *
+		 * IAMROOT, 2023.07.08:
+		 * - ING
+		 */
 		long src_load, dst_load, load;
 		/*
 		 * If the improvement from just moving env->p direction is better
 		 * than swapping tasks around, check if a move is possible.
 		 */
+		/*
+		 * IAMROOT. 2023.07.04:
+		 * - google-translate
+		 * env->p 방향으로 이동하는 것의 개선이 작업을 교환하는 것보다 낫다면 이동이
+		 * 가능한지 확인하십시오.
+		 */
 		load = task_h_load(env->p);
 		dst_load = env->dst_stats.load + load;
 		src_load = env->src_stats.load - load;
+		/*
+		 * IAMROOT, 2023.07.04:
+		 * - dst 로 이동후 이전보다 load 불균형이 개선된다면 maymove = true
+		 */
 		maymove = !load_too_imbalanced(src_load, dst_load, env);
 	}
 
@@ -2798,8 +3136,19 @@ static int task_numa_migrate(struct task_struct *p)
 	 * random movement of tasks -- counter the numa conditions we're trying
 	 * to satisfy here.
 	 */
+	/*
+	 * IAMROOT. 2023.07.02:
+	 * - google-translate
+	 * 가장 낮은 SD_NUMA 도메인을 선택하면 불균형이 가장 적고 작업 이동을 가장 먼저
+	 * 시작하게 됩니다. 그리고 우리는 작업의 임의 이동을 생성하기 때문에 작업 이동을
+	 * 피하고 싶습니다. 여기서 만족시키려는 누마 조건에 반대합니다.
+	 */
 	rcu_read_lock();
 	sd = rcu_dereference(per_cpu(sd_numa, env.src_cpu));
+	/*
+	 * IAMROOT, 2023.07.08:
+	 * - numa migrate 시는 load balance 보다 이동이 쉽게 초과 숫자의 절반만 적용
+	 */
 	if (sd)
 		env.imbalance_pct = 100 + (sd->imbalance_pct - 100) / 2;
 	rcu_read_unlock();
@@ -2809,6 +3158,13 @@ static int task_numa_migrate(struct task_struct *p)
 	 * balance domains, some of which do not cross NUMA boundaries.
 	 * Tasks that are "trapped" in such domains cannot be migrated
 	 * elsewhere, so there is no point in (re)trying.
+	 */
+	/*
+	 * IAMROOT. 2023.07.02:
+	 * - google-translate
+	 * Cpusets는 스케줄러 도메인 트리를 더 작은 균형 도메인으로 나눌 수 있으며 그 중
+	 * 일부는 NUMA 경계를 넘지 않습니다. 이러한 도메인에 "갇힌" 작업은 다른 곳으로
+	 * 마이그레이션할 수 없으므로 (재)시도할 필요가 없습니다.
 	 */
 	if (unlikely(!sd)) {
 		sched_setnuma(p, task_node(p));
@@ -2834,6 +3190,17 @@ static int task_numa_migrate(struct task_struct *p)
 	 *   multiple NUMA nodes; in order to better consolidate the group,
 	 *   we need to check other locations.
 	 */
+	/*
+	 * IAMROOT. 2023.07.07:
+	 * - google-translate
+	 * 다음과 같은 경우 다른 노드를 살펴보십시오.
+	 * - preferred_nid에 사용 가능한 공간이 없습니다.
+	 * - 작업이 여러 NUMA 노드에 걸쳐 인터리브되는 numa_group의
+	 *   일부입니다. 그룹을 더 잘 통합하려면 다른 위치를 확인해야 합니다.
+	 *
+	 * - preferred_nid 에서 적당한 cpu를 못찾았거나 active_nodes가 2 이상일 경우
+	 *   online node의 다른 노드중 faults 가 많은 노드에서 찾아본다.
+	 */
 	ng = deref_curr_numa_group(p);
 	if (env.best_cpu == -1 || (ng && ng->active_nodes > 1)) {
 		for_each_online_node(nid) {
@@ -2841,6 +3208,10 @@ static int task_numa_migrate(struct task_struct *p)
 				continue;
 
 			dist = node_distance(env.src_nid, env.dst_nid);
+			/*
+			 * IAMROOT, 2023.07.07:
+			 * - BACKPLANE 이고 dist가 변경되었다면 faults 값 재계산
+			 */
 			if (sched_numa_topology_type == NUMA_BACKPLANE &&
 						dist != env.dist) {
 				taskweight = task_weight(p, env.src_nid, dist);
@@ -2848,6 +3219,13 @@ static int task_numa_migrate(struct task_struct *p)
 			}
 
 			/* Only consider nodes where both task and groups benefit */
+			/*
+			 * IAMROOT. 2023.07.07:
+			 * - google-translate
+			 * 작업과 그룹 모두 이익이 되는 노드만 고려하십시오.
+			 *
+			 * - src 보다 faults(access) 가 많은 노드만 고려
+			 */
 			taskimp = task_weight(p, nid, dist) - taskweight;
 			groupimp = group_weight(p, nid, dist) - groupweight;
 			if (taskimp < 0 && groupimp < 0)
@@ -2867,6 +3245,20 @@ static int task_numa_migrate(struct task_struct *p)
 	 * settle down.
 	 * A task that migrated to a second choice node will be better off
 	 * trying for a better one later. Do not set the preferred node here.
+	 */
+	/*
+	 * IAMROOT. 2023.07.07:
+	 * - google-translate
+	 * 작업이 여러 NUMA 노드에 걸쳐 있고 작업 부하의 활성 노드 중 하나로
+	 * 마이그레이션되는 작업 부하의 일부인 경우 작업 부하가 안정될 수 있도록 이 노드를
+	 * 작업의 기본 누마 노드로 기억하십시오. 두 번째 선택 노드로 마이그레이션된 작업은
+	 * 나중에 더 나은 노드로 시도하는 것이 좋습니다. 여기에서 기본 노드를 설정하지
+	 * 마십시오.
+	 *
+	 * - XXX 주석의 의미는?
+	 *
+	 * - 1. best_cpu가 설정되었다 -> best_cpu의 노드로 numa_preferred_nid 설정
+	 *   2. best_cpu가 설정되지 않았다 -> src 노드로 numa_preferred_nid 설정
 	 */
 	if (ng) {
 		if (env.best_cpu == -1)
@@ -2903,6 +3295,11 @@ static int task_numa_migrate(struct task_struct *p)
 }
 
 /* Attempt to migrate a task to a CPU on the preferred node. */
+/*
+ * IAMROOT. 2023.07.04:
+ * - google-translate
+ * preferred 노드의 CPU로 작업을 마이그레이션하려고 시도합니다.
+ */
 static void numa_migrate_preferred(struct task_struct *p)
 {
 	unsigned long interval = HZ;
@@ -2935,6 +3332,11 @@ static void numa_migrate_preferred(struct task_struct *p)
  * 워크로드에서 활발하게 실행 중인 노드 수를 확인합니다. NUMA 힌트 결함이
  * 트리거되는 노드를 추적하여 이를 수행하십시오. 이는 워크로드의 메모리가 현재
  * 위치한 노드 집합과 다를 수 있습니다.
+ *
+ * IAMROOT, 2023.07.01:
+ * - online node중 @numa_group의 faults_cpu 수가 가장 큰 node 의 1/3 보다
+ *   큰 노드들의 갯수와 max_faults수를 numa_group 멤버 변수에 설정한다.
+ * - NOTE active_nodes 계산에는 faults_cpu를 사용한다.
  */
 static void numa_group_count_active_nodes(struct numa_group *numa_group)
 {
@@ -2964,6 +3366,14 @@ static void numa_group_count_active_nodes(struct numa_group *numa_group)
  * below NUMA_PERIOD_THRESHOLD (where range of ratio is 1..NUMA_PERIOD_SLOTS)
  * the scan period will decrease. Aim for 70% local accesses.
  */
+/*
+ * IAMROOT. 2023.07.02:
+ * - google-translate
+ * 스캔 속도를 조정할 때 기간은 NUMA_PERIOD_SLOTS 단위로 나뉩니다. 결함 통계가
+ * 로컬일수록 다음 스캔 창에 대한 스캔 기간이 높아집니다. 로컬/(로컬+원격) 비율이
+ * NUMA_PERIOD_THRESHOLD(비율 범위는 1..NUMA_PERIOD_SLOTS) 미만이면 스캔 기간이
+ * 줄어듭니다. 70% 로컬 액세스를 목표로 합니다.
+ */
 #define NUMA_PERIOD_SLOTS 10
 #define NUMA_PERIOD_THRESHOLD 7
 
@@ -2979,6 +3389,9 @@ static void numa_group_count_active_nodes(struct numa_group *numa_group)
  * 대부분의 메모리가 이미 로컬 노드에 있거나 대부분의 페이지 액세스가 다른
  * 프로세스와 공유되는 경우 스캔 기간을 늘립니다(스캔 속도 저하). 그렇지 않으면
  * 스캔 기간을 줄이십시오.
+ *
+ * IAMROOT, 2023.07.08:
+ * - skip
  */
 static void update_task_scan_period(struct task_struct *p,
 			unsigned long shared, unsigned long private)
@@ -3004,6 +3417,12 @@ static void update_task_scan_period(struct task_struct *p,
 	 * 밸런싱에 관심이 없는 영역입니다. 이와 관련하여 마이그레이션에 실패한 경우
 	 * 마이그레이션이 너무 빠르거나 로컬 노드에 과부하가 걸린 것입니다. 두 경우 모두 더
 	 * 느리게 스캔
+	 *
+	 * IAMROOT, 2023.07.02:
+	 * - 다음 3가지 상태에 대해서 다음 scan 주기를 2배로 한다
+	 *   1. 유휴상태
+	 *   2. numa balancing 이 아닌 영역
+	 *   3. migration에 실패한 적이 있다
 	 */
 	if (local + shared == 0 || p->numa_faults_locality[2]) {
 		p->numa_scan_period = min(p->numa_scan_period_max,
@@ -3030,6 +3449,14 @@ static void update_task_scan_period(struct task_struct *p,
 		 * Most memory accesses are local. There is no need to
 		 * do fast NUMA scanning, since memory is already local.
 		 */
+		/*
+		 * IAMROOT. 2023.07.02:
+		 * - google-translate
+		 * 대부분의 메모리 액세스는 로컬입니다. 메모리가 이미 로컬이기 때문에
+		 * 빠른 NUMA 스캔을 수행할 필요가 없습니다.
+		 *
+		 * - 주석의 내용은 private access인 경우 local 로 보는 것 같다.
+		 */
 		int slot = ps_ratio - NUMA_PERIOD_THRESHOLD; /*  */
 		if (!slot)
 			slot = 1;
@@ -3040,6 +3467,12 @@ static void update_task_scan_period(struct task_struct *p,
 		 * There is no point in continuing fast NUMA scanning,
 		 * since other tasks may just move the memory elsewhere.
 		 */
+		/*
+		 * IAMROOT. 2023.07.02:
+		 * - google-translate
+		 * 대부분의 메모리 액세스는 다른 작업과 공유됩니다. 다른 작업이 메모리를 다른
+		 * 곳으로 이동할 수 있기 때문에 빠른 NUMA 검색을 계속할 필요가 없습니다.
+		 */
 		int slot = lr_ratio - NUMA_PERIOD_THRESHOLD;
 		if (!slot)
 			slot = 1;
@@ -3049,6 +3482,12 @@ static void update_task_scan_period(struct task_struct *p,
 		 * Private memory faults exceed (SLOTS-THRESHOLD)/SLOTS,
 		 * yet they are not on the local NUMA node. Speed up
 		 * NUMA scanning to get the memory moved over.
+		 */
+		/*
+		 * IAMROOT. 2023.07.02:
+		 * - google-translate
+		 * 개인 메모리 오류는 (SLOTS-THRESHOLD)/SLOTS를 초과하지만 로컬
+		 * NUMA 노드에 없습니다. 메모리 이동을 위해 NUMA 스캔 속도를 높입니다.
 		 */
 		int ratio = max(lr_ratio, ps_ratio);
 		diff = -(NUMA_PERIOD_THRESHOLD - ratio) * period_slot;
@@ -3073,6 +3512,10 @@ static void update_task_scan_period(struct task_struct *p,
  * 유사한 통계를 유지하지만 수십 초의 NUMA 밸런싱 기간에서 훨씬 벗어난 32ms 기간의
  * 통계를 감소시킵니다. 작업이 너무 새로운 경우에만 스케줄러 통계를 사용하여 아직
  * NUMA 통계가 없습니다.
+ *
+ * IAMROOT, 2023.07.01:
+ * - 이전 실행되었을 때와 @p->se.sum_exec_runtime 의 delta 값을 반환한다.
+ *   @p->se.exec_start의 delta는 @period 인자에 전달한다.
  */
 static u64 numa_get_avg_runtime(struct task_struct *p, u64 *period)
 {
@@ -3125,6 +3568,12 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 	 * scores nodes according to the number of NUMA hinting faults on
 	 * both the node itself, and on nearby nodes.
 	 */
+	/*
+	 * IAMROOT. 2023.07.01:
+	 * - google-translate
+	 * 글루리스 메시 NUMA 토폴로지가 있는 시스템에서 group_weight는 노드 자체와 인근
+	 * 노드 모두에서 NUMA 힌트 오류 수에 따라 노드에 점수를 매깁니다.
+	 */
 	if (sched_numa_topology_type == NUMA_GLUELESS_MESH) {
 		unsigned long score, max_score = 0;
 		int node, max_node = nid;
@@ -3149,6 +3598,15 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 	 * searching down the hierarchy of node groups, recursively searching
 	 * inside the highest scoring group of nodes. The nodemask tricks
 	 * keep the complexity of the search down.
+	 */
+	/*
+	 * IAMROOT. 2023.07.01:
+	 * - google-translate
+	 * NUMA 백플레인 상호 연결 토폴로지가 있는 시스템에서 선호하는 nid를 찾는 것이 더
+	 * 복잡합니다. 목표는 시스템에서 서로 가까운 numa_groups의 작업을 찾고 시스템의
+	 * 서로 다른 측면에서 얽힌 워크로드를 해결하는 것입니다. 이를 위해서는 노드 그룹의
+	 * 계층 구조를 검색하고 가장 높은 점수를 받은 노드 그룹 내부를 재귀적으로 검색해야
+	 * 합니다. 노드 마스크 트릭은 검색의 복잡성을 낮춥니다.
 	 */
 	nodes = node_online_map;
 	for (dist = sched_max_numa_distance; dist > LOCAL_DISTANCE; dist--) {
@@ -3194,6 +3652,11 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 	return nid;
 }
 
+/*
+ * IAMROOT, 2023.07.04:
+ * - task 와 ng의 faults 통계 업데이트(buf 임시 통계를 가져와서 업데이트후 비운다)
+ *   faults 가 가장 많은 노드를 @p->numa_preferred_nid로 설정한다.
+ */
 static void task_numa_placement(struct task_struct *p)
 {
 	int seq, nid, max_nid = NUMA_NO_NODE;
@@ -3209,6 +3672,12 @@ static void task_numa_placement(struct task_struct *p)
 	 * exclusive access. Use READ_ONCE() here to ensure
 	 * that the field is read in a single access:
 	 */
+	/*
+	 * IAMROOT. 2023.07.02:
+	 * - google-translate
+	 * p->mm->numa_scan_seq 필드는 독점 액세스 없이 업데이트됩니다. 여기서
+	 * READ_ONCE()를 사용하여 단일 액세스에서 필드를 읽을 수 있도록 합니다.
+	 */
 	seq = READ_ONCE(p->mm->numa_scan_seq);
 	if (p->numa_scan_seq == seq)
 		return;
@@ -3220,6 +3689,11 @@ static void task_numa_placement(struct task_struct *p)
 	runtime = numa_get_avg_runtime(p, &period);
 
 	/* If the task is part of a group prevent parallel updates to group stats */
+	/*
+	 * IAMROOT. 2023.07.02:
+	 * - google-translate
+	 * 작업이 그룹의 일부인 경우 그룹 통계에 대한 병렬 업데이트 방지
+	 */
 	ng = deref_curr_numa_group(p);
 	if (ng) {
 		group_lock = &ng->lock;
@@ -3227,6 +3701,11 @@ static void task_numa_placement(struct task_struct *p)
 	}
 
 	/* Find the node with the highest number of faults */
+	/*
+	 * IAMROOT. 2023.07.02:
+	 * - google-translate
+	 * faults가 가장 많은 노드 찾기
+	 */
 	for_each_online_node(nid) {
 		/* Keep track of the offsets in numa_faults array */
 		int mem_idx, membuf_idx, cpu_idx, cpubuf_idx;
@@ -3242,6 +3721,11 @@ static void task_numa_placement(struct task_struct *p)
 			cpubuf_idx = task_faults_idx(NUMA_CPUBUF, nid, priv);
 
 			/* Decay existing window, copy faults since last scan */
+			/*
+			 * IAMROOT. 2023.07.02:
+			 * - google-translate
+			 * 기존 창 decay, 마지막 스캔 이후 오류 복사
+			 */
 			diff = p->numa_faults[membuf_idx] - p->numa_faults[mem_idx] / 2;
 			fault_types[priv] += p->numa_faults[membuf_idx];
 			p->numa_faults[membuf_idx] = 0;
@@ -3252,6 +3736,14 @@ static void task_numa_placement(struct task_struct *p)
 			 * number of faults. Tasks with little runtime have
 			 * little over-all impact on throughput, and thus their
 			 * faults are less important.
+			 */
+			/*
+			 * IAMROOT. 2023.07.01:
+			 * - google-translate
+			 * faults_from을 정규화하여 그룹의 모든 작업이 원시 결함 수
+			 * 대신 CPU 사용에 따라 계산되도록 합니다. 런타임이 적은 작업은
+			 * 처리량에 전반적으로 거의 영향을 미치지 않으므로 오류가 덜
+			 * 중요합니다.
 			 */
 			f_weight = div64_u64(runtime << 16, period + 1);
 			f_weight = (f_weight * p->numa_faults[cpubuf_idx]) /
@@ -3278,6 +3770,11 @@ static void task_numa_placement(struct task_struct *p)
 			}
 		}
 
+		/*
+		 * IAMROOT, 2023.07.08:
+		 * - ng가 없으면 task faults중 가장 큰 값의 nid를 max_nid로 설정
+		 *   ng가 있으면 group faults중 가장 큰 값의 nid를 max_nid로 설정
+		 */
 		if (!ng) {
 			if (faults > max_faults) {
 				max_faults = faults;
@@ -3320,6 +3817,17 @@ static inline void put_numa_group(struct numa_group *grp)
  * - @p 요청
  *   tsk : @cpupid(page)의 cpu에서 동작중인 curr
  *   cpupid의 pid : @cpupid)를 마지막에 썻던 task
+ *
+ * IAMROOT, 2023.07.01:
+ * - @p: current
+ *   @cpupid: fault가 발생한 페이지에 설정되었던 last_cpupid
+ *
+ * IAMROOT, 2023.07.04:
+ * - 같은 공유페이지에 접근하는 task들은 faults를 group 으로 관리한다.
+ *
+ * IAMROOT, 2023.07.08:
+ * - vm을 같이 사용하는 thread들과 같은 공유페이지를 사용하는 프로세스들은 같은
+ *   numa group을 사용한다.
  */
 static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 			int *priv)
@@ -3385,13 +3893,21 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
  * - 해당 page를 마지막에 접근했던 task와 page를 사용했던 cpu의 curr와
  *   동일한지 비교한다.
  */
+	/*
+	 * IAMROOT, 2023.07.08:
+	 * - page에 마지막에 접근했던 task가 원래 cpu에서 curr로 동작하고 있어야 한다.
+	 */
 	if (!cpupid_match_pid(tsk, cpupid))
 		goto no_join;
 
 /*
  * IAMROOT, 2023.06.24:
  * - tsk(cpupid의 curr)의 ng가 없으면 return.
- @*/
+ *
+ * IAMROOT, 2023.07.08:
+ * - grp: 이전 fault 발생 task 의 numa group
+ *   mygrp: 현재 fault 발생 task 의 numa group
+ */
 	grp = rcu_dereference(tsk->numa_group);
 	if (!grp)
 		goto no_join;
@@ -3406,7 +3922,7 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	 */
 /*
  * IAMROOT, 2023.06.24:
- * - my_grp -> grp로 옮길려고한다. my_grp이 작은데 괜히 옮길 필욘 없을것이다.
+ * - my_grp -> grp로 옮길려고한다. my_grp이 큰데 괜히 옮길 필욘 없을것이다.
  */
 	if (my_grp->nr_tasks > grp->nr_tasks)
 		goto no_join;
@@ -3416,7 +3932,7 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 	 */
 /*
  * IAMROOT, 2023.06.24:
- * - 같다면, grp가 address가 큰경우에만 움직인다.
+ * - 같다면, grp가 address가 작은 경우에만 조인한다.
  */
 	if (my_grp->nr_tasks == grp->nr_tasks && my_grp > grp)
 		goto no_join;
@@ -3430,6 +3946,11 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 		join = true;
 
 	/* Simple filter to avoid false positives due to PID collisions */
+	/*
+	 * IAMROOT. 2023.06.25:
+	 * - google-translate
+	 * PID 충돌로 인한 오탐을 방지하는 간단한 필터
+	 */
 	if (flags & TNF_SHARED)
 		join = true;
 
@@ -3531,7 +4052,8 @@ void task_numa_free(struct task_struct *p, bool final)
  */
 /*
  * IAMROOT, 2023.06.24:
- * -
+ * - @mem_node - page->flags 에 설정된 node id(물리 page가 존재하는 node)
+ *   cpu_node - faults 가 발생한 task의 node
  */
 void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 {
@@ -3621,7 +4143,6 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
  *   이전에 실패했거나 스케줄러가 이동한 경우 주기적으로 작업을 기본
  *   노드로 마이그레이션을 다시 시도하십시오.
  * - 실패했을경우 이번에 다시 한번 한다는 개념인듯
- * - ING
  */
 	if (time_after(jiffies, p->numa_migrate_retry)) {
 		task_numa_placement(p);
@@ -13639,6 +14160,9 @@ static bool update_pick_idlest(struct sched_group *idlest,
  *   없을 수 있으므로 근사치입니다.
  *
  * - return true : running의 25%보다 cpu가 많은 경우.
+ *
+ * IAMROOT, 2023.07.04:
+ * - Return: dst node cpu 갯수의 25% 보다 running task 가 작은 경우 true 반환
  */
 static inline bool allow_numa_imbalance(int dst_running, int dst_weight)
 {
@@ -14016,21 +14540,18 @@ next_group:
 #define NUMA_IMBALANCE_MIN 2
 
 /*
- * IAMROOT, 2023.05.06:
- * - imbalance를 그대로 사용할지 여부를 정한다. dest에 cpu대비 running이 이미 
- *   많을때 imbalance값이 적다면 그냥 0 return.
- *   아닌 경우 그대로 imbalance 사용
- *
- * IAMROOT, 2023.05.11:
- * - dst의 running task 가 cpu 갯수의 25% 미만이고 @imbalnce 값이 1 이나 2
- *   이면 0 으로 조정한다.
+ * IAMROOT, 2023.07.04:
+ * - src -> dst로 task가 이동한후 dst의 running task 가 dst node 의 cpu 갯수의
+ *   25% 미만이라면 src보다 running task 갯수가 2개까지 많더라도 balance로
+ *   판단하도록 imbalnce 값을 0 으로 조정하여 반환한다.
+ *   위 조건이 아니면 원래값 반환
  */
 static inline long adjust_numa_imbalance(int imbalance,
 				int dst_running, int dst_weight)
 {
 /*
  * IAMROOT, 2023.05.06:
- * - running이 cpu개수보다 25%이하이면 imbalance값을 그대로 사용한다.
+ * - running이 cpu개수보다 25%이상이면 imbalance값을 그대로 사용한다.
  */
 	if (!allow_numa_imbalance(dst_running, dst_weight))
 		return imbalance;
@@ -14044,7 +14565,7 @@ static inline long adjust_numa_imbalance(int imbalance,
  * - 목적지가 가볍게 로드될 때 로컬로 남아 있는 간단한 통신 작업 쌍을 
  *   기반으로 약간의 불균형을 허용합니다.
  *
- * - 이미 dest에 running이 많다. 이때 imbalance가 적다면(2 이하) 그냥 수행안한다
+ * - running task가 25% 미만이라면 imbalance 2 이하는 0으로 조정
  */
 	if (imbalance <= NUMA_IMBALANCE_MIN)
 		return 0;

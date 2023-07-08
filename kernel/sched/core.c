@@ -3650,6 +3650,12 @@ static void __migrate_swap_task(struct task_struct *p, int cpu)
 		 * it before it went to sleep. This means on wakeup we make the
 		 * previous CPU our target instead of where it really is.
 		 */
+		/*
+		 * IAMROOT. 2023.07.07:
+		 * - google-translate
+		 * 작업이 더 이상 실행되지 않습니다. 잠들기 전에 마이그레이션한 것처럼 보이게
+		 * 합니다. 즉, 웨이크업 시 이전 CPU를 실제 위치가 아닌 대상으로 지정합니다.
+		 */
 		p->wake_cpu = cpu;
 	}
 }
@@ -10543,6 +10549,15 @@ int migrate_task_to(struct task_struct *p, int target_cpu)
  * Requeue a task on a given node and accurately track the number of NUMA
  * tasks on the runqueues
  */
+/*
+ * IAMROOT. 2023.07.01:
+ * - google-translate
+ * 지정된 노드에서 작업을 다시 대기열에 넣고 실행 대기열에서 NUMA 작업 수를
+ * 정확하게 추적합니다.
+ *
+ * IAMROOT, 2023.07.08:
+ * - @nid(max_nid)를 numa_preferred_nid로 설정한다.
+ */
 void sched_setnuma(struct task_struct *p, int nid)
 {
 	bool queued, running;
@@ -10553,6 +10568,10 @@ void sched_setnuma(struct task_struct *p, int nid)
 	queued = task_on_rq_queued(p);
 	running = task_current(rq, p);
 
+	/*
+	 * IAMROOT, 2023.07.08:
+	 * - 통계를 업데이트를 위하여 dequeue및 enqueue
+	 */
 	if (queued)
 		dequeue_task(rq, p, DEQUEUE_SAVE);
 	if (running)

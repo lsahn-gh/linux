@@ -80,6 +80,13 @@ enum {
  * "mode flags".  These flags are allocated from bit 0 up, as they
  * are never OR'ed into the mode in mempolicy API arguments.
  */
+/*
+ * IAMROOT. 2023.06.29:
+ * - google-translate
+ * struct mempolicy 플래그 단어를 "모드 플래그"와 공유하는 내부
+ * 플래그입니다. 이러한 플래그는 mempolicy API 인수에서 모드로 OR되지 않으므로 비트
+ * 0부터 할당됩니다.
+ */
 #define MPOL_F_SHARED  (1 << 0)	/* identify shared policies */
 #define MPOL_F_MOF	(1 << 3) /* this policy wants migrate on fault */
 /*
