@@ -2061,7 +2061,11 @@ static inline unsigned long group_weight(struct task_struct *p, int nid,
 
 /*
  * IAMROOT, 2023.06.24:
- * - @dst_cpu로 numa migrate가 가능한지 확인한다.
+ * @p       @page를 numa fault 한 task. (사실상 current)
+ * @src_nid @page의 원래 nodeid
+ * @dst_cpu @page가 migrate할 node의 cpu(사실상 thiscpu)
+ * - @page의 cpupid를 this로 고치고,
+ *   @dst_cpu로 numa migrate가 가능한지 확인한다.
  *   1. scan 횟수가 적은경우 true
  *   2. 
  *   3. private fault인경우 true.
@@ -3185,7 +3189,7 @@ static inline void put_numa_group(struct numa_group *grp)
 
 /*
  * IAMROOT, 2023.06.24:
- * - @p 요청
+ * - @p : this (current)
  *   tsk : @cpupid(page)의 cpu에서 동작중인 curr
  *   cpupid의 pid : @cpupid)를 마지막에 썻던 task
  */
@@ -3252,6 +3256,27 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
  * IAMROOT, 2023.06.24:
  * - 해당 page를 마지막에 접근했던 task와 page를 사용했던 cpu의 curr와
  *   동일한지 비교한다.
+ *
+ * ---- page curr와 last access를 비교하는 이유? -----
+ * - page curr가 page last access와 같은 경우
+ *   1. numa_migrate_prep()에서 should_numa_migrate_memory()를 통해 변경된
+ *      경우. last access는 this이며 동시에 page curr다.
+ *      cpupid_match_pid()에선 같다고 넘어가겠지만 아래 grp == my_grp에서
+ *      no_join으로 넘어갈것이다.
+ *
+ *   2. 그외에 그냥 같은 경우
+ *      last가 아직 동작하고 있어서 다시 접근이 예상된다.
+ *      last가 자주동작한다고 판단되어 다시 접근이 예상된다. 
+ *
+ * - page curr가 page last access와 다른 경우
+ *   1. curr가 없는 경우 (cpu sleep 등)
+ *      동작중이 아니므로 group 할 필요없음
+ *
+ *   2. 그외에 그냥 다른 경우
+ *      2-1 tsk가 이미 죽은 경우 -> 할필요 없음
+ *      2-2 충분한 시간이 흘러 tsk가 해당 page에 잘 접근하지 않은 거라
+ *      판단한 경우 -> 굳이 group화 안함.
+ * --------------------------------------------------
  */
 	if (!cpupid_match_pid(tsk, cpupid))
 		goto no_join;
@@ -3259,7 +3284,7 @@ static void task_numa_group(struct task_struct *p, int cpupid, int flags,
 /*
  * IAMROOT, 2023.06.24:
  * - tsk(cpupid의 curr)의 ng가 없으면 return.
- @*/
+ */
 	grp = rcu_dereference(tsk->numa_group);
 	if (!grp)
 		goto no_join;
