@@ -4804,6 +4804,10 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
  *
  * - @return NUMA_NO_NODE : 이전 node유지
  *           != NUMA_NO_NODE : 추천 migrate node.
+ *
+ * IAMROOT, 2023.07.01:
+ * - Return: page 의 vma addr에 설정된 mode에 부합하는 node를 반환
+ *           단 MPOL_F_MORON flags 설정이면 가능하면 현재 cpu의 node id
  */
 int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags)
@@ -4811,6 +4815,11 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 	get_page(page);
 
 	count_vm_numa_event(NUMA_HINT_FAULTS);
+	/*
+	 * IAMROOT, 2023.06.30:
+	 * - @page 의 마지막 접근 cpu node id 와 현재 fault를 처리하고 있는 cpu의
+	 *   node id가 같으면 TNF_FAULT_LOCAL flags 추가
+	 */
 	if (page_nid == numa_node_id()) {
 		count_vm_numa_event(NUMA_HINT_FAULTS_LOCAL);
 		*flags |= TNF_FAULT_LOCAL;
@@ -4917,6 +4926,21 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
  * IAMROOT, 2023.06.24:
  * - mpol 및 fault count를 비교하여 추천 nid를 알아온다.
  */
+	/*
+	 * IAMROOT, 2023.06.30:
+	 * - @page: fault exception이 발생하여 처리 중인 페이지
+	 *   @vma: vmf->vma
+	 *   @vmf->address
+	 *   여기 까지 target_nid를 받아오기 위한 인자, 아래는 flags에
+	 *   TNF_FAULT_LOCAL을 추가 할 지 여부를 위해 사용
+	 *   ------------------------------------------------------------
+	 *   @page_nid: fault 처리 중인 페이지를 마지막에 접근한 cpu의 node id
+	 *   @flags: 0 | RO 페이지면 TNF_NO_GROUP | 공유페이지면 TNF_SHARED
+	 *
+	 * IAMROOT, 2023.07.01:
+	 * - target_nid : page 의 vma addr에 설정된 mode에 부합하는 node를 반환
+	 *                단 MPOL_F_MORON flags 설정이면 가능하면 현재 cpu의 node id
+	 */
 	target_nid = numa_migrate_prep(page, vma, vmf->address, page_nid,
 			&flags);
 /*
@@ -4962,6 +4986,9 @@ out:
  * - 1. 
  * - migrate를 성공했다면 page_nid는 target_nid,
  *   아니라면 원래 자신의 nid를 가리킨다.
+ *
+ * IAMROOT, 2023.07.01:
+ * - fault 가 발생한 후 orig_pte 가 변경되었거나 migrate에 성공한 경우
  */
 	if (page_nid != NUMA_NO_NODE)
 		task_numa_fault(last_cpupid, page_nid, 1, flags);

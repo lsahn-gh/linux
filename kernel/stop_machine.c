@@ -167,6 +167,30 @@ static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
  * -ENOENT if @fn(@arg) was not executed because @cpu was offline;
  * otherwise, the return value of @fn.
  */
+/*
+ * IAMROOT. 2023.07.08:
+ * - google-translate
+ * stop_one_cpu - cpu 중지
+ * @cpu: 중지할 cpu
+ * @fn: 실행할 함수
+ * @arg: @fn에 대한 인수
+ *
+ * @cpu에서 @fn(@arg)을 실행합니다. @fn은 CPU의 모든 작업을 선점하고 독점하는 우선
+ * 순위가 가장 높은 프로세스 컨텍스트에서 실행됩니다. 이 함수는 실행이 완료된 후
+ * 반환됩니다.
+ *
+ * 이 함수는 @fn이 완료될 때까지 @cpu가 온라인 상태를 유지하도록
+ * 보장하지 않습니다. @cpu가 중간에 다운되면 실행이 부분적으로 또는 완전히 다른
+ * cpus에서 발생할 수 있습니다. @fn은 이를 위해 준비되어 있거나 호출자는 이 함수가
+ * 완료될 때까지 @cpu가 온라인 상태를 유지하도록 해야 합니다.
+ *
+ * 컨텍스트:
+ * 잘 수 있습니다.
+ *
+ * 반환값:
+ * @cpu가 오프라인이어서 @fn(@arg)이 실행되지 않은 경우 -ENOENT;
+ * 그렇지 않으면 @fn의 반환 값입니다.
+ */
 int stop_one_cpu(unsigned int cpu, cpu_stop_fn_t fn, void *arg)
 {
 	struct cpu_stop_done done;

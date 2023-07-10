@@ -644,10 +644,10 @@ unlock:
  * IAMROOT, 2023.06.17:
  * - papago
  *   액세스할 수 없는 가상 주소 범위를 표시하는 데 사용됩니다.
- *   이들은 나중에 NUMA hinting fault에 의해 지워집니다. 이러한 faults에 
+ *   이들은 나중에 NUMA hinting fault에 의해 지워집니다. 이러한 faults에
  *   따라 더 나은 NUMA 배치를 위해 페이지가 마이그레이션될 수 있습니다.
  *
- *   이것은 NUMA fault가 PROT_NONE을 사용하여 처리된다고 가정합니다. 
+ *   이것은 NUMA fault가 PROT_NONE을 사용하여 처리된다고 가정합니다.
  *   아키텍처가 다른 선택을 하면 코어에 추가 변경이 필요합니다.
  * - @addr ~ @end까지 numa fault방법(MM_CP_PROT_NUMA)으로 PAGE_NONE를 적용한다.
  */
@@ -1950,8 +1950,18 @@ unsigned int mempolicy_slab_node(void)
  * number of present nodes.
  */
 /*
+ * IAMROOT. 2023.06.30:
+ * - google-translate
+ * 알려진 오프셋 @n이 있는 VMA에 대해 정적 인터리빙을
+ * 수행합니다. pol->nodes(n=0부터 시작)에서 n번째 노드를 반환하고 n이 현재 노드
+ * 수를 초과하면 래핑합니다.
+ */
+/*
  * IAMROOT, 2022.05.14:
  * - @pol에 따라 node를 선택한다.
+ *
+ * IAMROOT, 2023.06.30:
+ * - Return: offset @n을 @pol->nodes 의 노드 갯수로 나눈 나머지에 따라 nid 반환
  */
 static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 {
@@ -1965,6 +1975,15 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
 	 *
 	 * Between first_node() and next_node(), pol->nodes could be changed
 	 * by other threads. So we put pol->nodes in a local stack.
+	 */
+	/*
+	 * IAMROOT. 2023.06.30:
+	 * - google-translate
+	 * 장벽은 레지스터 또는 스택에서 노드 마스크를 안정화하여 코드 아래에서 변경을
+	 * 중지합니다.
+	 *
+	 * first_node()와 next_node() 사이에서 pol->nodes는 다른 스레드에 의해
+	 * 변경될 수 있습니다. 그래서 우리는 pol->nodes를 로컬 스택에 넣습니다.
 	 */
 	barrier();
 
@@ -1982,7 +2001,7 @@ static unsigned offset_il_node(struct mempolicy *pol, unsigned long n)
  *   1  1      1
  *   2  2      2
  *   3  0      0
- *    
+ *
  * - ex) nnodes = 2, nodemask = 0b101 일때
  *   n  target nid
  *   0  0      0
@@ -2376,14 +2395,14 @@ int vma_dup_policy(struct vm_area_struct *src, struct vm_area_struct *dst)
 /*
  * IAMROOT, 2023.04.01:
  * - papago
- *   mpol_dup()이 current->cpuset == cpuset_being_rebound를 발견하면 
- *   cpuset_mems_allowed()에서 반환된 mems_allowed로 mpol_rebind_policy()를 
- *   호출하여 복사된 mempolicy를 리바인딩합니다. 이는 cpuset 이동 후 mempolicies 
- *   cpuset을 상대적으로 유지합니다. 자세한 내용은 kernel/cpuset.c 
+ *   mpol_dup()이 current->cpuset == cpuset_being_rebound를 발견하면
+ *   cpuset_mems_allowed()에서 반환된 mems_allowed로 mpol_rebind_policy()를
+ *   호출하여 복사된 mempolicy를 리바인딩합니다. 이는 cpuset 이동 후 mempolicies
+ *   cpuset을 상대적으로 유지합니다. 자세한 내용은 kernel/cpuset.c
  *   update_nodemask()를 참조하십시오.
  *
- *   current의 mempolicy는 다른 작업(cpuset의 mem을 변경하는 작업)에 의해 
- *   리바인드될 수 있으므로 현재 작업에 대한 리바인드 작업을 수행할 필요가 
+ *   current의 mempolicy는 다른 작업(cpuset의 mem을 변경하는 작업)에 의해
+ *   리바인드될 수 있으므로 현재 작업에 대한 리바인드 작업을 수행할 필요가
  *   없습니다.
  *
  * - @old를 복사한 new를 할당해서 return한다.
@@ -2572,9 +2591,9 @@ static void sp_free(struct sp_node *n)
  *   @vma: 페이지가 매핑된 vm 영역.
  *   @addr: 페이지가 매핑된 가상 주소.
  *
- *   vma,addr에 대한 현재 정책 노드 ID를 조회하고 페이지의 노드 ID와 
+ *   vma,addr에 대한 현재 정책 노드 ID를 조회하고 페이지의 노드 ID와
  *   비교합니다. 정책 결정은 alloc_page_vma()를 모방합니다.
- *   vma 및 결함 주소를 알고 있는 결함 경로에서 호출됩니다. 
+ *   vma 및 결함 주소를 알고 있는 결함 경로에서 호출됩니다.
  *
  *   Return: 페이지가 이 정책에 유효한 노드에 있는 경우 NUMA_NO_NODE
  *   또는 교체 페이지를 할당하는 데 적합한 노드 ID입니다.
@@ -2586,6 +2605,11 @@ static void sp_free(struct sp_node *n)
  *   1. 이전 node 유지(return NUMA_NO_NODE)
  *   2. 특수한 상황 this node로 강제설정(MPOL_F_MORON이 있고, mpol, fault count비교등)
  *   3. mpol에 따라 새로 선택한 node.
+ *
+ * IAMROOT, 2023.07.01:
+ * - page 의 vma addr에 설정된 mode에 부합하는 node를 반환한다. 단 MPOL_F_MORON flags
+ *   설정(numa balance)이 있을 경우 mode설정에 관계없이 현재 cpu의 node id 로 migrate
+ *   할 수 있는지 확인하고(should_numa_migrate_memory) 이를 반환한다.
  */
 int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long addr)
 {
@@ -2633,6 +2657,10 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 		break;
 
 	case MPOL_LOCAL:
+		/*
+		 * IAMROOT, 2023.07.01:
+		 * - XXX thisnid 와 numa_node_id의 차이는?
+		 */
 		polnid = numa_node_id();
 		break;
 
@@ -2650,6 +2678,13 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 		 * use current page if in policy nodemask,
 		 * else select nearest allowed node, if any.
 		 * If no allowed nodes, use current [!misplaced].
+		 */
+		/*
+		 * IAMROOT. 2023.07.01:
+		 * - google-translate
+		 * 정책 노드 마스크에 있는 경우 현재 페이지를 사용하고, 그렇지 않으면
+		 * 가장 가까운 허용 노드를 선택합니다(있는 경우). 허용된 노드가 없으면
+		 * 현재 [!misplaced]를 사용합니다.
 		 */
 		if (node_isset(curnid, pol->nodes))
 			goto out;
@@ -2669,6 +2704,11 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
  * IAMROOT, 2023.06.24:
  * - numa policy였을경우 위 MPOL에 상관없이 thisnid로 교체한다.
  */
+	/*
+	 * IAMROOT, 2023.07.01:
+	 * - MPOL_F_MORON flags 설정이 있으면 pol->mode 설정에 관련없이 thisnid
+	 *   로 migrate
+	 */
 	if (pol->flags & MPOL_F_MORON) {
 		polnid = thisnid;
 

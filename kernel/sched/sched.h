@@ -3896,6 +3896,8 @@ static inline unsigned long cpu_util_irq(struct rq *rq)
  *     util = 1024 - 10 - 20 - 30 = 964
  *
  *     (964 * (1024 - 40)) / 1024 = 926
+ *
+ * - @max 에서 @irq 외 의 비율을 util 에 곱한값을 max로 나누어 반환
  */
 static inline
 unsigned long scale_irq_capacity(unsigned long util, unsigned long irq, unsigned long max)

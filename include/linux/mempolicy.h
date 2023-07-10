@@ -42,6 +42,29 @@ struct mm_struct;
  * to the new storage.  The reference count of the new object is initialized
  * to 1, representing the caller of mpol_dup().
  */
+/*
+ * IAMROOT. 2023.06.30:
+ * - google-translate
+ * 메모리 정책을 설명합니다.
+ *
+ * Mempolicy는 프로세스 또는 VMA와 연결될 수 있습니다. VMA 관련 할당의 경우 VMA 정책이
+ * 선호되고 그렇지 않으면 프로세스 정책이 사용됩니다. 인터럽트는 현재 프로세스의 메모리
+ * 정책을 무시합니다.
+ *
+ * 인터리브에 대한 잠금 정책:
+ * 프로세스 컨텍스트에서는 프로세스만 자신의 상태에 액세스하기 때문에
+ * 잠금이 없습니다. 모든 vma 조작은 mmap_lock의 down_read에 의해 어느 정도
+ * 보호됩니다.
+ *
+ * 해제 정책:
+ * Mempolicy 객체는 참조 카운트됩니다. mempolicy는
+ * mpol_put()이 참조 횟수를 0으로 감소시키면 해제됩니다.
+ *
+ * 복제 정책 개체:
+ * mpol_dup()은 새 mempolicy를 할당하고 지정된 mempolicy를 새 스토리지에
+ * 복사합니다. 새 개체의 참조 횟수는 mpol_dup()의 호출자를 나타내는 1로
+ * 초기화됩니다.
+ */
 struct mempolicy {
 	atomic_t refcnt;
 	unsigned short mode; 	/* See MPOL_* above */

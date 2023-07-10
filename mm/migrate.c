@@ -2515,6 +2515,10 @@ static int numamigrate_isolate_page(pg_data_t *pgdat, struct page *page)
  *   페이지에서 높은 참조 횟수를 가질 것으로 예상됩니다.
  *
  * - lru page에서 isolate후 @node로 migrate한다.
+ *
+ * IAMROOT, 2023.07.01:
+ * - Return: 1 - 전부 성공
+ *           0 - 하나 이상 실패
  */
 int migrate_misplaced_page(struct page *page, struct vm_area_struct *vma,
 			   int node)
