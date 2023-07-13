@@ -2164,6 +2164,10 @@ this_rq_lock_irq(struct rq_flags *rf)
 }
 
 #ifdef CONFIG_NUMA
+/*
+ * IAMROOT, 2023.07.11:
+ * - preferred_group_nid() 참고
+ */
 enum numa_topology_type {
 	NUMA_DIRECT,
 	NUMA_GLUELESS_MESH,
@@ -2621,6 +2625,10 @@ static inline u64 global_rt_runtime(void)
 	return (u64)sysctl_sched_rt_runtime * NSEC_PER_USEC;
 }
 
+/*
+ * IAMROOT, 2023.07.11:
+ * - @p가 @rq에서 현재 동작중인지 확인한다.
+ */
 static inline int task_current(struct rq *rq, struct task_struct *p)
 {
 	return rq->curr == p;

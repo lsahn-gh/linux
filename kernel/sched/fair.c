@@ -2336,6 +2336,10 @@ bool should_numa_migrate_memory(struct task_struct *p, struct page * page,
 /*
  * 'numa_type' describes the node at the moment of load balancing.
  */
+/*
+ * IAMROOT, 2023.07.13:
+ * - numa_classify() 참고
+ */
 enum numa_type {
 	/* The node has spare capacity that can be used to run more tasks.  */
 	node_has_spare = 0,
@@ -2442,6 +2446,10 @@ numa_type numa_classify(unsigned int imbalance_pct,
 static inline bool test_idle_cores(int cpu, bool def);
 /*
  * IAMROOT, 2023.07.07:
+ * - @idle_core = -1로 처음에 진입해서 @cpu가 idle_core인지 검사하고, 이후로
+ *   idle_core가 한번 찾아지고 @idle_core >= 0 인채로 입력되면 그냥 검색을
+ *   안하고 return @idle_core를 하는 개념이다.
+ *
  * - Return:
  *   1. idle_core 설정 조건이고 cpu 의 smt가 전부 idle 이면 cpu
  *   2. 그렇지 않으면 전달된 @idle_core
@@ -2493,7 +2501,9 @@ static inline int numa_idle_core(int idle_core, int cpu)
  */
 /*
  * IAMROOT, 2023.07.07:
- * - @ns 의 멤버를 설정한다.
+ * - @nid에속한 cpus의 load등을 @ns에 합산하며, weight, node_type 를 설정한다.
+ *   @find_idle이 true인경우 idle_cpu까지 찾는다.
+ *
  */
 static void update_numa_stats(struct task_numa_env *env,
 			      struct numa_stats *ns, int nid,
@@ -2597,12 +2607,19 @@ assign:
 	 * - google-translate
 	 * 이전의 best_cpu/rq numa-migrate 플래그를 지웁니다. 작업이 이제 이동/스왑하기에
 	 * 더 나은 CPU를 찾았기 때문입니다.
+	 *
+	 * - 이전에 best_cpu를 찾아놨지만 @env의 dst_cpu와 다른상태. best_cpu를 교체해야되는
+	 *   상황이므로 기존의 best_cpu를 지우고 numa migrte flag도 지운다.
 	 */
 	if (env->best_cpu != -1 && env->best_cpu != env->dst_cpu) {
 		rq = cpu_rq(env->best_cpu);
 		WRITE_ONCE(rq->numa_migrate_on, 0);
 	}
 
+/*
+ * IAMROOT, 2023.07.13:
+ * - best_task도 바꾼다. 기존 best_task는 refdown, 새로운 best_task는 ref up
+ */
 	if (env->best_task)
 		put_task_struct(env->best_task);
 	if (p)
@@ -3061,7 +3078,14 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 		 * - google-translate
 		 * 불균형이 없으면 유휴 CPU 사용
 		 *
-		 * - 이동후 running task 수가 같다면 idle_cpu를 best_cpu로 지정
+		 * - 균형상태일때
+		 *   1) 이전에 idle_cpu를 찾았다면
+		 *     해당 idle_cpu를 dst_cpu로 사용한다.
+		 *     idle_core로의 이동이므로 @env의 best_task는 refdown만 시키고 새로
+		 *     들어가는 task는 없는 의미에서 NULL이된다. 또한 균형 상태이므로 impl
+		 *     값또한 0으로 들오간다.
+		 *   2) idle_cpu를 못찾았으면
+		 *     maymove만 true로 설정한다.
 		 */
 		if (!imbalance) {
 			maymove = true;
@@ -3111,6 +3135,10 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 	}
 }
 
+/*
+ * IAMROOT, 2023.07.13:
+ * - ING
+ */
 static int task_numa_migrate(struct task_struct *p)
 {
 	struct task_numa_env env = {
@@ -3169,12 +3197,20 @@ static int task_numa_migrate(struct task_struct *p)
 	 * Cpusets는 스케줄러 도메인 트리를 더 작은 균형 도메인으로 나눌 수 있으며 그 중
 	 * 일부는 NUMA 경계를 넘지 않습니다. 이러한 도메인에 "갇힌" 작업은 다른 곳으로
 	 * 마이그레이션할 수 없으므로 (재)시도할 필요가 없습니다.
+	 *
+	 * - numa domain내에서만 migrate를 한다. sd가 없으면 numa_preferred_nid를
+	 *   @p의 numa로 다시 변경후 실패처리
 	 */
 	if (unlikely(!sd)) {
 		sched_setnuma(p, task_node(p));
 		return -EINVAL;
 	}
 
+/*
+ * IAMROOT, 2023.07.13:
+ * - src_nid, dst_nid에 대해 통계를 작성한다.
+ *   dst의경우 idle_core까지 찾는다.
+ */
 	env.dst_nid = p->numa_preferred_nid;
 	dist = env.dist = node_distance(env.src_nid, env.dst_nid);
 	taskweight = task_weight(p, env.src_nid, dist);
@@ -3302,21 +3338,34 @@ static int task_numa_migrate(struct task_struct *p)
 /*
  * IAMROOT. 2023.07.04:
  * - google-translate
- * preferred 노드의 CPU로 작업을 마이그레이션하려고 시도합니다.
+ *  preferred 노드의 CPU로 작업을 마이그레이션하려고 시도합니다.
+ * - 
  */
 static void numa_migrate_preferred(struct task_struct *p)
 {
 	unsigned long interval = HZ;
 
 	/* This task has no NUMA fault statistics yet */
+/*
+ * IAMROOT, 2023.07.10:
+ * - 선호 node가 없거나 fault가 없으면 할게 없다. return.
+ */
 	if (unlikely(p->numa_preferred_nid == NUMA_NO_NODE || !p->numa_faults))
 		return;
 
 	/* Periodically retry migrating the task to the preferred node */
+/*
+ * IAMROOT, 2023.07.10:
+ * - numa_scan_period로 next numa_migrate_retry시각을 갱신한다.
+ */
 	interval = min(interval, msecs_to_jiffies(p->numa_scan_period) / 16);
 	p->numa_migrate_retry = jiffies + interval;
 
 	/* Success if task is already running on preferred CPU */
+/*
+ * IAMROOT, 2023.07.10:
+ * - 이미 선호 node라면 바꿀필요없다.
+ */
 	if (task_node(p) == p->numa_preferred_nid)
 		return;
 
@@ -3338,6 +3387,9 @@ static void numa_migrate_preferred(struct task_struct *p)
  * 위치한 노드 집합과 다를 수 있습니다.
  *
  * IAMROOT, 2023.07.01:
+ * - active_nodes개수와 max_faults를 갱신한다.
+ * - active_nodes
+ *   max_faults의 1 / 3 이상인것들을 
  * - online node중 @numa_group의 faults_cpu 수가 가장 큰 node 의 1/3 보다
  *   큰 노드들의 갯수와 max_faults수를 numa_group 멤버 변수에 설정한다.
  * - NOTE active_nodes 계산에는 faults_cpu를 사용한다.
@@ -3347,6 +3399,10 @@ static void numa_group_count_active_nodes(struct numa_group *numa_group)
 	unsigned long faults, max_faults = 0;
 	int nid, active_nodes = 0;
 
+/*
+ * IAMROOT, 2023.07.11:
+ * - max_faults를 알아온다.
+ */
 	for_each_online_node(nid) {
 		faults = group_faults_cpu(numa_group, nid);
 		if (faults > max_faults)
@@ -3518,8 +3574,14 @@ static void update_task_scan_period(struct task_struct *p,
  * NUMA 통계가 없습니다.
  *
  * IAMROOT, 2023.07.01:
+ * @period now ~ last_task_numa_placement동안의 지난 시간
+ * @return now ~ last_sum_exec_runtime까지의 지나간 runtime시간
+ *
  * - 이전 실행되었을 때와 @p->se.sum_exec_runtime 의 delta 값을 반환한다.
  *   @p->se.exec_start의 delta는 @period 인자에 전달한다.
+ * - 이전 runtime과 시간의 간격을 @return, @period에 전달하고 갱신한다.
+ * - 최초로 여길 진입한경우 @return은 se load_sum, @period는 LOAD_AVG_MAX로
+ *   return 한다.
  */
 static u64 numa_get_avg_runtime(struct task_struct *p, u64 *period)
 {
@@ -3557,6 +3619,7 @@ static u64 numa_get_avg_runtime(struct task_struct *p, u64 *period)
  * numa_group의 작업에 대해 선호하는 nid를 결정합니다. 이는 group_weight와 일관된
  * 결과를 생성하는 방식으로 수행되어야 합니다. 그렇지 않으면 워크로드가 수렴되지
  * 않을 수 있습니다.
+ * - sched_numa_topology_type에 따른 numa_group preffered node를 알아온다.
  */
 static int preferred_group_nid(struct task_struct *p, int nid)
 {
@@ -3659,7 +3722,19 @@ static int preferred_group_nid(struct task_struct *p, int nid)
 /*
  * IAMROOT, 2023.07.04:
  * - task 와 ng의 faults 통계 업데이트(buf 임시 통계를 가져와서 업데이트후 비운다)
- *   faults 가 가장 많은 노드를 @p->numa_preferred_nid로 설정한다.
+ *   mem faults 가 가장 많은 노드를 @p->numa_preferred_nid로 설정한다.
+ *
+ * - 1. node, cpu, mem별 fault 통계한다.
+ *      통계할때, 기존값은 50% decay해서 사용한다.
+ *      mem 통계는 fault값 그대로 사용하지만,
+ *      cpu 통계는 runtime에서 cpu fault비율을 계산해 그 비율로 사용한다.
+ *      (runtime이 적는 cpu는 fault가 별로 중요하지 않기때문이다.)
+ *   2. ng에도 계산한 통계를 가산한다.
+ *   3. tmp buf를 사용후 0 초기화.
+ *   4. ng의 active_nodes, max_fault 갱신
+ *   5. max mem fault가 발생한 node를 기준으로 preferred node를 선정하여
+ *      @p의 preferred_nid로 설정
+ *  6. fault상태에 따른 numa_scan_period update
  */
 static void task_numa_placement(struct task_struct *p)
 {
@@ -3729,6 +3804,9 @@ static void task_numa_placement(struct task_struct *p)
 			 * IAMROOT. 2023.07.02:
 			 * - google-translate
 			 * 기존 창 decay, 마지막 스캔 이후 오류 복사
+			 *
+			 * - mem에대해 계산. 임시버퍼 값으로 fault_types에 통계내고,
+			 * 임시버퍼측은 초기화한다.
 			 */
 			diff = p->numa_faults[membuf_idx] - p->numa_faults[mem_idx] / 2;
 			fault_types[priv] += p->numa_faults[membuf_idx];
@@ -3748,13 +3826,44 @@ static void task_numa_placement(struct task_struct *p)
 			 * 대신 CPU 사용에 따라 계산되도록 합니다. 런타임이 적은 작업은
 			 * 처리량에 전반적으로 거의 영향을 미치지 않으므로 오류가 덜
 			 * 중요합니다.
+			 *
+			 * - period당 runtime의 cpu fault 가중치를 계산한다. 
+			 *
+			 *  runtime    cpu fault
+			 *  ------- *  ------------ = cpu weight
+			 *  perioid    total_faults
+			 *
+			 *  단위시간당 runtime값에셔 cpu fault의 비율만큼을 runtime시간을
+			 *  f_weight에 계산해낸다.
+			 *
+			 *  ex) 직관적인 예를 위해 shift나 + 1값등은 생략.
+			 *      runtime = 1000, period = 10,
+			 *      cpu fault = 1, total_faults = 3
+			 *
+			 *      period당 runtime은 100.
+			 *      이 runtime에서 cpu fault는 100 * 1 / 4 = 25
+			 *      
+			 *      즉 1 period당 cpu fault에 대한 runtime시간을 25라고 하고,
+			 *      이걸 f_weight로 정의한다.
 			 */
 			f_weight = div64_u64(runtime << 16, period + 1);
 			f_weight = (f_weight * p->numa_faults[cpubuf_idx]) /
 				   (total_faults + 1);
+/*
+ * IAMROOT, 2023.07.10:
+ * - 이전에 저장한 f_diff sum값(p->numa_faults[cpu_idx])은 50%만 적용해서
+ *   new f_diff를 계산해낸다.
+ */
 			f_diff = f_weight - p->numa_faults[cpu_idx] / 2;
+/*
+ * IAMROOT, 2023.07.10:
+ * - tmp 값은 다 썻으니 초기화를 한다.
+ */
 			p->numa_faults[cpubuf_idx] = 0;
-
+/*
+ * IAMROOT, 2023.07.10:
+ * - 새로 계산해낸 diff값들을 누적한다.
+ */
 			p->numa_faults[mem_idx] += diff;
 			p->numa_faults[cpu_idx] += f_diff;
 			faults += p->numa_faults[mem_idx];
@@ -3767,6 +3876,16 @@ static void task_numa_placement(struct task_struct *p)
 				 * nid and priv in a specific region because it
 				 * is at the beginning of the numa_faults array.
 				 */
+/*
+ * IAMROOT, 2023.07.11:
+ * - papago
+ *   우리 자신의 그룹만 변경할 수 있기 때문에 안전합니다.
+ *
+ *   mem_idx는 numa_faults 배열의 시작 부분에 있기 때문에 특정 영역에서
+ *   주어진 nid 및 priv에 대한 오프셋을 나타냅니다.
+ *
+ * - ng가 있다면 ng에도 계산한 통계값을 누적해준다.
+ */
 				ng->faults[mem_idx] += diff;
 				ng->faults_cpu[mem_idx] += f_diff;
 				ng->total_faults += diff;
@@ -3790,12 +3909,21 @@ static void task_numa_placement(struct task_struct *p)
 		}
 	}
 
+/*
+ * IAMROOT, 2023.07.11:
+ * - 위에서 계산한 ng의 fault값들을 토대로 active_nodes, max_faults값 갱신.
+ *   max_nid를 기준으로 preferred nid를 구해온다.
+ */
 	if (ng) {
 		numa_group_count_active_nodes(ng);
 		spin_unlock_irq(group_lock);
 		max_nid = preferred_group_nid(p, max_nid);
 	}
 
+/*
+ * IAMROOT, 2023.07.12:
+ * - 위에서 구해온 preferred nid로 설정한다.
+ */
 	if (max_faults) {
 		/* Set the new preferred node */
 		if (max_nid != p->numa_preferred_nid)
@@ -4165,7 +4293,8 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
  * - papago
  *   이전에 실패했거나 스케줄러가 이동한 경우 주기적으로 작업을 기본
  *   노드로 마이그레이션을 다시 시도하십시오.
- * - 실패했을경우 이번에 다시 한번 한다는 개념인듯
+ * - numa_migrate_retry시간이 지낫으면 task_numa_placement()를 수행하고,
+ *   다음 numa_migrate_retry을 갱신한다.
  */
 	if (time_after(jiffies, p->numa_migrate_retry)) {
 		task_numa_placement(p);
@@ -4177,6 +4306,11 @@ void task_numa_fault(int last_cpupid, int mem_node, int pages, int flags)
 	if (flags & TNF_MIGRATE_FAIL)
 		p->numa_faults_locality[2] += pages;
 
+/*
+ * IAMROOT, 2023.07.10:
+ * - fault가 발생할때 data를 cpu로 load하는쪽은 cpu fault, data가 있던
+ *   memory는 memory fault로 기록될것이다.
+ */
 	p->numa_faults[task_faults_idx(NUMA_MEMBUF, mem_node, priv)] += pages;
 	p->numa_faults[task_faults_idx(NUMA_CPUBUF, cpu_node, priv)] += pages;
 	p->numa_faults_locality[local] += pages;
@@ -14563,7 +14697,14 @@ next_group:
 #define NUMA_IMBALANCE_MIN 2
 
 /*
- * IAMROOT, 2023.07.04:
+ * IAMROOT, 2023.05.06:
+ * - imbalance를 그대로 사용할지 여부를 정한다. dest에 cpu대비 running이 이미 
+ *   많을때 imbalance값이 적다면 그냥 0 return.
+ *   아닌 경우 그대로 imbalance 사용
+ *
+ * - dst의 running task 가 cpu 갯수의 25% 미만이고 @imbalnce 값이 1 이나 2
+ *   이면 0 으로 조정한다.
+ *
  * - src -> dst로 task가 이동한후 dst의 running task 가 dst node 의 cpu 갯수의
  *   25% 미만이라면 src보다 running task 갯수가 2개까지 많더라도 balance로
  *   판단하도록 imbalnce 값을 0 으로 조정하여 반환한다.

@@ -2612,6 +2612,10 @@ static void sched_numa_warn(const char *str)
 	printk(KERN_WARNING "\n");
 }
 
+/*
+ * IAMROOT, 2023.07.12:
+ * - @distance와 일치하는 numa가 있으면 return true.
+ */
 bool find_numa_distance(int distance)
 {
 	int i;

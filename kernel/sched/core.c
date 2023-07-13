@@ -10556,7 +10556,7 @@ int migrate_task_to(struct task_struct *p, int target_cpu)
  * 정확하게 추적합니다.
  *
  * IAMROOT, 2023.07.08:
- * - @nid(max_nid)를 numa_preferred_nid로 설정한다.
+ * - @nid(max_nid)를 numa_preferred_nid로 설정한다. 
  */
 void sched_setnuma(struct task_struct *p, int nid)
 {
@@ -10571,6 +10571,8 @@ void sched_setnuma(struct task_struct *p, int nid)
 	/*
 	 * IAMROOT, 2023.07.08:
 	 * - 통계를 업데이트를 위하여 dequeue및 enqueue
+	 * - DEQUEUE_SAVE, ENQUEUE_RESTORE란것이 실제 dequeue, enqueue
+	 *   하는게 아니라 잠깐 뺏다가 넣을 예정이라는 의미이다.
 	 */
 	if (queued)
 		dequeue_task(rq, p, DEQUEUE_SAVE);
