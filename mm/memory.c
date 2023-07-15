@@ -4808,6 +4808,11 @@ static vm_fault_t do_fault(struct vm_fault *vmf)
  * IAMROOT, 2023.07.01:
  * - Return: page 의 vma addr에 설정된 mode에 부합하는 node를 반환
  *           단 MPOL_F_MORON flags 설정이면 가능하면 현재 cpu의 node id
+ *
+ * IAMROOT, 2023.07.11:
+ * - numa balancing(MPOL_F_MORON) 설정이면 task 가 memory 접근시 많이 사용하는
+ *   cpu의 node 쪽으로 @page를 옮기려 한다. @page에 설정된 node보다 현재 cpu의
+ *   node의 cpu 들에서 충분히 memory 접근이 많다면 현재 cpu의 node를 반환한다
  */
 int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 		      unsigned long addr, int page_nid, int *flags)
@@ -4817,7 +4822,7 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 	count_vm_numa_event(NUMA_HINT_FAULTS);
 	/*
 	 * IAMROOT, 2023.06.30:
-	 * - @page 의 마지막 접근 cpu node id 와 현재 fault를 처리하고 있는 cpu의
+	 * - @page 에 설정된 node id 와 현재 fault를 처리하고 있는 cpu의
 	 *   node id가 같으면 TNF_FAULT_LOCAL flags 추가
 	 */
 	if (page_nid == numa_node_id()) {
@@ -4831,7 +4836,26 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
 /*
  * IAMROOT, 2023.06.24:
  * - numa fault(task_numa_work() 참고)
- * - 
+ * - fault 관리 방법
+ *   1. 주기적으로 task의 vma page를 prot_none 설정해서 해당 page에 접근시
+ *      numa fault가 발생하게 함.
+ *   2. 이때마다 mem_buf, cpu_buf node 양쪽에 fault 통계 누적.
+ *   3. 위의 fault 통계는 priv, share 구분 하여 저장하고 scan 주기 설정에 사용
+ *   4. 실제 위의 통계는 task와 numa group 양쪽에 갱신하고 buf는 비움
+ * - page migration 조건(should_numa_migrate_memory에서 검사)
+ *   task 와 다른 노드에 page를 접근할 때
+ *   1. 하나의 task 가 page 에 연속해서 fault가 발생하는 경우
+ *   2. numa group이 있는 task 경우에만 dst node 가 src node보다 3배 이상 fault가
+ *      많을 때
+ *   3. memory 를 가지고 있는 node가 가지고 있지 않는 node 보다 1.33배 이상
+ *      fault 가 많을 때
+ *
+ * - task migration 조건
+ *   1. max fault node를 찾는다
+ *   2. max fault node에서 best cpu로 migrate 또는 swap
+ *      - best cpu를 못찾았거나 numa group 이 2개이상 node에서 접근이 많을 때는
+ *       모든 노드에서 best_cpu를 찾는다
+ *      - imp(fault 차이)가 떨어지거나 load 가 저하되는 경우는 제외
  */
 static vm_fault_t do_numa_page(struct vm_fault *vmf)
 {
@@ -4934,7 +4958,7 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	 *   여기 까지 target_nid를 받아오기 위한 인자, 아래는 flags에
 	 *   TNF_FAULT_LOCAL을 추가 할 지 여부를 위해 사용
 	 *   ------------------------------------------------------------
-	 *   @page_nid: fault 처리 중인 페이지를 마지막에 접근한 cpu의 node id
+	 *   @page_nid: page->flags에 설정된 node id
 	 *   @flags: 0 | RO 페이지면 TNF_NO_GROUP | 공유페이지면 TNF_SHARED
 	 *
 	 * IAMROOT, 2023.07.01:
@@ -4954,6 +4978,13 @@ static vm_fault_t do_numa_page(struct vm_fault *vmf)
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
 
 	/* Migrate to the requested node */
+	/*
+	 * IAMROOT, 2023.07.11:
+	 * - numa balancing(MPOL_F_MORON) 설정이면 task 가 memory 접근시 많이 사용하는
+	 *   cpu의 node 쪽으로 @page를 옮기려 한다. @page에 설정된 node보다 현재 cpu의
+	 *   node의 cpu 들에서 충분히 memory 접근이 많다면 taget_nid에 현재 cpu의
+	 *   node가 설정되어 현재 cpu의 노드로 @page를 옮긴다.
+	 */
 	if (migrate_misplaced_page(page, vma, target_nid)) {
 /*
  * IAMROOT, 2023.06.24:
@@ -4987,8 +5018,14 @@ out:
  * - migrate를 성공했다면 page_nid는 target_nid,
  *   아니라면 원래 자신의 nid를 가리킨다.
  *
- * IAMROOT, 2023.07.01:
- * - fault 가 발생한 후 orig_pte 가 변경되었거나 migrate에 성공한 경우
+ * IAMROOT, 2023.07.12:
+ * - page_nid == NUMA_NO_NODE 인 경우(task_numa_fault를 실행하지 않는 경우)
+ *   함수 시작시 NUMA_NO_NODE로 초기화이후 page_to_nid로 다시 설정하기 전에 아래
+ *   예외로 인해 jump 한 경우이다.
+ *   1. 함수 시작시 pte검사시 pte가 변경된 경우(migrate 실패후 변경된 경우는 아님)
+ *   2. normal page 가져오기 실패한 경우
+ *   3. compound page일 경우
+ * - 위 경우가 아니면 migrate 시도 실패 성공 여부와 관계없이 task_numa_fault를 호출한다.
  */
 	if (page_nid != NUMA_NO_NODE)
 		task_numa_fault(last_cpupid, page_nid, 1, flags);

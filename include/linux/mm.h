@@ -1627,6 +1627,10 @@ static inline int page_zone_id(struct page *page)
 #ifdef NODE_NOT_IN_PAGE_FLAGS
 extern int page_to_nid(const struct page *page);
 #else
+/*
+ * IAMROOT, 2023.07.09:
+ * - @page->flags에 설정된 node id 반환
+ */
 static inline int page_to_nid(const struct page *page)
 {
 	struct page *p = (struct page *)page;

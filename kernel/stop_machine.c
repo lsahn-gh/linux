@@ -281,6 +281,8 @@ notrace void __weak stop_machine_yield(const struct cpumask *cpumask)
 /*
  * IAMROOT, 2023.03.25:
  * - @data의 fn을 호출(msdata->fn(msdata->data))
+ * - 2개의 stopper가 이 함수를 호출하지만 사용자 함수(msdata->fn)는
+ *   msdata의 active_cpus mask에서만 호출한다.(ex. stop_two_cpus)
  */
 static int multi_cpu_stop(void *data)
 {
@@ -340,6 +342,10 @@ static int multi_cpu_stop(void *data)
 	return err;
 }
 
+/*
+ * IAMROOT, 2023.07.15:
+ * - 두 cpu의 work를 각각 stopper를 통해서 실행하게 한다.
+ */
 static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
 				    int cpu2, struct cpu_stop_work *work2)
 {
@@ -355,6 +361,13 @@ retry:
 	 * possibility of one of the above stoppers being woken up by another
 	 * CPU, and preempting us. This will cause us to not wake up the other
 	 * stopper forever.
+	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * 스토퍼 스레드의 깨우기는 대기열과 동일한 스케줄링 컨텍스트에서 발생해야
+	 * 합니다. 그렇지 않으면 위의 스토퍼 중 하나가 다른 CPU에 의해 깨어나 선점할
+	 * 가능성이 있습니다. 이것은 우리가 다른 마개를 영원히 깨우지 못하게 할 것입니다.
 	 */
 	preempt_disable();
 	raw_spin_lock_irq(&stopper1->lock);
@@ -374,6 +387,19 @@ retry:
 	 *
 	 * It can be falsely true but it is safe to spin until it is cleared,
 	 * queue_stop_cpus_work() does everything under preempt_disable().
+	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * __stop_cpus()로 경쟁하는 경우 스토퍼가 시스템 교착 상태로 이어지는 역순으로
+	 * 대기하지 않도록 합니다.
+	 *
+	 * queue_stop_cpus_work()가 cpu1에는 작업을 대기했지만
+	 * cpu2에는 대기하지 않은 경우 stop_cpus_in_progress를 놓칠 수 없습니다.
+	 * 두 잠금을 모두 보유합니다.
+	 *
+	 * 거짓일 수 있지만 해제될 때까지 회전하는 것이 안전합니다.
+	 * queue_stop_cpus_work()는 preempt_disable()에서 모든 작업을 수행합니다.
 	 */
 	if (unlikely(stop_cpus_in_progress)) {
 		err = -EDEADLK;
@@ -412,6 +438,21 @@ unlock:
  * Stops both the current and specified CPU and runs @fn on one of them.
  *
  * returns when both are completed.
+ */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * stop_two_cpus - 2개의 cpus를 중지합니다.
+ * @cpu1: 중지할 cpu
+ * @cpu2: 중지할 다른 cpu
+ * @fn: 실행할 함수
+ * @arg: @fn에 대한 인수
+ *
+ * 현재 CPU와 지정된 CPU를 모두 중지하고 그 중 하나에서 @fn을 실행합니다.
+ *
+ * 둘 다 완료되면 반환됩니다.
+ *
+ * - cpu1, cpu2를 중지하고 cpu1 에서 @fn 호출
  */
 int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *arg)
 {

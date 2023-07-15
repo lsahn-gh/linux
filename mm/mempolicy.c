@@ -2700,6 +2700,11 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 	}
 
 	/* Migrate the page towards the node whose CPU is referencing it */
+	/*
+	 * IAMROOT. 2023.07.09:
+	 * - google-translate
+	 * CPU가 참조하는 노드로 페이지를 마이그레이션합니다.
+	 */
 /*
  * IAMROOT, 2023.06.24:
  * - numa policy였을경우 위 MPOL에 상관없이 thisnid로 교체한다.
@@ -2707,7 +2712,12 @@ int mpol_misplaced(struct page *page, struct vm_area_struct *vma, unsigned long 
 	/*
 	 * IAMROOT, 2023.07.01:
 	 * - MPOL_F_MORON flags 설정이 있으면 pol->mode 설정에 관련없이 thisnid
-	 *   로 migrate
+	 *   로 migrate 할 수 있는지 확인
+	 *
+	 * IAMROOT, 2023.07.11:
+	 * - @page를 현재 cpu의 노드로 migration 하려한다. 현재 cpu의 node에 있는
+	 *   cpu 들에서 memory 접근이 많다면 page를 현재 cpu 의 node 쪽으로
+	 *   옮기려 한다.
 	 */
 	if (pol->flags & MPOL_F_MORON) {
 		polnid = thisnid;

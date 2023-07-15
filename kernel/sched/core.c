@@ -2724,11 +2724,28 @@ static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
  * 5) stopper completes and stop_one_cpu() returns and the migration
  *    is done.
  */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * 다음은 마이그레이션이 작동하는 방식입니다.
+ * 1) stop_one_cpu()를 사용하여 대상 CPU에서 migration_cpu_stop()을 호출합니다.
+ * 2) stopper가 실행되기 시작합니다(암시적으로 마이그레이션된 스레드를 CPU에서 강제 종료).
+ * 3) 마이그레이션된 작업이 여전히 잘못된 실행 대기열에 있는지 확인합니다.
+ * 4) 잘못된 실행 대기열에 있는 경우 마이그레이션 스레드가 이를 제거하고 올바른 대기열에
+ *    넣습니다.
+ * 5) stoper가 완료되고 stop_one_cpu()가 반환되고 마이그레이션이 완료됩니다.
+ */
 
 /*
  * move_queued_task - move a queued task to new rq.
  *
  * Returns (locked) new rq. Old rq's lock is released.
+ */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * move_queued_task - 대기 중인 작업을 새 rq로 이동합니다. 새 rq를
+ * 반환(잠김)합니다. 이전 rq의 잠금이 해제됩니다.
  */
 static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 				   struct task_struct *p, int new_cpu)
@@ -2776,6 +2793,17 @@ struct set_affinity_pending {
  * So we race with normal scheduler movements, but that's OK, as long
  * as the task is no longer on this CPU.
  */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * 이 CPU에서 대상 CPU로 작업(현재 아님)을 이동합니다. 여기에서 더 이상 실행할 수
+ * 없거나(이 CPU에서 set_cpus_allowed() 떨어져 있거나 CPU가 다운됨)
+ * exec(sched_exec)에서 이 작업의 균형을 재조정하려고 시도하기 때문에 이 작업을
+ * 수행합니다.
+ *
+ * 그래서 우리는 정상적인 스케줄러 움직임으로 경쟁하지만 작업이 더 이상
+ * 이 CPU에 있지 않는 한 괜찮습니다.
+ */
 static struct rq *__migrate_task(struct rq *rq, struct rq_flags *rf,
 				 struct task_struct *p, int dest_cpu)
 {
@@ -2794,6 +2822,13 @@ static struct rq *__migrate_task(struct rq *rq, struct rq_flags *rf,
  * and performs thread migration by bumping thread off CPU then
  * 'pushing' onto another runqueue.
  */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * migration_cpu_stop - 이것은 highprio stopper 스레드에 의해 실행되며 스레드를
+ * CPU에서 분리한 다음 다른 실행 대기열로 '푸시'하여 스레드 마이그레이션을
+ * 수행합니다.
+ */
 static int migration_cpu_stop(void *data)
 {
 	struct migration_arg *arg = data;
@@ -2807,11 +2842,24 @@ static int migration_cpu_stop(void *data)
 	 * The original target CPU might have gone down and we might
 	 * be on another CPU but it doesn't matter.
 	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * 원래 대상 CPU가 다운되었을 수 있고 다른 CPU에 있을 수 있지만 문제가 되지
+	 * 않습니다.
+	 */
 	local_irq_save(rf.flags);
 	/*
 	 * We need to explicitly wake pending tasks before running
 	 * __migrate_task() such that we will not miss enforcing cpus_ptr
 	 * during wakeups, see set_cpus_allowed_ptr()'s TASK_WAKING test.
+	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * 깨우는 동안 cpus_ptr 적용을 놓치지 않도록 __migrate_task()를 실행하기 전에 보류
+	 * 중인 작업을 명시적으로 깨울 필요가 있습니다. set_cpus_allowed_ptr()의
+	 * TASK_WAKING 테스트를 참조하세요.
 	 */
 	flush_smp_call_function_from_idle();
 
@@ -2822,12 +2870,25 @@ static int migration_cpu_stop(void *data)
 	 * If we were passed a pending, then ->stop_pending was set, thus
 	 * p->migration_pending must have remained stable.
 	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * 보류 중인 경우 ->stop_pending이 설정되었으므로 p->migration_pending이
+	 * 안정적으로 유지되어야 합니다.
+	 */
 	WARN_ON_ONCE(pending && pending != p->migration_pending);
 
 	/*
 	 * If task_rq(p) != rq, it cannot be migrated here, because we're
 	 * holding rq->lock, if p->on_rq == 0 it cannot get enqueued because
 	 * we're holding p->pi_lock.
+	 */
+	/*
+	 * IAMROOT. 2023.07.15:
+	 * - google-translate
+	 * task_rq(p) != rq이면 여기에서 마이그레이션할 수 없습니다. rq->lock을 보유하고
+	 * 있기 때문입니다. p->on_rq == 0이면 p->pi_lock을 보유하고 있기 때문에 큐에 추가할
+	 * 수 없습니다.
 	 */
 	if (task_rq(p) == rq) {
 		if (is_migration_disabled(p))
@@ -2852,6 +2913,14 @@ static int migration_cpu_stop(void *data)
 		 * during CPU hotplug, at which point we'll get pushed out
 		 * anyway, so it's probably not a big deal.
 		 */
+		/*
+		 * IAMROOT. 2023.07.15:
+		 * - google-translate
+		 * XXX __migrate_task()가 실패할 수 있습니다. 이 시점에서 우리는
+		 * 이상한 CPU에서 실행하게 될 수 있습니다. AFAICT 이것은 CPU 핫플러그
+		 * 동안에만 발생할 수 있으며, 이 시점에서 우리는 어쨌든 밀려날 것이므로
+		 * 큰 문제는 아닐 것입니다.
+		 */
 
 	} else if (pending) {
 		/*
@@ -2862,11 +2931,28 @@ static int migration_cpu_stop(void *data)
 		 * A !PREEMPT kernel has a giant hole here, which makes it far
 		 * more likely.
 		 */
+		/*
+		 * IAMROOT. 2023.07.15:
+		 * - google-translate
+		 * 이는 migrate_enable()의 preempt_enable()과 stopper 작업 예약
+		 * 사이에서 마이그레이션될 때 발생합니다. 그 시점에서 우리는 다시 정규
+		 * 작업이며 더 이상 현재가 아닙니다.
+		 *
+		 * !PREEMPT 커널에는 여기에 거대한 구멍이 있어 훨씬 가능성이
+		 * 높습니다.
+		 */
 
 		/*
 		 * The task moved before the stopper got to run. We're holding
 		 * ->pi_lock, so the allowed mask is stable - if it got
 		 * somewhere allowed, we're done.
+		 */
+		/*
+		 * IAMROOT. 2023.07.15:
+		 * - google-translate
+		 * 스토퍼가 실행되기 전에 작업이 이동했습니다. 우리는 ->pi_lock을 잡고
+		 * 있으므로 허용된 마스크가 안정적입니다. 허용된 위치에 있으면 완료된
+		 * 것입니다.
 		 */
 		if (cpumask_test_cpu(task_cpu(p), p->cpus_ptr)) {
 			p->migration_pending = NULL;
@@ -2878,6 +2964,12 @@ static int migration_cpu_stop(void *data)
 		 * When migrate_enable() hits a rq mis-match we can't reliably
 		 * determine is_migration_disabled() and so have to chase after
 		 * it.
+		 */
+		/*
+		 * IAMROOT. 2023.07.15:
+		 * - google-translate
+		 * migrate_enable()이 rq 불일치에 도달하면 우리는 안정적으로
+		 * is_migration_disabled()를 결정할 수 없으므로 추적해야 합니다.
 		 */
 		WARN_ON_ONCE(!pending->stop_pending);
 		task_rq_unlock(rq, p, &rf);
@@ -3624,6 +3716,11 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 }
 
 #ifdef CONFIG_NUMA_BALANCING
+/*
+ * IAMROOT, 2023.07.15:
+ * - @p를 @cpu 의 rq로 옮긴다.
+ * - rq_pin_lock은 debug용
+ */
 static void __migrate_swap_task(struct task_struct *p, int cpu)
 {
 	if (task_on_rq_queued(p)) {
@@ -3665,6 +3762,10 @@ struct migration_swap_arg {
 	int src_cpu, dst_cpu;
 };
 
+/*
+ * IAMROOT, 2023.07.15:
+ * - double lock을 잡고 두개의 task를 교환한다.
+ */
 static int migrate_swap_stop(void *data)
 {
 	struct migration_swap_arg *arg = data;
@@ -3708,6 +3809,10 @@ unlock:
 
 /*
  * Cross migrate two tasks
+ */
+/*
+ * IAMROOT, 2023.07.15:
+ * - swap할 src,dst 를 설정하고 stop_two_cpus 호출
  */
 int migrate_swap(struct task_struct *cur, struct task_struct *p,
 		int target_cpu, int curr_cpu)
@@ -10528,6 +10633,11 @@ bool sched_smp_initialized __read_mostly;
 
 #ifdef CONFIG_NUMA_BALANCING
 /* Migrate current task p to target_cpu */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * 현재 작업 p를 target_cpu로 마이그레이션
+ */
 int migrate_task_to(struct task_struct *p, int target_cpu)
 {
 	struct migration_arg arg = { p, target_cpu };

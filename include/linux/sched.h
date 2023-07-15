@@ -2313,6 +2313,14 @@ extern struct task_struct *idle_task(int cpu);
  *
  * Return: 1 if @p is an idle task. 0 otherwise.
  */
+/*
+ * IAMROOT. 2023.07.15:
+ * - google-translate
+ * is_idle_task - 지정된 작업이 유휴 작업입니까?
+ * @p: 해당 작업.
+ *
+ * 반환: @p가 유휴 작업인 경우 1입니다. 그렇지 않으면 0입니다.
+ */
 static __always_inline bool is_idle_task(const struct task_struct *p)
 {
 	return !!(p->flags & PF_IDLE);
