@@ -2725,9 +2725,11 @@ static bool load_too_imbalanced(long src_load, long dst_load,
  *   @taskimp: dst node 와 src node의 fault 차이
  *   @groupimp: dst node 와 src node의 group fault 차이
  *   @maymove: src->dst(단방향 이동후 balance 예측)로 이동해도 됨
+ *   moveimp: 전달된 단방향 imp(fault 차이)를 백업한 변수
+ *   imp: 양방향 imp 계산후 가중치까지 적용되는 변수
  * - env->dst_nid 의 cpu(env->dst_cpu)들을 비교하여 그중 best_cpu를
  *   설정하기위해 task_numa_assign 호출
- * - 단반향 이동(src->dst)이 swap 보다 이득이면 best_cpu 만 설정
+ * - 단방향 이동(src->dst)이 swap 보다 이득이면 best_cpu 만 설정
  *   swap이 이득이면 best_cpu와 best_task를 설정
  * - Return: stopsearch(더이상 검색이 필요 없으면 true)
  */
@@ -2804,9 +2806,8 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * - google-translate
 	 * 선호하는 노드로 이동하지 않고 최선의 작업인 경우 이 스왑 후보를 건너뜁니다.
 	 *
-	 * - best_task의 preffered_nid가 src_nid와 같지만 cur는 그렇지 않다면
-	 *   할당을 건너뛴다. swap 한다면 현재 task는 preffered_nid 로 이동하지
-	 *   않게되므로 후보에서 건너뛴다.
+	 * - best_task는 preffered_nid로 이동하지만 현재 loop의 swap 후보는
+	 *   그렇지 않을 때 건너뛴다.
 	 */
 	if (env->best_task &&
 	    env->best_task->numa_preferred_nid == env->src_nid &&
@@ -3101,6 +3102,11 @@ unlock:
  * IAMROOT, 2023.07.08:
  * - 현재 task(@env->p)의 dst_nid cpu 중 numa balance에 최적인 cpu를 찾아서
  *   @env->best_cpu에 설정한다.
+ *
+ * - best_cpu 설정(task migration) 조건
+ *   1. 이동후 balance가 유지되는 idle cpu
+ *   2. swap 이나 단방향 이동후 접근도(imp) 와 load balance 가 좋아지는 cpu
+ *      (preferred_nid 로 이동하는 cpu 우선)
  */
 static void task_numa_find_cpu(struct task_numa_env *env,
 				long taskimp, long groupimp)
@@ -3197,7 +3203,7 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 	 * IAMROOT, 2023.07.12:
 	 * - task_numa_compare 에 maymove가 true로 호출되는 경우
 	 *   1. has_spare node type
-	 *      이동후 balance 이지만 dst에 idle cpu가 없어진 경우
+	 *      이동후 balance 이지만 dst에 캐쉬된 idle_cpu가 없는 경우
 	 *      balance로 판단되는 경우는 아래와 같다.
 	 *      1. 이동후 dst node에 running task가 node의 cpu 숫자의 25%이상이고
 	 *         src 가 dst보다 running task가 같거나 많다

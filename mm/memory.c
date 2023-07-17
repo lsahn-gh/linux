@@ -4842,7 +4842,7 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
  *   2. 이때마다 mem_buf, cpu_buf node 양쪽에 fault 통계 누적.
  *   3. 위의 fault 통계는 priv, share 구분 하여 저장하고 scan 주기 설정에 사용
  *   4. 실제 위의 통계는 task와 numa group 양쪽에 갱신하고 buf는 비움
- * - page migration 조건(should_numa_migrate_memory에서 검사)
+ * - page migration 조건(should_numa_migrate_memory 참조)
  *   task 와 다른 노드에 page를 접근할 때
  *   1. 하나의 task 가 page 에 연속해서 fault가 발생하는 경우
  *   2. numa group이 있는 task 경우에만 dst node 가 src node보다 3배 이상 fault가
@@ -4850,7 +4850,7 @@ int numa_migrate_prep(struct page *page, struct vm_area_struct *vma,
  *   3. memory 를 가지고 있는 node가 가지고 있지 않는 node 보다 1.33배 이상
  *      fault 가 많을 때
  *
- * - task migration 조건
+ * - task migration 조건(task_numa_find_cpu 참조)
  *   1. max fault node를 찾는다
  *   2. max fault node에서 best cpu로 migrate 또는 swap
  *      - best cpu를 못찾았거나 numa group 이 2개이상 node에서 접근이 많을 때는
