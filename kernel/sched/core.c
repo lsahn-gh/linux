@@ -2746,6 +2746,7 @@ static inline bool is_cpu_allowed(struct task_struct *p, int cpu)
  * - google-translate
  * move_queued_task - 대기 중인 작업을 새 rq로 이동합니다. 새 rq를
  * 반환(잠김)합니다. 이전 rq의 잠금이 해제됩니다.
+ * - @p를 현재 @rq에서 @new_cpu의 rq로 옮긴다.
  */
 static struct rq *move_queued_task(struct rq *rq, struct rq_flags *rf,
 				   struct task_struct *p, int new_cpu)
@@ -2803,6 +2804,8 @@ struct set_affinity_pending {
  *
  * 그래서 우리는 정상적인 스케줄러 움직임으로 경쟁하지만 작업이 더 이상
  * 이 CPU에 있지 않는 한 괜찮습니다.
+ *
+ * - @p 가 @dest_cpu 에서 실행될 수 있다면 move_queued_task 호출하여 옮긴다
  */
 static struct rq *__migrate_task(struct rq *rq, struct rq_flags *rf,
 				 struct task_struct *p, int dest_cpu)
@@ -2828,6 +2831,11 @@ static struct rq *__migrate_task(struct rq *rq, struct rq_flags *rf,
  * migration_cpu_stop - 이것은 highprio stopper 스레드에 의해 실행되며 스레드를
  * CPU에서 분리한 다음 다른 실행 대기열로 '푸시'하여 스레드 마이그레이션을
  * 수행합니다.
+ *
+ * - @data->task 를 현재 rq에서 @data->dest_cpu의 rq로 옮긴다.
+ *
+ * - @data->pending이 NULL 이 아닌 조건은 pass 하였다.
+ *   (migrate_task_to에서 호출되었을 경우는 pending 이 NULL 이다.)
  */
 static int migration_cpu_stop(void *data)
 {

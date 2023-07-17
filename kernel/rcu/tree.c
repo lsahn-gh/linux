@@ -399,6 +399,16 @@ bool rcu_dynticks_zero_in_eqs(int cpu, int *vp)
  *
  * The caller must have disabled interrupts and must not be idle.
  */
+/*
+ * IAMROOT. 2023.07.17:
+ * - google-translate
+ * RCU 코어에 이 CPU가 정지 상태인 스케줄러를 통과했음을 알립니다. 이것은 정지
+ * 상태에 대한 필요성이 긴급할 때 호출되므로 이 CPU가 가까운 미래에 무엇을
+ * 할지(또는 하지 않을지)에 관계없이 RCU 코어가 이를 알 수 있도록 원자적 작업과
+ * 전체 메모리 장벽을 소각합니다. 제로 기간 dyntick-idle 기간을 에뮬레이션하여 RCU
+ * 코어에 알립니다. 호출자는 인터럽트를 비활성화해야 하며 유휴 상태가 아니어야
+ * 합니다.
+ */
 notrace void rcu_momentary_dyntick_idle(void)
 {
 	int seq;

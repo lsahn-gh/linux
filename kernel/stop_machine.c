@@ -94,6 +94,11 @@ static void cpu_stop_signal_done(struct cpu_stop_done *done)
  * IAMROOT, 2023.02.11:
  * - @work->list를 @stopper->works에 추가한다.
  *   @wakeq에 @stopper->thread 를 추가한다.
+ *
+ * IAMROOT, 2023.07.16:
+ * - 이후 wake_up_q 함수에 wakeq를 인자로 호출하면 wakeq 에 추가된 @stopper->thread를
+ *   깨우게 된다.
+ * - stopper thread는 깨어나면 @stopper->works에 연결된 @work의 fn 함수를 수행한다
  */
 static void __cpu_stop_queue_work(struct cpu_stopper *stopper,
 					struct cpu_stop_work *work,
@@ -281,8 +286,9 @@ notrace void __weak stop_machine_yield(const struct cpumask *cpumask)
 /*
  * IAMROOT, 2023.03.25:
  * - @data의 fn을 호출(msdata->fn(msdata->data))
- * - 2개의 stopper가 이 함수를 호출하지만 사용자 함수(msdata->fn)는
- *   msdata의 active_cpus mask에서만 호출한다.(ex. stop_two_cpus)
+ * - ex. stop_two_cpus 에서 호출한 경우
+ *   2개의 stopper가 이 함수를 호출하지만 사용자 함수(msdata->fn)는 msdata의
+ *   active_cpus mask에 설정된 cpu(cpu1) 에서만 호출
  */
 static int multi_cpu_stop(void *data)
 {
@@ -297,8 +303,21 @@ static int multi_cpu_stop(void *data)
 	 * When called from stop_machine_from_inactive_cpu(), irq might
 	 * already be disabled.  Save the state and restore it on exit.
 	 */
+	/*
+	 * IAMROOT. 2023.07.16:
+	 * - google-translate
+	 * stop_machine_from_inactive_cpu()에서 호출하면 irq가 이미 비활성화되었을 수
+	 * 있습니다. 상태를 저장하고 종료 시 복원합니다.
+	 */
 	local_save_flags(flags);
 
+	/*
+	 * IAMROOT, 2023.07.16:
+	 * - is_active가 true 인 조건
+	 *   1. active_cpus가 설정되지 않았으면 첫번째 현재 cpu(smp_processor_id)가
+	 *      첫번째 online cpu이다.
+	 *   2. 현재 cpu가 active_cpus mask 에 있다.
+	 */
 	if (!msdata->active_cpus) {
 		cpumask = cpu_online_mask;
 		is_active = cpu == cpumask_first(cpumask);
@@ -316,22 +335,43 @@ static int multi_cpu_stop(void *data)
 			curstate = newstate;
 			switch (curstate) {
 			case MULTI_STOP_DISABLE_IRQ:
+				/*
+				 * IAMROOT, 2023.07.17:
+				 * - run 하기 전에 irq 먼저 disable
+				 */
 				local_irq_disable();
 				hard_irq_disable();
 				break;
 			case MULTI_STOP_RUN:
+				/*
+				 * IAMROOT, 2023.07.17:
+				 * - msdata->active_cpus만 fn 호출
+				 */
 				if (is_active)
 					err = msdata->fn(msdata->data);
 				break;
 			default:
 				break;
 			}
+			/*
+			 * IAMROOT, 2023.07.17:
+			 * - msdata->num_threads 수만큼 호출되어야 다음 state(+1)
+			 *   로 넘어간다
+			 */
 			ack_state(msdata);
 		} else if (curstate > MULTI_STOP_PREPARE) {
 			/*
 			 * At this stage all other CPUs we depend on must spin
 			 * in the same loop. Any reason for hard-lockup should
 			 * be detected and reported on their side.
+			 */
+			/*
+			 * IAMROOT. 2023.07.17:
+			 * - google-translate
+			 * 이 단계에서 우리가 의존하는 다른 모든 CPU는 동일한 루프에서
+			 * 회전해야 합니다. 하드 록업에 대한 모든 이유를 감지하고 고객
+			 * 측에서 보고해야 합니다.
+			 * - XXX 무한루프에 빠졌을 경우를 위한 watchdog 설정?
 			 */
 			touch_nmi_watchdog();
 		}
@@ -345,6 +385,14 @@ static int multi_cpu_stop(void *data)
 /*
  * IAMROOT, 2023.07.15:
  * - 두 cpu의 work를 각각 stopper를 통해서 실행하게 한다.
+ * - 1. @cpu1 @cpu2의 per cpu  cpu_stoper 각각 설정
+ *   2. 설정된 stopper1,2를 wakeq에 추가하고 @work1,2(같음)도
+ *      stopper1,2->works에 추가
+ *   3. wakeq 에 추가된 stopper1,2 thread를 깨운다.
+ * - 아래는 이후 진행상황 예측
+ *   1. 깨어난 stopper thread는 work1,2(같음)에 설정된 callback함수(multi_cpu_stop)
+ *      를  호출
+ *   2. multi_cpu_stop 함수에서 work 구조체 arg 멤버로 설정된 msdata
  */
 static int cpu_stop_queue_two_works(int cpu1, struct cpu_stop_work *work1,
 				    int cpu2, struct cpu_stop_work *work2)
@@ -367,12 +415,16 @@ retry:
 	 * - google-translate
 	 * 스토퍼 스레드의 깨우기는 대기열과 동일한 스케줄링 컨텍스트에서 발생해야
 	 * 합니다. 그렇지 않으면 위의 스토퍼 중 하나가 다른 CPU에 의해 깨어나 선점할
-	 * 가능성이 있습니다. 이것은 우리가 다른 마개를 영원히 깨우지 못하게 할 것입니다.
+	 * 가능성이 있습니다. 이것은 우리가 다른 스토퍼를 영원히 깨우지 못하게 할 것입니다.
 	 */
 	preempt_disable();
 	raw_spin_lock_irq(&stopper1->lock);
 	raw_spin_lock_nested(&stopper2->lock, SINGLE_DEPTH_NESTING);
 
+	/*
+	 * IAMROOT, 2023.07.16:
+	 * - 두 stopper가 모두 enabled 여야 한다.
+	 */
 	if (!stopper1->enabled || !stopper2->enabled) {
 		err = -ENOENT;
 		goto unlock;
@@ -414,6 +466,10 @@ unlock:
 	raw_spin_unlock(&stopper2->lock);
 	raw_spin_unlock_irq(&stopper1->lock);
 
+	/*
+	 * IAMROOT, 2023.07.16:
+	 * - 이미 진행중이라면 끝날때 까지 대기하다 재시도하도록 한다.
+	 */
 	if (unlikely(err == -EDEADLK)) {
 		preempt_enable();
 
@@ -423,6 +479,11 @@ unlock:
 		goto retry;
 	}
 
+	/*
+	 * IAMROOT, 2023.07.16:
+	 * - wakeq에 연결된 stopper1,2 thread를 깨운다.게 되고 깨어난 stopper1,2는
+	 *   work1,2(같음) 설정된 callback함수(multi_cpu_stop) 을 호출한다.
+	 */
 	wake_up_q(&wakeq);
 	preempt_enable();
 
@@ -452,7 +513,22 @@ unlock:
  *
  * 둘 다 완료되면 반환됩니다.
  *
- * - cpu1, cpu2를 중지하고 cpu1 에서 @fn 호출
+ * - @cpu1, @cpu2를 중지하고 @cpu1 에서 @fn 호출
+ * - 전달된 인자
+ *   @cpu1: dst_cpu
+ *   @cpu2: src_cpu
+ *   @fn: migrate_swap_stop
+ *   @arg: migration_swap_arg
+ * - 1. msdata, work1,2 구조체 설정
+ *   2. nr_todo 2로설정및 completion 구조체를 초기화
+ *   3. @cpu1 @cpu2의 per cpu  cpu_stoper 각각 설정
+ *   4. 설정된 stopper1,2를 wakeq에 추가하고 @work1,2(같음)도
+ *      stopper1,2->works에 추가
+ *   5. wakeq 에 추가된 stopper1,2 thread를 깨운다.
+ *   6. 깨어난 stopper thread는 work1,2(같음)에 설정된 callback함수(multi_cpu_stop)
+ *      를 호출
+ *   7. multi_cpu_stop 함수에서 work 구조체 arg 멤버로 설정된 msdata 구조체의
+ *      @fn 함수(migrate_swap_stop)를 @arg 를 인자로 호출
  */
 int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *arg)
 {
@@ -460,6 +536,11 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
 	struct cpu_stop_work work1, work2;
 	struct multi_stop_data msdata;
 
+	/*
+	 * IAMROOT, 2023.07.17:
+	 * - num_threads: threads 갯수만큼 실행되어야 다음 state로 넘어간다
+	 * - active_cpus: dst_cpu의 cpumask. active_cpus 에만 @fn 함수가 호출된다.
+	 */
 	msdata = (struct multi_stop_data){
 		.fn = fn,
 		.data = arg,
@@ -475,10 +556,27 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
 	};
 
 	cpu_stop_init_done(&done, 2);
+	/*
+	 * IAMROOT, 2023.07.17:
+	 * - 1. thread_ack 를 num_threads로 초기화
+	 *   2. state를 MULTI_STOP_PREPARE로 설정
+	 */
 	set_state(&msdata, MULTI_STOP_PREPARE);
 
+	/*
+	 * IAMROOT, 2023.07.17:
+	 * - XXX swap 하는 이유는?
+	 */
 	if (cpu1 > cpu2)
 		swap(cpu1, cpu2);
+	/*
+	 * IAMROOT, 2023.07.17:
+	 * - XXX 같은 구조체의 reference를 인자(work1,2)로 호출하고 있고
+	 *   multi_cpu_stop 함수의 인자인 arg는 msdata의 reference 이다.
+	 *   따라서 두개의 stopper가 multi_cpu_stop 함수를 호출하게 되고
+	 *   인자인 msdata는 같은 주소를 참조한다. 이는 state 동기화시 같은 데이터를
+	 *   읽고 쓰게된다.
+	 */
 	if (cpu_stop_queue_two_works(cpu1, &work1, cpu2, &work2))
 		return -ENOENT;
 
