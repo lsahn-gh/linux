@@ -2720,6 +2720,19 @@ static bool load_too_imbalanced(long src_load, long dst_load,
  * 있다는 점을 고려하여 소스 작업이 대상 dst_cpu로 마이그레이션된 경우 시스템의
  * 전체 컴퓨팅 및 NUMA 액세스가 개선되는지 확인합니다.
  *
+ * --- task numa compare의 기본 개념 ---
+ *
+ * - 단방향이동요청(maymove == true)
+ *   maymode = true라면  task가 이동을해도 imbalance가 이득이라고 이전에
+ *   계산되어 true로 설정한것이다.
+ *
+ * - 양방향 이동(cur != NULL && bast_task != NULL)
+ *   curr와 bast_task가 swap이 되는 상황. src -> dst와 dst -> src의
+ *   task, group weight, preferred node 비교등을 수행해서 swap이
+ *   이득인지 검사를 할것이다.
+ *
+ * ------------------------------------------------
+ *
  * - @env->p: current
  *   @env->dst_cpu: @env->dst_nid 의 cpu중 현재 loop의 cpu
  *   @taskimp: dst node 와 src node의 fault 차이
@@ -2727,8 +2740,10 @@ static bool load_too_imbalanced(long src_load, long dst_load,
  *   @maymove: src->dst(단방향 이동후 balance 예측)로 이동해도 됨
  *   moveimp: 전달된 단방향 imp(fault 차이)를 백업한 변수
  *   imp: 양방향 imp 계산후 가중치까지 적용되는 변수
+ *
  * - env->dst_nid 의 cpu(env->dst_cpu)들을 비교하여 그중 best_cpu를
  *   설정하기위해 task_numa_assign 호출
+ *
  * - 단방향 이동(src->dst)이 swap 보다 이득이면 best_cpu 만 설정
  *   swap이 이득이면 best_cpu와 best_task를 설정
  * - Return: stopsearch(더이상 검색이 필요 없으면 true)
@@ -2767,6 +2782,8 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * - google-translate
 	 * 우리는 선점을 활성화했기 때문에 마이그레이션을 수행하고 스왑 후보로 자신(current
 	 * == env->p)을 선택하려고 시도할 수 있습니다.
+	 *
+	 * - 이전에 선점등이 일어나서 그 사이에 이미 옮겨진거 같다. out.
 	 */
 	if (cur == env->p) {
 		stopsearch = true;
@@ -2779,6 +2796,9 @@ static bool task_numa_compare(struct task_numa_env *env,
 		 * - dst_cpu의 curr가 종료중이거나 idle task이면
 		 *   현재 loop의 fault 비교치가 best보다 좋다면 단방향 예측이 참인
 		 *   조건만으로 idle cpu 할당을 시도해 본다.
+		 *
+		 * - swap 비교대상이 curr에 없다. 굳이 move를 해야된다면 imp 비교후
+		 *   assign 하고 그게 아니라면 안한다.
 		 */
 		if (maymove && moveimp >= env->best_imp)
 			goto assign;
@@ -2808,6 +2828,10 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 *
 	 * - best_task는 preffered_nid로 이동하지만 현재 loop의 swap 후보는
 	 *   그렇지 않을 때 건너뛴다.
+	 *
+	 * - curr가 src에 갈수있는 상황이다.
+	 *   best_task는 이미 pref node(src)에 있는데 굳이 바꿀필요도 없고,
+	 *   curr또한 pref node가 아닌 src에 갈필요는 없을것이다.
 	 */
 	if (env->best_task &&
 	    env->best_task->numa_preferred_nid == env->src_nid &&
@@ -2840,6 +2864,9 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 *   이동시 faults 차이의 합을 구한다. 값이 음수일수록 원격 억세스가 많다.
 	 *   즉 src task 를 dst 로 이동하려는데 swap 으로 이동한다면 dst -> src
 	 *   의 이동에 대한 faults도 염두에 두어야 한다.
+	 *
+	 * - dst -> src이동의 diff를 계산한다. group이 같으면 task만 고려하면되니
+	 *   task만 비교한다.
 	 */
 	cur_ng = rcu_dereference(cur->numa_group);
 	if (cur_ng == p_ng) {
@@ -2860,6 +2887,8 @@ static bool task_numa_compare(struct task_numa_env *env,
 		 * - google-translate
 		 * 약간의 히스테리시스를 추가하여 그룹 내에서 작은 차이로 작업이 바뀌는 것을
 		 * 방지합니다.
+		 *
+		 * - 작은 차이로인한 group내의 변화는 무시한다.
 		 */
 		if (cur_ng)
 			imp -= imp / 16;
@@ -2873,6 +2902,8 @@ static bool task_numa_compare(struct task_numa_env *env,
 		 * - google-translate
 		 * 그룹 가중치를 비교합니다. 작업이 그룹의 일부가 아닌 그 자체인 경우,
 		 * 대신 작업 가중치를 사용합니다.
+		 *
+		 * - 둘다 group이 있는 경우에만 group값으로 비교한다.
 		 */
 		if (cur_ng && p_ng)
 			imp += group_weight(cur, env->src_nid, dist) -
@@ -2890,6 +2921,9 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 *
 	 * - swap에 의한 dst->src 이동을 고려하면 이미 dst가 preferred node에 있는
 	 *   경우는 imp를 감소시켜 선택되지 않도록 한다.
+	 *
+	 * - cur가 이미 pref node(dst)에 있는데 옮겨지는 상황(dst -> src)은
+	 *   안좋다. 가중치를 빼준다.
 	 */
 	if (cur->numa_preferred_nid == env->dst_nid)
 		imp -= imp / 16;
@@ -2909,6 +2943,9 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 *
 	 * - swap에 의한 dst->src 이동을 고려하면 preferred node로 이동하는 경우이므로
 	 *   imp를 증가시켜 선택하도록 권장
+	 *
+	 * - 위의 경우와 반대로 pref node(src)로 이동되는 상황은 좋다. 가중치를
+	 *   더해준다.
 	 */
 	if (cur->numa_preferred_nid == env->src_nid)
 		imp += imp / 8;
@@ -2918,6 +2955,9 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * - 단방향(src->dst) 이동은 괜찮지만 swap 할 경우는 fault가 감소하는 경향이고
 	 *   현재 루프의 imp 가 best 보다 크다면 swap 하지 않고 단방향 migration 하도록
 	 *   cur을 NULL로 설정하고 현재 loop cpu로 할당을 시도해본다.
+	 *
+	 * - 단방향 요청도 있으면서, 단방향이 계산상 더 좋다고도 생각된다.
+	 *   swap(cur != NULL)을 굳이 할필요없으니 단방향으로 assign 한다.
 	 */
 	if (maymove && moveimp > imp && moveimp > env->best_imp) {
 		imp = moveimp;
@@ -2936,6 +2976,14 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 *
 	 * - 현재 루프의 task는 swap시 dst->src 이동에서 preferred_nid 로 이동하지만
 	 *   best는 그렇지 않을 경우 현재 loop cpu와 task 로 할당하기 위해 jump
+	 *
+	 * - swap을 해야되는(env->best_task != NULL)상홍에서 실제 이동되는
+	 *   task들의 pref node가 좋아질수밖에 없다고 생각되는 상황이다.
+	 *   
+	 *   > dst->src로 이동하는 cur는 src가 pref node,
+	 *   > src->dst로 이동하는 best_task는 현재 node가 not pref node.
+	 *
+	 *   좋기만한 상황이므로 assign한다.
 	 */
 	if (env->best_task && cur->numa_preferred_nid == env->src_nid &&
 	    env->best_task->numa_preferred_nid != env->src_nid) {
