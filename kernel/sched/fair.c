@@ -3574,7 +3574,7 @@ static void numa_migrate_preferred(struct task_struct *p)
  * IAMROOT, 2023.07.01:
  * - active_nodes개수와 max_faults를 갱신한다.
  * - active_nodes
- *   max_faults의 1 / 3 이상인것들 최소 1개이상.
+ *   max_faults의 1 / 3 이상인것들. 최소 1개이상(max fault 자기자신)
  * - online node중 @numa_group의 faults_cpu 수가 가장 큰 node 의 1/3 보다
  *   큰 노드들의 갯수와 max_faults수를 numa_group 멤버 변수에 설정한다.
  * - NOTE active_nodes 계산에는 faults_cpu를 사용한다.
