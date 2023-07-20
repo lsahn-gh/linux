@@ -195,6 +195,8 @@ static bool cpu_stop_queue_work(unsigned int cpu, struct cpu_stop_work *work)
  * 반환값:
  * @cpu가 오프라인이어서 @fn(@arg)이 실행되지 않은 경우 -ENOENT;
  * 그렇지 않으면 @fn의 반환 값입니다.
+ *
+ * - @fn을 @cpu에서 실행하게 push하고 기다린다.
  */
 int stop_one_cpu(unsigned int cpu, cpu_stop_fn_t fn, void *arg)
 {
@@ -529,6 +531,9 @@ unlock:
  *      를 호출
  *   7. multi_cpu_stop 함수에서 work 구조체 arg 멤버로 설정된 msdata 구조체의
  *      @fn 함수(migrate_swap_stop)를 @arg 를 인자로 호출
+ *
+ * - @cpu1에서 @fn을 수행하고 @cpu2에서는 @cpu1이 끝날떄까지 기다린다.
+ *   해당 작업은 multi_cpu_stop()에서 수행된다.
  */
 int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *arg)
 {
@@ -555,6 +560,10 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
 		.caller = _RET_IP_,
 	};
 
+/*
+ * IAMROOT, 2023.07.20:
+ * - 2개의 thread에서 응답을 받아야되므로 2로 설정한다.
+ */
 	cpu_stop_init_done(&done, 2);
 	/*
 	 * IAMROOT, 2023.07.17:
@@ -566,6 +575,8 @@ int stop_two_cpus(unsigned int cpu1, unsigned int cpu2, cpu_stop_fn_t fn, void *
 	/*
 	 * IAMROOT, 2023.07.17:
 	 * - XXX swap 하는 이유는?
+	 *
+	 * - cpu번호가 작은게 @fn을 수행하도록 정렬한다.
 	 */
 	if (cpu1 > cpu2)
 		swap(cpu1, cpu2);

@@ -2868,6 +2868,8 @@ static int migration_cpu_stop(void *data)
 	 * 깨우는 동안 cpus_ptr 적용을 놓치지 않도록 __migrate_task()를 실행하기 전에 보류
 	 * 중인 작업을 명시적으로 깨울 필요가 있습니다. set_cpus_allowed_ptr()의
 	 * TASK_WAKING 테스트를 참조하세요.
+	 *
+	 * - pending되있던것들을 실행한다.
 	 */
 	flush_smp_call_function_from_idle();
 
@@ -2897,6 +2899,8 @@ static int migration_cpu_stop(void *data)
 	 * task_rq(p) != rq이면 여기에서 마이그레이션할 수 없습니다. rq->lock을 보유하고
 	 * 있기 때문입니다. p->on_rq == 0이면 p->pi_lock을 보유하고 있기 때문에 큐에 추가할
 	 * 수 없습니다.
+	 *
+	 * - this cpu가 @p여야만 migrate가능하다.
 	 */
 	if (task_rq(p) == rq) {
 		if (is_migration_disabled(p))
@@ -2961,6 +2965,8 @@ static int migration_cpu_stop(void *data)
 		 * 스토퍼가 실행되기 전에 작업이 이동했습니다. 우리는 ->pi_lock을 잡고
 		 * 있으므로 허용된 마스크가 안정적입니다. 허용된 위치에 있으면 완료된
 		 * 것입니다.
+		 *
+		 * - @p가 이미 dest_cpu로 이동했다.
 		 */
 		if (cpumask_test_cpu(task_cpu(p), p->cpus_ptr)) {
 			p->migration_pending = NULL;
@@ -2978,6 +2984,8 @@ static int migration_cpu_stop(void *data)
 		 * - google-translate
 		 * migrate_enable()이 rq 불일치에 도달하면 우리는 안정적으로
 		 * is_migration_disabled()를 결정할 수 없으므로 추적해야 합니다.
+		 *
+		 * - stop_work에서 현재함수를 실행을 시킨다.
 		 */
 		WARN_ON_ONCE(!pending->stop_pending);
 		task_rq_unlock(rq, p, &rf);
@@ -3773,6 +3781,11 @@ struct migration_swap_arg {
 /*
  * IAMROOT, 2023.07.15:
  * - double lock을 잡고 두개의 task를 교환한다.
+ *
+ * - migrate_swap()에 의해 호출되는 경우
+ *   migrate_swap() -> stop_two_cpus()에 의해 실행되는데, 이때
+ *   한개의 cpu1만 이 함수를 실행하고, cpu2는 cpu1이 끝날때까지 별거
+ *   안한다.
  */
 static int migrate_swap_stop(void *data)
 {
@@ -3821,6 +3834,8 @@ unlock:
 /*
  * IAMROOT, 2023.07.15:
  * - swap할 src,dst 를 설정하고 stop_two_cpus 호출
+ *
+ * - 번호가 빠른 cpu에서 migrate_swap_stop()를 수행할것이다.
  */
 int migrate_swap(struct task_struct *cur, struct task_struct *p,
 		int target_cpu, int curr_cpu)

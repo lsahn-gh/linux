@@ -3006,6 +3006,7 @@ static bool task_numa_compare(struct task_numa_env *env,
 	 * IAMROOT, 2023.07.06:
 	 * - 중요도(imp=fault차이)가 30 미만이거나 best_imp보다 16이상 크지 않다면
 	 *   무시하고 다음 루프 진행
+	 * - 너무작거나 별차이 안나면 안한다는뜻.
 	 */
 	if (imp < SMALLIMP || imp <= env->best_imp + SMALLIMP / 2)
 		goto unlock;
@@ -3051,6 +3052,10 @@ assign:
 	 *   2. dst_cpu가 현재 idle이면 dst_cpu 유지
 	 *   3. best_cpu가 현재 idle 이면 best_cpu
 	 *   4. idle cpu를 못찾았다면 cache 되었던 idle_cpu나 현재 루프의 dst_cpu
+	 *
+	 * - src->dst의 단방향 요청시의 dst_cpu를 결정한다.
+	 *   평가할 task는 없이 이미 task는 결정난 상태고, cpu만 바꿀지를 결정한다.
+	 *   idle_cpu > dst_cpu > best_cpu 의 우선순위로 dst_cpu결정한다.
 	 */
 	if (!cur) {
 		int cpu = env->dst_stats.idle_cpu;
@@ -3085,6 +3090,10 @@ assign:
 		env->dst_cpu = cpu;
 	}
 
+/*
+ * IAMROOT, 2023.07.20:
+ * - @env의 best_cpu를 dst_cpu로, cur, imp를 best로 갱신한다.
+ */
 	task_numa_assign(env, cur, imp);
 
 	/*
@@ -3101,6 +3110,9 @@ assign:
 	 * - @maymove가 true 로 전달되었을 경우 검색 중단 조건(idle cpu의 경우
 	 *   단방향 조건만 충족하면 된다.)
 	 *   best_cpu가 idle 인 경우
+	 *
+	 * - idle인 cpu로 task가 단방향으로 옮겨간 상황이라고 판단된다.
+	 *   자던 cpu를 깨운것만으로 만족한다. 더 최적의 조건을 굳이 찾지 않는다.
 	 */
 	if (maymove && !cur && env->best_cpu >= 0 && idle_cpu(env->best_cpu))
 		stopsearch = true;
@@ -3123,6 +3135,9 @@ assign:
 	 *   2. 현재 루프의 task는 swap시 dst->src 이동에서 preferred_nid 로
 	 *      이동하지만 best는 그렇지 않을 경우
 	 *   3. swap 후에는 불균형이 유지나 개선된다.
+	 *
+	 * - swap인데, best_task를 찾았고, preferred node도 일치하면, node를 찾는것만으로도
+	 *   만족한다. 굳이 더 최상을 안찾는다.
 	 */
 	if (!maymove && env->best_task &&
 	    env->best_task->numa_preferred_nid == env->src_nid) {
@@ -3261,6 +3276,11 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 	 *   2. overloaded, fully_busy node type
 	 *      현재 task 가 dst node로 이동후(src->dst 단방향 이동) load 불균형이
 	 *      개선됨
+	 *
+	 * - dst_nid에 속한 cpu를 대상으로 제일 좋은 dst_cpu를 찾는다.
+	 *   idle cpu가 대상이 되거나, 이동하는 task의 preferred node에 일치하는
+	 *   cpu가 대상이 된경우 break될것이고,
+	 *   그게 아니면 balance후 가장 imp차가 큰 cpu가 선택될것이다.
 	 */
 	for_each_cpu(cpu, cpumask_of_node(env->dst_nid)) {
 		/* Skip this CPU if the source task cannot migrate */
@@ -3436,10 +3456,10 @@ static int task_numa_migrate(struct task_struct *p)
 	/*
 	 * IAMROOT. 2023.07.07:
 	 * - google-translate
-	 * 작업이 여러 NUMA 노드에 걸쳐 있고 작업 부하의 활성 노드 중 하나로
-	 * 마이그레이션되는 작업 부하의 일부인 경우 작업 부하가 안정될 수 있도록 이 노드를
-	 * 작업의 기본 누마 노드로 기억하십시오. 두 번째 선택 노드로 마이그레이션된 작업은
-	 * 나중에 더 나은 노드로 시도하는 것이 좋습니다. 여기에서 기본 노드를 설정하지
+	 * task가 multiple NUMA node에 걸쳐 있고 workload의 active node 중 하나로
+	 * 마이그레이션되는 workload의 일부인 경우, workload가 안정될 수 있도록 이 node를
+	 * task의 preferred numa node로 기억하십시오. second choice node로 마이그레이션된 task는
+	 * 나중에 더 나은 node로 시도하는 것이 좋습니다. 여기에서 preferred node를 설정하지
 	 * 마십시오.
 	 *
 	 * - XXX 주석의 의미는?
@@ -3448,6 +3468,10 @@ static int task_numa_migrate(struct task_struct *p)
 	 *   2. best_cpu가 설정되지 않았다 -> src 노드로 numa_preferred_nid 설정
 	 * - src 보다 나은 node를 못 찾았다면 src를 preferred로 설정하고 찾았고
 	 *   원래 preferred node가 아니면 갱신한다.
+	 *
+	 * - best_cpu로 가는 @p에 대해서만 preferred_nid를 설정하고, 반대의 task에 대해선
+	 *   나중에 더 좋은 preferred_nid를 찾을수 있으니 굳이 preferred_nid를 설정하지 말라는
+	 *   의미 인듯하다.
 	 */
 	if (ng) {
 		if (env.best_cpu == -1)
@@ -3470,6 +3494,8 @@ static int task_numa_migrate(struct task_struct *p)
 	 * IAMROOT, 2023.07.14:
 	 * - best_task가 NULL이면 현재 task만 best_cpu로 migration 하고
 	 *   NULL이 아니면 best와 src cpu의 curr를 swap migration 한다.
+	 *
+	 * - dst에 tsk가 비어있는 상태. @p를 best_cpu로만 변경해주면 끝난다.
 	 */
 	if (env.best_task == NULL) {
 		ret = migrate_task_to(p, env.best_cpu);
@@ -3479,6 +3505,10 @@ static int task_numa_migrate(struct task_struct *p)
 		return ret;
 	}
 
+/*
+ * IAMROOT, 2023.07.20:
+ * - dst에 task도 있는상태(env.best_task != NULL). task도 swap을 해줘야한다.
+ */
 	ret = migrate_swap(p, env.best_task, env.best_cpu, env.src_cpu);
 	WRITE_ONCE(best_rq->numa_migrate_on, 0);
 
@@ -3544,10 +3574,16 @@ static void numa_migrate_preferred(struct task_struct *p)
  * IAMROOT, 2023.07.01:
  * - active_nodes개수와 max_faults를 갱신한다.
  * - active_nodes
- *   max_faults의 1 / 3 이상인것들을 
+ *   max_faults의 1 / 3 이상인것들 최소 1개이상.
  * - online node중 @numa_group의 faults_cpu 수가 가장 큰 node 의 1/3 보다
  *   큰 노드들의 갯수와 max_faults수를 numa_group 멤버 변수에 설정한다.
  * - NOTE active_nodes 계산에는 faults_cpu를 사용한다.
+ *
+ * ex) cpu가 10개 있다고 가정. max_fault = 25 인 cpu가 1개 있을때
+ * fault = 9인 cpu가 8개,
+ * fault = 3인 cpu가 1개
+ *
+ * 가 있다면 active_nodes = 9이 될것이다.
  */
 static void numa_group_count_active_nodes(struct numa_group *numa_group)
 {
