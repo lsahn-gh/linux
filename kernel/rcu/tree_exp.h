@@ -810,6 +810,26 @@ static int rcu_print_task_exp_stall(struct rcu_node *rnp)
  *
  * This has the same semantics as (but is more brutal than) synchronize_rcu().
  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   synchronize_rcu_expedited - 무차별 대입 RCU 유예 기간.
+ *
+ *   RCU 유예 기간을 기다리되 신속하게 처리합니다. 기본 아이디어는 유휴 상태가 
+ *   아닌 모든 비 nohz 온라인 CPU를 IPI하는 것입니다. IPI 핸들러는 CPU가 
+ *   RCU 크리티컬 섹션에 있는지 확인하고, 그렇다면 가장 바깥쪽 rcu_read_unlock()이 
+ *   RCU-preempt에 대한 정지 상태를 보고하도록 플래그를 설정하거나 스케줄러에 
+ *   RCU-sched에 대한 도움을 요청합니다. 반면에 CPU가 RCU 읽기 측 임계 영역에 
+ *   있지 않으면 IPI 핸들러는 즉시 정지 상태를 보고합니다.
+ *
+ *   이는 이전의 신속한 구현에 비해 크게 개선되었지만 여전히 실시간 워크로드에 
+ *   비우호적이므로 모든 종류의 일반 사례 코드에는 권장되지 않습니다. 실제로, 
+ *   루프에서 synchronize_rcu_expedited()를 사용하는 경우 코드를 재구성하여 
+ *   업데이트를 일괄 처리한 다음 단일 synchronize_rcu()를 대신 사용하십시오.
+ *
+ *   이것은 synchronize_rcu()와 동일한 의미 체계를 갖습니다(그러나 보다 
+ *   잔인합니다).
+ */
 void synchronize_rcu_expedited(void)
 {
 	bool boottime = (rcu_scheduler_active == RCU_SCHEDULER_INIT);
@@ -823,38 +843,83 @@ void synchronize_rcu_expedited(void)
 			 "Illegal synchronize_rcu_expedited() in RCU read-side critical section");
 
 	/* Is the state is such that the call is a grace period? */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   통화가 유예 기간인 상태입니까? 
+ */
 	if (rcu_blocking_is_gp())
 		return;
 
 	/* If expedited grace periods are prohibited, fall back to normal. */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   긴급 유예 기간이 금지된 경우 정상으로 돌아갑니다. 
+ */
 	if (rcu_gp_is_normal()) {
 		wait_rcu_gp(call_rcu);
 		return;
 	}
 
 	/* Take a snapshot of the sequence number.  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   시퀀스 번호의 스냅샷을 찍습니다. 
+ */
 	s = rcu_exp_gp_seq_snap();
 	if (exp_funnel_lock(s))
 		return;  /* Someone else did our work for us. */
 
 	/* Ensure that load happens before action based on it. */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   로드를 기반으로 작업 전에 로드가 발생하는지 확인합니다.
+ */
 	if (unlikely(boottime)) {
 		/* Direct call during scheduler init and early_initcalls(). */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   스케줄러 초기화 및 early_initcalls() 동안 직접 호출.
+ */
 		rcu_exp_sel_wait_wake(s);
 	} else {
 		/* Marshall arguments & schedule the expedited grace period. */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   인수를 마샬링하고 신속 유예 기간을 예약합니다.
+ */
 		rew.rew_s = s;
 		INIT_WORK_ONSTACK(&rew.rew_work, wait_rcu_exp_gp);
 		queue_work(rcu_gp_wq, &rew.rew_work);
 	}
 
 	/* Wait for expedited grace period to complete. */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   긴급 유예 기간이 완료될 때까지 기다리십시오.
+ */
 	rnp = rcu_get_root();
 	wait_event(rnp->exp_wq[rcu_seq_ctr(s) & 0x3],
 		   sync_exp_work_done(s));
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   작업 대기열 작업은 반환 전에 발생합니다.
+ */
 	smp_mb(); /* Workqueue actions happen before return. */
 
 	/* Let the next expedited grace period start. */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   다음 신속 유예 기간이 시작되도록 하십시오.
+ */
 	mutex_unlock(&rcu_state.exp_mutex);
 
 	if (likely(!boottime))

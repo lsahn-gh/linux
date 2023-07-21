@@ -125,6 +125,19 @@ int rcu_num_nodes __read_mostly = NUM_RCU_NODES; /* Total # rcu_nodes in use. */
  * transitions from RCU_SCHEDULER_INIT to RCU_SCHEDULER_RUNNING after RCU
  * is fully initialized, including all of its kthreads having been spawned.
  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   rcu_scheduler_active 변수는 RCU_SCHEDULER_INACTIVE 값으로 초기화되고 
+ *   첫 번째 작업이 생성되기 직전에 RCU_SCHEDULER_INIT로 전환됩니다. 
+ *   따라서 이 변수가 RCU_SCHEDULER_INACTIVE일 때 RCU는 단 하나의 작업만 
+ *   있다고 가정할 수 있으므로 RCU가 (예를 들어) synchronize_rcu()를 간단한 
+ *   barrier()로 최적화할 수 있습니다. 이 변수가 RCU_SCHEDULER_INIT이면 RCU는 
+ *   실제 유예 기간을 감지하는 데 필요한 모든 작업을 실제로 수행해야 합니다. 
+ *   이 변수는 또한 lockdep-RCU 오류 검사에서 부팅 시 가양성을 억제하는 데 
+ *   사용됩니다. 마지막으로 생성된 모든 kthread를 포함하여 RCU가 완전히 
+ *   초기화된 후 RCU_SCHEDULER_INIT에서 RCU_SCHEDULER_RUNNING으로 전환됩니다.
+ */
 int rcu_scheduler_active __read_mostly;
 EXPORT_SYMBOL_GPL(rcu_scheduler_active);
 
@@ -139,6 +152,18 @@ EXPORT_SYMBOL_GPL(rcu_scheduler_active);
  * It might later prove better for people registering RCU callbacks during
  * early boot to take responsibility for these callbacks, but one step at
  * a time.
+ */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   rcu_scheduler_fully_active 변수는 스케줄러가 새 작업을 생성할 수 있게 
+ *   된 이후인 early_initcall() 처리 중에 0에서 1로 전환됩니다. 따라서 
+ *   RCU 처리(예: RCU 우선 순위 향상을 위한 작업 생성)는 
+ *   rcu_scheduler_fully_active가 0에서 1로 전환될 때까지 지연되어야 합니다. 
+ *   또한 현재 이 시점 이후까지 모든 RCU 콜백의 호출을 지연합니다.
+ *
+ *   초기 부팅 중에 RCU 콜백을 등록하는 사람들이 한 번에 한 단계씩 이러한 
+ *   콜백에 대한 책임을 지는 것이 나중에 더 나을 수 있습니다.
  */
 static int rcu_scheduler_fully_active __read_mostly;
 
@@ -178,6 +203,13 @@ module_param(rcu_unlock_delay, int, 0444);
  * per-CPU. Object size is equal to one page. This value
  * can be changed at boot time.
  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   이 rcu 매개변수는 런타임 읽기 전용입니다. CPU당 캐시할 수 있는 
+ *   최소 허용 개체 수를 반영합니다. 개체 크기는 한 페이지와 같습니다. 
+ *   이 값은 부팅 시 변경할 수 있습니다.
+ */
 static int rcu_min_cached_objs = 5;
 module_param(rcu_min_cached_objs, int, 0444);
 
@@ -189,6 +221,19 @@ module_param(rcu_min_cached_objs, int, 0444);
 // The default value is 5 seconds, which is long enough to reduce
 // interference with the shrinker while it asks other systems to
 // drain their caches.
+
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   페이지 축소기는 페이지를 만들기 위해 해제할 페이지를 
+ *   요청할 수 있습니다.
+ *   시스템의 다른 부분에서 사용할 수 있습니다. 이것은 일반적으로 
+ *   메모리 부족 상태에서 발생하며 이 경우 짧은 시간 동안 페이지 
+ *   캐시 채우기도 연기해야 합니다. 
+ *
+ *   기본값은 5초로 다른 시스템에 캐시를 비울 것을 요청하는 동안 
+ *   축소기와의 간섭을 줄이기에 충분합니다. 
+ */
 static int rcu_delay_page_cache_fill_msec = 5000;
 module_param(rcu_delay_page_cache_fill_msec, int, 0444);
 
@@ -829,6 +874,25 @@ noinstr void rcu_nmi_exit(void)
  */
 /*
  * IAMROOT, 2022.11.11:
+ * - papago
+ *   rcu_irq_exit - RCU에 현재 CPU가 유휴를 향해 irq를 종료하고 있음을 알립니다.
+ *   인터럽트 처리기에서 종료하면 유휴 모드로 들어갈 수 있습니다. 즉, 
+ *   읽기 측 임계 섹션이 발생할 수 있는 모드를 종료할 수 있습니다. 
+ *   호출자는 인터럽트를 비활성화해야 합니다.
+ *
+ *   이 코드는 유휴 루프가 irq_enter() 및 irq_exit()에 대한 불균형 
+ *   호출을 초래할 수 있는 어떤 작업도 수행하지 않는다고 가정합니다. 
+ *   아키텍처의 유휴 루프가 이 가정을 위반하는 경우 RCU는 사용자가 
+ *   마땅히 받아야 할 좋은 것을 제공합니다. 그러나 매우 드물고 재현 
+ *   불가능합니다.
+ *
+ *   이 제한을 해결하려면 작업 대기열과 같은 것을 사용하십시오.
+ *
+ *   당신은 경고를 받았습니다.
+ *
+ *   rcu_irq_exit()에 대한 호출을 추가하거나 제거하는 경우 
+ *   CONFIG_RCU_EQS_DEBUG=y로 테스트해야 합니다.
+ *
  * - TODO
  */
 void noinstr rcu_irq_exit(void)
@@ -1108,6 +1172,29 @@ noinstr void rcu_nmi_enter(void)
  */
 /*
  * IAMROOT, 2022.11.11:
+ * - papago
+ *   rcu_irq_enter - RCU에 현재 CPU가 유휴 상태에서 irq로 들어가고 있음을 
+ *   알립니다.
+ *
+ *   유휴 모드 종료, 즉 읽기 측 임계 섹션이 발생할 수 있는 모드로 들어갈 
+ *   수 있는 인터럽트 핸들러를 입력하십시오. 호출자는 인터럽트를 비활성화해야 
+ *   합니다.
+ *
+ *   Linux 커널은 예를 들어 사용자 모드에 대한 상향 호출을 수행할 때 절대 
+ *   종료하지 않는 인터럽트 핸들러에 완전히 들어갈 수 있습니다! 이 코드는 
+ *   유휴 루프가 사용자 모드에 대한 상향 호출을 수행하지 않는다고 가정합니다.
+ *   아키텍처의 유휴 루프가 사용자 모드에 대한 상향 호출을 수행하거나 
+ *   irq_enter() 및 irq_exit() 함수에 대한 불균형 호출을 초래하는 다른 작업을 
+ *   수행하는 경우 RCU는 사용자가 마땅히 받아야 할 좋은 결과를 제공합니다.
+ *   그러나 매우 드물고 재현 불가능합니다.
+ *
+ *   이 제한을 해결하려면 작업 대기열과 같은 것을 사용하십시오.
+ *
+ *   당신은 경고를 받았습니다.
+ *
+ *   rcu_irq_enter()에 대한 호출을 추가하거나 제거하는 경우 
+ *   CONFIG_RCU_EQS_DEBUG=y로 테스트해야 합니다.
+ *
  * - TODO
  */
 noinstr void rcu_irq_enter(void)
@@ -3107,6 +3194,41 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
  * Implementation of these memory-ordering guarantees is described here:
  * Documentation/RCU/Design/Memory-Ordering/Tree-RCU-Memory-Ordering.rst.
  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   call_rcu() - 유예 기간 후 호출을 위해 RCU 콜백을 대기시킵니다.
+ *   @head: RCU 업데이트를 대기하는 데 사용할 구조입니다.
+ *   @func: 유예 기간 후에 호출되는 실제 콜백 함수.
+ *
+ *   콜백 함수는 전체 유예 기간이 경과한 후, 즉 기존의 모든 RCU 읽기 측 임계 
+ *   섹션이 완료된 후 호출됩니다. 그러나 콜백 함수는 call_rcu()가 호출된 
+ *   후에 시작된 RCU 읽기 측 임계 섹션과 동시에 실행될 수 있습니다.
+ *
+ *   RCU 읽기 측 임계 섹션은 rcu_read_lock() 및 rcu_read_unlock()으로 
+ *   구분되며 중첩될 수 있습니다. 또한 v5.0 이상에서만 인터럽트, 선점 또는 
+ *   softirq가 비활성화된 코드 영역도 RCU 읽기 측 중요 섹션으로 사용됩니다. 
+ *   여기에는 하드웨어 인터럽트 핸들러, softirq 핸들러 및 NMI 핸들러가 
+ *   포함됩니다.
+ *
+ *   모든 CPU는 유예 기간이 기존의 모든 RCU 읽기 측 중요 섹션을 넘어 
+ *   연장된다는 데 동의해야 합니다. CPU가 두 개 이상인 시스템에서 이것은 
+ *   "func()"가 호출될 때 각 CPU가 call_rcu() 호출보다 먼저 시작되는 마지막 
+ *   RCU 읽기 측 임계 섹션의 끝 이후로 전체 메모리 장벽을 실행했음을 의미합니다. 
+ *   이것은 또한 "func()"의 시작 이후 계속되는 RCU 읽기측 임계 섹션을 실행하는 
+ *   각 CPU가 call_rcu() 이후에 해당 RCU 읽기측 임계 섹션이 시작되기 전에 
+ *   메모리 배리어를 실행해야 함을 의미합니다. 이러한 보장에는 오프라인, 
+ *   유휴 또는 사용자 모드에서 실행 중인 CPU와 커널에서 실행 중인 CPU가 
+ *   포함됩니다.
+ *
+ *   또한 CPU A가 call_rcu()를 호출하고 CPU B가 결과 RCU 콜백 함수 "func()"를 
+ *   호출한 경우 CPU A와 CPU B 모두 call_rcu() 호출과 "func()" 호출 사이의 
+ *   시간 간격 동안 전체 메모리 장벽을 실행하도록 보장됩니다. CPU A와 CPU B가 
+ *   동일한 CPU인 경우에도 마찬가지입니다(단, 시스템에 CPU가 둘 이상인 
+ *   경우에만 해당).
+ *
+ *   이러한 메모리 순서 보장의 구현은 여기에 설명되어 있습니다. 
+ */
 void call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
 	__call_rcu(head, func);
@@ -3715,6 +3837,21 @@ void __init kfree_rcu_scheduler_running(void)
  * when there was in fact only one the whole time, as this just adds some
  * overhead: RCU still operates correctly.
  */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   초기 부팅 중에 차단 유예 기간 대기는 자동으로 유예 기간을 의미합니다. 
+ *   나중에 이것은 PREEMPTION의 경우가 아닙니다.
+ *
+ *   그러나 컨텍스트 전환은 !PREEMPTION에 대한 유예 기간이기 때문에 
+ *   synchronize_rcu() 또는 synchronize_rcu_expedited()를 실행하는 동안 어느 
+ *   시점에 온라인 CPU가 하나만 있는 경우 차단 유예 기간 대기는 자동으로 
+ *   유예 기간을 의미합니다. 온라인에 여러 개의 CPU가 있다고 잘못 표시해도 
+ *   괜찮습니다. 실제로는 전체 시간 동안 CPU가 한 개뿐이었는데 약간의 오버헤드가 
+ *   추가될 뿐입니다.
+ *   RCU는 여전히 올바르게 작동합니다.
+. 
+ */
 static int rcu_blocking_is_gp(void)
 {
 	int ret;
@@ -3736,6 +3873,19 @@ static int rcu_blocking_is_gp(void)
 	 * in the code, without the need for additional memory barriers.
 	 * Those memory barriers are provided by CPU-hotplug code.
 	 */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   rcu_state.n_online_cpus 카운터가 1이면 CPU가 하나만 있고 해당 CPU는 
+ *   액세스 당시 온라인 상태였던 모든 CPU의 이전 액세스를 모두 봅니다.
+ *   게다가 이 카운터가 1이면 그 값은 아래의 preempt_enable() 이후까지 변경할 
+ *   수 없습니다.
+ *
+ *   또한 rcu_state.n_online_cpus가 여기에서 1이면 모든 이후 CPU(이 CPU와 
+ *   나중에 온라인으로 전환되는 모든 CPU)는 추가 메모리 장벽 없이 코드에서 
+ *   이 지점 이전의 모든 액세스를 볼 수 있습니다.
+ *   이러한 메모리 장벽은 CPU 핫플러그 코드에 의해 제공됩니다.
+ */
 	ret = READ_ONCE(rcu_state.n_online_cpus) <= 1;
 	preempt_enable();
 	return ret;
@@ -3778,6 +3928,36 @@ static int rcu_blocking_is_gp(void)
  *
  * Implementation of these memory-ordering guarantees is described here:
  * Documentation/RCU/Design/Memory-Ordering/Tree-RCU-Memory-Ordering.rst.
+ */
+/*
+ * IAMROOT, 2023.07.21:
+ * - papago
+ *   synchronize_rcu - 유예 기간이 경과할 때까지 기다립니다.
+ *
+ *   전체 유예 기간이 경과한 후, 즉 현재 실행 중인 모든 RCU 읽기 측 임계 섹션이
+ *   완료된 후 제어가 호출자에게 반환됩니다. 그러나 synchronize_rcu()에서
+ *   반환되면 호출자는 synchronize_rcu()가 대기하는 동안 시작된 새로운 RCU 읽기
+ *   측 임계 섹션과 동시에 실행될 수 있습니다.
+ *
+ *   RCU 읽기 측 임계 섹션은 rcu_read_lock() 및 rcu_read_unlock()으로 구분되며
+ *   중첩될 수 있습니다. 또한 v5.0 이상에서만 인터럽트, 선점 또는 softirq가 
+ *   비활성화된 코드 영역도 RCU 읽기 측 중요 섹션으로 사용됩니다. 여기에는 
+ *   하드웨어 인터럽트 핸들러, softirq 핸들러 및 NMI 핸들러가 포함됩니다.
+ *
+ *   이 보장은 추가 메모리 순서 보장을 의미합니다.
+ *   둘 이상의 CPU가 있는 시스템에서 synchronize_rcu()가 반환되면 각 CPU는 
+ *   synchronize_rcu()에 대한 호출보다 먼저 시작된 마지막 RCU 읽기 측 임계 
+ *   섹션의 끝 이후 전체 메모리 장벽을 실행한 것으로 보장됩니다. 또한, 
+ *   synchronize_rcu()로부터의 반환 이상으로 확장되는 RCU 읽기측 임계 섹션이 
+ *   있는 각 CPU는 synchronize_rcu() 시작 후 및 해당 RCU 읽기측 임계 섹션 시작 
+ *   전에 전체 메모리 배리어를 실행하도록 보장됩니다. 이러한 보장에는 오프라인, 
+ *   유휴 또는 사용자 모드에서 실행 중인 CPU와 커널에서 실행 중인 CPU가 포함됩니다.
+ *   또한 CPU A가 synchronize_rcu()를 호출하여 CPU B의 호출자에게 반환된 경우 
+ *   CPU A와 CPU B는 synchronize_rcu()를 실행하는 동안 전체 메모리 배리어를 
+ *   실행한 것으로 보장됩니다. CPU A와 CPU B가 동일한 CPU인 경우에도 
+ *   마찬가지입니다(단, 시스템에 CPU가 둘 이상인 경우에만 해당).
+ *
+ *   이러한 메모리 순서 보장의 구현은 여기에 설명되어 있습니다. 
  */
 void synchronize_rcu(void)
 {
