@@ -12,3 +12,6 @@ http://www2.rdrop.com/users/paulmck/RCU/RCU.2018.11.21c.PSU-full.pdf
 
 4. Tiny-RCU Code Walkthrough on LWN.net
 https://lwn.net/Articles/323929/#Tiny-RCU%20Code%20Walkthrough
+
+5. 문c블로그
+http://jake.dothome.co.kr/rcu/

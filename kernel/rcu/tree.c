@@ -74,6 +74,10 @@
 
 /* Data structures. */
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - rcu pcpu 
+ */
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct rcu_data, rcu_data) = {
 	.dynticks_nesting = 1,
 	.dynticks_nmi_nesting = DYNTICK_IRQ_NONIDLE,
@@ -98,6 +102,11 @@ static struct rcu_state rcu_state = {
 static bool dump_tree;
 module_param(dump_tree, bool, 0444);
 /* By default, use RCU_SOFTIRQ instead of rcuc kthreads. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - PREEMPT_RT가 아니면 사용.(default true)
+ *   PREEPRT_RT kernel이면 미사용
+ */
 static bool use_softirq = !IS_ENABLED(CONFIG_PREEMPT_RT);
 #ifndef CONFIG_PREEMPT_RT
 module_param(use_softirq, bool, 0444);
@@ -133,7 +142,7 @@ int rcu_num_nodes __read_mostly = NUM_RCU_NODES; /* Total # rcu_nodes in use. */
  *   따라서 이 변수가 RCU_SCHEDULER_INACTIVE일 때 RCU는 단 하나의 작업만 
  *   있다고 가정할 수 있으므로 RCU가 (예를 들어) synchronize_rcu()를 간단한 
  *   barrier()로 최적화할 수 있습니다. 이 변수가 RCU_SCHEDULER_INIT이면 RCU는 
- *   실제 유예 기간을 감지하는 데 필요한 모든 작업을 실제로 수행해야 합니다. 
+ *   실제 gp을 감지하는 데 필요한 모든 작업을 실제로 수행해야 합니다. 
  *   이 변수는 또한 lockdep-RCU 오류 검사에서 부팅 시 가양성을 억제하는 데 
  *   사용됩니다. 마지막으로 생성된 모든 kthread를 포함하여 RCU가 완전히 
  *   초기화된 후 RCU_SCHEDULER_INIT에서 RCU_SCHEDULER_RUNNING으로 전환됩니다.
@@ -507,6 +516,10 @@ static int rcu_is_cpu_rrupt_from_idle(void)
 
 #define DEFAULT_RCU_BLIMIT (IS_ENABLED(CONFIG_RCU_STRICT_GRACE_PERIOD) ? 1000 : 10)
 				// Maximum callbacks per rcu_do_batch ...
+/*
+ * IAMROOT, 2023.07.22:
+ * - 100 ~ 10000개의 pending callback 개수 한도.
+ */
 #define DEFAULT_MAX_RCU_BLIMIT 10000 // ... even during callback flood.
 static long blimit = DEFAULT_RCU_BLIMIT;
 #define DEFAULT_RCU_QHIMARK 10000 // If this many pending, ignore blimit.
@@ -516,6 +529,10 @@ static long qlowmark = DEFAULT_RCU_QLOMARK;
 #define DEFAULT_RCU_QOVLD_MULT 2
 #define DEFAULT_RCU_QOVLD (DEFAULT_RCU_QOVLD_MULT * DEFAULT_RCU_QHIMARK)
 static long qovld = DEFAULT_RCU_QOVLD; // If this many pending, hammer QS.
+/*
+ * IAMROOT, 2023.07.22:
+ * - qoverload calc.
+ */
 static long qovld_calc = -1;	  // No pre-initialization lock acquisitions!
 
 module_param(blimit, long, 0444);
@@ -1245,6 +1262,18 @@ static void rcu_disable_urgency_upon_qs(struct rcu_data *rdp)
  * Make notrace because it can be called by the internal functions of
  * ftrace, and making this notrace removes unnecessary recursion calls.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   rcu_is_watching - RCU가 현재 CPU가 유휴 상태가 아니라고 생각하는지 확인
+ *
+ *   RCU가 실행 중인 CPU를 감시하는 경우 true를 반환합니다. 즉, 이 CPU가 안전하게
+ *   RCU 읽기 측 임계 섹션에 들어갈 수 있습니다. 즉, 현재 CPU가 유휴 루프에 
+ *   있지 않거나 인터럽트 또는 NMI 처리기에 있는 경우 true를 반환합니다.
+ *
+ *   ftrace의 내부 함수에 의해 호출될 수 있으므로 notrace를 만들고 이 
+ *   notrace를 만들면 불필요한 재귀 호출이 제거됩니다.
+ */
 notrace bool rcu_is_watching(void)
 {
 	bool ret;
@@ -1623,6 +1652,19 @@ static void rcu_gp_kthread_wake(void)
  *
  * The caller must hold rnp->lock with interrupts disabled.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   공간이 있으면 이 CPU에서 아직 할당되지 않은 모든 콜백에 ->gp_seq 
+ *   번호를 할당합니다. 또한 이전에 너무 보수적인 것으로 입증된 ->gp_seq 
+ *   번호가 할당된 모든 콜백을 가속화합니다. 이는 RCU가 유휴 상태일 때 
+ *   콜백에 ->gp_seq 번호가 할당되었지만 루트가 아닌 rcu_node 구조를 
+ *   참조하는 경우 발생할 수 있습니다. 이 함수는 멱등적이므로 반복해서 
+ *   호출해도 문제가 되지 않습니다. RCU gp kthread를 깨워야 
+ *   한다는 플래그를 반환합니다.
+ *
+ *   호출자는 인터럽트가 비활성화된 상태에서 rnp->lock을 유지해야 합니다.
+ */
 static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 {
 	unsigned long gp_seq_req;
@@ -1647,6 +1689,17 @@ static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 	 * accelerating callback invocation to an earlier grace-period
 	 * number.
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   콜백은 종종 불완전한 gp 정보로 등록됩니다. 정확한 정보를 
+ *   얻으려면 전역 잠금을 획득해야 한다는 사실에 관한 것... 따라서 
+ *   RCU는 주어진 콜백이 호출할 준비가 되는 gp 번호를 보수적으로 
+ *   추정합니다. 다음 코드는 이 추정치를 확인하고 가능한 경우 이를 
+ *   개선하여 이전 gp 번호에 대한 콜백 호출을 가속화합니다.
+ *
+ * - 전역 seq의 snap값을 가져온다. 보통 같거나 한칸(4)차 이하.
+ */
 	gp_seq_req = rcu_seq_snap(&rcu_state.gp_seq);
 	if (rcu_segcblist_accelerate(&rdp->cblist, gp_seq_req))
 		ret = rcu_start_this_gp(rnp, rdp, gp_seq_req);
@@ -1699,12 +1752,30 @@ static void rcu_accelerate_cbs_unlocked(struct rcu_node *rnp,
  *
  * The caller must hold rnp->lock with interrupts disabled.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   gp이 완료된 모든 콜백을 RCU_DONE_TAIL 하위 목록으로 
+ *   이동한 다음 나머지 하위 목록을 압축하고 ->gp_seq 번호를 
+ *   RCU_NEXT_TAIL 하위 목록의 모든 콜백에 할당합니다. 이 함수는 
+ *   멱등적이므로 반복적으로 호출해도 문제가 되지 않습니다. 너무 자주 
+ *   호출되지 않는 한...
+ *   RCU gp kthread를 깨워야 하는 경우 true를 반환합니다.
+ *
+ *   호출자는 인터럽트가 비활성화된 상태에서 rnp->lock을 유지해야 합니다.
+ *
+ * - 
+ */
 static bool rcu_advance_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 {
 	rcu_lockdep_assert_cblist_protected(rdp);
 	raw_lockdep_assert_held_rcu_node(rnp);
 
 	/* If no pending (not yet ready to invoke) callbacks, nothing to do. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - pending중인 cb가 없다면 return false.
+ */
 	if (!rcu_segcblist_pend_cbs(&rdp->cblist))
 		return false;
 
@@ -1712,6 +1783,15 @@ static bool rcu_advance_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 	 * Find all callbacks whose ->gp_seq numbers indicate that they
 	 * are ready to invoke, and put them into the RCU_DONE_TAIL sublist.
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   ->gp_seq 번호가 호출 준비가 되었음을 나타내는 모든 콜백을 찾아 
+ *   RCU_DONE_TAIL 하위 목록에 넣습니다.
+ *
+ * - accelerate를 위해서 완료된 @rnp->gp_seq이하의 cb를 done으로 옮긴다.
+ *   next_ready구간은 wait로 옮긴다.
+ */
 	rcu_segcblist_advance(&rdp->cblist, rnp->gp_seq);
 
 	/* Classify any remaining callbacks. */
@@ -1752,6 +1832,16 @@ static void rcu_strict_gp_check_qs(void)
  * structure corresponding to the current CPU, and must have irqs disabled.
  * Returns true if the grace-period kthread needs to be awakened.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   CPU 로컬 rcu_data 상태를 업데이트하여 gp의 시작과 끝을 
+ *   기록합니다. 호출자는 현재 CPU에 해당하는 리프 rcu_node 구조의 -> 
+ *   잠금을 보유해야 하며 irqs를 비활성화해야 합니다.
+ *   gp kthread를 깨워야 하는 경우 true를 반환합니다.
+ *
+ * - 
+ */
 static bool __note_gp_changes(struct rcu_node *rnp, struct rcu_data *rdp)
 {
 	bool ret = false;
@@ -1760,10 +1850,18 @@ static bool __note_gp_changes(struct rcu_node *rnp, struct rcu_data *rdp)
 
 	raw_lockdep_assert_held_rcu_node(rnp);
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - seq 변화 없으면 return.
+ */
 	if (rdp->gp_seq == rnp->gp_seq)
 		return false; /* Nothing to do. */
 
 	/* Handle the ends of any preceding grace periods first. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - gp_seq가 완료됬거나
+ */
 	if (rcu_seq_completed_gp(rdp->gp_seq, rnp->gp_seq) ||
 	    unlikely(READ_ONCE(rdp->gpwrap))) {
 		if (!offloaded)
@@ -1799,6 +1897,10 @@ static bool __note_gp_changes(struct rcu_node *rnp, struct rcu_data *rdp)
 	return ret;
 }
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - gp과 시작과 끝을 검사한다.
+ */
 static void note_gp_changes(struct rcu_data *rdp)
 {
 	unsigned long flags;
@@ -1807,12 +1909,22 @@ static void note_gp_changes(struct rcu_data *rdp)
 
 	local_irq_save(flags);
 	rnp = rdp->mynode;
+/*
+ * IAMROOT, 2023.07.22:
+ * - this cpu와 상위 node seq가 변화가 없으면 바뀐게 없다는것 + 
+ *   한바퀴 돈게 아니라면 return.
+ */
 	if ((rdp->gp_seq == rcu_seq_current(&rnp->gp_seq) &&
 	     !unlikely(READ_ONCE(rdp->gpwrap))) || /* w/out lock. */
 	    !raw_spin_trylock_rcu_node(rnp)) { /* irqs already off, so later. */
 		local_irq_restore(flags);
 		return;
 	}
+/*
+ * IAMROOT, 2023.07.22:
+ * - gp seq에 변화가 생긴것을 상위 node seq를 보고 확인했다.
+ */
+
 	needwake = __note_gp_changes(rnp, rdp);
 	raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 	rcu_strict_gp_check_qs();
@@ -2456,6 +2568,14 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
  * Otherwise, see if this CPU has just passed through its first
  * quiescent state for this grace period, and record that fact if so.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   이 CPU가 아직 인식하지 못하는 새로운 gp이 있는지 확인하고, 
+ *   그렇다면 로컬 rcu_data 상태를 설정하십시오.
+ *   그렇지 않으면 이 gp동안 이 CPU가 첫 번째 qs를 
+ *   통과했는지 확인하고 해당 사실을 기록하십시오.
+ */
 static void
 rcu_check_quiescent_state(struct rcu_data *rdp)
 {
@@ -2480,6 +2600,10 @@ rcu_check_quiescent_state(struct rcu_data *rdp)
 	 * Tell RCU we are done (but rcu_report_qs_rdp() will be the
 	 * judge of that).
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - this cpu가 qs라는것을 report
+ */
 	rcu_report_qs_rdp(rdp);
 }
 
@@ -2835,6 +2959,10 @@ static void strict_work_handler(struct work_struct *work)
 }
 
 /* Perform RCU core processing work for the current CPU.  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 
+ */
 static __latent_entropy void rcu_core(void)
 {
 	unsigned long flags;
@@ -2848,6 +2976,10 @@ static __latent_entropy void rcu_core(void)
 	WARN_ON_ONCE(!rdp->beenonline);
 
 	/* Report any deferred quiescent states if preemption enabled. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - SKIP
+ */
 	if (!(preempt_count() & PREEMPT_MASK)) {
 		rcu_preempt_deferred_qs(current);
 	} else if (rcu_preempt_need_deferred_qs(current)) {
@@ -2883,6 +3015,10 @@ static __latent_entropy void rcu_core(void)
 		queue_work_on(rdp->cpu, rcu_gp_wq, &rdp->strict_work);
 }
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - RCU_SOFTIRQ
+ */
 static void rcu_core_si(struct softirq_action *h)
 {
 	rcu_core();
@@ -2913,6 +3049,10 @@ static void invoke_rcu_core_kthread(void)
 
 /*
  * Wake up this CPU's rcuc kthread to do RCU core processing.
+ */
+/*
+ * IAMROOT, 2023.07.22:
+ * - RCU_SOFTIRQ callback(rcu_core_si()) 실행한다.
  */
 static void invoke_rcu_core(void)
 {
@@ -2997,6 +3137,10 @@ static int __init rcu_spawn_core_kthreads(void)
 /*
  * Handle any core-RCU processing required by a call_rcu() invocation.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - RCU_SOFTIRQ를 invoke한다.
+ */
 static void __call_rcu_core(struct rcu_data *rdp, struct rcu_head *head,
 			    unsigned long flags)
 {
@@ -3018,6 +3162,19 @@ static void __call_rcu_core(struct rcu_data *rdp, struct rcu_head *head,
 	 * invoking rcu_force_quiescent_state() if the newly enqueued callback
 	 * is the only one waiting for a grace period to complete.
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   콜백이 너무 많거나 대기 시간이 너무 긴 경우 gp을 강제
+ *   적용합니다.
+ *   히스테리시스를 적용하고 다른 CPU가 최근에 
+ *   rcu_force_quiescent_state()를 호출한 경우 
+ *   rcu_force_quiescent_state()를 호출하지 마십시오. 또한 새로 
+ *   대기열에 추가된 콜백이 gp이 완료되기를 기다리는 유일한 
+ *   콜백인 경우 rcu_force_quiescent_state()를 호출하지 마십시오.
+ *
+ * - 너무 많이 cb가 쌓여있다. 강제로 fqs(force qs)를 한다.
+ */
 	if (unlikely(rcu_segcblist_n_cbs(&rdp->cblist) >
 		     rdp->qlen_last_fqs_check + qhimark)) {
 
@@ -3052,11 +3209,24 @@ static void rcu_leak_callback(struct rcu_head *rhp)
  * number of queued RCU callbacks.  The caller must hold the leaf rcu_node
  * structure's ->lock.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   해당 CPU의 대기 중인 RCU 콜백 수를 기준으로 현재 CPU에 해당하는 리프 
+ *   rcu_node 구조의 ->cbovldmask 비트를 확인하고 필요한 경우 업데이트합니다. 
+ *   호출자는 리프 rcu_node 구조의 -> 잠금을 보유해야 합니다.
+ *
+ * - overload면 grpmask를 set, 아니면 unset한다.
+ */
 static void check_cb_ovld_locked(struct rcu_data *rdp, struct rcu_node *rnp)
 {
 	raw_lockdep_assert_held_rcu_node(rnp);
 	if (qovld_calc <= 0)
 		return; // Early boot and wildcard value set.
+/*
+ * IAMROOT, 2023.07.22:
+ * - overload됬으면 
+ */
 	if (rcu_segcblist_n_cbs(&rdp->cblist) >= qovld_calc)
 		WRITE_ONCE(rnp->cbovldmask, rnp->cbovldmask | rdp->grpmask);
 	else
@@ -3075,10 +3245,36 @@ static void check_cb_ovld_locked(struct rcu_data *rdp, struct rcu_node *rnp)
  * be holding ->nocb_lock to do this check, which is too heavy for a
  * common-case operation.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   해당 CPU의 대기 중인 RCU 콜백 수를 기준으로 현재 CPU에 해당하는 
+ *   리프 rcu_node 구조의 ->cbovldmask 비트를 확인하고 필요한 경우 
+ *   업데이트합니다. 잠금을 유지할 필요는 없지만 호출자는 인터럽트를 
+ *   비활성화해야 합니다.
+ *
+ *   이 함수는 각각의 gp이 이미 종료된 많은 콜백이 있을 
+ *   가능성을 무시합니다. 이 생략은 이 검사를 수행하기 위해 
+ *   ->nocb_lock을 유지해야 하는 CB가 없는 CPU가 필요하기 때문에 
+ *   일반적인 경우 작업에 너무 무겁습니다.
+ *
+ * - overload여부에 따라 @rnp->cbovldmask에 rdp->grpmask를 set / unset 갱신.
+ *   이미 되있으면 아무것도 안한다.
+ */
 static void check_cb_ovld(struct rcu_data *rdp)
 {
 	struct rcu_node *const rnp = rdp->mynode;
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - 다음과 같은경우 return.
+ *   1. qovld_calc이 아직 미설정이거나,
+ *     초기화안됨.
+ *   2. @rdp cb len >=  qovld_calc &&  (rnp->cbovldmask) & rdp->grpmask)
+ *     overload가 됬고 이미 overload가 되있으면
+ *   3. @rdp cb len <  qovld_calc && !(rnp->cbovldmask) & rdp->grpmask)
+ *     overload가 안됬고 overload 표시도 안되있으면
+ */
 	if (qovld_calc <= 0 ||
 	    ((rcu_segcblist_n_cbs(&rdp->cblist) >= qovld_calc) ==
 	     !!(READ_ONCE(rnp->cbovldmask) & rdp->grpmask)))
@@ -3089,6 +3285,11 @@ static void check_cb_ovld(struct rcu_data *rdp)
 }
 
 /* Helper function for call_rcu() and friends.  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @head에 @func에 대한 node를 한개 추가하고 RCU_SOFTIRQ를
+ *   invoke한다.
+ */
 static void
 __call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
@@ -3120,6 +3321,10 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
 	rdp = this_cpu_ptr(&rcu_data);
 
 	/* Add the callback to our list. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - SEGCBLIST_ENABLED 가 안켜져있으면 여기서 enable한다.
+ */
 	if (unlikely(!rcu_segcblist_is_enabled(&rdp->cblist))) {
 		// This can trigger due to call_rcu() from offline CPU:
 		WARN_ON_ONCE(rcu_scheduler_active != RCU_SCHEDULER_INACTIVE);
@@ -3130,11 +3335,24 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
 			rcu_segcblist_init(&rdp->cblist);
 	}
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - overload 여부 update
+ */
 	check_cb_ovld(rdp);
+
+/*
+ * IAMROOT, 2023.07.22:
+ * - nocb인경우 return이거나 lock을 올수도있다. 기본값을 nocb를 사용안한다.
+ */
 	if (rcu_nocb_try_bypass(rdp, head, &was_alldone, flags))
 		return; // Enqueued onto ->nocb_bypass, so just leave.
 	// If no-CBs CPU gets here, rcu_nocb_try_bypass() acquired ->nocb_lock.
 	rcu_segcblist_enqueue(&rdp->cblist, head);
+/*
+ * IAMROOT, 2023.07.22:
+ * - debug
+ */
 	if (__is_kvfree_rcu_offset((unsigned long)func))
 		trace_rcu_kvfree_callback(rcu_state.name, head,
 					 (unsigned long)func,
@@ -3197,11 +3415,11 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
 /*
  * IAMROOT, 2023.07.21:
  * - papago
- *   call_rcu() - 유예 기간 후 호출을 위해 RCU 콜백을 대기시킵니다.
+ *   call_rcu() - gp 후 호출을 위해 RCU 콜백을 대기시킵니다.
  *   @head: RCU 업데이트를 대기하는 데 사용할 구조입니다.
- *   @func: 유예 기간 후에 호출되는 실제 콜백 함수.
+ *   @func: gp 후에 호출되는 실제 콜백 함수.
  *
- *   콜백 함수는 전체 유예 기간이 경과한 후, 즉 기존의 모든 RCU 읽기 측 임계 
+ *   콜백 함수는 전체 gp이 경과한 후, 즉 기존의 모든 RCU 읽기 측 임계 
  *   섹션이 완료된 후 호출됩니다. 그러나 콜백 함수는 call_rcu()가 호출된 
  *   후에 시작된 RCU 읽기 측 임계 섹션과 동시에 실행될 수 있습니다.
  *
@@ -3211,7 +3429,7 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
  *   여기에는 하드웨어 인터럽트 핸들러, softirq 핸들러 및 NMI 핸들러가 
  *   포함됩니다.
  *
- *   모든 CPU는 유예 기간이 기존의 모든 RCU 읽기 측 중요 섹션을 넘어 
+ *   모든 CPU는 gp이 기존의 모든 RCU 읽기 측 중요 섹션을 넘어 
  *   연장된다는 데 동의해야 합니다. CPU가 두 개 이상인 시스템에서 이것은 
  *   "func()"가 호출될 때 각 CPU가 call_rcu() 호출보다 먼저 시작되는 마지막 
  *   RCU 읽기 측 임계 섹션의 끝 이후로 전체 메모리 장벽을 실행했음을 의미합니다. 
@@ -3228,6 +3446,8 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func)
  *   경우에만 해당).
  *
  *   이러한 메모리 순서 보장의 구현은 여기에 설명되어 있습니다. 
+ *
+ *   - @head에 @func에 대한 node를 추가하고 RCU_SOFTIRQ를 invoke한다.
  */
 void call_rcu(struct rcu_head *head, rcu_callback_t func)
 {
@@ -3840,13 +4060,13 @@ void __init kfree_rcu_scheduler_running(void)
 /*
  * IAMROOT, 2023.07.21:
  * - papago
- *   초기 부팅 중에 차단 유예 기간 대기는 자동으로 유예 기간을 의미합니다. 
+ *   초기 부팅 중에 차단 gp 대기는 자동으로 gp을 의미합니다. 
  *   나중에 이것은 PREEMPTION의 경우가 아닙니다.
  *
- *   그러나 컨텍스트 전환은 !PREEMPTION에 대한 유예 기간이기 때문에 
+ *   그러나 컨텍스트 전환은 !PREEMPTION에 대한 gp이기 때문에 
  *   synchronize_rcu() 또는 synchronize_rcu_expedited()를 실행하는 동안 어느 
- *   시점에 온라인 CPU가 하나만 있는 경우 차단 유예 기간 대기는 자동으로 
- *   유예 기간을 의미합니다. 온라인에 여러 개의 CPU가 있다고 잘못 표시해도 
+ *   시점에 온라인 CPU가 하나만 있는 경우 차단 gp 대기는 자동으로 
+ *   gp을 의미합니다. 온라인에 여러 개의 CPU가 있다고 잘못 표시해도 
  *   괜찮습니다. 실제로는 전체 시간 동안 CPU가 한 개뿐이었는데 약간의 오버헤드가 
  *   추가될 뿐입니다.
  *   RCU는 여전히 올바르게 작동합니다.
@@ -3932,9 +4152,9 @@ static int rcu_blocking_is_gp(void)
 /*
  * IAMROOT, 2023.07.21:
  * - papago
- *   synchronize_rcu - 유예 기간이 경과할 때까지 기다립니다.
+ *   synchronize_rcu - gp이 경과할 때까지 기다립니다.
  *
- *   전체 유예 기간이 경과한 후, 즉 현재 실행 중인 모든 RCU 읽기 측 임계 섹션이
+ *   전체 gp이 경과한 후, 즉 현재 실행 중인 모든 RCU 읽기 측 임계 섹션이
  *   완료된 후 제어가 호출자에게 반환됩니다. 그러나 synchronize_rcu()에서
  *   반환되면 호출자는 synchronize_rcu()가 대기하는 동안 시작된 새로운 RCU 읽기
  *   측 임계 섹션과 동시에 실행될 수 있습니다.

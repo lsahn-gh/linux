@@ -21,6 +21,10 @@
  */
 
 #define RCU_SEQ_CTR_SHIFT	2
+/*
+ * IAMROOT, 2023.07.22:
+ * - 0b11
+ */
 #define RCU_SEQ_STATE_MASK	((1 << RCU_SEQ_CTR_SHIFT) - 1)
 
 /*
@@ -84,6 +88,22 @@ static inline void rcu_seq_end(unsigned long *sp)
  * power of the number of low-order bits reserved for state, then rounded up to
  * the next value in which the state bits are all zero.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   rcu_seq_snap - 업데이트 측 시퀀스 번호의 스냅샷을 찍습니다.
+ *
+ *   이 함수는 현재 시간 이후 전체 유예 기간이 경과했음을 나타내는 유예 기간 
+ *   시퀀스 번호의 가장 빠른 값을 반환합니다. 유예 기간 시퀀스 번호가 이 값에 
+ *   도달하면 현재 시간 이전에 등록된 모든 콜백을 호출하는 것이 안전합니다. 
+ *   이 값은 현재 유예 기간 숫자에 상태용으로 예약된 하위 비트 수의 2제곱을 
+ *   더한 다음 상태 비트가 모두 0인 다음 값으로 반올림됩니다.
+ *
+ * - @sp값보다 조금 더 뒤의 값을 snap값(1 or 2칸뒤)으로 사용한다.
+ *   ex) sp == 4 => 8 (idle이라 안정적인 상태. + 1칸만 하면되면 개념)
+ *       sp == 5 => 12 (complete가 안된상태. +1칸만으론 global과 
+ *       cpu가 너무 가깝다. 그래서 2칸뒤로 하는 개념.)
+ */
 static inline unsigned long rcu_seq_snap(unsigned long *sp)
 {
 	unsigned long s;
@@ -94,6 +114,10 @@ static inline unsigned long rcu_seq_snap(unsigned long *sp)
 }
 
 /* Return the current value the update side's sequence number, no ordering. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - return @*sp
+ */
 static inline unsigned long rcu_seq_current(unsigned long *sp)
 {
 	return READ_ONCE(*sp);
@@ -119,6 +143,18 @@ static inline bool rcu_seq_done(unsigned long *sp, unsigned long s)
 
 /*
  * Has a grace period completed since the time the old gp_seq was collected?
+ */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @new가 complete됬으면 return true.
+ * - @new의 하위 2bit를 제외하고 비교한다. old < new 
+ *
+ * - 하위 2bit는 idle / gp 여부. 상위는 seq개념. 다음과 같이 생각될수있다.
+ *
+ * - 0------1----4-------5 ------8 ...
+ *   | idle | gp | idle  | gp    |
+ *
+ * - old = 5 new = 8 => 4에 대한 gp는 완료됬다. return true
  */
 static inline bool rcu_seq_completed_gp(unsigned long old, unsigned long new)
 {

@@ -79,6 +79,10 @@ struct rcu_head *rcu_cblist_dequeue(struct rcu_cblist *rclp)
 }
 
 /* Set the length of an rcu_segcblist structure. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @rsclp->len = v;
+ */
 static void rcu_segcblist_set_len(struct rcu_segcblist *rsclp, long v)
 {
 #ifdef CONFIG_RCU_NOCB_CPU
@@ -107,18 +111,30 @@ long rcu_segcblist_n_segment_cbs(struct rcu_segcblist *rsclp)
 }
 
 /* Set the length of a segment of the rcu_segcblist structure. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - seglen[seg] = v;
+ */
 static void rcu_segcblist_set_seglen(struct rcu_segcblist *rsclp, int seg, long v)
 {
 	WRITE_ONCE(rsclp->seglen[seg], v);
 }
 
 /* Increase the numeric length of a segment by a specified amount. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @seg에 해당하는 seglen을 +v 한다.
+ */
 static void rcu_segcblist_add_seglen(struct rcu_segcblist *rsclp, int seg, long v)
 {
 	WRITE_ONCE(rsclp->seglen[seg], rsclp->seglen[seg] + v);
 }
 
 /* Move from's segment length to to's segment. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @from의 len을 @to으로 옮긴다.
+ */
 static void rcu_segcblist_move_seglen(struct rcu_segcblist *rsclp, int from, int to)
 {
 	long len;
@@ -135,6 +151,10 @@ static void rcu_segcblist_move_seglen(struct rcu_segcblist *rsclp, int from, int
 }
 
 /* Increment segment's length. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - @seg에 해당하는 seglen을 1증가시킨다.
+ */
 static void rcu_segcblist_inc_seglen(struct rcu_segcblist *rsclp, int seg)
 {
 	rcu_segcblist_add_seglen(rsclp, seg, 1);
@@ -207,6 +227,46 @@ static void rcu_segcblist_inc_seglen(struct rcu_segcblist *rsclp, int seg)
  * so that the module unloading operation is completely safe.
  *
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   rcu_segcblist 구조의 숫자 길이를 지정된 양(음수일 수 있음)만큼 늘립니다. 
+ *   이로 인해 ->len 필드가 구조의 실제 콜백 수와 일치하지 않을 수 있습니다.
+ *   이 증가는 전후 호출자 액세스와 관련하여 완전히 정렬됩니다.
+ *
+ *   그렇다면 도대체 왜 ->len 필드에 대한 업데이트 전후에 메모리 배리어가 
+ *   필요한 걸까요??? 그 이유는 rcu_barrier()가 각 CPU의 ->len 필드를 잠그지 
+ *   않고 샘플링하고 주어진 CPU의 필드가 0이면 해당 CPU의 IPI를 방지하기 
+ *   때문입니다.
+ *   이것은 물론 대기 및 콜백 호출과 경쟁할 수 있습니다.
+ *   이러한 경쟁 중 하나를 올바르게 처리하지 못하면 rcu_barrier()가 대기해야 
+ *   하는 콜백이 실제로 대기열에 있는 CPU를 IPI하는 데 실패하는 rcu_barrier()가 
+ *   발생할 수 있습니다. 그리고 rcu_barrier()가 그러한 콜백을 기다리는 데 
+ *   실패하면 특정 커널 모듈을 언로드하면 코드가 커널에 더 이상 존재하지 
+ *   않는 함수가 호출됩니다.
+ *
+ *   따라서 1->0 및 0->1에서 ->len 전환은 목록 수정 및 rcu_barrier() 모두와 
+ *   관련하여 신중하게 정렬해야 합니다. 
+ *
+ *   큐잉 케이스는 CASE 1이고 호출 케이스는 CASE 2입니다.
+ *
+ *   사례 1:
+ *   CPU 0에는 대기 중인 콜백이 없지만 CPU 1이 rcu_barrier()를 호출하는 
+ *   것처럼 call_rcu()를 호출한다고 가정합니다. CPU 0의 ->len 필드는 
+ *   0->1에서 전환되며 이는 신중하게 처리해야 하는 전환 중 하나입니다. 
+ *   ->len 업데이트 후 및 rcu_barrier() 시작 시 전체 메모리 배리어가 없으면 
+ *   다음과 같은 일이 발생할 수 있습니다.
+ *
+ *   CPU 0				CPU 1
+ *
+ *   call_rcu().
+ *  					rcu_barrier() sees ->len as 0.
+ *   set ->len = 1.
+ *  					rcu_barrier() does nothing.
+ *  					module is unloaded.
+ *   
+ *
+ */
 void rcu_segcblist_add_len(struct rcu_segcblist *rsclp, long v)
 {
 #ifdef CONFIG_RCU_NOCB_CPU
@@ -226,6 +286,15 @@ void rcu_segcblist_add_len(struct rcu_segcblist *rsclp, long v)
  * callbacks on the structure.  This increase is fully ordered with respect
  * to the callers accesses both before and after.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *  rcu_segcblist 구조체의 숫자 길이를 1 늘립니다.
+ *  이로 인해 ->len 필드가 구조의 실제 콜백 수와 일치하지 않을 수 있습니다. 
+ *  이 증가는 전후 호출자 액세스와 관련하여 완전히 정렬됩니다.
+ *
+ * - @rsclp len을 1 증가시킨다.
+ */
 void rcu_segcblist_inc_len(struct rcu_segcblist *rsclp)
 {
 	rcu_segcblist_add_len(rsclp, 1);
@@ -233,6 +302,11 @@ void rcu_segcblist_inc_len(struct rcu_segcblist *rsclp)
 
 /*
  * Initialize an rcu_segcblist structure.
+ */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 원형리스트초기화,
+ *   seglen의 모든값과 len을 0으로 초기화하고 SEGCBLIST_ENABLED을 set한다.
  */
 void rcu_segcblist_init(struct rcu_segcblist *rsclp)
 {
@@ -287,6 +361,10 @@ bool rcu_segcblist_ready_cbs(struct rcu_segcblist *rsclp)
  * Does the specified rcu_segcblist structure contain callbacks that
  * are still pending, that is, not yet ready to be invoked?
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - DONE구간 이후의 대기중인 cb이 있으면 true.
+ */
 bool rcu_segcblist_pend_cbs(struct rcu_segcblist *rsclp)
 {
 	return rcu_segcblist_is_enabled(rsclp) &&
@@ -339,13 +417,46 @@ bool rcu_segcblist_nextgp(struct rcu_segcblist *rsclp, unsigned long *lp)
  * for rcu_barrier() to sometimes post callbacks needlessly, but
  * absolutely not OK for it to ever miss posting a callback.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   지정된 rcu_segcblist 구조에 지정된 콜백을 큐에 넣고 필요에 
+ *   따라 계정을 업데이트합니다. ->len 필드는 잠기지 않고 액세스할 
+ *   수 있으므로 WRITE_ONCE()입니다.
+ *   ->len 필드는 rcu_barrier()와 그 친구들이 이 구조에 콜백을 
+ *   게시해야 하는지 여부를 결정하는 데 사용되며, rcu_barrier()가 
+ *   때때로 불필요하게 콜백을 게시하는 것은 괜찮지만 콜백 게시를 
+ *   놓치는 것은 절대 좋지 않습니다.
+ *
+ * - @rsclp의 마지막에 @rhp를 추가한다.
+ */
 void rcu_segcblist_enqueue(struct rcu_segcblist *rsclp,
 			   struct rcu_head *rhp)
 {
+/*
+ * IAMROOT, 2023.07.22:
+ * - len++
+ */
 	rcu_segcblist_inc_len(rsclp);
+/*
+ * IAMROOT, 2023.07.22:
+ * - RCU_NEXT_TAIL len++
+ */
 	rcu_segcblist_inc_seglen(rsclp, RCU_NEXT_TAIL);
+/*
+ * IAMROOT, 2023.07.22:
+ * - @rhp가 end이므로 next를 NULL로 한다.
+ */
 	rhp->next = NULL;
+/*
+ * IAMROOT, 2023.07.22:
+ * - end인 @rhp을 마지막 node로 설정한다.
+ */
 	WRITE_ONCE(*rsclp->tails[RCU_NEXT_TAIL], rhp);
+/*
+ * IAMROOT, 2023.07.22:
+ * - end였던 node의 next끝에 rhp를 연결한다.
+ */
 	WRITE_ONCE(rsclp->tails[RCU_NEXT_TAIL], &rhp->next);
 }
 
@@ -479,11 +590,24 @@ void rcu_segcblist_insert_pend_cbs(struct rcu_segcblist *rsclp,
  * Advance the callbacks in the specified rcu_segcblist structure based
  * on the current value passed in for the grace-period counter.
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   gp 카운터에 대해 전달된 현재 값을 기반으로 지정된 rcu_segcblist 
+ *   구조에서 콜백을 진행합니다.
+ *
+ * - complete된 seq이하구간들중 wait, ready구간만 done으로 옮긴다.
+ *   next_ready구간은 seq에 관계없이 wait로 옮긴다.
+ */
 void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
 {
 	int i, j;
 
 	WARN_ON_ONCE(!rcu_segcblist_is_enabled(rsclp));
+/*
+ * IAMROOT, 2023.07.22:
+ * - 완료 구간 이후가 비어있으면 return.
+ */
 	if (rcu_segcblist_restempty(rsclp, RCU_DONE_TAIL))
 		return;
 
@@ -491,7 +615,36 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
 	 * Find all callbacks whose ->gp_seq numbers indicate that they
 	 * are ready to invoke, and put them into the RCU_DONE_TAIL segment.
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papgo
+ *   ->gp_seq 번호가 호출 준비가 되었음을 나타내는 모든 콜백을 찾아 
+ *   RCU_DONE_TAIL 세그먼트에 넣습니다.
+ * - wait 구간 부터 마지막 전까지 done으로 옮기고, 개수도 옮긴다.
+ */
 	for (i = RCU_WAIT_TAIL; i < RCU_NEXT_TAIL; i++) {
+/*
+ * IAMROOT, 2023.07.22:
+ * - 이미 완료 됬다면 break.
+ * - ex) @seq를 20라고 가정. 
+ *   
+ *     DONE WAIT NEXT_READY NEXT      DONE WAIT NEXT_READY NEXT
+ *      12  16       20      24  =>    12                   24
+ *                                     16
+ *                                     20
+ *
+ *   20이하를 DONE으로 이동
+ *
+ * - ex) @seq를 20라고 가정. 20보다 높은 NEXT_READY는 WAIT,
+ *     20는 DONE으로 이동
+ *   
+ *     DONE WAIT NEXT_READY NEXT        DONE WAIT NEXT_READY NEXT
+ *      16  20       24      28   =>     16         24        28
+ *                                       20
+ *   20이하를 DONE으로 이동
+ *
+ *   list개념적으론 위와 비슷해지지만 20미만은 이제 없어질것이다.
+ */
 		if (ULONG_CMP_LT(seq, rsclp->gp_seq[i]))
 			break;
 		WRITE_ONCE(rsclp->tails[RCU_DONE_TAIL], rsclp->tails[i]);
@@ -499,10 +652,27 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
 	}
 
 	/* If no callbacks moved, nothing more need be done. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - wait부터 break가 발생했으면 할게없다. return.
+ */
 	if (i == RCU_WAIT_TAIL)
 		return;
-
+/*
+ * IAMROOT, 2023.07.22:
+ * - ptr을 옮기기 시작한다.
+ */
 	/* Clean up tail pointers that might have been misordered above. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 옮긴 seg를 done tail로 가리킨다. 즉 empty로 만드는것
+ * - WAIT까지 처리한경우 i = 2(NEXT_READY)
+ *   WAIT -> DONE
+ *   
+ * - NEXT_READY까지 처리 i = 3(NEXT)
+ *   WAIT -> DONE
+ *   NEXT_READY -> DONE
+ */
 	for (j = RCU_WAIT_TAIL; j < i; j++)
 		WRITE_ONCE(rsclp->tails[j], rsclp->tails[RCU_DONE_TAIL]);
 
@@ -512,9 +682,33 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
 	 * callbacks.  The overall effect is to copy down the later pointers
 	 * into the gap that was created by the now-ready segments.
 	 */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ *   콜백이 이동되었으므로 이제 호출할 준비가 된 콜백 목록의 중간을 
+ *   가리키는 잘못 정렬된 ->tails[] 포인터를 정리하십시오. 전반적인 효과는 
+ *   나중 포인터를 지금 준비된 세그먼트에 의해 생성된 간격으로 복사하는 
+ *   것입니다.
+ *
+ * - i = 2 로 끝났을때 NEXT_READY를 WAIT자리로 이동시키기 위한 코드.
+ *   for문자체가 큰 의미는 없다.
+ */
 	for (j = RCU_WAIT_TAIL; i < RCU_NEXT_TAIL; i++, j++) {
+/*
+ * IAMROOT, 2023.07.22:
+ * - next로 향해있으면 대상이 아니다.
+ *   ex) WAIT까지 처리한경우 i = 2(NEXT_READY) 에서
+ *   WAIT -> DONE의 처리를 위해서 했지만
+ *   NEXT_READY는 건드리지 않았다.
+ *   만약 NEXT_READY -> NEXT를 가리키고 있다면 여기서 break.
+ *   그게 아니라면 WAIT로 옮겨갈것이다.
+ */
 		if (rsclp->tails[j] == rsclp->tails[RCU_NEXT_TAIL])
 			break;  /* No more callbacks. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - DONE <- WAIT, WAIT <- NEXT_READY로 옮긴다. len도 같이 옮긴다.
+ */
 		WRITE_ONCE(rsclp->tails[j], rsclp->tails[i]);
 		rcu_segcblist_move_seglen(rsclp, i, j);
 		rsclp->gp_seq[j] = rsclp->gp_seq[i];
@@ -535,6 +729,11 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
  * grace-period sequence number seq at which new callbacks would become
  * ready to invoke.  Returns true if there are callbacks that won't be
  * ready to invoke until seq, false otherwise.
+ */
+/*
+ * IAMROOT, 2023.07.22:
+ * - papago
+ * - ING
  */
 bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
 {

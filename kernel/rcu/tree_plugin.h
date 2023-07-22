@@ -13,6 +13,10 @@
 
 #include "../locking/rtmutex_common.h"
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - PASS
+ */
 static bool rcu_rdp_is_offloaded(struct rcu_data *rdp)
 {
 	/*

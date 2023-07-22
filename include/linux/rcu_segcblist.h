@@ -57,9 +57,21 @@ struct rcu_cblist {
  * are already ready to invoke) or for RCU_NEXT_TAIL (whose callbacks have
  * not yet been assigned a grace-period number).
  */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 제일 앞에 있는 segment.
+ */
 #define RCU_DONE_TAIL		0	/* Also RCU_WAIT head. */
 #define RCU_WAIT_TAIL		1	/* Also RCU_NEXT_READY head. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 마지막 segment 전 segment
+ */
 #define RCU_NEXT_READY_TAIL	2	/* Also RCU_NEXT head. */
+/*
+ * IAMROOT, 2023.07.22:
+ * - 마지막 segment
+ */
 #define RCU_NEXT_TAIL		3
 #define RCU_CBLIST_NSEGS	4
 

@@ -58,6 +58,8 @@ struct rcu_head *rcu_cblist_dequeue(struct rcu_cblist *rclp);
  *   카운트는 나중에 업데이트됩니다.
  *
  *   따라서 rcu_segcblist_n_cbs()를 대신 사용해야 하는 경우가 많습니다.
+ *
+ * - @rsclp가 비어있으면 return true
  */
 static inline bool rcu_segcblist_empty(struct rcu_segcblist *rsclp)
 {
@@ -69,6 +71,8 @@ static inline bool rcu_segcblist_empty(struct rcu_segcblist *rsclp)
  * IAMROOT, 2023.07.17:
  * - papago
  *   분할된 콜백 목록의 콜백 수를 반환합니다. 
+ *
+ * - call 개수 반환.
  */
 static inline long rcu_segcblist_n_cbs(struct rcu_segcblist *rsclp)
 {
@@ -79,6 +83,10 @@ static inline long rcu_segcblist_n_cbs(struct rcu_segcblist *rsclp)
 #endif
 }
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - @rsclp에 flags set.
+ */
 static inline void rcu_segcblist_set_flags(struct rcu_segcblist *rsclp,
 					   int flags)
 {
@@ -91,6 +99,10 @@ static inline void rcu_segcblist_clear_flags(struct rcu_segcblist *rsclp,
 	rsclp->flags &= ~flags;
 }
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - flags에 @flags가 존재하면 return true.
+ */
 static inline bool rcu_segcblist_test_flags(struct rcu_segcblist *rsclp,
 					    int flags)
 {
@@ -106,6 +118,8 @@ static inline bool rcu_segcblist_test_flags(struct rcu_segcblist *rsclp,
  * - papago
  *   예를 들어 지정된 rcu_segcblist가 활성화되어 오프라인 CPU에 해당하지
  *   않습니까? 
+ *
+ * - @rsclp 에서 SEGCBLIST_ENABLED이 있으면 return true.
  */
 static inline bool rcu_segcblist_is_enabled(struct rcu_segcblist *rsclp)
 {
@@ -128,6 +142,10 @@ static inline bool rcu_segcblist_is_offloaded(struct rcu_segcblist *rsclp)
 	return false;
 }
 
+/*
+ * IAMROOT, 2023.07.22:
+ * - offload되있으면 true. 아니면 false
+ */
 static inline bool rcu_segcblist_completely_offloaded(struct rcu_segcblist *rsclp)
 {
 	int flags = SEGCBLIST_KTHREAD_CB | SEGCBLIST_KTHREAD_GP | SEGCBLIST_OFFLOADED;
@@ -148,6 +166,8 @@ static inline bool rcu_segcblist_completely_offloaded(struct rcu_segcblist *rscl
  * - papago
  *   지정된 rcu_segcblist 구조의 지정된 세그먼트를 따르는 모든 세그먼트에
  *   콜백이 비어 있습니까? (지정된 세그먼트에는 콜백이 포함될 수 있습니다.) 
+ *
+ * - @seg index에대한 seg가 비었다면 return true.
  */
 static inline bool rcu_segcblist_restempty(struct rcu_segcblist *rsclp, int seg)
 {
