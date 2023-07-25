@@ -1722,6 +1722,15 @@ static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
  * that a new grace-period request be made, invokes rcu_accelerate_cbs()
  * while holding the leaf rcu_node structure's ->lock.
  */
+/*
+ * IAMROOT, 2023.07.25:
+ * - papago
+ *   rcu_accelerate_cbs()와 유사하지만 리프 rcu_node 구조의 -> 잠금이 
+ *   유지될 필요가 없습니다. rcu_data 구조에서 ->gp_seq_needed의 캐시된 
+ *   값을 참조하고 새 유예 기간 요청이 작성되었음을 나타내면 리프 
+ *   rcu_node 구조의 ->lock을 유지하면서 rcu_accelerate_cbs()를 
+ *   호출합니다.
+ */
 static void rcu_accelerate_cbs_unlocked(struct rcu_node *rnp,
 					struct rcu_data *rdp)
 {

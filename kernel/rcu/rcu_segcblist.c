@@ -264,8 +264,30 @@ static void rcu_segcblist_inc_seglen(struct rcu_segcblist *rsclp, int seg)
  *   set ->len = 1.
  *  					rcu_barrier() does nothing.
  *  					module is unloaded.
- *   
+ *   전체 장벽을 사용하면 rcu_barrier()가 ->len을 0으로 보는 모든 경우가 
+ *   명확하게 경주 call_rcu()에서 반환되기 전에 발생합니다. 즉, 이 
+ *   call_rcu() 호출은 기다리지 않아도 됩니다. 결국 문제가 있는 call_rcu() 
+ *   호출이 rcu_barrier() 전에 발생하는지 확인해야 합니다.
  *
+ *   사례 2:
+ *   CPU 1이 rcu_barrier()를 호출하는 것처럼 CPU 0이 마지막 콜백을 
+ *   호출한다고 가정합니다. CPU 0의 ->len 필드는 1->0에서 전환되며 이는 
+ *   신중하게 처리해야 하는 전환 중 하나입니다.
+ *   ->len 업데이트 전과 rcu_barrier()의 끝에서 전체 메모리 배리어가 
+ *   없으면 다음이 발생할 수 있습니다.
+ *
+ *   CPU 0				CPU 1
+ *  
+ *   start invoking last callback
+ *   set ->len = 0 (reordered)
+ *    				rcu_barrier() sees ->len as 0
+ *    				rcu_barrier() does nothing.
+ *    				module is unloaded
+ *   callback executing after unloaded!
+ *
+ *   전체 장벽을 사용하면 rcu_barrier()가 ->len을 0으로 인식하는 
+ *   모든 경우는 콜백 함수가 완료된 후 완전히 정렬되므로 모듈 언로드 
+ *   작업이 완전히 안전합니다.
  */
 void rcu_segcblist_add_len(struct rcu_segcblist *rsclp, long v)
 {
@@ -733,6 +755,18 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
 /*
  * IAMROOT, 2023.07.22:
  * - papago
+ *   보다 정확한 유예 기간 정보를 기반으로 콜백을 "가속화"합니다.
+ *   그 이유는 RCU가 유예 기간의 시작과 끝을 동기화하지 않고 콜백이 
+ *   로컬로 게시되기 때문입니다. 따라서 정확한 정보를 얻으면 성능과 
+ *   확장성이 모두 저하되므로 초기에 콜백에 보수적으로 레이블을 지정해야 
+ *   합니다. 보다 정확한 유예 기간 정보를 사용할 수 있게 되면 이전에 
+ *   게시된 콜백을 가속화하여 이전 유예 기간이 끝날 때 완료되도록 표시할 
+ *   수 있습니다.
+ *
+ *   이 함수는 rcu_segcblist 구조와 새 콜백이 호출할 준비가 되는 유예 
+ *   기간 시퀀스 번호 seq에서 작동합니다. seq까지 호출할 준비가 되지 
+ *   않은 콜백이 있으면 true를 반환하고 그렇지 않으면 false를 반환합니다.
+. 
  * - ING
  */
 bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
@@ -751,6 +785,15 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
 	 * callbacks in the RCU_NEXT_TAIL segment, and assigned "seq"
 	 * as their ->gp_seq[] grace-period completion sequence number.
 	 */
+/*
+ * IAMROOT, 2023.07.25:
+ * - papago
+ *   ->gp_seq[] 완료가 "seq"를 통해 전달된 콜백의 가장 오래된 세그먼트 
+ *   앞의 세그먼트를 찾고 빈 세그먼트를 건너뜁니다. 이 가장 오래된 
+ *   세그먼트는 이후 세그먼트와 함께 RCU_NEXT_TAIL 세그먼트에 새로 
+ *   도착한 콜백과 병합될 수 있으며 ->gp_seq[] 유예 기간 완료 시퀀스 
+ *   번호로 "seq"를 할당할 수 있습니다. 
+ */
 	for (i = RCU_NEXT_READY_TAIL; i > RCU_DONE_TAIL; i--)
 		if (rsclp->tails[i] != rsclp->tails[i - 1] &&
 		    ULONG_CMP_LT(rsclp->gp_seq[i], seq))
@@ -777,10 +820,38 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
 	 * NEXT_READY_TAIL and the grace-period number of NEXT_READY_TAIL
 	 * would be updated.  NEXT_TAIL would then be empty.
 	 */
+/*
+ * IAMROOT, 2023.07.25:
+ * - papago
+ *   모든 세그먼트에 "seq"보다 빠른 유예 기간 시퀀스 번호에 
+ *   해당하는 콜백이 포함되어 있으면 그대로 둡니다.
+ *   rcu_segcblist 구조의 배열에 충분한 세그먼트가 있다고 
+ *   가정하면 완료되지 않은 일부 세그먼트에 실제로 호출할 
+ *   준비가 된 콜백이 포함된 경우에만 발생할 수 있습니다. 이 
+ *   상황은 rcu_segcblist_advance()에 대한 다음 호출로 해결될 
+ *   것입니다.
+ *
+ *   또한 ->gp_seq[] 완료가 "seq"를 통해 전달된 시점 또는 이후에 
+ *   있는 콜백의 가장 오래된 세그먼트로 이동하여 빈 세그먼트를 
+ *   건너뜁니다.
+ *
+ *   세그먼트 "i"(및 이전 콜백을 포함하는 더 낮은 번호의 세그먼트)는 
+ *   영향을 받지 않으며 해당 유예 기간 번호는 변경되지 않습니다. 
+ *   예를 들어, i == WAIT_TAIL이면 WAIT_TAIL도 DONE_TAIL도 건드리지 
+ *   않습니다.
+ *   대신 NEXT_TAIL의 CB가 NEXT_READY_TAIL의 CB와 병합되고 
+ *   NEXT_READY_TAIL의 유예 기간 번호가 업데이트됩니다. 그러면 
+ *   NEXT_TAIL이 비어 있게 됩니다.
+ */
 	if (rcu_segcblist_restempty(rsclp, i) || ++i >= RCU_NEXT_TAIL)
 		return false;
 
 	/* Accounting: everything below i is about to get merged into i. */
+/*
+ * IAMROOT, 2023.07.25:
+ * - papago
+ *   회계: i 아래의 모든 것이 i로 병합되려고 합니다. 
+ */
 	for (j = i + 1; j <= RCU_NEXT_TAIL; j++)
 		rcu_segcblist_move_seglen(rsclp, j, i);
 
@@ -791,6 +862,14 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
 	 * where there were no pending callbacks in the rcu_segcblist
 	 * structure other than in the RCU_NEXT_TAIL segment.
 	 */
+/*
+ * IAMROOT, 2023.07.25:
+ * - papago
+ *   새로 도착한 콜백을 포함하여 이후의 모든 콜백을 위의 for 루프가 
+ *   위치한 세그먼트로 병합합니다. RCU_NEXT_TAIL 세그먼트 이외의 
+ *   rcu_segcblist 구조에서 보류 중인 콜백이 없는 경우를 올바르게 
+ *   처리하기 위해 ->gp_seq[] 값으로 "seq"를 할당합니다. 
+ */
 	for (; i < RCU_NEXT_TAIL; i++) {
 		WRITE_ONCE(rsclp->tails[i], rsclp->tails[RCU_NEXT_TAIL]);
 		rsclp->gp_seq[i] = seq;
