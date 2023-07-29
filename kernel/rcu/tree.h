@@ -44,6 +44,10 @@ struct rcu_node {
 	unsigned long gp_seq;	/* Track rsp->gp_seq. */
 	unsigned long gp_seq_needed; /* Track furthest future GP request. */
 	unsigned long completedqs; /* All QSes done for this node. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 보고받아야할 mask.
+ */
 	unsigned long qsmask;	/* CPUs or groups that need to switch in */
 				/*  order for current grace period to proceed.*/
 				/*  In leaf rcu_node, each bit corresponds to */
@@ -51,10 +55,18 @@ struct rcu_node {
 				/*  bit corresponds to a child rcu_node */
 				/*  structure. */
 	unsigned long rcu_gp_init_mask;	/* Mask of offline CPUs at GP init. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 다음에 qsmask가 될 mask.
+ */
 	unsigned long qsmaskinit;
 				/* Per-GP initial value for qsmask. */
 				/*  Initialized from ->qsmaskinitnext at the */
 				/*  beginning of each grace period. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - online/offline 포함 변경사항에 대한 mask
+ */
 	unsigned long qsmaskinitnext;
 	unsigned long ofl_seq;	/* CPU-hotplug operation sequence count. */
 				/* Online CPUs for next grace period. */
@@ -74,6 +86,13 @@ struct rcu_node {
 	unsigned long ffmask;	/* Fully functional CPUs. */
 	unsigned long grpmask;	/* Mask to apply to parent qsmask. */
 				/*  Only one bit will be set in this mask. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - grplo, grphi
+ *   이 node가 관리해야될 시작과 끝의 cpu대역.
+ * - grpnum
+ *   상위 node연결시 지정되는 연결번호.
+ */
 	int	grplo;		/* lowest-numbered CPU here. */
 	int	grphi;		/* highest-numbered CPU here. */
 	u8	grpnum;		/* group number for next level up. */
@@ -372,11 +391,22 @@ struct rcu_state {
 };
 
 /* Values for rcu_state structure's gp_flags field. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - flag
+ *   INIT : gp thread 요청
+ *   FQS : 너무많은 cb있을경우에 대한 처리요청
+ */
 #define RCU_GP_FLAG_INIT 0x1	/* Need grace-period initialization. */
 #define RCU_GP_FLAG_FQS  0x2	/* Need grace-period quiescent-state forcing. */
 #define RCU_GP_FLAG_OVLD 0x4	/* Experiencing callback overload. */
 
 /* Values for rcu_state structure's gp_state field. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - state
+ *   WAIT : gp start 대기중
+ */
 #define RCU_GP_IDLE	 0	/* Initial state and no GP in progress. */
 #define RCU_GP_WAIT_GPS  1	/* Wait for grace-period start. */
 #define RCU_GP_DONE_GPS  2	/* Wait done for grace-period start. */

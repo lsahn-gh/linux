@@ -373,6 +373,10 @@ void rcu_segcblist_offload(struct rcu_segcblist *rsclp, bool offload)
  * Does the specified rcu_segcblist structure contain callbacks that
  * are ready to be invoked?
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - don tail에 cb 존재 확인
+ */
 bool rcu_segcblist_ready_cbs(struct rcu_segcblist *rsclp)
 {
 	return rcu_segcblist_is_enabled(rsclp) &&
@@ -767,7 +771,13 @@ void rcu_segcblist_advance(struct rcu_segcblist *rsclp, unsigned long seq)
  *   기간 시퀀스 번호 seq에서 작동합니다. seq까지 호출할 준비가 되지 
  *   않은 콜백이 있으면 true를 반환하고 그렇지 않으면 false를 반환합니다.
 . 
- * - ING
+ * - global seq인 @seq와 cpu seq의 차이가 RCU_NEXT_READY_TAIL(2), RCU_WAIT_TAIL(1)
+ *   에 대해서 1이상 난경우
+ *
+ *   1로 왔을경우 : 2,3 -> 1,
+ *   2로 왔을경우 : 3 -> 2
+ *
+ *   로 옮긴다.
  */
 bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
 {
@@ -793,6 +803,10 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
  *   세그먼트는 이후 세그먼트와 함께 RCU_NEXT_TAIL 세그먼트에 새로 
  *   도착한 콜백과 병합될 수 있으며 ->gp_seq[] 유예 기간 완료 시퀀스 
  *   번호로 "seq"를 할당할 수 있습니다. 
+ *
+ * - RCU_NEXT_READY_TAIL,, RCU_WAIT_TAIL 순으로 역순회하면서
+ *   list에 내용물이 있는지 확인한다. == 이면 내용물이없다.
+ *   중간에 내용물이 있고 global seq 이전 cpu seq이면 break.
  */
 	for (i = RCU_NEXT_READY_TAIL; i > RCU_DONE_TAIL; i--)
 		if (rsclp->tails[i] != rsclp->tails[i - 1] &&
@@ -842,6 +856,9 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
  *   대신 NEXT_TAIL의 CB가 NEXT_READY_TAIL의 CB와 병합되고 
  *   NEXT_READY_TAIL의 유예 기간 번호가 업데이트됩니다. 그러면 
  *   NEXT_TAIL이 비어 있게 됩니다.
+ *
+ * - i는 2, 1, 0중 하나. 특히 2(RCU_NEXT_READY_TAIL)의 경우엔
+ *   비어있지않아도 return false.
  */
 	if (rcu_segcblist_restempty(rsclp, i) || ++i >= RCU_NEXT_TAIL)
 		return false;
@@ -851,6 +868,12 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
  * IAMROOT, 2023.07.25:
  * - papago
  *   회계: i 아래의 모든 것이 i로 병합되려고 합니다. 
+ *
+ * - i는 2, 1중에 하나.
+ *   1로 왔을경우 : 2,3 -> 1,
+ *   2로 왔을경우 : 3 -> 2
+ *   global seq가 cpu seq와 차이나갔으므로 한칸씩 이동해도 전혀 문제가
+ *   없다는 의미가된다.
  */
 	for (j = i + 1; j <= RCU_NEXT_TAIL; j++)
 		rcu_segcblist_move_seglen(rsclp, j, i);
@@ -869,6 +892,9 @@ bool rcu_segcblist_accelerate(struct rcu_segcblist *rsclp, unsigned long seq)
  *   위치한 세그먼트로 병합합니다. RCU_NEXT_TAIL 세그먼트 이외의 
  *   rcu_segcblist 구조에서 보류 중인 콜백이 없는 경우를 올바르게 
  *   처리하기 위해 ->gp_seq[] 값으로 "seq"를 할당합니다. 
+ *
+ * - 내용물을 옮겼으므로 비어있는 seg들을 NEXT TAIL로 전부 교체하고, 
+ *   seq를 갱신한다.
  */
 	for (; i < RCU_NEXT_TAIL; i++) {
 		WRITE_ONCE(rsclp->tails[i], rsclp->tails[RCU_NEXT_TAIL]);

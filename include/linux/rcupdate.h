@@ -35,6 +35,10 @@
 #include <asm/processor.h>
 #include <linux/cpumask.h>
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - a >= b
+ */
 #define ULONG_CMP_GE(a, b)	(ULONG_MAX / 2 >= (a) - (b))
 /*
  * IAMROOT, 2023.07.22:
@@ -72,6 +76,8 @@ void __rcu_read_unlock(void);
  *   정의됩니다. 이것은 rcu_read_lock() 중첩 깊이를 제공하지만
  *   CONFIG_PREEMPT_RCU가 다른 유형의 커널 빌드에서 rcu_read_lock()
  *   중첩 깊이를 알 수 없는 경우에만 의미가 있습니다.
+ *
+ * - rcu_lock 중첩 횟수
  */
 #define rcu_preempt_depth() READ_ONCE(current->rcu_read_lock_nesting)
 
@@ -995,6 +1001,26 @@ do {									      \
  *   실시간(-rt 패치 세트 사용) 커널 빌드의 선점형 RCU 구현에서 RCU 읽기 측
  *   임계 섹션이 선점될 수 있으며 차단될 수도 있지만 우선 순위 상속이
  *   적용되는 스핀록을 획득할 때만 가능합니다.
+ *
+ * ----------------------------
+ * - rcu 감지
+ *   context switch : rcu_note_context_switch() 
+ *   user, idle : rcu_flavor_sched_clock_irq() (tick_periodic())
+ *   preemption : rcu_preempt_deferred_qs_irqrestore()
+ *                rcu_softirq_qs()
+ *
+ * - qs report
+ *   RCU_SOFTIRQ (rcu_core_si)
+ *   rcu_gp_kthread()
+ *
+ * - cb 수행
+ *   rcu_do_batch()
+ *
+ * - cb함수 추가
+ *   call_rcu()
+ * ----------------------------
+ *
+ * - lock count 증가
  */
 static __always_inline void rcu_read_lock(void)
 {
@@ -1049,6 +1075,9 @@ static __always_inline void rcu_read_lock(void)
  *   상속 스핀록으로 확장됩니다. 인터럽트가 비활성화된 상태에서.
  *
  *   자세한 내용은 rcu_read_lock()을 참조하십시오.
+ *
+ * - rcu lock counting감소. lock counting가 풀리면 special처리
+ *   (block task정리, deferred 해제)
  */
 static inline void rcu_read_unlock(void)
 {

@@ -444,7 +444,9 @@ static void rcu_qs(void)
   *   때까지 현재 유예 기간을 완료할 수 없습니다.
   *
   *   호출자는 인터럽트를 비활성화해야 합니다.
-  * - TODO.
+  * - preemption
+  *   rcu_read_lock()등에서 preemption_disable을 한다.
+  *   하지만 이 preemption disable도 하기 싫은 상황이 있다. 그것에 대한 처리.
   */
 void rcu_note_context_switch(bool preempt)
 {
@@ -529,6 +531,8 @@ EXPORT_SYMBOL_GPL(rcu_note_context_switch);
  *   지정된 rcu_node 구조에 대한 현재 유예 기간을 차단하는 선점된
  *   RCU 판독기가 있는지 확인하십시오. 호출자가 신뢰할 수 있는 응답이 필요한
  *   경우 rcu_node의 -> 잠금을 보유해야 합니다.
+ *
+ * - gp tasks가 있는 경우 return true.
  */
 static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp)
 {
@@ -538,11 +542,21 @@ static int rcu_preempt_blocked_readers_cgp(struct rcu_node *rnp)
 /* limit value for ->rcu_read_lock_nesting. */
 #define RCU_NEST_PMAX (INT_MAX / 2)
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - current nesting++
+ *   lock 중첩관리.
+ */
 static void rcu_preempt_read_enter(void)
 {
 	WRITE_ONCE(current->rcu_read_lock_nesting, READ_ONCE(current->rcu_read_lock_nesting) + 1);
 }
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - current nesting--
+ *   lock 중첩관리
+ */
 static int rcu_preempt_read_exit(void)
 {
 	int ret = READ_ONCE(current->rcu_read_lock_nesting) - 1;
@@ -566,6 +580,8 @@ static void rcu_preempt_depth_set(int val)
  * - papago
  *   rcu_read_lock()에 대한 선점형 RCU 구현.
  *   증가 ->rcu_read_lock_nesting, 차단하면 공유 상태가 업데이트됩니다.
+ *
+ * - lock 중첩관리만 한다.
  */
 void __rcu_read_lock(void)
 {
@@ -593,6 +609,8 @@ EXPORT_SYMBOL_GPL(__rcu_read_lock);
  *   rcu_read_unlock()) ->rcu_read_unlock_special이 0이 아닌 경우
  *   rcu_read_unlock_special()을 호출하여 RCU 읽기 측 중요 섹션 및 기타
  *   특수한 경우에서 컨텍스트 전환 후 정리합니다.
+ *
+ * - rcu lock counting이 0이면 special을 확인한다.
  */
 void __rcu_read_unlock(void)
 {
@@ -600,7 +618,15 @@ void __rcu_read_unlock(void)
 
 	barrier();  // critical section before exit code.
 	if (rcu_preempt_read_exit() == 0) {
+/*
+ * IAMROOT, 2023.07.29:
+ * - lock 중첩이 없는 상태.
+ */
 		barrier();  // critical-section exit before .s check.
+/*
+ * IAMROOT, 2023.07.29:
+ * - special에 어떤값이라도 있으면 special처리를 한다.(주로 preemtion 여부확인)
+ */
 		if (unlikely(READ_ONCE(t->rcu_read_unlock_special.s)))
 			rcu_read_unlock_special(t);
 	}
@@ -658,6 +684,8 @@ static bool rcu_preempt_has_tasks(struct rcu_node *rnp)
  * - papago
  *   지연된 정지 상태를 보고합니다. 지연 시간은 예를 들어
  *   rcu_read_unlock_special()에서 호출하는 경우 매우 짧을 수 있습니다.
+ *
+ * - deferred qs들을 deferred 상태를 해제시킨다.
  */
 static void
 rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
@@ -685,11 +713,23 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
  */
 	special = t->rcu_read_unlock_special;
 	rdp = this_cpu_ptr(&rcu_data);
+/*
+ * IAMROOT, 2023.07.29:
+ * - special이 발생안했고, exp deferred qs도 발생안했다. return.
+ */
 	if (!special.s && !rdp->exp_deferred_qs) {
 		local_irq_restore(flags);
 		return;
 	}
+/*
+ * IAMROOT, 2023.07.29:
+ * - 원래 값을 reset.
+ */
 	t->rcu_read_unlock_special.s = 0;
+/*
+ * IAMROOT, 2023.07.29:
+ * - need qs가 있었으면 qs check
+ */
 	if (special.b.need_qs) {
 		if (IS_ENABLED(CONFIG_RCU_STRICT_GRACE_PERIOD)) {
 			rcu_report_qs_rdp(rdp);
@@ -710,6 +750,8 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
  * - papago
  *   이 CPU의 정지 상태에 대한 긴급 유예 기간으로 요청에 응답합니다. 아래의
  *   차단된 작업 목록에서 작업을 제거하면 작업의 요청이 처리됩니다.
+ *
+ * - exp deferred qs 처리.
  */
 	if (rdp->exp_deferred_qs)
 		rcu_report_exp_rdp(rdp);
@@ -719,6 +761,8 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
  * IAMROOT, 2023.07.17:
  * - papago
  *   RCU 읽기 측 중요 섹션 중에 차단된 경우 정리합니다. 
+ *
+ * - block된 적이 있었으면(preemption)
  */
 	if (special.b.blocked) {
 
@@ -749,6 +793,10 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
 		t->rcu_blocked_node = NULL;
 		trace_rcu_unlock_preempted_task(TPS("rcu_preempt"),
 						rnp->gp_seq, t->pid);
+/*
+ * IAMROOT, 2023.07.29:
+ * - blocked task에 대한 해제처리.
+ */
 		if (&t->rcu_node_entry == rnp->gp_tasks)
 			WRITE_ONCE(rnp->gp_tasks, np);
 		if (&t->rcu_node_entry == rnp->exp_tasks)
@@ -775,6 +823,10 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
  *   스냅샷을 찍어야 합니다.
  */
 		empty_exp_now = sync_rcu_exp_done(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - empty가 아니였다가 empty가 되면. 상위로 report할지 한번 검사한다.
+ */
 		if (!empty_norm && !rcu_preempt_blocked_readers_cgp(rnp)) {
 			trace_rcu_quiescent_state_report(TPS("preempt_rcu"),
 							 rnp->gp_seq,
@@ -831,6 +883,9 @@ rcu_preempt_deferred_qs_irqrestore(struct task_struct *t, unsigned long flags)
  *   책임입니다. 그 이유는 선점이 비활성화되어 있어도 컨텍스트 전환 중에 정지
  *   상태를 보고하는 것이 안전하기 때문입니다. 이 함수는 이러한 뉘앙스를
  *   이해할 것으로 기대할 수 없으므로 호출자가 이를 처리해야 합니다.
+ *
+ * - exp deferred qs존재하거나 special이 발생하였고,
+ *   reader가 현재 없다면 return true.
  */
 static bool rcu_preempt_need_deferred_qs(struct task_struct *t)
 {
@@ -871,6 +926,8 @@ static void rcu_preempt_deferred_qs(struct task_struct *t)
  * IAMROOT, 2023.07.17:
  * - papago
  *   스케줄러에게 재평가 기회를 제공하는 최소한의 핸들러.
+ *
+ * - rcu_read_unlock_special()참고. irq work가 끝나는걸 감지하기 위한 장치.
  */
 static void rcu_preempt_deferred_qs_handler(struct irq_work *iwp)
 {
@@ -890,6 +947,9 @@ static void rcu_preempt_deferred_qs_handler(struct irq_work *iwp)
  * - papago
  *   rcu_read_unlock() 중에 RCU 코어 처리를 통지해야 하거나 RCU 읽기 측
  *   중요 섹션 동안 작업이 차단되는 것과 같은 특수한 경우를 처리합니다.
+ *
+ * - block상태면 rcu soft irq를 일으키거나, irq work가 끝나는걸 감지시킨다.,
+ *   block이 아니면 deferred 상태를 해제한다.
  */
 static void rcu_read_unlock_special(struct task_struct *t)
 {
@@ -909,6 +969,13 @@ static void rcu_read_unlock_special(struct task_struct *t)
 
 	local_irq_save(flags);
 	irqs_were_disabled = irqs_disabled_flags(flags);
+/*
+ * IAMROOT, 2023.07.29:
+ * - preempt_bh_were_disabled == true
+ *   preemption disable상태로 unlock이 호출된경우. + softirq
+ * - irqs_were_disabled == true
+ *   irq가 disable된상태.
+ */
 	if (preempt_bh_were_disabled || irqs_were_disabled) {
 		bool expboost; // Expedited GP in flight or possible boosting.
 /*
@@ -919,6 +986,10 @@ static void rcu_read_unlock_special(struct task_struct *t)
 		struct rcu_data *rdp = this_cpu_ptr(&rcu_data);
 		struct rcu_node *rnp = rdp->mynode;
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - expboost == false로 가정.
+ */
 		expboost = (t->rcu_blocked_node && READ_ONCE(t->rcu_blocked_node->exp_tasks)) ||
 			   (rdp->grpmask & READ_ONCE(rnp->expmask)) ||
 			   IS_ENABLED(CONFIG_RCU_STRICT_GRACE_PERIOD) ||
@@ -964,6 +1035,8 @@ static void rcu_read_unlock_special(struct task_struct *t)
  * - papago
  *   스케줄러가 재평가하고 후크를 호출하도록 합니다.
  *   !irq_work인 경우 fqs 스캔은 결국 ipi가 됩니다. 
+ *
+ * - irq work가 끝나는걸 감지하기 위한 장치.
  */
 				init_irq_work(&rdp->defer_qs_iw, rcu_preempt_deferred_qs_handler);
 				rdp->defer_qs_iw_pending = true;
@@ -973,6 +1046,10 @@ static void rcu_read_unlock_special(struct task_struct *t)
 		local_irq_restore(flags);
 		return;
 	}
+/*
+ * IAMROOT, 2023.07.29:
+ * - preemption, irq 상황이 아닌경우. deferred 상태임을 해제 한다.
+ */
 	rcu_preempt_deferred_qs_irqrestore(t, flags);
 }
 
@@ -1029,6 +1106,24 @@ static void rcu_preempt_check_blocked_tasks(struct rcu_node *rnp)
  *   확인합니다. 작업이 차단되면 해당 CPU의 rcu_node 구조에 작업을 기록하고
  *   다른 곳에서 확인하므로 이 기능은 작업 관련이 아닌 현재 CPU와 관련된 정지
  *   상태만 확인하면 됩니다.
+ *
+ * - @user거나 idle에서 interrupt인경우 qs set.
+ *
+ * -------- lock case별
+ * 3) qs보고
+ *    rcu_read_lock()
+ * -> 1) 별거안함
+ *    preempt_disable()
+ * -> 1) 별거안함
+ *               ---- preempt 발생(speial)
+ *    rcu_read_unlock()
+ * -> 1) 별거안함
+ *    preempt_enable()
+ * -> 2) deferred 상태 해제
+ * ..
+ * .. (next tick)
+ * ..
+ * -> 3) qs보고
  */
 static void rcu_flavor_sched_clock_irq(int user)
 {
@@ -1038,21 +1133,46 @@ static void rcu_flavor_sched_clock_irq(int user)
 	if (user || rcu_is_cpu_rrupt_from_idle()) {
 		rcu_note_voluntary_context_switch(current);
 	}
+/*
+ * IAMROOT, 2023.07.29:
+ * 1)
+ * - reader가 있거나 preemption disable or softirq가 진행중이면.
+ */
 	if (rcu_preempt_depth() > 0 ||
 	    (preempt_count() & (PREEMPT_MASK | SOFTIRQ_MASK))) {
 		/* No QS, force context switch if deferred. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 1. rcu lock counter가 있는경우 : 아무것도 안한다.
+ *   2. rcu lock counter가  없고 preempt_count()가 있는경우
+ *      exp deferred qs존재하거나 special이 발생하였을때 : qs처리를 안한다.
+ */
 		if (rcu_preempt_need_deferred_qs(t)) {
 			set_tsk_need_resched(t);
 			set_preempt_need_resched();
 		}
+/*
+ * IAMROOT, 2023.07.29:
+ * 2)
+ * - rcu lock counter가 없고, preempt_count()도 없을때,
+ *   exp deferred qs존재하거나 special이 발생하였으면 deferred 해제 처리
+ */
 	} else if (rcu_preempt_need_deferred_qs(t)) {
 		rcu_preempt_deferred_qs(t); /* Report deferred QS. */
 		return;
+/*
+ * IAMROOT, 2023.07.29:
+ * 3)
+ * - 위의 모든 상황이 아니고 rcu lock counter가 결국 없는 상황이면 qs report
+ */
 	} else if (!WARN_ON_ONCE(rcu_preempt_depth())) {
 		rcu_qs(); /* Report immediate QS. */
 		return;
 	}
-
+/*
+ * IAMROOT, 2023.07.29:
+ * - 위의 모든상황도 아니였다.
+ */
 	/* If GP is oldish, ask for help from rcu_read_unlock_special(). */
 	if (rcu_preempt_depth() > 0 &&
 	    __this_cpu_read(rcu_data.core_needs_qs) &&
@@ -1197,6 +1317,8 @@ static void __init rcu_bootup_announce(void)
  *   PREEMPTION=n에 대한 정지 상태에 유의하십시오. 얼마나 많은 정지 상태가
  *   통과했는지 알 필요가 없기 때문에 유예 기간이 시작된 이후에 적어도 하나가
  *   있었다면 플래그를 설정할 뿐입니다. 호출자는 선점을 비활성화해야 합니다.
+ *
+ * - report 함수. norm을 false로 함으로써 report를 완성한다.
  */
 static void rcu_qs(void)
 {
@@ -1259,6 +1381,7 @@ EXPORT_SYMBOL_GPL(rcu_all_qs);
  * - papago
  *   PREEMPTION=n 컨텍스트 스위치에 유의하십시오. 호출자는 인터럽트를
  *   비활성화해야 합니다. 
+ * - 무조건 보고. preeption code는 여기서도 별도로 존재한다.
  */
 void rcu_note_context_switch(bool preempt)
 {
@@ -1635,6 +1758,10 @@ static bool rcu_is_callbacks_kthread(void)
 	return __this_cpu_read(rcu_data.rcu_cpu_kthread_task) == current;
 }
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - 500ms
+ */
 #define RCU_BOOST_DELAY_JIFFIES DIV_ROUND_UP(CONFIG_RCU_BOOST_DELAY * HZ, 1000)
 
 /*
@@ -1644,6 +1771,7 @@ static bool rcu_is_callbacks_kthread(void)
  * IAMROOT, 2023.07.17:
  * - papago
  *   새로운 유예 기간의 시작을 위해 우선 순위 부스트 계정을 수행하십시오.
+ * - 500ms 
  */
 static void rcu_preempt_boost_start_gp(struct rcu_node *rnp)
 {

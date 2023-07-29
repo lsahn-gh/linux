@@ -280,6 +280,10 @@ static unsigned long rcu_rnp_online_cpus(struct rcu_node *rnp)
  * permit this function to be invoked without holding the root rcu_node
  * structure's ->lock, but of course results can be subject to change.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - global gp가 이미 진행중이다.
+ */
 static int rcu_gp_in_progress(void)
 {
 	return rcu_seq_state(rcu_seq_current(&rcu_state.gp_seq));
@@ -1240,6 +1244,10 @@ void rcu_irq_enter_irqson(void)
  * the scheduler-clock interrupt was enabled on a nohz_full CPU) in order
  * to get to a quiescent state, disable it.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - PASS
+ */
 static void rcu_disable_urgency_upon_qs(struct rcu_data *rdp)
 {
 	raw_lockdep_assert_held_rcu_node(rdp->mynode);
@@ -1525,6 +1533,10 @@ static void trace_rcu_this_gp(struct rcu_node *rnp, struct rcu_data *rdp,
  *
  * Returns true if the GP thread needs to be awakened else false.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 새로운 gp를 @gp_seq_req로 요청한다. 만약 이미 시작했으면 false
+ */
 static bool rcu_start_this_gp(struct rcu_node *rnp_start, struct rcu_data *rdp,
 			      unsigned long gp_seq_req)
 {
@@ -1543,8 +1555,20 @@ static bool rcu_start_this_gp(struct rcu_node *rnp_start, struct rcu_data *rdp,
 	raw_lockdep_assert_held_rcu_node(rnp_start);
 	trace_rcu_this_gp(rnp_start, rdp, gp_seq_req, TPS("Startleaf"));
 	for (rnp = rnp_start; 1; rnp = rnp->parent) {
+/*
+ * IAMROOT, 2023.07.29:
+ * - 처음에 lock을건다.
+ */
 		if (rnp != rnp_start)
 			raw_spin_lock_rcu_node(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 1. need seq >= 인 @gp_seq_req
+ *   2. gp가 이미 시작했는지
+ *   3. start가 아니면서 state가 존재하는경우
+ *
+ *   이미 gp가 진행중이므로 out
+ */
 		if (ULONG_CMP_GE(rnp->gp_seq_needed, gp_seq_req) ||
 		    rcu_seq_started(&rnp->gp_seq, gp_seq_req) ||
 		    (rnp != rnp_start &&
@@ -1553,7 +1577,16 @@ static bool rcu_start_this_gp(struct rcu_node *rnp_start, struct rcu_data *rdp,
 					  TPS("Prestarted"));
 			goto unlock_out;
 		}
+/*
+ * IAMROOT, 2023.07.29:
+ * - 이부분부터는 아직 gp가 시작안했다.
+ * - needed갱신
+ */
 		WRITE_ONCE(rnp->gp_seq_needed, gp_seq_req);
+/*
+ * IAMROOT, 2023.07.29:
+ * - seq만 갱신하고 state가 있다면 역시 이미 시작했다고 판단. out
+ */
 		if (rcu_seq_state(rcu_seq_current(&rnp->gp_seq))) {
 			/*
 			 * We just marked the leaf or internal node, and a
@@ -1567,18 +1600,38 @@ static bool rcu_start_this_gp(struct rcu_node *rnp_start, struct rcu_data *rdp,
 		}
 		if (rnp != rnp_start && rnp->parent != NULL)
 			raw_spin_unlock_rcu_node(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - parent가 없으면 종료.
+ */
 		if (!rnp->parent)
 			break;  /* At root, and perhaps also leaf. */
 	}
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - 위 순회문에 의해서 rnp는 최상위 node를 가리키고있다.
+ */
 	/* If GP already in progress, just leave, otherwise start one. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - global gp가 이미 진행중이면 out.
+ */
 	if (rcu_gp_in_progress()) {
 		trace_rcu_this_gp(rnp, rdp, gp_seq_req, TPS("Startedleafroot"));
 		goto unlock_out;
 	}
+/*
+ * IAMROOT, 2023.07.29:
+ * - 여기까지왔으면 glboal gp도 시작안한 상태. gp thread에 요청 시간, 요청 플래그들을 변경한다.
+ */
 	trace_rcu_this_gp(rnp, rdp, gp_seq_req, TPS("Startedroot"));
 	WRITE_ONCE(rcu_state.gp_flags, rcu_state.gp_flags | RCU_GP_FLAG_INIT);
 	WRITE_ONCE(rcu_state.gp_req_activity, jiffies);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 예외처리.
+ */
 	if (!READ_ONCE(rcu_state.gp_kthread)) {
 		trace_rcu_this_gp(rnp, rdp, gp_seq_req, TPS("NoGPkthread"));
 		goto unlock_out;
@@ -1628,6 +1681,10 @@ static bool rcu_future_gp_cleanup(struct rcu_node *rnp)
  * pre-sleep check of the awaken condition.  In this case, a wakeup really
  * is required, and is therefore supplied.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp_wq(rcu_gp_kthread) 를 깨운다.
+ */
 static void rcu_gp_kthread_wake(void)
 {
 	struct task_struct *t = READ_ONCE(rcu_state.gp_kthread);
@@ -1664,6 +1721,10 @@ static void rcu_gp_kthread_wake(void)
  *   한다는 플래그를 반환합니다.
  *
  *   호출자는 인터럽트가 비활성화된 상태에서 rnp->lock을 유지해야 합니다.
+ *
+ * - pending된게 있으면 glboal seq snap으로 신규 cb들을 accelate하고
+ *   성공하면 gp start를 요청한다.
+ *   gp start를 요청했으면 return true.
  */
 static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 {
@@ -1674,6 +1735,10 @@ static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
 	raw_lockdep_assert_held_rcu_node(rnp);
 
 	/* If no pending (not yet ready to invoke) callbacks, nothing to do. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - pending 중인게 없으면 return.
+ */
 	if (!rcu_segcblist_pend_cbs(&rdp->cblist))
 		return false;
 
@@ -1699,6 +1764,8 @@ static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
  *   개선하여 이전 gp 번호에 대한 콜백 호출을 가속화합니다.
  *
  * - 전역 seq의 snap값을 가져온다. 보통 같거나 한칸(4)차 이하.
+ *   snap seq로 accelate 처리를 한다.
+ * - 신규 cb에 대해서 accelate를 처리한다. 성공하면 gp start요청.
  */
 	gp_seq_req = rcu_seq_snap(&rcu_state.gp_seq);
 	if (rcu_segcblist_accelerate(&rdp->cblist, gp_seq_req))
@@ -1730,6 +1797,16 @@ static bool rcu_accelerate_cbs(struct rcu_node *rnp, struct rcu_data *rdp)
  *   값을 참조하고 새 유예 기간 요청이 작성되었음을 나타내면 리프 
  *   rcu_node 구조의 ->lock을 유지하면서 rcu_accelerate_cbs()를 
  *   호출합니다.
+ *
+ * - 1. global seq snap과 1이상 차이난 cpu seq를
+ *
+ *   1로 왔을경우 : 2,3 -> 1,
+ *   2로 왔을경우 : 3 -> 2
+ *
+ *   앞세그먼트로 한칸씩 이동시킨다.
+ *   앞세그먼트로 한칸씩 이동한다.
+ *
+ *   2. pending된 gp가 있으면 accelate하고 gp start요청.
  */
 static void rcu_accelerate_cbs_unlocked(struct rcu_node *rnp,
 					struct rcu_data *rdp)
@@ -1739,14 +1816,27 @@ static void rcu_accelerate_cbs_unlocked(struct rcu_node *rnp,
 
 	rcu_lockdep_assert_cblist_protected(rdp);
 	c = rcu_seq_snap(&rcu_state.gp_seq);
+/*
+ * IAMROOT, 2023.07.29:
+ * - needed가 ge면 accelate를 여기서 한다.
+ */
 	if (!READ_ONCE(rdp->gpwrap) && ULONG_CMP_GE(rdp->gp_seq_needed, c)) {
 		/* Old request still live, so mark recent callbacks. */
 		(void)rcu_segcblist_accelerate(&rdp->cblist, c);
 		return;
 	}
+
+/*
+ * IAMROOT, 2023.07.29:
+ * - pending된것에 대한 처리.
+ */
 	raw_spin_lock_rcu_node(rnp); /* irqs already disabled. */
 	needwake = rcu_accelerate_cbs(rnp, rdp);
 	raw_spin_unlock_rcu_node(rnp); /* irqs remain disabled. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp start를 해야되는 상황이면 gp kthread wake를 한다.
+ */
 	if (needwake)
 		rcu_gp_kthread_wake();
 }
@@ -1941,6 +2031,10 @@ static void note_gp_changes(struct rcu_data *rdp)
 		rcu_gp_kthread_wake();
 }
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - debug용 지연
+ */
 static void rcu_gp_slow(int delay)
 {
 	if (delay > 0 &&
@@ -1960,6 +2054,10 @@ void rcu_gp_set_torture_wait(int duration)
 EXPORT_SYMBOL_GPL(rcu_gp_set_torture_wait);
 
 /* Actually implement the aforementioned wait. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - PASS
+ */
 static void rcu_gp_torture_wait(void)
 {
 	unsigned long duration;
@@ -1986,6 +2084,11 @@ static void rcu_strict_gp_boundary(void *unused)
 /*
  * Initialize a new grace period.  Return false if no grace period required.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - papago
+ * - gp를 위한 초기화
+ */
 static noinline_for_stack bool rcu_gp_init(void)
 {
 	unsigned long firstseq;
@@ -1997,6 +2100,10 @@ static noinline_for_stack bool rcu_gp_init(void)
 
 	WRITE_ONCE(rcu_state.gp_activity, jiffies);
 	raw_spin_lock_irq_rcu_node(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 보통은 flags가 set되서 요청했을것이다. lock경합 확인
+ */
 	if (!READ_ONCE(rcu_state.gp_flags)) {
 		/* Spurious wakeup, tell caller to go back to sleep.  */
 		raw_spin_unlock_irq_rcu_node(rnp);
@@ -2004,6 +2111,10 @@ static noinline_for_stack bool rcu_gp_init(void)
 	}
 	WRITE_ONCE(rcu_state.gp_flags, 0); /* Clear all flags: New GP. */
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - 이미 시작했으면 return false.
+ */
 	if (WARN_ON_ONCE(rcu_gp_in_progress())) {
 		/*
 		 * Grace period already in progress, don't start another.
@@ -2016,6 +2127,10 @@ static noinline_for_stack bool rcu_gp_init(void)
 	/* Advance to a new grace period and initialize state. */
 	record_gp_stall_check_time();
 	/* Record GP times before starting GP, hence rcu_seq_start(). */
+/*
+ * IAMROOT, 2023.07.29:
+ * - start로 update.
+ */
 	rcu_seq_start(&rcu_state.gp_seq);
 	ASSERT_EXCLUSIVE_WRITER(rcu_state.gp_seq);
 	trace_rcu_grace_period(rcu_state.name, rcu_state.gp_seq, TPS("start"));
@@ -2031,6 +2146,12 @@ static noinline_for_stack bool rcu_gp_init(void)
 	 * of RCU's Requirements documentation.
 	 */
 	WRITE_ONCE(rcu_state.gp_state, RCU_GP_ONOFF);
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp가 새로 시작된다.
+ *   1. gp 
+ *   2. qs를 받아야할 cpu들의 flags들을 1로 update.
+ */
 	rcu_for_each_leaf_node(rnp) {
 		smp_mb(); // Pair with barriers used when updating ->ofl_seq to odd values.
 		firstseq = READ_ONCE(rnp->ofl_seq);
@@ -2040,6 +2161,10 @@ static noinline_for_stack bool rcu_gp_init(void)
 		smp_mb(); // Pair with barriers used when updating ->ofl_seq to even values.
 		raw_spin_lock(&rcu_state.ofl_lock);
 		raw_spin_lock_irq_rcu_node(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 해당노드의 변경사항이 없고 preemption이 된것도 없으면 skip
+ */
 		if (rnp->qsmaskinit == rnp->qsmaskinitnext &&
 		    !rnp->wait_blkd_tasks) {
 			/* Nothing to do on this leaf rcu_node structure. */
@@ -2050,16 +2175,34 @@ static noinline_for_stack bool rcu_gp_init(void)
 
 		/* Record old state, apply changes to ->qsmaskinit field. */
 		oldmask = rnp->qsmaskinit;
+/*
+ * IAMROOT, 2023.07.29:
+ * - 갱신.
+ */
 		rnp->qsmaskinit = rnp->qsmaskinitnext;
 
 		/* If zero-ness of ->qsmaskinit changed, propagate up tree. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 한쪽은 0이고, 다른한쪽은 != 0인경우
+ *   node에 대한 변경사항이 생겼다. 없다가 생겼거나, 있다가 없어진경우.
+ *   rnp를 새로 생성하거나 지운다.
+ */
 		if (!oldmask != !rnp->qsmaskinit) {
+/*
+ * IAMROOT, 2023.07.29:
+ * - 새로 생겼다. 생성시켜야한다.
+ */
 			if (!oldmask) { /* First online CPU for rcu_node. */
 				if (!rnp->wait_blkd_tasks) /* Ever offline? */
 					rcu_init_new_rnp(rnp);
 			} else if (rcu_preempt_has_tasks(rnp)) {
 				rnp->wait_blkd_tasks = true; /* blocked tasks */
 			} else { /* Last offline CPU and can propagate. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 없어졌다. 지워야된다.
+ */
 				rcu_cleanup_dead_rnp(rnp);
 			}
 		}
@@ -2082,6 +2225,10 @@ static noinline_for_stack bool rcu_gp_init(void)
 		raw_spin_unlock_irq_rcu_node(rnp);
 		raw_spin_unlock(&rcu_state.ofl_lock);
 	}
+/*
+ * IAMROOT, 2023.07.29:
+ * - debug용 지연.
+ */
 	rcu_gp_slow(gp_preinit_delay); /* Races with CPU hotplug. */
 
 	/*
@@ -2097,13 +2244,26 @@ static noinline_for_stack bool rcu_gp_init(void)
 	 * process finishes, because this kthread handles both.
 	 */
 	WRITE_ONCE(rcu_state.gp_state, RCU_GP_INIT);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 모든 node를 순회하며 초기화한다.
+ */
 	rcu_for_each_node_breadth_first(rnp) {
 		rcu_gp_slow(gp_init_delay);
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);
 		rdp = this_cpu_ptr(&rcu_data);
 		rcu_preempt_check_blocked_tasks(rnp);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 보고받아야할 mask update. 및 gp_seq 동기화.
+ */
 		rnp->qsmask = rnp->qsmaskinit;
 		WRITE_ONCE(rnp->gp_seq, rcu_state.gp_seq);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 자기의 node인 경우 즉시 변경이 가능하므로 gp 변경사항을 즉시
+ *   반영한다.
+ */
 		if (rnp == rdp->mynode)
 			(void)__note_gp_changes(rnp, rdp);
 		rcu_preempt_boost_start_gp(rnp);
@@ -2111,8 +2271,16 @@ static noinline_for_stack bool rcu_gp_init(void)
 					    rnp->level, rnp->grplo,
 					    rnp->grphi, rnp->qsmask);
 		/* Quiescent states for tasks on any now-offline CPUs. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - off된 cpus(mask)
+ */
 		mask = rnp->qsmask & ~rnp->qsmaskinitnext;
 		rnp->rcu_gp_init_mask = mask;
+/*
+ * IAMROOT, 2023.07.29:
+ * - off된 cpus에 대해서 qs처리를 한다.
+ */
 		if ((mask || rnp->wait_blkd_tasks) && rcu_is_leaf_node(rnp))
 			rcu_report_qs_rnp(mask, rnp, rnp->gp_seq, flags);
 		else
@@ -2146,6 +2314,10 @@ static bool rcu_gp_fqs_check_wake(int *gfp)
 		return true;
 
 	// The current grace period has completed.
+/*
+ * IAMROOT, 2023.07.29:
+ * - 최상위 node가 완료됬고, block task도 없다.
+ */
 	if (!READ_ONCE(rnp->qsmask) && !rcu_preempt_blocked_readers_cgp(rnp))
 		return true;
 
@@ -2154,6 +2326,10 @@ static bool rcu_gp_fqs_check_wake(int *gfp)
 
 /*
  * Do one round of quiescent-state forcing.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - fqs 접수후 정리.
  */
 static void rcu_gp_fqs(bool first_time)
 {
@@ -2179,6 +2355,10 @@ static void rcu_gp_fqs(bool first_time)
 
 /*
  * Loop doing repeated quiescent-state forcing until the grace period ends.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - fqs + 대기
  */
 static noinline_for_stack void rcu_gp_fqs_loop(void)
 {
@@ -2206,10 +2386,22 @@ static noinline_for_stack void rcu_gp_fqs_loop(void)
 		}
 		trace_rcu_grace_period(rcu_state.name, rcu_state.gp_seq,
 				       TPS("fqswait"));
+/*
+ * IAMROOT, 2023.07.29:
+ * - wait 상태로 변경.
+ */
 		WRITE_ONCE(rcu_state.gp_state, RCU_GP_WAIT_FQS);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 모든 qs가 완료될떄까지 대기
+ */
 		(void)swait_event_idle_timeout_exclusive(rcu_state.gp_wq,
 				 rcu_gp_fqs_check_wake(&gf), j);
 		rcu_gp_torture_wait();
+/*
+ * IAMROOT, 2023.07.29:
+ * - fqs 시작.
+ */
 		WRITE_ONCE(rcu_state.gp_state, RCU_GP_DOING_FQS);
 		/* Locking provides needed memory barriers. */
 		/* If grace period done, leave loop. */
@@ -2217,6 +2409,10 @@ static noinline_for_stack void rcu_gp_fqs_loop(void)
 		    !rcu_preempt_blocked_readers_cgp(rnp))
 			break;
 		/* If time for quiescent-state forcing, do it. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 너무 오래걸린경우 rcu fqs처리.,
+ */
 		if (!time_after(rcu_state.jiffies_force_qs, jiffies) ||
 		    (gf & (RCU_GP_FLAG_FQS | RCU_GP_FLAG_OVLD))) {
 			trace_rcu_grace_period(rcu_state.name, rcu_state.gp_seq,
@@ -2254,6 +2450,10 @@ static noinline_for_stack void rcu_gp_fqs_loop(void)
 /*
  * Clean up after the old grace period.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp end처리.
+ */
 static noinline void rcu_gp_cleanup(void)
 {
 	int cpu;
@@ -2268,6 +2468,10 @@ static noinline void rcu_gp_cleanup(void)
 	WRITE_ONCE(rcu_state.gp_activity, jiffies);
 	raw_spin_lock_irq_rcu_node(rnp);
 	rcu_state.gp_end = jiffies;
+/*
+ * IAMROOT, 2023.07.29:
+ * - debug 목적의 gp max기록.
+ */
 	gp_duration = rcu_state.gp_end - rcu_state.gp_start;
 	if (gp_duration > rcu_state.gp_max)
 		rcu_state.gp_max = gp_duration;
@@ -2292,7 +2496,15 @@ static noinline void rcu_gp_cleanup(void)
 	 * period is recorded in any of the rcu_node structures.
 	 */
 	new_gp_seq = rcu_state.gp_seq;
+/*
+ * IAMROOT, 2023.07.29:
+ * - rcu end처리. seq up이면서 idle이 됬다.
+ */
 	rcu_seq_end(&new_gp_seq);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 전체 node를 돌며 반영.
+ */
 	rcu_for_each_node_breadth_first(rnp) {
 		raw_spin_lock_irq_rcu_node(rnp);
 		if (WARN_ON_ONCE(rcu_preempt_blocked_readers_cgp(rnp)))
@@ -2300,6 +2512,10 @@ static noinline void rcu_gp_cleanup(void)
 		WARN_ON_ONCE(rnp->qsmask);
 		WRITE_ONCE(rnp->gp_seq, new_gp_seq);
 		rdp = this_cpu_ptr(&rcu_data);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 자기 node면 즉시 반영.
+ */
 		if (rnp == rdp->mynode)
 			needgp = __note_gp_changes(rnp, rdp) || needgp;
 		/* smp_mb() provided by prior unlock-lock pair. */
@@ -2322,6 +2538,10 @@ static noinline void rcu_gp_cleanup(void)
 
 	/* Declare grace period done, trace first to use old GP number. */
 	trace_rcu_grace_period(rcu_state.name, rcu_state.gp_seq, TPS("end"));
+/*
+ * IAMROOT, 2023.07.29:
+ * - global에 대한 end처리.
+ */
 	rcu_seq_end(&rcu_state.gp_seq);
 	ASSERT_EXCLUSIVE_WRITER(rcu_state.gp_seq);
 	WRITE_ONCE(rcu_state.gp_state, RCU_GP_IDLE);
@@ -2354,6 +2574,14 @@ static noinline void rcu_gp_cleanup(void)
 /*
  * Body of kthread that handles grace periods.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - qs보고(rcu_report_qs_rdp() 참고)
+ *   1. context switch
+ *   2. user
+ *   3. idle
+ *   4. rcu preempt 사용으로인한 추가 조건
+ */
 static int __noreturn rcu_gp_kthread(void *unused)
 {
 	rcu_bind_gp_kthread();
@@ -2364,10 +2592,18 @@ static int __noreturn rcu_gp_kthread(void *unused)
 			trace_rcu_grace_period(rcu_state.name, rcu_state.gp_seq,
 					       TPS("reqwait"));
 			WRITE_ONCE(rcu_state.gp_state, RCU_GP_WAIT_GPS);
+/*
+ * IAMROOT, 2023.07.29:
+ * - INIT올때까지 대기하겠다는것.(note_gp_changes() 참고)
+ */
 			swait_event_idle_exclusive(rcu_state.gp_wq,
 					 READ_ONCE(rcu_state.gp_flags) &
 					 RCU_GP_FLAG_INIT);
 			rcu_gp_torture_wait();
+/*
+ * IAMROOT, 2023.07.29:
+ * - state를 RCU_GP_DONE_GPS으로 변경.
+ */
 			WRITE_ONCE(rcu_state.gp_state, RCU_GP_DONE_GPS);
 			/* Locking provides needed memory barrier. */
 			if (rcu_gp_init())
@@ -2380,6 +2616,10 @@ static int __noreturn rcu_gp_kthread(void *unused)
 		}
 
 		/* Handle quiescent-state forcing. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - fqs관련 처리.
+ */
 		rcu_gp_fqs_loop();
 
 		/* Handle grace-period end. */
@@ -2397,6 +2637,10 @@ static int __noreturn rcu_gp_kthread(void *unused)
  * forcing, that kthread will clean up after the just-completed grace
  * period.  Note that the caller must hold rnp->lock, which is released
  * before return.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - global에 보고. RCU_GP_FLAG_FQS로 설정후 gp thread wakeup
  */
 static void rcu_report_qs_rsp(unsigned long flags)
 	__releases(rcu_get_root()->lock)
@@ -2423,6 +2667,11 @@ static void rcu_report_qs_rsp(unsigned long flags)
  * disabled.  This allows propagating quiescent state due to resumed tasks
  * during grace-period initialization.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - @mask에 해당하는 cpus의 qs를 해당 node로 보고
+ * - 상위 node로 보고할때에는 mask가 보고하는 node들에 대한 mask이다.
+ */
 static void rcu_report_qs_rnp(unsigned long mask, struct rcu_node *rnp,
 			      unsigned long gps, unsigned long flags)
 	__releases(rnp->lock)
@@ -2446,11 +2695,19 @@ static void rcu_report_qs_rnp(unsigned long mask, struct rcu_node *rnp,
 		WARN_ON_ONCE(oldmask); /* Any child must be all zeroed! */
 		WARN_ON_ONCE(!rcu_is_leaf_node(rnp) &&
 			     rcu_preempt_blocked_readers_cgp(rnp));
+/*
+ * IAMROOT, 2023.07.29:
+ * - report.
+ */
 		WRITE_ONCE(rnp->qsmask, rnp->qsmask & ~mask);
 		trace_rcu_quiescent_state_report(rcu_state.name, rnp->gp_seq,
 						 mask, rnp->qsmask, rnp->level,
 						 rnp->grplo, rnp->grphi,
 						 !!rnp->gp_tasks);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 아직ㄷ 보고되지 않은 마스크들이 있으면 상위로 올라가면 안된다. return.
+ */
 		if (rnp->qsmask != 0 || rcu_preempt_blocked_readers_cgp(rnp)) {
 
 			/* Other bits still set at this level, so done. */
@@ -2486,6 +2743,10 @@ static void rcu_report_qs_rnp(unsigned long mask, struct rcu_node *rnp,
  * RCU grace period.  The caller must hold the corresponding rnp->lock with
  * irqs disabled, and this lock is released upon return, but irqs remain
  * disabled.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - qs할게 남아있으면 return. 그게 아니면 상위로 보고.
  */
 static void __maybe_unused
 rcu_report_unblock_qs_rnp(struct rcu_node *rnp, unsigned long flags)
@@ -2526,6 +2787,10 @@ rcu_report_unblock_qs_rnp(struct rcu_node *rnp, unsigned long flags)
  * Record a quiescent state for the specified CPU to that CPU's rcu_data
  * structure.  This must be called from the specified CPU.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - cpu가 자신의 node에게 qs 보고
+ */
 static void
 rcu_report_qs_rdp(struct rcu_data *rdp)
 {
@@ -2538,6 +2803,13 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
 	WARN_ON_ONCE(rdp->cpu != smp_processor_id());
 	rnp = rdp->mynode;
 	raw_spin_lock_irqsave_rcu_node(rnp, flags);
+/*
+ * IAMROOT, 2023.07.29:
+ * - 1. 못받았거나
+ *   2. seq가 다르거나
+ *   3. 한바퀴 돈경우.
+ *   new gp를 해야된다는 의미에서 못받은걸로 설정하고 return.
+ */
 	if (rdp->cpu_no_qs.b.norm || rdp->gp_seq != rnp->gp_seq ||
 	    rdp->gpwrap) {
 
@@ -2553,6 +2825,10 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
 	}
 	mask = rdp->grpmask;
 	rdp->core_needs_qs = false;
+/*
+ * IAMROOT, 2023.07.29:
+ * - 이미 보고한경우 아무것도 안한다.
+ */
 	if ((rnp->qsmask & mask) == 0) {
 		raw_spin_unlock_irqrestore_rcu_node(rnp, flags);
 	} else {
@@ -2560,6 +2836,10 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
 		 * This GP can't end until cpu checks in, so all of our
 		 * callbacks can be processed during the next GP.
 		 */
+/*
+ * IAMROOT, 2023.07.29:
+ * - offloaded가 없으면 accelerate.
+ */
 		if (!offloaded)
 			needwake = rcu_accelerate_cbs(rnp, rdp);
 
@@ -2584,17 +2864,33 @@ rcu_report_qs_rdp(struct rcu_data *rdp)
  *   그렇다면 로컬 rcu_data 상태를 설정하십시오.
  *   그렇지 않으면 이 gp동안 이 CPU가 첫 번째 qs를 
  *   통과했는지 확인하고 해당 사실을 기록하십시오.
+ *
+ * - 정규 qs감지
+ *
+ * - rcu 감지
+ *   context switch : rcu_note_context_switch() 
+ *   user, idle : rcu_flavor_sched_clock_irq()
+ *   preemption : rcu_preempt_deferred_qs_irqrestore()
+ *                rcu_softirq_qs()
  */
 static void
 rcu_check_quiescent_state(struct rcu_data *rdp)
 {
 	/* Check for grace-period ends and beginnings. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp변화 검사.
+ */
 	note_gp_changes(rdp);
 
 	/*
 	 * Does this CPU still need to do its part for current grace period?
 	 * If no, return and let the other CPUs do their part as well.
 	 */
+/*
+ * IAMROOT, 2023.07.29:
+ * - qs보고할 필요가 없으면 return.
+ */
 	if (!rdp->core_needs_qs)
 		return;
 
@@ -2602,6 +2898,10 @@ rcu_check_quiescent_state(struct rcu_data *rdp)
 	 * Was there a quiescent state since the beginning of the grace
 	 * period? If no, then exit and wait for the next call.
 	 */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 해당 cpu에서 qs가 아직 감지가 안된 경우. rcu_qs()
+ */
 	if (rdp->cpu_no_qs.b.norm)
 		return;
 
@@ -2651,6 +2951,10 @@ int rcutree_dying_cpu(unsigned int cpu)
  * prematurely.  That said, invoking it after the fact will cost you
  * a needless lock acquisition.  So once it has done its work, don't
  * invoke it again.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - node 하나 제거.
  */
 static void rcu_cleanup_dead_rnp(struct rcu_node *rnp_leaf)
 {
@@ -2705,6 +3009,10 @@ int rcutree_dead_cpu(unsigned int cpu)
 /*
  * Invoke any RCU callbacks that have made it to the end of their grace
  * period.  Throttle as specified by rdp->blimit.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 실제 cb 수행 함수.
  */
 static void rcu_do_batch(struct rcu_data *rdp)
 {
@@ -2845,6 +3153,15 @@ static void rcu_do_batch(struct rcu_data *rdp)
  * core processing.  If the current grace period has gone on too long,
  * it will ask the scheduler to manufacture a context switch for the sole
  * purpose of providing the needed quiescent state.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - papago
+ *   이 기능은 각 스케줄링 클록 인터럽트에서 호출되며 이 CPU가 사용자 
+ *   모드 또는 유휴 루프와 같은 비컨텍스트 스위치 정지 상태에 있는지 
+ *   확인합니다. 또한 RCU 코어 처리를 예약합니다. 현재 유예 기간이 너무 
+ *   오래 지속되면 필요한 정지 상태를 제공하기 위한 목적으로만 컨텍스트 
+ *   스위치를 제조하도록 스케줄러에 요청합니다.
  */
 void rcu_sched_clock_irq(int user)
 {
@@ -3008,6 +3325,10 @@ static __latent_entropy void rcu_core(void)
 		rcu_nocb_unlock_irqrestore(rdp, flags);
 	}
 
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp가 종료안되고 지연되는 경우에 대한 memory 부족현상 측정
+ */
 	rcu_check_gp_start_stall(rnp, rdp, rcu_jiffies_till_stall_check());
 
 	/* If there are callbacks ready, invoke them. */
@@ -3149,6 +3470,9 @@ static int __init rcu_spawn_core_kthreads(void)
 /*
  * IAMROOT, 2023.07.22:
  * - RCU_SOFTIRQ를 invoke한다.
+ *   cb이 쌓여있다.
+ *   1. gp가 진행중이 아니면 accelate + gp start
+ *   2. gp가 진행중이면 fqs
  */
 static void __call_rcu_core(struct rcu_data *rdp, struct rcu_head *head,
 			    unsigned long flags)
@@ -3191,9 +3515,17 @@ static void __call_rcu_core(struct rcu_data *rdp, struct rcu_head *head,
 		note_gp_changes(rdp);
 
 		/* Start a new grace period if one not already started. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 진행중이 아니면 accelate or + gp start요청.
+ */
 		if (!rcu_gp_in_progress()) {
 			rcu_accelerate_cbs_unlocked(rdp->mynode, rdp);
 		} else {
+/*
+ * IAMROOT, 2023.07.29:
+ * - 이미 진행중인 상태. fqs 요청.
+ */
 			/* Give the grace period a kick. */
 			rdp->blimit = DEFAULT_MAX_RCU_BLIMIT;
 			if (rcu_state.n_force_qs == rdp->n_force_qs_snap &&
@@ -3298,6 +3630,7 @@ static void check_cb_ovld(struct rcu_data *rdp)
  * IAMROOT, 2023.07.22:
  * - @head에 @func에 대한 node를 한개 추가하고 RCU_SOFTIRQ를
  *   invoke한다.
+ * - cb가 쌓여있으면 accelate, gp start 요청
  */
 static void
 __call_rcu(struct rcu_head *head, rcu_callback_t func)
@@ -4519,6 +4852,10 @@ EXPORT_SYMBOL_GPL(rcu_barrier);
  * first CPU in a given leaf rcu_node structure coming online.  The caller
  * must hold the corresponding leaf rcu_node ->lock with interrupts
  * disabled.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - node 한개를 추가.
  */
 static void rcu_init_new_rnp(struct rcu_node *rnp_leaf)
 {

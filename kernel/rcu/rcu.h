@@ -56,6 +56,10 @@ static inline void rcu_seq_set_state(unsigned long *sp, int newstate)
 }
 
 /* Adjust sequence number for start of update-side operation. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp seq를 start로 바꾼다. (0->1) 
+ */
 static inline void rcu_seq_start(unsigned long *sp)
 {
 	WRITE_ONCE(*sp, *sp + 1);
@@ -70,6 +74,11 @@ static inline unsigned long rcu_seq_endval(unsigned long *sp)
 }
 
 /* Adjust sequence number for end of update-side operation. */
+/*
+ * IAMROOT, 2023.07.29:
+ * - seq + 1 (0b100) 처리. 즉 한칸을 올린다.
+ *   ex) 4,5,6,7 -> 8
+ */
 static inline void rcu_seq_end(unsigned long *sp)
 {
 	smp_mb(); /* Ensure update-side operation before counter increment. */
@@ -127,6 +136,11 @@ static inline unsigned long rcu_seq_current(unsigned long *sp)
  * Given a snapshot from rcu_seq_snap(), determine whether or not the
  * corresponding update-side operation has started.
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp가 시작해서 진행중인지 확인한다.
+ *   (s - 1) < *sp 
+ */
 static inline bool rcu_seq_started(unsigned long *sp, unsigned long s)
 {
 	return ULONG_CMP_LT((s - 1) & ~RCU_SEQ_STATE_MASK, READ_ONCE(*sp));
@@ -135,6 +149,10 @@ static inline bool rcu_seq_started(unsigned long *sp, unsigned long s)
 /*
  * Given a snapshot from rcu_seq_snap(), determine whether or not a
  * full update-side operation has occurred.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - gp가 끝나고 idle 중인지 확인한다.
  */
 static inline bool rcu_seq_done(unsigned long *sp, unsigned long s)
 {
@@ -360,9 +378,17 @@ extern void rcu_init_geometry(void);
  * specified state structure (for SRCU) or the only rcu_state structure
  * (for RCU).
  */
+/*
+ * IAMROOT, 2023.07.29:
+ * - 전체에 대해서 최상위부터 순회.
+ */
 #define srcu_for_each_node_breadth_first(sp, rnp) \
 	for ((rnp) = &(sp)->node[0]; \
 	     (rnp) < &(sp)->node[rcu_num_nodes]; (rnp)++)
+/*
+ * IAMROOT, 2023.07.29:
+ * - 전체에 대해서 최상위부터 순회.
+ */
 #define rcu_for_each_node_breadth_first(rnp) \
 	srcu_for_each_node_breadth_first(&rcu_state, rnp)
 
@@ -371,6 +397,10 @@ extern void rcu_init_geometry(void);
  * Note that if there is a singleton rcu_node tree with but one rcu_node
  * structure, this loop -will- visit the rcu_node structure.  It is still
  * a leaf node, even if it is also the root node.
+ */
+/*
+ * IAMROOT, 2023.07.29:
+ * - leaf node에 대해서만 순회한다.
  */
 #define rcu_for_each_leaf_node(rnp) \
 	for ((rnp) = rcu_first_leaf_node(); \
