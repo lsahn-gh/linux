@@ -235,18 +235,31 @@ lr	.req	x30		// link register
  * Pseudo-ops for PC-relative adr/ldr/str <reg>, <symbol> where
  * <symbol> is within the range +/- 4 GB of the PC.
  */
+/*
+ * IAMROOT, 2022.01.26:
+ *  - adr_l : 4KB page 크기 단위로 주소값을 계산하기 위한 매크로이며
+ *            adrp로 인한 하위 12 bits 절삭을 add로 보정하여 최종 주소값을
+ *            계산한다.
+ *  - ldr_l : +/- 4GB 범위 내에서 load 명령어를 수행하기 위한 매크로
+ *  - str_l : +/- 4GB 범위 내에서 store 명령어를 수행하기 위한 매크로
+ *
+ *  - adrp Xd, label : PC-relative address of page calculation instruction
+ *      PC reg 값에 @label 주소를 더하되 4KB page 크기로 절삭하여 @Xd에 저장.
+ *      예) 4k는 12 bits 이므로 PC reg 값 하위 12 bits는 0으로 채워진 뒤에
+ *          @label의 하위 12 bits를 제외한 나머지 bits를 PC와 더하여 @Xd에
+ *          저장한다.
+ *
+ *      최대 이동 가능 범위는 +/- 4GB 이다.
+ *      계산) immhi + immlo = 21 이며 sign 1 bit를 제외하면 20 bits가 된다.
+ *            +/- 2 ^ 20 개 page 만큼 이동할 수 있고 기본 단위는 4KB이므로
+ *            접근 가능 범위는 (2 ^ 20) * 4KB = 4GB가 된다.
+ *      이동 가능 page 갯수 : +/- 2 ^ 20 개
+ *      접근 가능 범위      : +/- 4GB
+ */
 	/*
 	 * @dst: destination register (64 bit wide)
 	 * @sym: name of the symbol
 	 */
-/*
- * IAMROOT, 2022.01.26:
- *  - adrp Xd, label
- *  +-4GB 범위로 동작 가능하며 label위치의 주소를 4kb단위로 가져온다.
- *
- *  adrp를 통해서 4kb 이후만 가져왔으므로 4kb 이하 범위도 가져와서
- *  add를 시켜 주소를 완성 시키는 개념이다.
- */
 	.macro	adr_l, dst, sym
 	adrp	\dst, \sym
 	add	\dst, \dst, :lo12:\sym
@@ -283,7 +296,7 @@ lr	.req	x30		// link register
  *         adrp x5, idmap_ptrs_per_pgd
  *         str  x4, [x5, :lo12:idmap_ptrs_per_pgd]
  *
- *         idmpa_ptrs_per_pgd <- x4 값을 저장
+ *         idmap_ptrs_per_pgd <- x4 값을 저장
  */
 	.macro	str_l, src, sym, tmp
 	adrp	\tmp, \sym

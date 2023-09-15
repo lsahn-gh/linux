@@ -44,6 +44,17 @@
  * - 컴파일 타임에(페이지 프레임 크기와 페이지 테이블 사용 단계) 결정
  *   -> 0xFFFF_****_****_****
  *   -> KASLR 옵션을 사용하는 경우 실제 커널 가상 주소는 런타임에 변경된다.
+ *
+ * KERNEL_START가 __PHYS_OFFSET으로 alias된 이유는 현재 mmu가 켜져있지 않아
+ * VA가 동작하지 않으며 대신 code readability를 높이기 위해 __PHYS_OFFSET란
+ * 이름으로 정의해둔 것임.
+ *
+ * - 예) VA_BITS = 48 bits 라면?
+ *      PAGE_OFFSET         = 0xffff_0000_0000_0000
+ *      PAGE_END            = 0xffff_8000_0000_0000
+ *      BPF_JIT_REGION_END  = 0xffff_8000_0800_0000 (SZ_128M)
+ *      MODULES_END         = 0xffff_8000_1000_0000 (SZ_128M)
+ *      MODULES_END == KIMAGE_VADDR == _text == KERNEL_START
  */
 #define __PHYS_OFFSET	KERNEL_START
 
@@ -138,6 +149,10 @@
  *   소스 코드가 여러개로 분리되어 있다면 linker에서 해당 symbol을
  *   찾을 수 있도록 사용하는 지시자.
  *
+ * - b와 bl의 차이
+ *   b  : 분기 이후에 이전의 흐름으로 돌아가지 않고 계속 진행할 때 사용.
+ *   bl : 분기 후 로직을 수행하고 분기 이전의 주소로 복귀하여 계속 수행하고자
+ *        할때 사용함. (함수 호출 후 return 시)
  */
 SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
@@ -177,7 +192,8 @@ SYM_CODE_END(primary_entry)
  */
 /*
  * IAMROOT, 2021.07.17:
- * - boot arguments를 boot_args로 옮긴다.
+ * - bootloader에서 x0, x1, x2, x3 reg로 boot arguments을 넘겨주는데 이 값들을
+ *   boot_args 배열에 저장하는 작업을 수행한다.
  *
  * - SYM_CODE_START_LOCAL() 해석
  *      .align 2;
@@ -186,36 +202,35 @@ SYM_CODE_END(primary_entry)
 SYM_CODE_START_LOCAL(preserve_boot_args)
 /*
  * IAMROOT, 2022.01.26:
- * x0, x1, x2, x3으로 들어온 boot arg들을 x21, boot_args에 옮기는
- * 작업을 수행한다.
- * (primary_entry 주석에서 x21은 FDT pointer를 저장하기로 했었다.)
+ * - x0에 있는 FDT phys addr을 x21에 옮긴 후 boot_args주소를 x0에 저장하고
+ *   stp 명령어를 통해서 x21, x1, x2, x3 값을 boot_args[0..3]에 저장한다.
+ *   (primary_entry 주석에서 x21은 FDT pointer를 저장하기로 했었다.)
  *
- * 일단 x0에 있는 fdt를 x21에 옮겨 놓은 다음에 boot_args주소를 x0에 저장해놓고
- * stp 명령어를 통해서 x0, x0 + 8, x0 + 16, x0 + 24에 접근하면서
- * x21(x0), x1, x2, x3을 넣는다.
- *
- * 현재 kernel version에서 arm64는 x1, x2, x3인자는 안쓰고 있기 때문에 0으로
- * 들어와야 될것이다. (setup_arch의 마지막 boot_args 부분 참고)
+ * - Arm64는 현재 kernel version에서 x1, x2, x3 인자는 안쓰니 0으로 초기화
+ *   될 것이다. (setup_arch의 마지막 boot_args 부분 참고)
  */
 	mov	x21, x0				// x21=FDT
-
 /*
- * IAMROOT, 2021.07.17:
+ * IAMROOT, 2023.09.07:
  * x0 = &boot_args[0]
  */
 	adr_l	x0, boot_args			// record the contents of
 /*
  * IAMROOT, 2021.07.17:
- * str x21, boot_args
- * str x1, boot_args + 8 = boot_args[1];
+ * - stp Xt1, Xt2, [Xn] : @Xt1, @Xt2 reg에 저장된 값을 @Xn 주소에 저장하며
+ *                        @Xt1은 [@Xn] + 0, @Xt1은 [@Xn] + 8로 접근함.
+ *                        stp 명령어는 두개의 str 명령어를 수행한 것과 동일한
+ *                        결과를 가짐.
+ *
+ * - @x21 = FDT, @x1, @x2, @x3에 저장된 값을 boot_args(@x0) 배열 0, 1, 2, 3에
+ *   순서대로 저장함.
+ *
+ * str x21, boot_args[0] (boot_args)
+ * str x1, boot_args[1]  (boot_args + 8)
+ * str x2, boot_args[2]  (boot_args + 16)
+ * str x3, boot_args[3]  ...
  */
 	stp	x21, x1, [x0]			// x0 .. x3 at kernel entry
-/*
- * IAMROOT, 2021.07.17:
- *
- * str x2, boot_args[2];
- * str x3, boot_args[3];
- */
 	stp	x2, x3, [x0, #16]
 
 /*
@@ -225,24 +240,23 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
  * sy : Any - Any : ALL (시스템에 있는 모든 코어)
  *
  * - Modern SMP arch에서 발생할 수 있는 문제
- *   stp와 dcache_inval_poc 중 어느 것이 더 먼저 수행될 지 보장하지 못함.
+ *   stp와 dcache_inval_poc 중 어느 것이 더 먼저 수행될지 보장하지 못함.
  *   dcache_inval_poc가 먼저 수행되는것을 방지하고 stp 명령어의 수행 결과를
- *   보장하기 위해 memory barrier 명령어를 이용한다.
- * - 캐시와의 관계성은?
- *   x0 .. x3까지의 모든 데이터를 boot_args에 저장하고 난 뒤 확실하게
- *   정리하고, 그 이후에 데이터 캐시를 클린하도록 중간에 베리어 명령을 수행한다.
+ *   보장하기 위해 memory barrier를 사용한다.
+ *
+ * - cache와의 관계성은?
+ *   x0 .. x3까지의 모든 데이터를 boot_args에 저장하고 난 뒤 확실하게 정리하고
+ *   그 이후에 데이터 캐시를 클린하도록 중간에 베리어 명령을 수행한다.
  */
 	dmb	sy				// needed before dc ivac with
 						// MMU off
 
 /*
  * IAMROOT, 2021.07.17:
- * 0x20: boot_args 배열의 전체 크기, sizeof(boot_args)
- * x0: &boot_args
- * x1: boot_args의 end address
- *
- * boot_args의 크기가 20byte이니 사이즈를 계산해 start address, end address를
- * 넘긴다.
+ * - boot_args의 start, end addr을 @x0, @x1에 각각 저장하고 args로 넘긴다.
+ *   x0   : 'boot_args' 시작 주소
+ *   x1   : 'boot_args' 끝 주소
+ *   0x20 : 'boot_args' 배열 크기
  */
 	add	x1, x0, #0x20			// 4 x 8 bytes
 	b	dcache_inval_poc		// tail call
