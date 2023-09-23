@@ -740,24 +740,31 @@
 #define SCTLR_EL1_CP15BEN	(BIT(5))
 #define SCTLR_EL1_SA0		(BIT(4))
 
+/* IAMROOT, 2023.09.19: TODO
+ * - B(11): reserved
+ *   B(20): reserved
+ *   B(22): reserved
+ *   B(28): nTLSMD: No Trap Load Multiple and Store Multiple
+ *                  to Device-nGRE/Device-nGnRE/Device-nGnRnE memory.
+ *   B(29): LSMAOE: Load Multiple and Store Multiple Atomicity
+ *                  and Ordering Enable.
+ */
 #define SCTLR_EL1_RES1	((BIT(11)) | (BIT(20)) | (BIT(22)) | (BIT(28)) | \
 			 (BIT(29)))
 
 #ifdef CONFIG_CPU_BIG_ENDIAN
-#define ENDIAN_SET_EL1		(SCTLR_EL1_E0E | SCTLR_ELx_EE)
-/*
- * IAMROOT, 2021.07.24:
- * SCTLR = System Control Register
- * E0E, EE 를 통해 Endian 을 설정한다.
+/* IAMROOT, 2021.07.24:
+ * E0E, EE bits를 통해 big-endian을 설정한다.
  */
+#define ENDIAN_SET_EL1		(SCTLR_EL1_E0E | SCTLR_ELx_EE)
 #else
 #define ENDIAN_SET_EL1		0
 #endif
 
-/*
- * IAMROOT, 2021.07.24:
- * - SCTLR_EL1_RES1: SCTLR 예약 비트(RES1) 5개
- * - ENDIAN_SET_EL1: Endian 설정
+/* IAMROOT, 2021.07.24:
+ * - SCTLR = System Control Register
+ *   SCTLR_EL1_RES1: SCTLR 예약 비트(RES1) 5개
+ *   ENDIAN_SET_EL1: endian 설정
  *   -> CONFIG_CPU_BIG_ENDIAN가 true이면 big endian, 아니면 little endian이다.
  */
 #define INIT_SCTLR_EL1_MMU_OFF \

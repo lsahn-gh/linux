@@ -372,29 +372,43 @@ alternative_endif
  * read_ctr - read CTR_EL0. If the system has mismatched register fields,
  * provide the system wide safe value from arm64_ftr_reg_ctrel0.sys_val
  */
-	.macro	read_ctr, reg
-/* IAMROOT, 2021.11.12:
- * - 5.10 -> 5.15 변경점
- * __KVM_NVHE_HYPERVISOR__ 이 ifndef 없었고 주석이 달린 부분만 있었는데
- * __KVM_VHE_HYPERVISOR__이 추가 되면서 else도 생김
+/* IAMROOT, 2023.09.16: TODO
+ * - CTR_EL0(Cache Type Register) 레지스터를 읽어 @reg에 저장한다.
+ *   CTR_EL0는 캐시 타입에 대한 정보를 가지고 있는 레지스터이다.
+ *
+ * - CTR_EL0[63:0]
+ *      DIC[29]        : Arm Doc 참고 필요
+ *      IDC[28]        : Arm Doc 참고 필요
+ *      CWG[27:24]     : Arm Doc 참고 필요. Cache Writeback Granule.
+ *      ERG[23:20]     : Arm Doc 참고 필요. Exclusive Reservation Granule.
+ *      DminLine[19:16]: data cache, unified cache line에서 최소 word 갯수.
+ *                       최대 0xF(4bits)이므로 2^15 == 32k words 까지 가능.
+ *                       1 word == 4bytes 라면 128KB 크기임.
+ *      L1Ip[15:14]    : L1 i-cache policy 종류, index/tag policy에 대한 내용.
+ *                  00 - VMID aware Physical Index, Physical tag (VPIPT)
+ *                  01 - ASID-tagged Virtual Index, Virtual Tag (AIVIVT)
+ *                  10 - Virtual Index, Physical Tag (VIPT)
+ *                  11 - Physical Index, Physical Tag (PIPT)
+ *      IminLine[3:0]  : instruction cache line에서 최소 word 갯수.
+ *                       최대 0xF(4bits)이므로 2^15 == 32k words 까지 가능.
+ *                       1 word == 4bytes 라면 128KB 크기임.
+ *   else
+ *      reserved bits
  */
+	.macro	read_ctr, reg
 #ifndef __KVM_NVHE_HYPERVISOR__
-/*
- * IAMROOT, 2022.01.26:
- * - 일단 ctr_el0를 읽는 동작을 취하고, 나중에 ARM64_MISMATCHED_CACHE_TYPE
- *   라면 대체 된다.
+
+/* IAMROOT, 2023.09.16:
+ * - ARM64_MISMATCHED_CACHE_TYPE가 정의되지 않으면 CTR_EL0 레지스터를 읽어
+ *   @reg에 저장하고 nop을 통해 instruction을 align 한다.
+ *   이는 instruction size mismatch가 발생하지 않도록 하기 위함이다.
+ *
+ * - ARM64_MISMATCHED_CACHE_TYPE가 정의되면 *_else에 정의된 instr 실행.
  */
 alternative_if_not ARM64_MISMATCHED_CACHE_TYPE
-/* IAMROOT, 2021.07.17:
- * ctr_el0: Cache Type Register
- */
 	mrs	\reg, ctr_el0			// read CTR
-/* IAMROOT, 2021.07.17: 1 cycle 휴식 */
 	nop
 alternative_else
-/* IAMROOT, 2021.07.17:
- * Cache Type mismatched 라면 나중에 alternative될때 이 code로 대체된다.
- */
 	ldr_l	\reg, arm64_ftr_reg_ctrel0 + ARM64_FTR_SYSVAL
 alternative_endif
 #else
@@ -438,10 +452,19 @@ alternative_cb_end
  * dcache_line_size - get the safe D-cache line size across all CPUs
  */
 /* IAMROOT, 2021.07.17:
- * - Cache Type Register에서 최소 데이터 캐시 라인을 바이트로 알아오기.
- *   reg = 4 * 2^(CTR_EL0.DminLine)
+ * - Cache Type Register을 통해 d-cache의 smallest line 크기를 바이트로 해석.
+ *   CTR_EL0.DminLine의 default unit이 word 이므로 'bytes per word'로 정수 4를
+ *   미리 @reg에 저장하고 lsl 명령어 수행함.
+ *
+ *   reg = 4(bytes per word) * 2^(CTR_EL0.DminLine)
  *       = 4 << CTR_EL0.DminLine
  *   예) reg = 4 * 2^4 = 64 bytes
+ *
+ * - ubfm Xd, Xn, immr, imms: Unsigned Bitfield Move ...
+ *   imms >= immr: imms - immr + 1 크기만큼의 bits를 복사하여 @Xd에 저장하되
+ *                 나머지 bits는 모두 0으로 채움.
+ * - lsl Xd, Xn, shift: Logical Shift Left (of bits) ...
+ *   @Xn 값을 왼쪽으로 @shift 만큼 이동하고 나머지는 0으로 채움.
  */
 	.macro	dcache_line_size, reg, tmp
 	read_ctr	\tmp

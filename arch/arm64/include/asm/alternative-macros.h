@@ -154,93 +154,83 @@
 /*
  * Begin an alternative code sequence.
  */
-/* IAMROOT, 2021.07.17:
- * - 5.10 -> 5.15 변경점.
- *   arch/arm64/include/asm/alternative.h 에서 위치 변경
- *-------------------------
- * - c의 ALTERNATIVE의 assembly version.
- *   alternative가 일어나기전엔 codeX로 동작하다가
- *   alternative가 되면 codeA가 codeY로 변경된다.
- * - codeY는 subsecion이라는 codeX의 근처 section에 위치하고 있다가
- *   후에 alternative하는 code에 의해 대체되는 방식이다.
- * - cap에 따라서 alternative하는지를 판단한다.
- *-------------------------
- * - example( alternative_if를 다음과 같이 쓴다고 가정)
+/* IAMROOT, 2023.09.17:
+ * - Kernel booting 및 runtime에 instruction을 swap 하기 위한 macro 정의.
+ *   이러한 macro는 performance 또는 bug workaround 패치를 위해 사용된다.
+ *   @cpucap에 사용되는 cap들은 kernel 빌드 타임에 script를 통해 정의되며
+ *   정수로 매핑되어 있다.
  *
- *.macro example_macro
- * alternative_if EXAMPLE_CAP
- *	codeA
- * alternative_else
- *  codeB
- * alternative_endif
+ *   예) ARM64_MISMATCHED_CACHE_TYPE
+ *       kernel 빌드 타임에 생성되는 define이고 cpucaps.h 파일에 정의.
+ *       define의 갯수에 따라 값이 바뀌긴 하지만 make defconfig을 사용하면
+ *       정수 34로 매핑된다.
  *
- * 매크로를 확장하면 다음과 같다
- * ----------
- *  1)
- * .set .Lasm_alt_mode, 1
- *	.pushsection .altinstructions, "a"
- *		altinstruction_entry 663f, 661f, \cap, 664f-663f, 662f-661f
- *	.popsection
- *  2)
- *	.subsection 1
- *	.align 2
- *	661:
- * ----------
+ * - alternative framework 레퍼런스
+ *   https://blogs.oracle.com/linux/post/exploring-arm64-runtime-patching-alternatives
+ *   https://sourceware.org/binutils/docs-2.41/as.html
  *
- *	codeA
+ * - alternative_if:
+ *   @cpucap이 지원되는 시스템이면 codeB(.text 0)로 동작하고
+ *             지원되지 않는 시스템이면 codeA(.text 1)로 변경되어 동작한다.
  *
- * ----------
- * 662:
- * 3)
- *	.if .Lasm_alt_mode==0
- *		.subsection 1
- *	.else
- *		.previous
- *	.endif
- * 663:
- * ----------
- * 4)
+ *   alternative_if \cpucap
+ *      codeA
+ *   alternative_else
+ *      codeB
+ *   alternative_endif
  *
- * codeB
+ * - alternative_if_not:
+ *   @cpucap이 지원되지 않는 시스템이면 codeA(.text 0)를 실행하고
+ *             지원되는 시스템이라면 codeB(.text 1)로 동작한다.
  *
- * ----------
- * 664:
- *	.org	. - (664b-663b) + (662b-661b)
- *	.org	. - (662b-661b) + (664b-663b)
- *	.if .Lasm_alt_mode==0
- *	.previous
- *	.endif
- * ----------
+ *   alternative_if_not \cpucap
+ *      codeA
+ *   alternative_else
+ *      codeB
+ *   alternative_endif
  *
- *	1) 일단 현재 위치의 codeA, codeB의 크기와 위치, capacity를
- *	altinstructions section에 저장한다. 후에 alternative를 하는 함수에서
- *	해당 section을 보고 대체할것이다.
- *	2) 2 ~3 까지. 즉 codeA를 일단 subsection으로 고려한다.
- *	3) .Lasm_alt_mode가 0이면 subseciont을 해당 위치로 갱신하고 하고 아니면
- *	3 전까지 subsection으로 쓴다는 얘기가 된다.
- *	1에서 Lasm_alt_mode가 1이였으므로 codeA위치는 subsection가 될것이다.
- *	4) codeB가 현재 위치에 들어가있을것이다.
- *
- * -----------------------------------
-*  1) 
- * alternative_if EXAMPLE_CAP
- *	codeA
- * alternative_else
- *  codeB
- * alternative_endif
- *
- * codeB로 동작하다가 alternative에서 EXAMPLE_CAP이 지원되는 시스템인게
- * 확인되면 codeA로 동작할것이다.
- *
- * 2)
- * alternative_if_not EXAMPLE_CAP
- *	codeA
- * alternative_else
- *  codeB
- * alternative_endif
- *
- * codeA로 동작하다가 alternative에서 EXAMPLE_CAP이 지원되는 시스템인게
- * 확인되면 codeB로 동작할것이다.
+ * ----------------------------------------------
+ * - alternative_if_not 예제는 아래처럼 확장된다.
+ *  # alternative_if_not cap 시작
+ *      .set .Lasm_alt_mode, 0
+ *      .pushsection .altinstructions, "a"
+ *  # altinstruction_entry 시작 (661f, 663f, \cap, 662f-661f, 664f-663f)
+ *      .word 661f - .
+ *      .word 663f - .
+ *      .hword \cap
+ *      .byte \size of codeA
+ *      .byte \size of codeB
+ *  # altinstruction_entry 끝
+ *      .popsection
+ *  661:
+ *  # alternative_if_not cap 끝
+ *          // 현재 section == .text 0
+ *      ...
+ *      codeA
+ *      ...
+ *  # alternative_else 시작
+ *  662:
+ *      .if .Lasm_alt_mode==0
+ *      .subsection 1
+ *          // 현재 section == .text 1
+ *      .else
+ *      .previous
+ *          // alternative_if 와 함께 쓰이며 이때는 .text 0으로 변경.
+ *          // 현재 section == .text 0
+ *      .endif
+ *  663:
+ *  # alternative_else 끝
+ *      ...
+ *      codeB
+ *      ...
+ *  # alternative_endif 시작
+ *  664:
+ *      .org	. - (664b-663b) + (662b-661b)
+ *      .org	. - (662b-661b) + (664b-663b)
+ *      .if .Lasm_alt_mode==0
+ *      .previous
+ *      .endif
+ *  # alternative_endif 끝
  */
 .macro alternative_if_not cap
 	.set .Lasm_alt_mode, 0
@@ -250,6 +240,9 @@
 661:
 .endm
 
+/* IAMROOT, 2023.09.17:
+ * - *_else와 함께 쓰기 위해 미리 .text 1 subsection으로 변경한다.
+ */
 .macro alternative_if cap
 	.set .Lasm_alt_mode, 1
 	.pushsection .altinstructions, "a"
@@ -270,6 +263,14 @@
 
 /*
  * Provide the other half of the alternative code sequence.
+ */
+/* IAMROOT, 2023.09.17:
+ * - .subsection @num: 현재 subsection을 @num로 변경한다.
+ *                     예) 현재 .text 0 이라면 .subsection 1 호출시
+ *                         .text 1로 변경된다.
+ * - .previous: 직전에 참조한 section, subsection으로 변경한다.
+ *              예) 현재 .text 1이고 이전에 .text 0에 있었다면 .previous 호출시
+ *                  .text 0으로 변경된다.
  */
 .macro alternative_else
 662:

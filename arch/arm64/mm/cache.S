@@ -140,9 +140,7 @@ SYM_FUNC_END(dcache_clean_pou)
  *	- start   - kernel start address of region
  *	- end     - kernel end address of region
  */
-SYM_FUNC_START_LOCAL(__dma_inv_area)
-/*
- * IAMROOT, 2021.07.17: 
+/* IAMROOT, 2021.07.17:
  *
  * - SYM_FUNC_START_PI(x) 해석:
  *   - SYM_FUNC_START_ALIAS(__pi_##x): 하나의 FUNC에 1개 이상의 이름을
@@ -158,7 +156,36 @@ SYM_FUNC_START_LOCAL(__dma_inv_area)
  *
  *   - BTI_C
  *          hint 34;
+ *
+ * - SYM_FUNC_START_LOCAL(x): .globl 없이 local에서만 symbol이 보이도록 됨.
+ * - __dma_inv_area
+ *   DMA d-cache line을 inval 하기 위해 dcache_inval_poc 기능을 그대로
+ *   사용하되 symbol alias만 생성함.
+ *
+ * - dcache_inval_poc 코드를 C lang으로 변환하면 아래와 같음.
+ * dcache_inval_poc(char * start, int end)
+ * {
+ *      int dcache_min_line = dcache_line_size(); // 64로가정 0x40
+ *      int mask = dcache_min_line - 1; // 0x40 - 1 = 0x3f
+ *
+ *      if (end & mask) {
+ *          end &= ~(mask);
+ *          clean_invalidated_cache(end); // dc civac, x1
+ *      }
+ *
+ *      if (start & mask) {
+ *          start &= ~(mask);
+ *          clean_invalidated_cache(start);
+ *          start += dcache_min_line;
+ *      }
+ *
+ *      while (start < end) {
+ *          invalidated_cache(start);
+ *          start += dcache_min_line;
+ *      }
+ * }
  */
+SYM_FUNC_START_LOCAL(__dma_inv_area)
 SYM_FUNC_START_PI(dcache_inval_poc)
 	/* FALLTHROUGH */
 
@@ -167,50 +194,36 @@ SYM_FUNC_START_PI(dcache_inval_poc)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
- /*
-  * IAMROOT, 2021.07.18: 
-  * dcache_inval_poc(char * start, int end)
-  * {
-  *		int dcache_min_line = dcache_line_size();	// 64로가정 0x40
-  *		int mask = dcache_min_line - 1;		// 0x40 - 1 = 0x3f
-  *
-  *		if(end & mask) {
-  *			end &= ~(mask);
-  *      	clean_invalidated_cache(end); // dc civac, x1
-  *     }
-  *        
-  *     if(start & mask) {
-  *			start &= ~(mask);
-  *			clean_invalidated_cache(start);
-  *			start += dcache_min_line;
-  *		}
-  *
-  *		while(start < end) {
-  *			invalidated_cache(start);
-  *			start += dcache_min_line;
-  *		}
-  * }
-  */
+/* IAMROOT, 2023.09.17:
+ * - CTR_EL0 reg에서 d-cache line의 크기를 읽어서 @x2에 저장.
+ */
 	dcache_line_size x2, x3
-/* IAMROOT, 2021.07.17: 
- * - x0: start address
- * - x1: end address
- * - x2: cache line size
+
+/* IAMROOT, 2021.07.17:
+ * - xN regs 중간 현황.
+ *   x0: start address
+ *   x1: end address
+ *   x2: d-cache line size in bytes
+ */
+
+/* IAMROOT, 2023.09.17:
+ * - end addr(@x1)의 align을 확인하기 위함. 여기서 align은 @x2의
+ *   d-cache line size 이고 -1을 하면 align을 위한 mask를 계산할 수 있음.
  *
- * End line aligned를 체크하기 위해서 수행하는 인스트럭션
- * 인스트럭션 결과로 하위 모든 Bit가 Set
+ * 예) x3 = 0x3F (0x40 - 1) -> (x2는 64 bytes로 가정)
  *
- * 예) x3 = 0x3F (0x40 - 1) -> (x2가 64인 경우)
+ * - tst Xn, Xm : Xn과 Xm을 and로 연산하고 결과는 CPSR reg의 NZCV bits에서
+ *   Z가 영향을 받음. tst instr은 ANDS XZR와 같고 alias 된 것임.
  */
 	sub	x3, x2, #1
-/* IAMROOT, 2021.07.17: 
- * tst r0, r1 : r0와 r1을 AND 연산한 것처럼 
- * -> CPSR 의 NZCV Flag가 결정 
- * -> Z가 영향을 받음
- */
 	tst	x1, x3				// end cache line aligned?
-/* IAMROOT, 2021.07.17: 
- * bic x0, x1, x2 : x1 & ~x2 의 결과에서 1을 다 Clear한 후 x0에 저장
+
+/* IAMROOT, 2021.07.17:
+ * - bic x1, x1, x3 : @x3는 mask 역할을 하여 mask에 해당하는 @x1의
+ *                    하위 비트를 모두 0으로 설정.
+ *
+ *   x3 = NOT(x3)   : bits 반전 (mask 역할)
+ *   x1 = x1 and x3 : and 연산
  *
  * 예) cache line size = 64 bytes
  *   x1 = 0x0402_0321 (unaligned)
@@ -219,29 +232,40 @@ SYM_FUNC_START_PI(dcache_inval_poc)
  *   x1 = 0x0402_0300 (aligned)
  */
 	bic	x1, x1, x3
-/* IAMROOT, 2021.07.17: 
- * b.eq : 위의 tst 명령어로 인해서 Z flag = 1 이라면 1f 실행 
- * 1f: 밑의 Label 1을 의미
- */	
+
+/* IAMROOT, 2023.09.18:
+ * - 위 tst 명령어가 실행되고 난 뒤 Z flag가 1로 설정되면 '1:' label로 점프.
+ *   f: forward
+ *   b: backward
+ */
 	b.eq	1f
-/* IAMROOT, 2021.07.17: 
- * D : Data cache
- * U : Unified cache
- * dc : 통합 캐시까지 모두 Clear
- * Clean : Dirty bit가 marking된 cache line에 한하여
- *         next level cache (unified L2) or main memory에
- *         writing 후 dirty bit clear 수행.
- *         (write-back policy 일때 적용되는 규칙)
- * Invalidate : Cache line의 V Status를 Clear
+
+/* IAMROOT, 2021.07.17:
+ * - start/end addr가 cache line size에 맞춰 align 되지 않으면 아래 수행.
+ *   boot_args[0], [3]: civac 적용
+ *            [1], [2]: ivac 적용
+ *   1. [0]과 [1]의 addr를 align.
+ *   2. 시작과 끝 주소에 대해서만 civac 적용.
+ *   - cache controller는 clean & invalidate 작업에 대해 cache line size
+ *     만큼 진행하나 align 되어 있지 않다면 해당 주소와 연관되어 있는
+ *     main memory의 다른 부분이 함께 cache linefill된 경우이며 해당 부분의
+ *     데이터 보호, cache coherency를 위하여 civac 명령어로 처리한다.
+ *
+ * - D     : data cache
+ *   U     : unified cache
+ *   dc    : d-cache maintenance 명령어이며 통합 캐시까지 모두 clear.
+ *   clean : dirty bit가 marking된 cache line에 한하여
+ *           next level cache (unified L2) or main memory에 writing 후
+ *           dirty bit clear 수행. (write-back policy 일때 적용되는 규칙)
+ *   invalidate : cache line의 v status를 clear
  *
  * - Point of Coherency 의미
- *   For a particular address, the PoC is the point at which all
- *   observers, for example, cores, DSPs, or DMA engines,
- *   that can access memory, are guaranteed to see the same copy of a memory
- *   location. Typically, this(PoC point) is the main external system memory.
- *   - D-Cache와 관련이 있다.
- *   - Main memory가 PoC point 이고 L1, L2, L3 모든 cache line에 대하여
- *     clean 수행.
+ *   the PoC is the point at which all observers, for example, cores, DSPs,
+ *   or DMA engines, that can access memory, are guaranteed to see the same
+ *   copy of a memory location. Typically, this(PoC point) is the main external
+ *   system memory.
+ *   - d-cache와 관련이 있다.
+ *   - main memory가 PoC이고 L1, L2, L3의 모든 cache line에 대해 clean 수행.
  *
  * - Point of Unification 의미
  *   The PoU for a core is the point at which the instruction and
@@ -250,18 +274,8 @@ SYM_FUNC_START_PI(dcache_inval_poc)
  *   would be the point of unification in a system with Harvard level 1 caches and
  *   a TLB for caching translation table entries.
  *   If no external cache is present, main memory would be the Point of Unification.
- *   - I-Cache와 관련이 있다.
- *   - Unified (L2/L3) cache 까지만 적용
- *
- * - 시작/끝 주소가 cache line size에 맞춰 align이 필요한 경우
- *   - boot_args[0], [3]: civac 적용
- *              [1], [2]: ivac 적용
- *   1. [0]과 [1]의 address를 align.
- *   2. 시작과 끝 주소에 대해서만 civac 적용.
- *     - cache controller는 clean & invalidate 작업에 대해 cache line size
- *       만큼 진행하나 align 되어 있지 않다면 해당 주소와 연관되어 있는
- *       main memory의 다른 부분이 함께 cache linefill된 경우이며 해당 부분의
- *       cache coherency를 위하여 civac 명령어로 처리함.
+ *   - i-cache와 관련이 있다.
+ *   - unified (L2/L3) cache 까지만 적용.
  *
  * - dc 명령어와 cache controller의 관계
  *   dc 명령어가 수행되면 cache controller의 queue에 push 되고 controller는
@@ -269,27 +283,27 @@ SYM_FUNC_START_PI(dcache_inval_poc)
  *   요청이 들어오면 10개는 바로 push하고 90개는 대기하게 된다.
  */
 	dc	civac, x1			// clean & invalidate D / U line
-/*
- * IAMROOT, 2021.07.24: 
- * data cache 정렬이 되지 않은 시작과 끝지점에 대해서는 
- * 데이터 보호를 위해 clean 작업을 수행한다.
- */
 1:	tst	x0, x3				// start cache line aligned?
 	bic	x0, x0, x3
 	b.eq	2f
 	dc	civac, x0			// clean & invalidate D / U line
 	b	3f
+
+/* IAMROOT, 2023.09.18:
+ * - cache line size에 맞춰 정렬이 된 [시작 or] 중간 부분(boot_args[1..2])은
+ *   ivac을 통해 invalidate만 수행한다.
+ */
 2:	dc	ivac, x0			// invalidate D / U line
 3:	add	x0, x0, x2
 	cmp	x0, x1
 	b.lo	2b
-/*
- * IAMROOT, 2021.07.24: 
+
+/* IAMROOT, 2021.07.24:
+ * - pending load/store, cache maintenance, TLB maintenance 명령어의 수행
+ *   결과를 다음 명령어가 실행되기 전에 완료(보장)하기 위하여 사용.
  *
- * dsb: Data Synchronization Barrier
- * sy : ALL cores
- * - Pending load/store, cache maintenance insts, TLB maintenance insts의
- *   수행 결과를 다음 명령어가 실행되기 전에 완료(보장)하기 위하여 사용.
+ * - dsb: Data Synchronization Barrier
+ *   sy : ALL cores
  * - dsb 명령어를 수행하게 되면 cache controller는 queue에 대기중인 명렁어
  *   처리가 끝날때까지 input을 hold하고 queue pool을 처리한다.
  */

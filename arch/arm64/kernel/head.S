@@ -37,8 +37,7 @@
 
 #include "efi-header.S"
 
-/*
- * IAMROOT, 2021.07.10:
+/* IAMROOT, 2021.07.10:
  * - 해당 코드는 bootloader에 의한 최소한의 초기화 작업이후의 코드임을 알린다.
  * - KERNEL_START --> 커널 시작 가상 주소(_text)
  * - 컴파일 타임에(페이지 프레임 크기와 페이지 테이블 사용 단계) 결정
@@ -62,8 +61,7 @@
 #error PAGE_OFFSET must be at least 2MB aligned
 #endif
 
-/*
- * IAMROOT, 2021.07.10:
+/* IAMROOT, 2021.07.10:
  * - DTB(Device Tree Blob)
  *   디바이스 트리가 컴파일되어 빅엔디언 형태의 바이너리이다.
  *   FDT(Flattened Device Tree)라고도 불리운다.
@@ -136,8 +134,7 @@
 	 *  x19/x20    __primary_switch()                       callee preserved temp registers
 	 *  x24        __primary_switch() .. relocate_kernel()  current RELR displacement
 	 */
-/*
- * IAMROOT, 2021.07.17:
+/* IAMROOT, 2021.07.17:
  *
  * - SYM_CODE_START() 해석:
  *      .globl primary_entry;
@@ -156,15 +153,9 @@
  */
 SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
-/*
- * IAMROOT, 2021.11.14:
- * - 5.10 -> 5.15 변경사항
- *   원래 el2_setup을 호출했는데 init_kernel_el으로 rename 되면서
- *   내부 루틴도 살짝 바뀜.
- */
 	bl	init_kernel_el			// w0=cpu_boot_mode
-/*
- * IAMROOT, 2021.08.14: 
+
+/* IAMROOT, 2021.08.14: 
  * - nVHE로 동작하는 경우 아래 코드는 EL2->EL1으로 변경된 채 동작한다.
  *
  * - 커널 물리주소 위치를 읽어온 후 2M 정렬단위의 하위 offset를 
@@ -1080,9 +1071,7 @@ EXPORT_SYMBOL(kimage_vaddr)
  * Returns either BOOT_CPU_MODE_EL1 or BOOT_CPU_MODE_EL2 in w0 if
  * booted in EL1 or EL2 respectively.
  */
-
-/*
- * IAMROOT, 2022.01.27:
+/* IAMROOT, 2022.01.27:
  * - CurrentEL 1 -> EL1
  * - CurrentEL 2 and nVHE - > EL1
  * - CurrentEL 2 and VHE - > EL2
@@ -1092,27 +1081,24 @@ EXPORT_SYMBOL(kimage_vaddr)
  *   여기서 초기화를 시킨다.
  */
 SYM_FUNC_START(init_kernel_el)
-/*
- * IAMROOT, 2021.07.24:
- * - 현재 EL 을 x0 로 가져온다.
+/* IAMROOT, 2021.07.24:
+ * - 현재 실행중인 EL(Exception Level) 값을 @x0에 저장하고 아래 조건문 수행.
+ *   @x0 == CurrentEL_EL2 ? init_el2 실행 (hypervisor)
+ *                        : init_el1 실행 (kernel)
  */
 	mrs	x0, CurrentEL
-/*
- * IAMROOT, 2021.07.24:
- * - CurrentEL_EL2 는 8 로 정의됨
- */
 	cmp	x0, #CurrentEL_EL2
-/*
- * IAMROOT, 2021.11.14:
- * - 현재 EL이 EL2면 init_el2를 실행한다.
- *   그렇지 않으면 바로 아래 init_el1으로 내려가게된다.
- */
 	b.eq	init_el2
 
-/*
- * IAMROOT, 2021.07.24:
- * @return x0 BOOT_CPU_MODE_EL1
- * - CurrentEL_EL1 실행되는 코드
+/* IAMROOT, 2021.07.24:
+ * - @return x0(BOOT_CPU_MODE_EL1)
+ *
+ * - EL1이면 실행되는 코드
+ *   SCTLR_EL1 reg에서 EL1_MMU_OFF bits 설정.
+ *
+ * - PSTATE: Process State register
+ *           
+ * - SPSR  : Saved Program Status Register
  *   모든 interrupt를 disable하고 boot mode가 el1이라는것을 설정한다.
  * - spsr_el1에 el1 stack 으로 설정한다.
  */
