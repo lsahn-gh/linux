@@ -20,8 +20,8 @@
 	.pushsection	.hyp.text, "ax"
 
 	.align 11
-/*
- * IAMROOT, 2021.08.20: 
+
+/* IAMROOT, 2021.08.20: 
  * http://egloos.zum.com/rousalome/v/10024114
  *
  * - exception

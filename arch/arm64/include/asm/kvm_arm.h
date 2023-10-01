@@ -86,8 +86,10 @@
 			 HCR_AMO | HCR_SWIO | HCR_TIDCP | HCR_RW | HCR_TLOR | \
 			 HCR_FMO | HCR_IMO | HCR_PTW )
 #define HCR_VIRT_EXCP_MASK (HCR_VSE | HCR_VI | HCR_VF)
-/*
- * IAMROOT, 2021. 07. 31:
+
+/* IAMROOT, 2021. 07. 31: TODO
+ * - VHE: Virtualization Host Extension
+ *
  * - Pointer Authentication : Any attempt to use the Pointer Authentication instructions will
  *                            result in an UNDEFINED exception being injected into the guest.
  *                            (pointer tagging과 유사)

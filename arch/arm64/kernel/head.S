@@ -1091,32 +1091,84 @@ SYM_FUNC_START(init_kernel_el)
 	b.eq	init_el2
 
 /* IAMROOT, 2021.07.24:
- * - @return x0(BOOT_CPU_MODE_EL1)
- *
- * - EL1이면 실행되는 코드
- *   SCTLR_EL1 reg에서 EL1_MMU_OFF bits 설정.
- *
- * - PSTATE: Process State register
- *           
- * - SPSR  : Saved Program Status Register
- *   모든 interrupt를 disable하고 boot mode가 el1이라는것을 설정한다.
- * - spsr_el1에 el1 stack 으로 설정한다.
+ * - CurrentEL == EL1이면 실행되는 코드
+ *   @return x0(BOOT_CPU_MODE_EL1)
  */
 SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
+/* IAMROOT, 2023.09.26:
+ * - SCTLR_EL1 reg에 EL1_MMU_OFF bits 설정.
+ */
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
 	msr	sctlr_el1, x0
 	isb
+
+/* IAMROOT, 2023.09.25:
+ * - spsr reg에 PSTATE.DAIF bits를 1로 세팅 및 EL1 SP를 사용하도록 값을
+ *   저장하고 eret 호출시 return할 'init_kernel_el' caller의 주소를
+ *   elr_el1 reg에 저장한다.
+ *   - PSTATE.DAIF bits: 1로 세팅하면 all async exceptions disabled 의미.
+ *                       Nested interrupt가 아닌 이상 mask bits가 설정되면
+ *                       이후에 발생하는 interrupt는 pending 된다.
+ *   - EL1 SP: M[3:0] bits를 EL1h로 설정하여 ELx mode + ELx SP 사용 표시.
+ *             아래 설명 참고.
+ *
+ * - elr_elx: exception link reg.
+ *            exception handler 처리 후 돌아갈 return 주소를 담고 있으며
+ *            exception 전용 reg.
+ *
+ * - PSTATE: process의 상태를 나타내는 개념이며 실제로는 cpsr, spsr reg가
+ *           쓰인다.
+ * - CPSR  : Current Program Status reg
+ *           프로그램의 현재 상태(ALU 결과, exception flags)를 가지고 있는 reg.
+ *           한개만 존재한다.
+ * - SPSR  : Saved Program Status reg
+ *           ELx mode 변경시에 현재 cpsr 값을 저장하기 위해 사용되는 reg이며
+ *           ELx mode 별로 다른 reg가 존재한다.
+ *
+ *   condition flags
+ *      - N: Negative condition flag
+ *           1 (결과가 음수)
+ *           0 (결과가 0 또는 양수)
+ *      - Z: Zero condition flag
+ *           1 (instr의 결과가 0)
+ *           0 (그 외 나머지)
+ *      - C: Carry condition flag
+ *           1 (instr의 결과로 carry 발생시 masking 됨)
+ *           0 (그 외 나머지)
+ *      - V: Overflow condition flag
+ *           1 (instr의 결과로 overflow 발생시 masking 됨)
+ *           0 (그 외 나머지)
+ *   exception masking bits (Async exceptions)
+ *      - D: Debug exception mask bit
+ *      - A: SError exception mask bit
+ *      - I: IRQ interrupt mask bit
+ *      - F: FIQ interrupt mask bit
+ *      Value: 1 (exception masked)
+ *             0 (exception NOT masked)
+ *
+ *   Async exception과 masking에 대한 참고 링크
+ *   - https://developer.arm.com/documentation/102412/0103/Exception-types/Asynchronous-exceptions
+ *
+ * - INIT_PSTATE_EL1.PSR_MODE_EL1h(0b0101) 의미
+ *   - M[3:2]: exception level 표시
+ *       0b00: EL0
+ *       0b01: EL1
+ *       0b10: EL2
+ *       0b11: EL3
+ *   - M[1]  : reserved
+ *   - M[0]  : SPsel bit
+ *        0b0: SP is always SP0
+ *        0b1: SP is determined by the EL
+ */
 	mov_q	x0, INIT_PSTATE_EL1
 	msr	spsr_el1, x0
 	msr	elr_el1, lr
-/*
- * IAMROOT, 2021.11.14:
- * - cpu boot 가 EL1이라는것.
- * - elr_el1
- *   eret호출시 jump할 주소를 저장하는 register
- * - eret
+
+/* IAMROOT, 2023.09.26:
+ * - cpu boot가 EL1이라고 설정한다.
+ * - eret: exception return 명령어.
  *   exception이 발생한 ELx의 spsr이 pstate로 복원되며 ELR_ELx에 저장된
- *   address로 점프하고 pstate가 spsr로 된다.
+ *   address로 점프한다.
  *   ex) currentEL == 1 이면 spsr_el1, elr_el1 접근
  *       currentEL == 2, nVHE이면 spsr_el2, elr_el2 접근
  *
@@ -1126,34 +1178,35 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
  */
 	mov	w0, #BOOT_CPU_MODE_EL1
 	eret
-/*
- * IAMROOT, 2021.11.14:
- * - 현재 Exception Level은 EL2
- * - 일단 NVHE 로 hcr_el2로 시작을하여, el2 관련 초기화를 진행한다.
- * - hcr_el2
- *   Hypervisor Configuration Register. 가상화 설정 관련 register.
+
+
+/* IAMROOT, 2021.11.14:
+ * - CurrentEL == EL2면 실행되는 코드
+ *   @return x0(BOOT_CPU_MODE_EL2)
  */
 SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
+/* IAMROOT, 2021.07.24:
+ * - NVHE flags로 hcr_el2를 설정하여 시작하며 el2 관련 초기화를 진행한다.
+ *
+ * - hcr_el2: hypervisor configuration reg.
+ *            가상화 설정 관련 register.
+ *
+ * - isb: instruction synchronization barrier.
+ *        endian 설정이 끝나면 i-cache pipeline을 비워 바뀐 endian으로
+ *        실행될 수 있도록 barrier를 수행한다.
+ */
 	mov_q	x0, HCR_HOST_NVHE_FLAGS
 	msr	hcr_el2, x0
-/*
- * IAMROOT, 2021.07.24:
- * - isb: Instruction Synchronization Barrier.
- *   파이프라인을 비운다.
- *   엔디안 설정이 끝나면 파이프라인을 비워서
- *   바뀐 엔디안으로 실행되도록 한다.
- */
 	isb
-/*
- * IAMROOT, 2021.11.14:
+
+/* IAMROOT, 2021.11.14:
  * - arch/arm64/include/asm/el2_setup.h
  */
 	init_el2_state
 
-/*
- * IAMROOT, 2021.08.14: EL2용 하이퍼 벡터 주소를 vbar_el2 레지스터에 기록
- * - vbar_el2
- *   el2에서 exception 발생시 점프할 address 저장
+/* IAMROOT, 2021.08.14:
+ * - EL2 hypervisor vector addr을 vbar_el2 reg에 기록한다.
+ *   vbar_el2: el2에서 exception 발생시 점프할 address 저장
  */
 	/* Hypervisor stub */
 	adr_l	x0, __hyp_stub_vectors
