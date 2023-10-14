@@ -400,9 +400,9 @@
 
 /* IAMROOT, 2021.08.14:
  * - eret 수행시 return할 ELx, SPx(stack) 설정 및 daif 플래그를 설정하여
- *   interrupt가 발생하지 않도록 한다. nVHE인 경우 EL1 -> EL2로 level이 상승하므로
- *   EL1으로 설정하는 것이다. 
- * 
+ *   interrupt가 발생하지 않도록 한다. nVHE인 경우 EL1 -> EL2로 level이
+ *   상승하므로 EL1으로 설정하는 것이다.
+ *
  * - spsr_elx는 exception이 발생한 level의 PSTATE 정보를 담고 있다.
  */
 .macro __init_el2_nvhe_prepare_eret

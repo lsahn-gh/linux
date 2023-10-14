@@ -38,9 +38,8 @@
  * Rearranging it a bit we get :
  *   (4 - n) * (PAGE_SHIFT - 3) + 3
  */
-/*
- * IAMROOT, 2021.08.14: 
- * 4단계 일때 정리
+/* IAMROOT, 2021.08.14:
+ * - 4단계 기준으로 정리
  *
  *  PAGE_SIZE | PAGE_SHIFT | n | ARM64_HW_PGTABLE_LEVEL_SHIFT(n)
  * -----------+------------+---+--------------------------------------------
@@ -61,25 +60,24 @@
  */
 #define ARM64_HW_PGTABLE_LEVEL_SHIFT(n)	((PAGE_SHIFT - 3) * (4 - (n)) + 3)
 
-/*
- * IAMROOT, 2021.08.14: 
+/* IAMROOT, 2021.08.14:
  * 가장 하위 페이지 PTE 테이블에 들어가는 엔트리 수
- * - 4K -> 2^9 = 512
+ * - 4K : 2^9  = 512개
+ * - 16K: 2^11 = 2048개
  */
 #define PTRS_PER_PTE		(1 << (PAGE_SHIFT - 3))
 
 /*
  * PMD_SHIFT determines the size a level 2 page table entry can map.
  */
-/*
- * IAMROOT, 2021.08.14: 
- * - 아래 모두 4K 기준
- * - PMD_SHIFT:  PMD에 사용할 SHIFT는 21
- * - PMD_SIZE:   2M (2^21)
- * - PMD_MASK:   0b1111 ....   0000000000000 (0 개수가 21개)
- * - PTRS_PER_PUD: 512개
- */
 #if CONFIG_PGTABLE_LEVELS > 2
+/* IAMROOT, 2021.08.14:
+ * - 4K 기준으로 정리
+ *   PMD_SHIFT   : PMD에 사용할 SHIFT는 21
+ *   PMD_SIZE    : 2M (2^21)
+ *   PMD_MASK    : 0b1111 ....   0000000000000 (0 개수가 21개)
+ *   PTRS_PER_PUD: 512개
+ */
 #define PMD_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(2)
 #define PMD_SIZE		(_AC(1, UL) << PMD_SHIFT)
 #define PMD_MASK		(~(PMD_SIZE-1))
@@ -89,15 +87,14 @@
 /*
  * PUD_SHIFT determines the size a level 1 page table entry can map.
  */
-/*
- * IAMROOT, 2021.08.14: 
- * - 아래 모두 4K 기준
- * - PUD_SHIFT:  PUD에 사용할 SHIFT는 30
- * - PUD_SIZE:   1G (2^30)
- * - PUD_MASK:   0b1111 ....   0000000000000 (0 개수가 30개)
- * - PTRS_PER_PUD: 512개
- */
 #if CONFIG_PGTABLE_LEVELS > 3
+/* IAMROOT, 2021.08.14:
+ * - 4K 기준으로 정리
+ *   PUD_SHIFT   : PUD에 사용할 SHIFT는 30
+ *   PUD_SIZE    : 1G (2^30)
+ *   PUD_MASK    : 0b1111 ....   0000000000000 (0 개수가 30개)
+ *   PTRS_PER_PUD: 512개
+ */
 #define PUD_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(1)
 #define PUD_SIZE		(_AC(1, UL) << PUD_SHIFT)
 #define PUD_MASK		(~(PUD_SIZE-1))
@@ -108,53 +105,48 @@
  * PGDIR_SHIFT determines the size a top-level page table entry can map
  * (depending on the configuration, this level can be 0, 1 or 2).
  */
-/*
- * IAMROOT, 2021.08.14: 
- * arm/arm64/Kconfig 의 PAGTABLE_LEVELS를 참고하면 page size와 vabits에 따라서
- * PGTABLE_LEVELS가 정해져있다. 
+/* IAMROOT, 2021.08.14:
+ * - arch/(arm|arm64)/Kconfig의 PGTABLE_LEVELS config에서
+ *   page size와 vabits의 값에 따라 정해진 PGTABLE_LEVELS을 확인할 수 있다.
  *
- * +-----------+--------++-----------------+
- * | PAGE_SIZE | vabits || PAGTABLE_LEVELS | PGD | PUD | PMD |
- * | 4k(12)    | 39     || 3               | 30  | -   | 21  |
- * |           | 48     || 4               | 39  | 30  | 21  |
- * +-----------+--------++-----------------+
- * | 16k(14)   | 36     || 2               | 25  | -   | -   |
- * |           | 47     || 3               | 36  | -   |
- * |           | 48     || 4               | 47  | 36  | 25  |
- * +-----------+--------++-----------------+
- * | 64k(16)   | 42     || 2               | 29  | -   | -   |
- * |           | 48     || 3               | 42  | -   | 29  |
- * |           | 52     || 3               | 42  | --  | 29  |
- * +-----------+--------++-----------------+
+ * +-----------+--------+-----------------+-----+-----+-----+
+ * | PAGE_SIZE | vabits | PAGTABLE_LEVELS | PGD | PUD | PMD |
+ * +-----------+--------+-----------------+-----+-----+-----+
+ * | 4k(12)    | 39     | 3               | 30  | -   | 21  |
+ * |           | 48     | 4               | 39  | 30  | 21  |
+ * +-----------+--------+-----------------+-----+-----+-----+
+ * | 16k(14)   | 36     | 2               | 25  | -   | -   |
+ * |           | 47     | 3               | 36  | -   | 25  |
+ * |           | 48     | 4               | 47  | 36  | 25  |
+ * +-----------+--------+-----------------+-----+-----+-----+
+ * | 64k(16)   | 42     | 2               | 29  | -   | -   |
+ * |           | 48     | 3               | 42  | -   | 29  |
+ * |           | 52     | 3               | 42  | -   | 29  |
+ * +-----------+--------+-----------------+-----+-----+-----+
  *
- * -----
  * - VA_BITS 48, page size 4K 기준
  *   CONFIG_PGTABLE_LEVELS : 4단계
  *
- * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 39
- * - PGDIR_SIZE:   512G (2^39)
- * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 39개)
- * - PTRS_PER_PGD: 512개
- *
- * ------
+ *   PGDIR_SHIFT : PGD에 사용할 SHIFT는 39
+ *   PGDIR_SIZE  : 512G (2^39)
+ *   PGDIR_MASK  : 0b1111 ....   0000000000000 (0 개수가 39개)
+ *   PTRS_PER_PGD: 512개
  *
  * - VA_BITS 52, page size 64K 기준
  *   CONFIG_PGTABLE_LEVELS : 3단계
  *
- * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 42
- * - PGDIR_SIZE:   4T (2^42)
- * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 42개)
- * - PTRS_PER_PGD: 1024
- *
- * ------
+ *   PGDIR_SHIFT : PGD에 사용할 SHIFT는 42
+ *   PGDIR_SIZE  : 4T (2^42)
+ *   PGDIR_MASK  : 0b1111 ....   0000000000000 (0 개수가 42개)
+ *   PTRS_PER_PGD: 1024개
  *
  * - VA_BITS 48, page size 16K 기준
  *   CONFIG_PGTABLE_LEVELS : 4단계
  *
- * - PGDIR_SHIFT:  PGD에 사용할 SHIFT는 47
- * - PGDIR_SIZE:   128T (2^47)
- * - PGDIR_MASK:   0b1111 ....   0000000000000 (0 개수가 47개)
- * - PTRS_PER_PGD: 2
+ *   PGDIR_SHIFT : PGD에 사용할 SHIFT는 47
+ *   PGDIR_SIZE  : 128T (2^47)
+ *   PGDIR_MASK  : 0b1111 ....   0000000000000 (0 개수가 47개)
+ *   PTRS_PER_PGD: 2개
  */
 #define PGDIR_SHIFT		ARM64_HW_PGTABLE_LEVEL_SHIFT(4 - CONFIG_PGTABLE_LEVELS)
 #define PGDIR_SIZE		(_AC(1, UL) << PGDIR_SHIFT)
@@ -164,18 +156,17 @@
 /*
  * Contiguous page definitions.
  */
-/*
- * IAMROOT, 2021.10.09: 
- * 4K, 4레벨 기준)
- * CONT_PTE_SHIFT=16
- * CONT_PTES=16
- * CONT_PTE_SIZE=64K
- * CONT_PTE_MASK=0xffff_ffff_ffff_0000
+/* IAMROOT, 2021.10.09:
+ * - 4K page size, 4 levels table 기준
+ *   CONT_PTE_SHIFT : 16
+ *   CONT_PTES      : 16
+ *   CONT_PTE_SIZE  : 64K
+ *   CONT_PTE_MASK  : 0xffff_ffff_ffff_0000
  *
- * CONT_PMD_SHIFT=24
- * CONT_PMDS=16
- * CONT_PMD_SIZE=32M
- * CONT_PMD_MASK=0xffff_ffff_fe00_0000
+ *   CONT_PMD_SHIFT : 24
+ *   CONT_PMDS      : 16
+ *   CONT_PMD_SIZE  : 32M
+ *   CONT_PMD_MASK  : 0xffff_ffff_fe00_0000
  */
 #define CONT_PTE_SHIFT		(CONFIG_ARM64_CONT_PTE_SHIFT + PAGE_SHIFT)
 #define CONT_PTES		(1 << (CONT_PTE_SHIFT - PAGE_SHIFT))
@@ -222,20 +213,37 @@
 /*
  * Section
  */
-#define PMD_SECT_VALID		(_AT(pmdval_t, 1) << 0)
-#define PMD_SECT_USER		(_AT(pmdval_t, 1) << 6)		/* AP[1] */
-#define PMD_SECT_RDONLY		(_AT(pmdval_t, 1) << 7)		/* AP[2] */
-#define PMD_SECT_S		(_AT(pmdval_t, 3) << 8)
-#define PMD_SECT_AF		(_AT(pmdval_t, 1) << 10)
-#define PMD_SECT_NG		(_AT(pmdval_t, 1) << 11)
-#define PMD_SECT_CONT		(_AT(pmdval_t, 1) << 52)
-/*
- * IAMROOT, 2021.11.17: 
+/* IAMROOT, 2021.11.17:
+ * - *_SECT_VALID : block/page descriptor의 valid 표시 bit.
+ *                  1: valid, MMU가 사용.
+ *                  0: invalid, MMU가 사용하지 않음.
+ *   *_SECT_USER  : AP[1]
+ *   *_SECT_RDONLY: AP[2]
+ *                : data access permission bits.
+ *                +---------+-----------------------+-----------------+
+ *                | AP[2:1] | Access from higher EL | Access from EL0 |
+ *                +---------+-----------------------+-----------------+
+ *                |     00  |   Read/Write          |   None          |
+ *                |     01  |   Read/Write          |   Read/Write    |
+ *                |     10  |   Read-Only           |   None          |
+ *                |     11  |   Read-Only           |   Read-Only     |
+ *                +---------+-----------------------+-----------------+
+ *   *_SECT_S     : TODO
+ *   *_SECT_AF    : access flag bit.
+ *                  access 된 적이 있으면 1, 아니면 0으로 설정된다.
+ *   *_SECT_NG    : not-Global bit.
+ *         nG == 0: trans-table 전역(global) 접근을 의미하며 이는
+ *                  모든 processes가 해당 region에 접근할 수 있음을 의미한다.
+ *         nG == 1: trans-table global 접근이 불가능함을 의미하며 이는
+ *                  process-specific을 뜻하기도 하고 현재 ASID에서만 가능함을
+ *                  의미한다.
+ *   *_SECT_CONT  : contiguous bit.
+ *                  TODO
+ *
  * - *_SECT_*XN : block/page에 적용하는 access bits.
  * - *_TABLE_*XN: page table에 적용하는 access bits.
  *                TABLE bits가 설정되면 자식 table/block/page 모두
  *                *XN bits가 설정된다. (상속)
- *
  * - PXN: kernel이 접근할 수 없도록 설정.
  *        주로 application code/data, device peripherals addr에 설정된다.
  * - UXN: application이 접근할 수 없도록 설정.
@@ -243,6 +251,13 @@
  *
  * link: https://developer.arm.com/documentation/den0024/a/BABCEADG
  */
+#define PMD_SECT_VALID		(_AT(pmdval_t, 1) << 0)
+#define PMD_SECT_USER		(_AT(pmdval_t, 1) << 6)		/* AP[1] */
+#define PMD_SECT_RDONLY		(_AT(pmdval_t, 1) << 7)		/* AP[2] */
+#define PMD_SECT_S		(_AT(pmdval_t, 3) << 8)
+#define PMD_SECT_AF		(_AT(pmdval_t, 1) << 10)
+#define PMD_SECT_NG		(_AT(pmdval_t, 1) << 11)
+#define PMD_SECT_CONT		(_AT(pmdval_t, 1) << 52)
 #define PMD_SECT_PXN		(_AT(pmdval_t, 1) << 53)
 #define PMD_SECT_UXN		(_AT(pmdval_t, 1) << 54)
 #define PMD_TABLE_PXN		(_AT(pmdval_t, 1) << 59)
@@ -257,8 +272,7 @@
 /*
  * Level 3 descriptor (PTE).
  */
-/*
- * IAMROOT, 2022.06.04:
+/* IAMROOT, 2022.06.04:
  * - PTE_VALID
  *   hardware mapping이 되있는지 확인.
  *   cpu가 접근 가능하게 한다는뜻.
@@ -273,8 +287,7 @@
 #define PTE_AF			(_AT(pteval_t, 1) << 10)	/* Access Flag */
 #define PTE_NG			(_AT(pteval_t, 1) << 11)	/* nG */
 #define PTE_GP			(_AT(pteval_t, 1) << 50)	/* BTI guarded */
-/*
- * IAMROOT, 2023.06.24:
+/* IAMROOT, 2023.06.24:
  * - cpu가 관리한다.
  */
 #define PTE_DBM			(_AT(pteval_t, 1) << 51)	/* Dirty Bit Management */
@@ -282,8 +295,7 @@
 #define PTE_PXN			(_AT(pteval_t, 1) << 53)	/* Privileged XN */
 #define PTE_UXN			(_AT(pteval_t, 1) << 54)	/* User XN */
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  * - PTE_ADDR_LOW
  *   1 << (48 - PAGE_SHIFT) 를 하고 1을 빼고 , PAGE_SHIFT만큼 shift를 한다.
  *   즉 하위 SECTION_SHIFT만큼을 제외한 나머지 bit를 1로 하겠다는 뜻
@@ -334,8 +346,7 @@
 #define TCR_T0SZ(x)		((UL(64) - (x)) << TCR_T0SZ_OFFSET)
 #define TCR_T1SZ(x)		((UL(64) - (x)) << TCR_T1SZ_OFFSET)
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  * - TCR_T0SZ와 TCR_T1SZ두개의 사이즈 전부 OR로해서 가져오는 역할
  */
 #define TCR_TxSZ(x)		(TCR_T0SZ(x) | TCR_T1SZ(x))
@@ -431,15 +442,13 @@
  * This should be GENMASK_ULL(47, 2).
  * TTBR_ELx[1] is RES0 in this configuration.
  */
-/*
- * IAMROOT, 2021.09.02:
- * TTBR_BADDR_MASK_52 == (47 ~ 2)번째 비트가 전부 1인 숫자.
+/* IAMROOT, 2021.09.02:
+ * - TTBR_BADDR_MASK_52 == (47 ~ 2)번째 비트가 전부 1인 숫자.
  */
 #define TTBR_BADDR_MASK_52	(((UL(1) << 46) - 1) << 2)
 #endif
 
-/*
- * IAMROOT, 2021.08.28:
+/* IAMROOT, 2021.08.28:
  * pgd entry를 확장할려고 계산하기 위한것.
  *
  * - VA_BITS 가 52bit이면 PAGE_SIZE가 64kb임을 고려한다.

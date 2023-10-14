@@ -48,8 +48,7 @@
 #define VMEMMAP_SHIFT	(PAGE_SHIFT - STRUCT_PAGE_MAX_SHIFT)
 #define VMEMMAP_SIZE	((_PAGE_END(VA_BITS_MIN) - PAGE_OFFSET) >> VMEMMAP_SHIFT)
 
-/*
- * IAMROOT, 2021.08.21: 
+/* IAMROOT, 2021.08.21:
  *-------------------------------------------------------------------------
  *   Kernel 가상 주소 공간 Mapping (VA 48bit 기준)
  * ======+=======================+=======================+===================
@@ -63,7 +62,7 @@
  *       +-----------------------+-----------------------+-------------------
  *       | 0xffff_fe00_0000_0000 | VMEMMAP_END           |
  *       +-----------------------+                       |
- *       |                       | VMEMMAP_SIZE          | 2TB 
+ *       |                       | VMEMMAP_SIZE          | 2TB
  *       +-----------------------+                       |
  *       | 0xffff_fc00_0000_0000 | VMEMMAP_START         |
  *       +-----------------------+-----------------------+-------------------
@@ -85,9 +84,9 @@
  *       |         ~             |                       |
  *       | 0xffff_fbff_fda0_0000 |                       |
  *       +-----------------------+-----------------------+--------+---------
- *       |      ~~~~~            |                       |      vmlloc      
- *       +-----------------------+-----------------------+--------+ 
- *       |                       | (vmlinux.lds.S참고)   |        | 
+ *       |      ~~~~~            |                       |      vmlloc
+ *       +-----------------------+-----------------------+--------+
+ *       |                       | (vmlinux.lds.S참고)   |        |
  *       |                       | _end                  |        |
  *       |                       | (vmlinux.lds.S참고)   |        |
  *       |                       | RO_DATA               |        |
@@ -139,16 +138,16 @@
  *   KASAN이 적용안됬는데 define은 남아있는게 맞지 않다고 생각한거같고
  *   어짜피 BPF_JIT_REGION_START == KASAN_SHADOW_END == PAGE_END가 되서
  *   의미도 없어서 삭제한듯함.
- *   
+ *
  *   3) VMEMMAP_START가 -VMEMMAP_SIZE - SZ_2M 이였는데
  *   (-(UL(1) << (VA_BITS - VMEMMAP_SHIFT))) 으로 변경.
  *
  *   4) PCI_IO_END가 VMEMMAP_START에서 SZ_2M을 빼는 거에서 SZ_8M을 빼는것으로
  *   변경
  *
- *   5) FIXADDR_TOP이 PCI_IO_START에서 SZ_2M을 빼는 거에서 
+ *   5) FIXADDR_TOP이 PCI_IO_START에서 SZ_2M을 빼는 거에서
  *   VMEMMAP_START에서 SZ_32M을 빼는것으로 변경
- */  
+ */
 /*
  * PAGE_OFFSET - the virtual address of the start of the linear map, at the
  *               start of the TTBR1 address space.
@@ -158,10 +157,10 @@
  */
 #define VA_BITS			(CONFIG_ARM64_VA_BITS)
 #define _PAGE_OFFSET(va)	(-(UL(1) << (va)))
-/*
- * IAMROOT, 2021.09.04:
- * compile time때 정해지는 kernel 공간의 start address
- * 
+
+/* IAMROOT, 2021.09.04:
+ * compile time에 정해지는 kernel 공간의 va start addr.
+ *
  * - VA 48Bit 4kb page 일때 : 0xffff_0000_0000_0000
  */
 #define PAGE_OFFSET		(_PAGE_OFFSET(VA_BITS))
@@ -186,8 +185,8 @@
 #define PCI_IO_START		(PCI_IO_END - PCI_IO_SIZE)
 #define FIXADDR_TOP		(VMEMMAP_START - SZ_32M)
 
-/*
- * IAMROOT, 2021.08.14: VA_BITS_MIN: VA 비트가 52인 경우 최소 48까지 사용
+/* IAMROOT, 2021.08.14:
+ * - VA_BITS_MIN: VA 비트가 52인 경우 최소 48까지 사용
  */
 #if VA_BITS > 48
 #define VA_BITS_MIN		(48)

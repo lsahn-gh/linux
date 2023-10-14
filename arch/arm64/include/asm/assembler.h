@@ -235,8 +235,7 @@ lr	.req	x30		// link register
  * Pseudo-ops for PC-relative adr/ldr/str <reg>, <symbol> where
  * <symbol> is within the range +/- 4 GB of the PC.
  */
-/*
- * IAMROOT, 2022.01.26:
+/* IAMROOT, 2022.01.26:
  *  - adr_l : 4KB page 크기 단위로 주소값을 계산하기 위한 매크로이며
  *            adrp로 인한 하위 12 bits 절삭을 add로 보정하여 최종 주소값을
  *            계산한다.

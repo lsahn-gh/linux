@@ -21,7 +21,19 @@
 
 	.align 11
 
-/* IAMROOT, 2021.08.20: 
+/* IAMROOT, 2021.08.20:
+ * - hyp exception vector table 정의.
+ *
+ * - ventry: vector entry
+ *           exception handler로 branch 하도록 macro가 구성되어 있다.
+ *           arch/arm64/include/asm/assembler.h 파일에 있음.
+ *
+ * - 아래 exception 케이스가 존재한다.
+ *   1. nVHE: EL1 -> EL2
+ *   2.  VHE: EL2 -> EL2
+ *   따라서 위 2개의 케이스를 커버하기 위해 hvc instr 호출이 발생하면
+ *   nVHE, VHE 모두 같은 handler(elx_sync)가 호출된다.
+ *
  * http://egloos.zum.com/rousalome/v/10024114
  *
  * - exception
@@ -53,9 +65,10 @@ SYM_CODE_END(__hyp_stub_vectors)
 
 	.align 11
 
-/*
- * IAMROOT, 2022.02.08:
- * - hvc (el1->el2 요청)시 진입한다.(Synchronous exception)
+/* IAMROOT, 2022.02.08:
+ * - 아래 모드에서 hvc 호출시 실행되는 handler. (synchronous exception)
+ *   nVHE: EL1 -> EL2
+ *    VHE: EL2 -> EL2
  */
 SYM_CODE_START_LOCAL(elx_sync)
 	cmp	x0, #HVC_SET_VECTORS
@@ -63,6 +76,9 @@ SYM_CODE_START_LOCAL(elx_sync)
 	msr	vbar_el2, x1
 	b	9f
 
+/* IAMROOT, 2023.10.02:
+ * - E2H bit clear가 되지 않는 예외 처리 요청시 mutate_to_vhe로 점프.
+ */
 1:	cmp	x0, #HVC_VHE_RESTART
 	b.eq	mutate_to_vhe
 
@@ -85,8 +101,7 @@ SYM_CODE_START_LOCAL(elx_sync)
 	eret
 SYM_CODE_END(elx_sync)
 
-/*
- * IAMROOT, 2022.02.08:
+/* IAMROOT, 2022.02.08:
  * - vhe 전환.
  */
 // nVHE? No way! Give me the real thing!

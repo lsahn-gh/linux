@@ -187,12 +187,14 @@ SECTIONS
 
 	HYPERVISOR_DATA_SECTIONS
 
-/*
- * IAMROOT, 2021.11.16:
+/* IAMROOT, 2021.11.16:
  * - idmap_pg_dir 목적
- *   head.S에서 mmu disable -> mmu enable로 mmu가 동작할 때 kernel code를
+ *   head.S에서 mmu disable -> enable로 상태가 변경될 때 kernel code를
  *   계속 수행할 수 있도록 돕는 임시 page table. pc + 1은 여전히 pa 주소이므로
  *   idmap_pg_dir을 통해 수행하지 않는다면 page fault가 발생한다.
+ *
+ * - HYPERVISOR_DATA_SECTIONS의 마지막에서 PAGE_SIZE로 align 되어 있으므로
+ *   idmap_pg_dir는 page size에 맞춰 align된다.
  */
 	idmap_pg_dir = .;
 	. += IDMAP_DIR_SIZE;

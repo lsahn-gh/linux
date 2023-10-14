@@ -645,6 +645,29 @@
 #define SYS_ICH_LR15_EL2		__SYS__LR8_EL2(7)
 
 /* VHE encodings for architectural EL0/1 system registers */
+/* IAMROOT, 2023.10.01:
+ * - FEAT_VHE가 지원되고 E2H == 1인 시스템에서 host-OS가 EL1 reg에 접근하기
+ *   위한 alias를 정의한다.
+ *
+ *   linux(host-OS)는 EL1에서 동작해야 하지만 VHE 지원 cpu에서는 성능을 위해
+ *   EL2에서 동작한다. 이때 SoC은 linux가 system reg에 접근 요청하면 아래
+ *   alias를 통해 EL1 reg에 접근하게 redirect 시킨다.
+ *
+ * - 이러한 방식을 사용하는 이유는 뭘까?
+ *   host-OS는 EL1에서 동작해야 하는데 기존의 type-2 hypervisor(kvm)는 host-OS가
+ *   EL1에, EL2 code는 EL2로 switching 하여 접근한다. EL1에서 hvc를 통해 EL2로
+ *   elevation 하는 경우 context switching으로 인한 overhead가 발생하여 성능
+ *   저하가 발생한다. 이를 해결하고자 VHE 기능이 개발되었고 kvm 같은 type-2
+ *   hypervisor가 탑재된 OS를 EL2에 load 시키고 linux 코드는 EL1에서 동작하고
+ *   있는 것처럼 착각하게 만들어 수행한다. 결국 linux 코드는 수정할 필요도 없고
+ *   상황에 따라 alias를 통해 EL1/2 코드를 context switching 없이 수행할 수 있게
+ *   된다.
+ *
+ * - FEAT_VHE 지원 및 E2H == 1 인 상황에서 아래와 같이 동작한다.
+ *   <reg>_EL1 접근 : EL2로 redirect.
+ *   <reg>_EL12 접근: EL1로 redirect.
+ *   <reg>_EL02 접근: EL0로 redirect.
+ */
 #define SYS_SCTLR_EL12			sys_reg(3, 5, 1, 0, 0)
 #define SYS_CPACR_EL12			sys_reg(3, 5, 1, 0, 2)
 #define SYS_ZCR_EL12			sys_reg(3, 5, 1, 2, 0)

@@ -17,8 +17,7 @@
  * with 4K (section size = 2M) but not with 16K (section size = 32M) or
  * 64K (section size = 512M).
  */
-/*
- * IAMROOT, 2021.12.18:
+/* IAMROOT, 2021.12.18:
  * - 2MB mapping은 4k page쪽에만 현재 구현된 상태.
  */
 #ifdef CONFIG_ARM64_4K_PAGES
@@ -37,23 +36,18 @@
  * VA range, so pages required to map highest possible PA are reserved in all
  * cases.
  */
-/*
- * IAMROOT, 2021.08.14: 
+/* IAMROOT, 2021.08.14:
  * - SWAPPER_PGTABLE_LEVELS: 정규 커널 페이지 테이블이 사용할 레벨 수
  *                           default arm64 커널은 CONFIG_PGTABLE_LEVELS=4
- *                           4K 페이지 테이블을 사용하는 경우 섹션 매핑을 
+ *                           4K 페이지 테이블을 사용하는 경우 섹션 매핑을
  *                           사용할 수 있으므로 1 단계 내릴 수 있다.
  *                           (4K, 섹션 매핑 사용하므로 디폴트=3)
  * - IDMAP_PGTABLE_LEVLES:   va=pa 1:1 id 매핑용 페이지 테이블이 사용할 단계 수
  *                           (4K, 섹션 매핑 사용하므로 디폴트=3)
- * 
- * - 위의 두 테이블 레벨 산출의 기준은 
- *    SWAPPER -> VA 기준으로
- *    IDMAP   -> PA 기준으로 
  *
- * - 5.10 -> 5.15 변경점
- *   원래는 ARM64_SWAPPER_USES_SECTION_MAP로 사용했는데
- *   ARM64_KERNEL_USES_PMD_MAPS로 변경되었다.
+ * - 위의 두 테이블 레벨 산출의 기준.
+ *    SWAPPER -> VA 기준
+ *    IDMAP   -> PA 기준
  */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_PGTABLE_LEVELS	(CONFIG_PGTABLE_LEVELS - 1)
@@ -128,9 +122,9 @@
 			+ EARLY_PGDS((vstart), (vend)) 	/* each PGDIR needs a next level page table */	\
 			+ EARLY_PUDS((vstart), (vend))	/* each PUD needs a next level page table */	\
 			+ EARLY_PMDS((vstart), (vend)))	/* each PMD needs a next level page table */
-/*
- * IAMROOT, 2021.08.14: 
- * - 초기 커널 페이지 테이블 init_pg_dir과 idmap_pg_dir용 사이즈를 산출한다.
+
+/* IAMROOT, 2021.08.14:
+ * - 초기 커널 페이지 테이블 init_pg_dir과 idmap_pg_dir의 사이즈를 산출한다.
  *   early 페이지로 계산한다.
  *
  * - 4K, 약 30M 단위인 경우
@@ -158,9 +152,7 @@
 /*
  * Initial memory map attributes.
  */
-/*
- * IAMROOT, 2021.08.21:
- *
+/* IAMROOT, 2021.08.21:
  * - SWAPPER_PMD_FLAGS
  *   - PMD_TYPE_SECT: 현재 table entry는 section임을 나타냄.
  *   - PMD_SECT_AF: Access Flag (Region accessed)
@@ -169,15 +161,14 @@
 #define SWAPPER_PTE_FLAGS	(PTE_TYPE_PAGE | PTE_AF | PTE_SHARED)
 #define SWAPPER_PMD_FLAGS	(PMD_TYPE_SECT | PMD_SECT_AF | PMD_SECT_S)
 
-/*
- * IAMROOT, 2021.08.21:
- *
+/* IAMROOT, 2021.08.21:
  * - SWAPPER_MM_MMUFLAGS
  *   - PMD_ATTRINDX, PTE_ATTRINDX:
  *       page table entry(== A block or page descriptor)의 필드 중
  *       Lower Attributes에 속하는 indx[4:2]에 MAIR_EL1의 index를 설정한다.
  *       indx[4:2]는 memory type을 결정하기 위해 사용된다. 자세한 내용은
- *       arch/arm64/include/asm/memory.h 에 있는 MT_NORMAL참조.
+ *       arch/arm64/include/asm/memory.h 에 있는 MT_NORMAL 참조.
+ *       또한 Reference Manual에서 'Translation Table format desc' 챕터 참조.
  */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_MM_MMUFLAGS	(PMD_ATTRINDX(MT_NORMAL) | SWAPPER_PMD_FLAGS)

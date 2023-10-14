@@ -48,8 +48,7 @@ u64 idmap_ptrs_per_pgd = PTRS_PER_PGD;
 u64 __section(".mmuoff.data.write") vabits_actual;
 EXPORT_SYMBOL(vabits_actual);
 
-/*
- * IAMROOT, 2021.10.02:
+/* IAMROOT, 2021.10.02:
  * - randomize 결과로 나온 offset을 저장하는 변수
  */
 u64 kimage_voffset __ro_after_init;

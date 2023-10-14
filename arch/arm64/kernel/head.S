@@ -155,14 +155,9 @@ SYM_CODE_START(primary_entry)
 	bl	preserve_boot_args
 	bl	init_kernel_el			// w0=cpu_boot_mode
 
-/* IAMROOT, 2021.08.14: 
- * - nVHE로 동작하는 경우 아래 코드는 EL2->EL1으로 변경된 채 동작한다.
- *
- * - 커널 물리주소 위치를 읽어온 후 2M 정렬단위의 하위 offset를 
- *   x23에 기록한다.
- *
- * ----
- *  - TCR : Table Control Register
+/* IAMROOT, 2021.08.14:
+ * - 커널 phys offset을 읽어 2M 단위로 정렬하기 위한 mask 값을 구하고
+ *   @x23에 저장한다.
  */
 	adrp	x23, __PHYS_OFFSET
 	and	x23, x23, MIN_KIMG_ALIGN - 1	// KASLR offset, defaults to 0
@@ -253,11 +248,10 @@ SYM_CODE_START_LOCAL(preserve_boot_args)
 	b	dcache_inval_poc		// tail call
 SYM_CODE_END(preserve_boot_args)
 
-/*
- * IAMROOT, 2021.08.28:
+/* IAMROOT, 2021.08.28:
  * - pgd entry중에 하나를 그다음 테이블에 연결하기 위함.
  *   page table을 하나 추가하는 개념이 되고,
- *   현재 tbl은 PGD이고 이 다음 PUD를 잇기 위함이며 
+ *   현재 tbl은 PGD이고 이 다음 PUD를 잇기 위함이며
  *   다음 page table은 tbl + PAGE_SIZE address이므로,
  *   그 주소를 가져와 해당 pud address에 해당하는 index에 값을 저장한다.
  */
@@ -469,12 +463,12 @@ SYM_CODE_END(preserve_boot_args)
  *   - first few MB of the kernel linear mapping to jump to once the MMU has
  *     been enabled
  */
-/*
- * IAMROOT, 2022.01.28:
+/* IAMROOT, 2022.01.28:
  * - idmap_pg_dir, init_pg_dir을 초기화한다.
- *   idmap은 va == pa 이므로 __idmap_text_start를 pa, va 모두 같게 mapping
- *   하는게 보이고, init은 pa의 경우 adrp로 불러온 __text, va는
- *   KIMAGE_VADDR가 되므로 두 값으로 mapping한다.
+ *   idmap_pg_dir: pa, va mem 1:1 매핑을 위한 테이블이며 __idmap_text_start를
+ *                 pa, va mem 모두 같게 mapping 한다.
+ *   init_pg_dir : kernel page 테이블이며 pa의 경우 adrp로 불러온 __text,
+ *                 va는 KIMAGE_VADDR가 되므로 두 값으로 mapping 한다.
  */
 SYM_FUNC_START_LOCAL(__create_page_tables)
 	mov	x28, lr
@@ -485,9 +479,8 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	 * the kernel image, and thus are clean to the PoC per the boot
 	 * protocol.
 	 */
-/*
- * IAMROOT, 2021.08.14:
- * 커널용 페이지 테이블에 대한 캐시를 모두 invalidate
+/* IAMROOT, 2021.08.14:
+ * - 'init_pg_dir' 크기만큼 해당 주소의 d-cache를 모두 invalidation.
  *
  * - arch/arm64/kernel/vmlinux.lds.S
  *
@@ -517,14 +510,12 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
  *   code 위치인 물리주소가 될것이다.
  *
  *   "adrp x0, init_pg_dir"를 실행할때는 offset이 0x4000이라는 정보로
- *   pc + 0x4000로 init_pg_dir을 load할 것이다.
- *   즉 현재 pc와 상관없이 offset만으로. 즉 pc와의 상대주소로 sympbol 주소를
- *   알수 있을것이다.
+ *   pc + 0x4000로 init_pg_dir을 load할 것이다. pc와 offset 계산으로도
+ *   symbol addr을 예측할 수 있다.
  *
- *   head.S는 이렇게 pc-relative만으로 구성되어 pc가, 즉 첫 시작 주소가
- *   어디서 시작하든 상대적으로 계산되어 symbol을 불러올수있으므로
- *   시작 주소가 상관없다는것이고 이게 head.S의 첫 주석에서 말한
- *   position independent의 의미이다.
+ *   head.S는 이렇게 pc-relative instr만으로 구성되어 symbol이 어디에 있던지
+ *   상대적으로 계산하여 abs addr 상관없고 이게 head.S의 첫 주석에서 말한
+ *   position independent 의미이다.
  */
 	adrp	x0, init_pg_dir
 	adrp	x1, init_pg_end
@@ -533,8 +524,8 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	/*
 	 * Clear the init page tables.
 	 */
-/*
- * IAMROOT, 2021.08.14: 커널용 페이지 테이블을 0으로 모두 초기화한다.
+/* IAMROOT, 2021.08.14:
+ * - 'init_pg_dir' 크기만큼 해당 주소의 phys mem을 0으로 초기화한다.
  */
 	adrp	x0, init_pg_dir
 	adrp	x1, init_pg_end
@@ -546,25 +537,25 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	subs	x1, x1, #64
 	b.ne	1b
 
-/*
- * IAMROOT, 2021.08.14: 커널 매핑에 필요한 디폴트 속성값을 가져온다.
- *
- * 디폴트 속성값을 요약하면 다음과 같다.
- * - Normal memory
- * - Section type
- * - Access Flag
- * - Inner Share
+/* IAMROOT, 2021.08.14:
+ * - 커널 매핑에 필요한 디폴트 속성값을 가져오며 다음과 같다.
+ *   - Normal memory
+ *   - Section type
+ *   - Access Flag
+ *   - Inner Share
  */
 	mov	x7, SWAPPER_MM_MMUFLAGS
 
 	/*
 	 * Create the identity mapping.
 	 */
+/* IAMROOT, 2023.10.12:
+ * - idmap은 pa == va 이므로 별다른 매크로없이 접근해도 상관없다.
+ */
 	adrp	x0, idmap_pg_dir
 	adrp	x3, __idmap_text_start		// __pa(__idmap_text_start)
 
-/*
- * IAMROOT, 2021.08.14: 
+/* IAMROOT, 2021.08.14:
  * - mmfr2_el1.lva (1=52bits va support, 0=none support(48))
  *
  * - 런타임에 64K 페이지 사용 시 최대 52비트 매핑 또는 48비트 매핑을 결정한다.
@@ -577,6 +568,10 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	mov	x5, #52
 	cbnz	x6, 1f
 #endif
+
+/* IAMROOT, 2023.10.12:
+ * - 52bits va NOT supported
+ */
 	mov	x5, #VA_BITS_MIN
 1:
 	adr_l	x6, vabits_actual
@@ -596,38 +591,34 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	 * this number conveniently equals the number of leading zeroes in
 	 * the physical address of __idmap_text_end.
 	 */
-/*
- * IAMROOT, 2021.08.14: 
- * - VA 확장이 필요한지 점검한다.
- *   __idmap_text_end의 주소를 물리주소로 알아와서 이 주소의 선두 비트들이 0인
- *   개수를 알아와서 TCR_T0SZ(VA_BITS=예:39)=25와 비교한다.
- *   비교하여 물리 주소에 사용한 0이 더 많은 경우 가상 주소 크기가 충분하다.
- *   이 경우 가상 주소 영역의 확장이 필요 없으니  1f 레이블로 이동한다.
- *   확장이 필요한 경우 __idmap_text_end 물리주소에서 산출된 선두 0의 개수를
- *   idmap_t0sz에 저장한다.
+/* IAMROOT, 2021.08.14:
+ * - VA 확장이 필요한지 확인한다.
+ *   clz를 통해 pa(__idmap_text_end)의 연속적인 0의 갯수를 알아와
+ *   TCR_T0SZ(VA_BITS=예:39)=25와 비교한다. pa에 사용한 0이 더 많은 경우
+ *   va 크기가 충분하여 va 영역 확장이 필요 없으니 1f 레이블로 이동한다.
+ *
+ * - clz: count leading zero bits
+ *        MSB에서부터 연속적인 0의 갯수를 알아오는 명령어.
  */
 	adrp	x5, __idmap_text_end
 	clz	x5, x5
 	cmp	x5, TCR_T0SZ(VA_BITS_MIN) // default T0SZ small enough?
 	b.ge	1f			// .. then skip VA range extension
 
+/* IAMROOT, 2023.10.12:
+ * - 확장이 필요한 경우이므로 pa(__idmap_text_end)의 연속적인 0의 갯수를
+ *   idmap_t0sz에 저장하고 va 크기에 따라 다르게 처리한다.
+ */
 	adr_l	x6, idmap_t0sz
 	str	x5, [x6]
 	dmb	sy
 	dc	ivac, x6		// Invalidate potentially stale cache line
 
-/*
- * IAMROOT, 2021.08.21:
- * - VA < 48
- *   table table level 을 확장.
- * - VA >= 48
- *   table table을 늘리기만 하는데 PGD table을
- *   PHYS_MASK_SHIFT - PGDIR_SHIFT만큼 늘렸다.
- *   (48 - 39 = 2^9 = 512)
- * - PGDIR_SHIFT의 주석에 써놓는걸 참조하면 EXTRA_SHIFT가 vabits가 안 맞는
- *   경우가 있다.(64k page size, vabits 48 인 경우
- */
 #if (VA_BITS < 48)
+/* IAMROOT, 2023.10.14:
+ * - VA_BITS < 48 인 경우.
+ *   table-table-level 을 확장.
+ */
 #define EXTRA_SHIFT	(PGDIR_SHIFT + PAGE_SHIFT - 3)
 #define EXTRA_PTRS	(1 << (PHYS_MASK_SHIFT - EXTRA_SHIFT))
 
@@ -638,27 +629,41 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	 * utilised, and that lowering T0SZ will always result in an additional
 	 * translation level to be configured.
 	 */
+/* IAMROOT, 2023.10.14:
+ * - PGDIR_SHIFT의 주석을 참조하면 EXTRA_SHIFT와 vabits가 mismatch인 경우가
+ *   있다. (64k page size & vabits 48)
+ */
 #if VA_BITS != EXTRA_SHIFT
 #error "Mismatch between VA_BITS and page size/number of translation levels"
 #endif
 
 	mov	x4, EXTRA_PTRS
-	/*
-	 * IAMROOT, 2021.08.28:
-	 * VA_BITS 가 39라고 가정
-	 *
-	 * tbl  : x0 -> idmap_pg_dir
-	 * virt : x3 -> __idmap_text_start
-	 * shift : EXTRA_SHIFT -> 30 + 12 - 3 = 39
-	 * ptrs : EXTRA_PTRS -> 2^(9) = 512
-	 * x5, x6 : temp
-	 */
+/* IAMROOT, 2021.08.28:
+ * VA_BITS 가 39라고 가정
+ *
+ * tbl    : @x0: idmap_pg_dir
+ * virt   : @x3: __idmap_text_start
+ * shift  : EXTRA_SHIFT (39 = 30 + 12 - 3)
+ * ptrs   : @x4: EXTRA_PTRS (512 = 2^9)
+ * tmp1   : @x5
+ * tmp2   : @x6
+ */
 	create_table_entry x0, x3, EXTRA_SHIFT, x4, x5, x6
 #else
 	/*
 	 * If VA_BITS == 48, we don't have to configure an additional
 	 * translation level, but the top-level table has more entries.
 	 */
+/* IAMROOT, 2023.10.14:
+ * - VA_BITS == 48 인 경우.
+ *   PGD table의 entry를 PHYS_MASK_SHIFT - PGDIR_SHIFT 만큼 늘린다.
+ *
+ *     PHYS_MASK_SHIFT: 48
+ *   - PGDIR_SHIFT    : 39
+ *   ---------------------
+ *                       9
+ *   2^9 = 512개
+ */
 	mov	x4, #1 << (PHYS_MASK_SHIFT - PGDIR_SHIFT)
 	str_l	x4, idmap_ptrs_per_pgd, x5
 #endif
@@ -666,8 +671,7 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	ldr_l	x4, idmap_ptrs_per_pgd
 	adr_l	x6, __idmap_text_end		// __pa(__idmap_text_end)
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  *   ---
  *   .macro map_memory, tbl, rtbl, vstart, vend, flags, phys, pgds,
  *   istart, iend, tmp, count, sv
@@ -717,8 +721,8 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	mov_q	x5, KIMAGE_VADDR		// compile time __va(_text)
 	add	x5, x5, x23			// add KASLR displacement
 	mov	x4, PTRS_PER_PGD
-/*
- * IAMROOT, 2021.08.21:
+
+/* IAMROOT, 2021.08.21:
  * - kernel의 가상주소의 vend를 구해야한다.
  *   vstart는 바로위 코드 x5를 통해 구했고.
  *   _end(가상주소)를 x6으로 adrp를 통해 물리 주소를 알아온다.
@@ -732,8 +736,7 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	sub	x6, x6, x3			// _end - _text
 	add	x6, x6, x5			// runtime __va(_end)
 
-/*
- * IAMROOT, 2021.08.24:
+/* IAMROOT, 2021.08.24:
  * Linear Mapping 시작.
  *
  * x0: __pa(init_pg_dir)
@@ -776,8 +779,7 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
  */
 	map_memory x0, x1, x5, x6, x7, x3, x4, x10, x11, x12, x13, x14
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  * - 위에 명령어들은 결국 load/store이고 해당 명령어들이 전부 완료되게
  *   알려주는 역할
  */
@@ -788,8 +790,7 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 	 */
 	dmb	sy
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  * - 위에서 memory mapping을 다했으므로 해당 memory의 cache를 전부 한번
  *   정리해주는 코드
  */
@@ -1138,27 +1139,6 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
  *      - V: Overflow condition flag
  *           1 (instr의 결과로 overflow 발생시 masking 됨)
  *           0 (그 외 나머지)
- *   exception masking bits (Async exceptions)
- *      - D: Debug exception mask bit
- *      - A: SError exception mask bit
- *      - I: IRQ interrupt mask bit
- *      - F: FIQ interrupt mask bit
- *      Value: 1 (exception masked)
- *             0 (exception NOT masked)
- *
- *   Async exception과 masking에 대한 참고 링크
- *   - https://developer.arm.com/documentation/102412/0103/Exception-types/Asynchronous-exceptions
- *
- * - INIT_PSTATE_EL1.PSR_MODE_EL1h(0b0101) 의미
- *   - M[3:2]: exception level 표시
- *       0b00: EL0
- *       0b01: EL1
- *       0b10: EL2
- *       0b11: EL3
- *   - M[1]  : reserved
- *   - M[0]  : SPsel bit
- *        0b0: SP is always SP0
- *        0b1: SP is determined by the EL
  */
 	mov_q	x0, INIT_PSTATE_EL1
 	msr	spsr_el1, x0
@@ -1206,7 +1186,9 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 
 /* IAMROOT, 2021.08.14:
  * - EL2 hypervisor vector addr을 vbar_el2 reg에 기록한다.
- *   vbar_el2: el2에서 exception 발생시 점프할 address 저장
+ *   vbar_el2: Vector Base Addr reg.
+ *             any el에서 exception이 발생하여 el2로 점프해야 하는 경우 처리할
+ *             exception handler vector table의 addr 저장.
  */
 	/* Hypervisor stub */
 	adr_l	x0, __hyp_stub_vectors
@@ -1218,28 +1200,32 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 * making it impossible to start in nVHE mode. Is that
 	 * compliant with the architecture? Absolutely not!
 	 */
-/*
- * IAMROOT, 2021.11.14:
- * - E2H : EL2 Host. Enables a configuration where a Host Operating System
- *   is running in EL2, and the Host Operating System's applications are
- *   running in EL0.
+/* IAMROOT, 2021.11.14:
+ * - HCR_E2H bit가 clear 되었는지 확인한다. 예상대로면 HCR_HOST_NVHE_FLAGS 에서
+ *   clear 되어야 하지만 몇몇 cpu 에서는 RES1로 동작하여 clear 되지 않는다고 한다.
+ *   HCR_E2H bit가 clear 되었다면 일반 동작(1f)로 이동하고 그게 아니면 VHE로
+ *   동작한다.
  *
- * - HCR_E2H이 clear됬는지 확인한다. 원래 대로라면 위에 HCR_HOST_NVHE_FLAGS
- *   로 설정하면서 clear됬어야됬는데 몇몇 cpu에서 이게 안된다고 한다.
- *   HCR_E2H가 clear됬으면 일반 동작(1f)로 이동하고 그게 아니면 stub로 동작한다.
+ * - E2H : FEAT_VHE 지원하는 경우 host-OS를 EL2에서 동작시키기 위한 bit.
  */
 	mrs	x0, hcr_el2
 	and	x0, x0, #HCR_E2H
 	cbz	x0, 1f
-/*
- * IAMROOT, 2021.11.14:
- * - 원래는 vhe mode로 나중에 전환 하지만 HCR_E2H가 clear안되는 cpu들은
- *   바로 vhe mode로 전환할 준비를 한다. HCR_E2H가 set되있으면 el1 관련
- *   register에 접근해도 el2 register에 접근하는 것처럼 되기 때문에
- *   문제가 발생하기 때문이다.
- * - el1에서 설정한 값이 el2에서도 똑같이 동작가능하도록
- *   SYS_SCTLR_EL12에 설정하는것이 보인다. 일단 vhe를 하기전에 무조건
- *   해당 register를 초기화해준다. hvc 동작시 해당 register를 사용한다.
+
+/* IAMROOT, 2021.11.14: TODO
+ * (E2H bit가 clear 되지 않는 예외 처리 로직)
+ *
+ * - E2H == 1인 상황에서는 바로 VHE mode로 전환할 준비를 한다.
+ *   EL2에서 동작하는 host-OS가 EL1 reg값을 동일하게 rw 하도록 준비.
+ *   VHE 동작 전에 해당 reg를 초기화하며 hvc 동작시 사용된다.
+ *
+ *   HCR_E2H == 1 이면 EL1에서 동작해야 할 host-OS가 EL2에서 동작하므로
+ *   EL1 reg에 접근할 수 있도록 alias 사용.
+ *
+ * - FEAT_VHE 지원 및 E2H == 1 인 상황에서 아래와 같이 동작한다.
+ *   <reg>_EL1 접근 : EL2로 redirect.
+ *   <reg>_EL12 접근: EL1로 redirect.
+ *   <reg>_EL02 접근: EL0로 redirect.
  */
 	/* Switching to VHE requires a sane SCTLR_EL1 as a start */
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1250,47 +1236,31 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 	 * to our original caller... This makes sure that we have
 	 * initialised the basic PSTATE state.
 	 */
-/*
- * IAMROOT, 2021.11.14:
- * - 원래는 EL2 mode에서 eret을 하면 elr_el2로 접근을 하는데
- *   HCR_E2H가 set되있으므로 elr_el1을 설정해도 elr_el2가
- *   elr_el1처럼 동작할것이다.
- * - spsr_el2에는 el1 복귀로 넣어놨으므로 eret시 el1이 되면서 __cpu_stick_to_vhe
- *   로 진입할것이다.
- * - PSTATE 초기화를 위해 spsr_el1에도 초기값을 넣어둔다.
+/* IAMROOT, 2021.11.14: TODO
+ * - spsr_el2, elr_el2에 EL2 daif, SP(el1)을 설정하고 return addr을
+ *   __cpu_stick_to_vhe로 설정한다. 따라서 eret 수행시 해당 함수로 점프한다.
+ *
+ * - FEAT_VHE 및 E2H == 1 인 현재 상황에서는 <sys-reg>_el1은 모두 el2로
+ *   redirect 된다. 따라서 el1이지만 h/w 레벨에서 el2로 접근하도록 동작한다.
+ *
+ * - eret 호출 전
+ *             pc: init_kernel_el
+ *   PSTATE(cpsr): unknown but current one
+ *
+ * - eret 호출 후
+ *             pc: __cpu_stick_to_vhe (예외 처리 함수)
+ *   PSTATE(cpsr): INIT_PSTATE_EL2
  */
 	mov	x0, #INIT_PSTATE_EL2
 	msr	spsr_el1, x0
 	adr	x0, __cpu_stick_to_vhe
 	msr	elr_el1, x0
-/*
- * IAMROOT, 2021.11.14:
- * - el1로 전환을 한다. elr_el1에서 __cpu_stick_to_vhe를 넣어놧으므로
- *   그쪽으로 branch가 될것이다.
- *   (현재 el2 mode에서, spsr_el2를 el1으로 __init_el2_nvhe_prepare_eret에서
- *   설정해놨으므로 eret을 통해 el1가 된다.)
- * ---
- *  1) eret 진입전
- *  Current EL : EL2
- *  spsr_el1 : INIT_PSTATE_EL2
- *  spsr_el2 : INIT_PSTATE_EL1 
- *  elr_el1  : __cpu_stick_to_vhe
- *  PSTATE   : (아직 초기화안됨)
- *
- * 2) eret 진입 직후 (__cpu_stick_to_vhe 진입)
- * Current EL : EL1 (spsr_el2에 EL1이 되있으므로 EL2 -> EL1)
- * PSTATE     : INIT_PSATE_EL1
- *
- * 3) __cpu_stick_to_vhe 완료후
- * Current EL : EL2 (hvc를 통해서 EL1 -> EL2)
- * PSTATE     : INIT_PSATE_EL2
- */
 	eret
 
-/*
- * IAMROOT, 2021.11.14:
- * - el1(nvhe)로 start할 준비를 한다.
- *   후에 switch_to_vhe에서 el2로 전환될것이다.
+/* IAMROOT, 2021.11.14:
+ * - nVHE 모드이므로 eret시 EL1로 변경할 준비를 한다.
+ *   guest-OS는 EL1에서, hypervisor는 EL2에서 동작중인 상황.
+ *   따라서 spsr_el2, elr_el2 모두 EL1과 관련된 정보들로 채워진다.
  */
 1:
 	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
@@ -1298,36 +1268,23 @@ SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 
 	msr	elr_el2, lr
 	mov	w0, #BOOT_CPU_MODE_EL2
-/*
- * IAMROOT, 2021.11.14:
- * - init_el2_state에서 __init_el2_nvhe_prepare_eret에서 el1으로
- *   복귀하도록 설정했엇을것이다. w0에 cpu가 el2로 일단 부팅을
- *   했다는걸 저장하고 실제 eret을 통해 el1으로 mode가 변경될것이다.
- *   elr_el2에 lr을 넣어놨으므로 lr로 바로 가게 될것이다.
- */
 	eret
 
 __cpu_stick_to_vhe:
-/*
- * IAMROOT, 2021.11.14:
- * - 원래는 vhe를 지원해도 el1으로 동작하다가 switch_to_vhe을 했어야 됬는데
- *   일부 cpu의 문제로 여기서 el2로 전환시킨다.
+/* IAMROOT, 2021.11.14: TODO
+ * - FEAT_VHE / E2H == 1 인 상황이자 E2H bit clear를 시도했지만 RES1로 인해
+ *   예외 처리가 필요한 상황에서 호출되는 helper 함수.
  *
- * --- hvc(Hypervisor Call)
+ * - hvc (synchronous exception)을 발생시키며 __hyp_stub_vectors의 elx_sync가
+ *   호출된다. arg는 HVC_VHE_RESTART로 세팅되어 hyp-call handler 호출.
  *
- * - el1 -> el2을 하기위해 Synchronous exception을 발생시킨다.
- *   __hyp_stub_vectors의 (vbar_el2에 set했었다.) elx_sync가 호출된다.
- *   (hvc의 #0는 system에서 무시되는것처럼 보이는데 필요에 따라 인자로
- *   쓸수있는 듯하다)
- *   PSTATE는 hvc가 발생한(el2에서 발생하면 el2->el2가 되는거같다.)
- *   spsr_elx에 저장을 해놓고, pc도 elr_elx에 저장을 해놓고 hvc가 끝나면
- *   다시 복귀시킨다.
- *   
- *   1. hvc 실행 : pc -> elr_el1, PSTATE -> spsr_el1
- *   2. hvc(sync vector 동작)
- *   3. hvc 종료(vector에서 eret을 통해 동작) : elr_el1 -> pc, spsr_el1 -> PSTATE
- *
- * - x0를 hvc 특별 인자로 사용한다. HVC_SET_VECTORS의 주석 참고
+ *   1. hvc 호출
+ *      elr_el2 reg에 pc 저장.
+ *      spsr_el2 reg에 PSTATE 저장.
+ *   2. hyp-call handler 수행 (sync exception)
+ *   3. hvc 종료
+ *      elr_el2 reg 값을 pc에 복구.
+ *      spsr_el2 reg 값을 PSTATE에 복구.
  */
 	mov	x0, #HVC_VHE_RESTART
 	hvc	#0
@@ -1339,9 +1296,15 @@ SYM_FUNC_END(init_kernel_el)
  * Sets the __boot_cpu_mode flag depending on the CPU boot mode passed
  * in w0. See arch/arm64/include/asm/virt.h for more info.
  */
-/*
- * IAMROOT, 2021.08.14: 
- * - w0로 알아온 부트(el1 or el2) 모드 값을 저장한다.
+/* IAMROOT, 2021.08.14:
+ * - w0에 저장된 boot mode 값을 __boot_cpu_mode에 저장한다.
+ *   해당 함수가 호출되고 나면 __boot_cpu_mode에 있는 2개의 배열 값은 아래와
+ *   같이 동일해진다.
+ *
+ *   - 호출 전
+ *      __boot_cpu_mode[] = { EL2, EL1 }
+ *   - 호출 후
+ *      __boot_cpu_mode[] = { EL2, EL2 } 또는 { EL1, El1 }
  */
 SYM_FUNC_START_LOCAL(set_cpu_boot_mode_flag)
 	adr_l	x1, __boot_cpu_mode
@@ -1368,14 +1331,18 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  * This is not in .bss, because we set it sufficiently early that the boot-time
  * zeroing of .bss would clobber it.
  */
-/*
- * IAMROOT, 2021.08.14: 
- * - 지시어 .long은 4바이트 값이다.
- *   set_cpu_boot_mode_flag 함수가 아래 값을
- *   부팅한 모드(el1 or el2) 값으로 동일해지도록 기록한다.
+/* IAMROOT, 2021.08.14:
+ * - init_kernel_el에서 결정된 boot mode 값을 저장한다.
  *
- * - 해당 데이터는 '.mmuoff.data.write' section에 저장되며 아래 C 코드와
- *   유사한 의미를 가진다. (bss section이 아님에 유의하자)
+ *   - 초기화 시
+ *      __boot_cpu_mode[] = { EL2, EL1 }
+ *   - set_cpu_boot_mode_flag 함수 호출 후
+ *      __boot_cpu_mode[] = { EL2, EL2 } 또는 { EL1, El1 }
+ *
+ * - .long: 4 bytes
+ *
+ * - 배열은 '.mmuoff.data.write' section에 저장되며 아래 C 코드와 유사한
+ *   의미를 가진다.
  *
  *   static int __boot_cpu_mode[] = {
  *      BOOT_CPU_MODE_EL2, BOOT_CPU_MODE_EL1

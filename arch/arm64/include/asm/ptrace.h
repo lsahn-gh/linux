@@ -17,14 +17,35 @@
 #define CurrentEL_EL2		(2 << 2)
 
 /* IAMROOT, 2021.08.14:
- * - spsr_elx 설정값.
+ * - cpsr / spsr_elx 설정값.
  *   PSR_DAIF: async interrupt 종류
- *   PSR_MODE: exception이 어느 level에서 발생했는지 표시 및
- *             SPsel bit까지 제어.
+ *   PSR_MODE: exception이 어느 level에서 발생했는지 표시 및 SPsel bit까지 제어.
  *
  * - ELx으로 돌아갈때 DAIF 플래그들을 모두 설정하여 인터럽트나 정렬 exception이
  *   발생하지 않도록 막는다. 또한 변경할 ELx mode + ELx stack을 선택한다.
  * - eret를 수행하면 현재 mode의 spsr_el값이 pstate로 update된다.
+ *
+ *   exception masking bits (Async exceptions)
+ *      - D: Debug exception mask bit
+ *      - A: SError exception mask bit
+ *      - I: IRQ interrupt mask bit
+ *      - F: FIQ interrupt mask bit
+ *      Value: 1 (exception masked)
+ *             0 (exception NOT masked)
+ *
+ *   Async exception과 masking에 대한 참고 링크
+ *   - https://developer.arm.com/documentation/102412/0103/Exception-types/Asynchronous-exceptions
+ *
+ * - INIT_PSTATE_EL1.PSR_MODE_EL1h(0b0101) 의미
+ *   - M[3:2]: exception level 표시
+ *       0b00: EL0
+ *       0b01: EL1
+ *       0b10: EL2
+ *       0b11: EL3
+ *   - M[1]  : reserved
+ *   - M[0]  : SPsel bit
+ *        0b0: SP is always SP0
+ *        0b1: SP is determined by the EL
  */
 #define INIT_PSTATE_EL1 \
 	(PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1h)
