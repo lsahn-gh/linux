@@ -833,8 +833,7 @@ alternative_endif
 #endif
 	.endm
 
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  *
  * ARM Ref p2448 Page, 64KB granule 참고.
  * ---
@@ -845,7 +844,7 @@ alternative_endif
  * ---
  *
  * (phys | phys >> 36) & PTE_ADDR_MASK
- * 
+ *
  * ---
  *
  * 52 bit system 은 PA 중 [51:16] 이 유용한 주소공간이고,
@@ -859,7 +858,7 @@ alternative_endif
  *
  * If ARMv8.2-LPA is implemented, bits[15:12] are bits[51:48] and bits[47:16] are
  * bits[47:16] of the output address for a page of memory.
- * 
+ *
  * 이라는 내용이 있다. 즉 [51:16]을 사용하고 있는데 mapping은 [47:12]를 써야되므로
  * 47의 뒤인 [51:48]을 [16:12]로 이동시키기 위함이다.
  */
