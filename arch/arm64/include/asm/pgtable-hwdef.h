@@ -347,7 +347,7 @@
 #define TCR_T1SZ(x)		((UL(64) - (x)) << TCR_T1SZ_OFFSET)
 
 /* IAMROOT, 2021.08.21:
- * - TCR_T0SZ와 TCR_T1SZ두개의 사이즈 전부 OR로해서 가져오는 역할
+ * - TCR_T0SZ 값과 TCR_T1SZ 값 모두 한번에 가져온다.
  */
 #define TCR_TxSZ(x)		(TCR_T0SZ(x) | TCR_T1SZ(x))
 #define TCR_TxSZ_WIDTH		6

@@ -793,32 +793,28 @@
 #define INIT_SCTLR_EL1_MMU_OFF \
 	(ENDIAN_SET_EL1 | SCTLR_EL1_RES1)
 
-/*
- * IAMROOT, 2021.08.29:
- * sctlr_el1.x
- * - m    : EL1/EL0 stage 1 MMU 사용.
- * - c    : Data caches 사용
- * - sa   : Stack Alignment check 사용.
- * - sa0  : EL0 Stack Alignment check 사용.
- * - sed  : SETEND instruction 사용 제한 (EL0가 AArch32 capable시)
- *          'setend'는 EL0에서 A32/T32의 pstate.e에 big/little endian을 설정.
- *          EL0에서 해당 명령어 사용시 EL1으로 exception 하여 trap 처리.
- * - i    : Instruction caches 사용.
- * - dze  : EL0에서 'dc zva' 명령어 허용 (zva: data cache zero by VA)
- * - uct  : EL0에서 'CTR_EL0' 레지스터 접근 허용.
- *          ctr_el0: cache type register, el0: 캐시 정보 제공.
- * - ntwe : EL0에서 WFE 사용시 trap 여부, 1 설정시 trap 하지 않음
- * - iesb : Implicit Error Synchronization event 허용
- * - span : Set Privileged Access Never 기능
- * - itfsb: Tag Check Faults 관련 (MTE2 구현시)
- *          1로 설정되는 것은 Tag Check Faults를 EL1 sync exception에서
- *          핸들링함을 의미.
- * - uci  : EL0에서 cache maintenance instructions 실행 허용.
- * -------(old 5.10)
- * - ata  : (5.15 삭제)
- * - ata0 : (5.15 삭제)
- * -------
- * - epan : (5.15 추가) Enhanced Privileged Access Never 기능
+/* IAMROOT, 2021.08.29:
+ * - sctlr_el1: system control reg
+ *   M[0]     : EL1/EL0 stage 1 MMU 사용.
+ *   C[2]     : Data caches 사용
+ *   SA[3]    : Stack Alignment check 사용.
+ *   SA0[4]   : EL0 Stack Alignment check 사용.
+ *   SED[8]   : SETEND instruction 사용 제한 (EL0가 AArch32 capable시)
+ *              'setend'는 EL0에서 A32/T32의 pstate.e에 big/little endian을 설정.
+ *              EL0에서 해당 명령어 사용시 EL1으로 exception 하여 trap 처리.
+ *   I[12]    : Instruction caches 사용.
+ *   DZE[14]  : EL0에서 'dc zva' 명령어 허용 (zva: data cache zero by VA)
+ *   UCT[15]  : EL0에서 'CTR_EL0' 레지스터 접근 허용.
+ *              ctr_el0: cache type register, 캐시 정보 제공.
+ *   nTWE[18] : EL0에서 WFE 사용시 trap 여부, 1 설정시 trap 하지 않음
+ *   IESB[21] : Implicit Error Synchronization event 허용
+ *   SPAN[23] : Set Privileged Access Never 기능
+ *              PSTATE.PAN 값은 EL1에서 exception 받도록 변경되지 않게 한다.
+ *   ITFSB[37]: Tag Check Faults 관련 (MTE2 구현시)
+ *              1로 설정되는 것은 Tag Check Faults를 EL1 sync exception에서
+ *              핸들링함을 의미.
+ *   UCI[26]  : EL0에서 cache maintenance 명령어 실행 허용.
+ *   EPAN[57] : Enhanced Privileged Access Never 기능
  */
 #define INIT_SCTLR_EL1_MMU_ON \
 	(SCTLR_ELx_M    | SCTLR_ELx_C    | SCTLR_ELx_SA   | SCTLR_EL1_SA0   | \
@@ -826,47 +822,60 @@
 	 SCTLR_EL1_NTWE | SCTLR_ELx_IESB | SCTLR_EL1_SPAN | SCTLR_ELx_ITFSB | \
 	 ENDIAN_SET_EL1 | SCTLR_EL1_UCI  | SCTLR_EL1_EPAN | SCTLR_EL1_RES1)
 
-/* MAIR_ELx memory attributes (used by Linux) */
-/*
- * IAMROOT, 2021.08.24:
- *   0b0000_dd00. 즉 2,3번째 bit dd를 제외한 나머지 bit가 0이면 device memory
- *   dd에 따라서 세분화된다.
+/* IAMROOT, 2021.08.24:
+ * - translation table entry의 attrindex 정의.
+ *   1. 0b0000_dd00: Device Memory 타입.
+ *               dd: 0b00 - Device-nGnRnE memory
+ *                   0b01 - Device-nGnRE memory
+ *                   0b10 - Device-nGRE memory
+ *                   0b11 - Device-GRE memory
  *
- * - MAIR_ATTR_DEVICE_nGnRnE		UL(0x00) == 0b0000_0000
- *   0b0000_dd00 = Device Memory
- *   0bXXXX_00XX = Device-nGnRnE memory
+ *                 - MAIR_ATTR_DEVICE_nGnRnE: 0b0000_0000 (0x00)
+ *                   dd: 00 -> 0bXXXX_00XX (Device-nGnRnE memory)
  *
- * - MAIR_ATTR_DEVICE_nGnRE		UL(0x04) == 0b0000_0100
- *   0b0000_dd00 = Device Memory
- *   0bXXXX_01XX = Device-nGnRE memory
+ *                 - MAIR_ATTR_DEVICE_nGnRE: 0b0000_0100 (0x04)
+ *                   dd: 01 -> 0bXXXX_01XX (Device-nGnRE memory)
  *
- * -----(old 5.10)
- * - MAIR_ATTR_DEVICE_GRE		UL(0x0c) == 0b0000_1100
- *   0b0000_dd00 = Device Memory
- *   0bXXXX_11XX = Device-nGnRE memory
- * -----
+ *   2. 0b0000_dd01: 'FEAT_XS'가 구현되어 있다면 Device Memory,
+ *                   아니면 UNPREDICTABLE.
+ *   3. 0b0000_dd1x: UNPREDICTABLE.
  *
- * 0booooiiii, (oooo != 0000 and iiii != 0000)는 normal memory라는것을 고려
+ *   4. 0boooo_iiii: Normal Memory 타입.
+ *             oooo: 0b0000 - ??
+ *                   0b00RW - Normal Memory, Outer Write-Through Transient
+ *                            RW는 00이 될 수 없음.
+ *                   0b0100 - Normal Memory, Outer Non-cacheable
+ *                   0b01RW - Normal Memory, Outer Write-Back Transient
+ *                            RW는 00이 될 수 없음.
+ *                   0b10RW - Normal Memory, Outer Write-Through Non-transient
+ *                   0b11RW - Normal Memory, Outer Write-Back Non-transient
+ *                       (R: Outer Read-Allocate policy)
+ *                       (W: Outer Write-Allocate policy)
+ *             iiii: 0b0000 - ??
+ *                   0b00RW - Normal Memory, Inner Write-Through Trasient
+ *                            RW는 00이 될 수 없음.
+ *                   0b0100 - Normal Memory, Inner Non-cacheable
+ *                   0b01RW - Normal Memory, Inner Write-Back Transient
+ *                            RW는 00이 될 수 없음.
+ *                   0b10RW - Normal Memory, Inner Write-Through Non-transient
+ *                   0b11RW - Normal Memory, Inner Write-Back Non-transient
+ *                       (R: Inner Read-Allocate policy)
+ *                       (W: Inner Write-Allocate policy)
  *
- * - MAIR_ATTR_NORMAL_NC		UL(0x44) = 0b0100_0100
- *   oooo = 0100, iiii = 0100
- *   Normal Memory, Outer/Inner Non-cacheable
+ *                 - MAIR_ATTR_NORMAL_NC
+ *                   ooooiiii: 0b0100_0100 (0x44)
+ *                   Normal Memory, Outer/Inner Non-cacheable
  *
- * - MAIR_ATTR_NORMAL_TAGGED		UL(0xf0) = 0b1111_0000
- *   oooo = 1111, iiii = 0000
- *   FEAT_MTE2가 구현되있으면 Normal Memory.
- *   Outer/Inner Write-Through, R/W-Allocate Non-transient
+ *                 - MAIR_ATTR_NORMAL_TAGGED
+ *                   ooooiiii: 0b1111_0000 (0xf0)
+ *                   FEAT_MTE2가 구현되있으면 Normal Memory.
+ *                   Outer/Inner Write-Through, R/W-Allocate Non-transient
  *
- * - MAIR_ATTR_NORMAL		UL(0xff) = 0b1111_1111
- *   oooo = 1111, iiii = 1111,
- *   Normal Memory, Write-Back, R/W-Allocate Non-transient
- *
- * -----(old 5.10)
- * - MAIR_ATTR_NORMAL_WT		UL(0xbb) = 0b1011_1011
- *   oooo = 1011, iiii = 1011
- *   Normal Memory, Outer/Inner Write-Through, R/W-Allocate Non-transient
- * -----
+ *                 - MAIR_ATTR_NORMAL
+ *                   ooooiiii: 0b1111_1111 (0xff)
+ *                   Normal Memory, Write-Back, R/W-Allocate Non-transient
  */
+/* MAIR_ELx memory attributes (used by Linux) */
 #define MAIR_ATTR_DEVICE_nGnRnE		UL(0x00)
 #define MAIR_ATTR_DEVICE_nGnRE		UL(0x04)
 #define MAIR_ATTR_NORMAL_NC		UL(0x44)
@@ -1262,16 +1271,20 @@
 #define KERNEL_GCR_EL1_EXCL	SYS_GCR_EL1_EXCL_MASK
 #endif
 
-/*
- * IAMROOT, 2021.08.21:
- * GCR_EL1 : Tag Control Register.
+/* IAMROOT, 2021.08.21:
+ * - .RRND = 0x1, .EXCL = 0xff로 설정한다.
+ *   RRND == 1은 tag value를 ChooseRandomNonExcludedTag로 정하겠다는 의미이다.
+ *   ChooseRandomNonExcludedTag는 alloc tag value를 0..15 중에서
+ *   non-deterministic 으로 선택하는데 EXCL[0:15]에서 bit가 1인 것은 제외한다.
+ *   만약 16 bit 전부 1이라면 alloc tag value로 0을 사용한다.
  *
- * 1. GCR_EL1:
- *      RRND를 1로, Exclude bit 16개를 전부 1로 set 한다.
- *      RRND가 1이라는 것은 tag값을 ChooseRandomNonExcludedTag가 결정하겠다는 것을 뜻한다.
- *      ChooseRandomNonExcludedTag는 Allocation Tag 값으로 0부터 15까지의 값을 non-deterministic 하게
- *      고르게 되는데 Exclude bit[0:15] 에서 set되어 있는 녀석은 선택할 때 제외시킨다.
- *      근데 만약 16개가 전부 1이라면 Allocation Tag 값으로 0을 사용한다.
+ * - GCR_EL1     : Tag Control reg.
+ *      .rrnd[16]: IRG instr을 통해 tag value 생성 방식을 제어.
+ *            0b0: RandomTag() 방식을 통해 tag value 생성.
+ *            0b1: implementation-specific 방식을 통해 tag value 생성.
+ *                 ChooseNonExcludedTag() 사용.
+ *    .excl[15:0]: ChooseNonExcludedTag() 방식이 사용될 때 제외할 bit 설정.
+ *                 만약 모든 bit가 1이면 tag value로 0을 사용한다.
  */
 #define KERNEL_GCR_EL1		(SYS_GCR_EL1_RRND | KERNEL_GCR_EL1_EXCL)
 

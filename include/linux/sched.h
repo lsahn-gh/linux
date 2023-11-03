@@ -2331,33 +2331,39 @@ extern void ia64_set_curr_task(int cpu, struct task_struct *p);
 
 void yield(void);
 
-/*
- * IAMROOT, 2021.09.04:
+/* IAMROOT, 2021.09.04:
+ * - INIT_TASK_DATA, init_thread_info, init_task를 종합하여 살펴보자.
  *
- * INIT_TASK_DATA, init_thread_info, init_task를 종합적으로 살펴보면
- * 다음과 같다.
+ *   CONFIG on/off에 따른 thread_info, task_struct 위치 (stack은 GROW DOWN 기준)
+ *   CONFIG_ARCH_TASK_STRUCT_ON_STACK / CONFIG_THREAD_INFO_IN_TASK
  *
- * ====================================================================
+ * - on / on : stack에 task_struct가 저장되고 task_struct에는 thread_info 존재.
+ *   +--------- stack ---------------------------------------+ TASK_SIZE
+ *   | task_struct (thread_info 포함)    |                   |
+ *   +-------------------------------------------------------+
+ *                                       ^                   ^
+ *                                       +-- stack end       +-- stack start
  *
- * CONFIG별 thread_info, task위치 (stack start, end는 GROW DOWN 기준)
+ * - on / off : stack에 task_struct, thread_info가 순서대로 저장. (사용안함)
+ *   +--------- stack ---------------------------------------+ TASK_SIZE
+ *   | task_struct    | thread_info      |                   |
+ *   +-------------------------------------------------------+
+ *                                       ^                   ^
+ *                                       +-- stack end       +-- stack start
  *
- * on,off / on,off : CONFIG_ARCH_TASK_STRUCT_ON_STACK/CONFIG_THREAD_INFO_IN_TASK
+ * - off / on : stack 용도로만 사용.
+ *   +--------- stack ---------------------------------------+ TASK_SIZE
+ *   |                                                       |
+ *   +-------------------------------------------------------+
+ *   ^                                                       ^
+ *   +-- stack end                                           +-- stack start
  *
- * - on / on : stack에 task가 존재하며 task에 thread_info가 존재한다.
- *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +-- task_struct(thread_info 포함) --->| stack end       | stack start
- *  
- * - on / off : stack에는 task, thread_info가 순서대로 존재한다.(사용안함)
- *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +- task_struct ----->| -thread_info ->| stack end       | stack start
- *
- * - off / on : stack은 stack 용도로만 사용한다.
- *       +--------- stack ---------------------------------------> TASK_SIZE
- *       + stack end                                             | stack start
- *
- * - off / off : stack에 thread_info가 존재한다.
- *       +--------- stack ---------------------------------------> TASK_SIZE
- *       +--thread_info ->| stack end                            | stack start
+ * - off / off : stack에 thread_info 저장.
+ *   +--------- stack ---------------------------------------+ TASK_SIZE
+ *   | thread_info    |                                      |
+ *   +-------------------------------------------------------+
+ *                    ^                                      ^
+ *                    +-- stack end                          +-- stack start
  *
  * current_thread_info()의 주석을 살펴보면 CONFIG_THREAD_INFO_IN_TASK == off
  * 에 대한것은 플랫폼 개발자가 정의해야되는거 같다.

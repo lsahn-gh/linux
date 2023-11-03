@@ -308,8 +308,7 @@
  *	      the MT_NORMAL_TAGGED memory type for PROT_MTE mappings. Note
  *	      that protection_map[] only contains MT_NORMAL attributes.
  */
-/*
- * IAMROOT, 2021.08.21:
+/* IAMROOT, 2021.08.21:
  * - MT_X는 MAIR_EL1의 index를 나타낸다. MAIR_EL1은 총 64비트로 이루어져있으며,
  *   8비트씩 묶었을 때의 index가 아래의 MT_X이다.
  *

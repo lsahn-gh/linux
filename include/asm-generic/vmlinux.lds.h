@@ -382,8 +382,7 @@
 	. = ALIGN(align);						\
 	*(.data..cacheline_aligned)
 
-/*
- * IAMROOT, 2021.09.05:
+/* IAMROOT, 2021.09.05:
  * init_thread_union과 init_stack이 같은 주소를 공유하니 기본적으로
  * stack과 union이 동일하다고 보면된다.(stack은 unoion의 끝주소에서부터 자란다)
  *

@@ -55,19 +55,12 @@
 #define TCR_MTE_FLAGS TCR_TBI1 | TCR_TBID1
 #endif
 
-/*
- * IAMROOT, 2021.08.21:
- *
- * ----- (old 5.10)
- * - memory cache제어에는 여러종류가 있지만 리눅스 커널은 아래 7가지만 define해서
+/* IAMROOT, 2021.08.21:
+ * - el1 mair reg 값 세팅에 필요한 attrs를 정의한다.
+ *   memory 제어에는 여러 종류가 있지만 linux kernel은 아래 5가지만 선택하여
  *   사용한다.
- * -----
- * - memory cache제어에는 여러종류가 있지만 리눅스 커널은 아래 5가지만 define해서
- *   사용한다. (MT_DEVICE_GRE, MT_NORMAL_WT가 빠졌다.)
- */
-/*
- * Default MAIR_EL1. MT_NORMAL_TAGGED is initially mapped as Normal memory and
- * changed during __cpu_setup to Normal Tagged if the system supports MTE.
+ *
+ *   mair: memory attribute indirection reg.
  */
 /*
  * Default MAIR_EL1. MT_NORMAL_TAGGED is initially mapped as Normal memory and
@@ -423,21 +416,19 @@ SYM_FUNC_END(idmap_kpti_install_ng_mappings)
  *	Return in x0 the value of the SCTLR_EL1 register.
  */
 	.pushsection ".idmap.text", "awx"
-/*
- * IAMROOT, 2022.01.28:
+
+/* IAMROOT, 2022.01.28:
  * - mair_el1, tcr_el1을 설정한다.
  */
 SYM_FUNC_START(__cpu_setup)
-/*
- * IAMROOT, 2021.08.21:
- * - tlbi : Translation Lookaside Buffer Invalidate
- *   vmall + el1
- *   vm : 현재 운영체제
- *   all : stage1의 모든 TLB Cache  || alls12: stage1, stage2의 모든 tlb cache
- *   el1 : 현재 level
- *   vmall : 즉 현재 운영체제 해당하는 stage1의 모든 TLB Cache를 지운다는뜻.
- *
- *   ---
+/* IAMROOT, 2021.08.21:
+ * - tlbi: Translation Lookaside Buffer Invalidate
+ *   vmallel1: vm + all + el1
+ *   - vm     : 현재 OS
+ *     all    : stage1의 모든 tlb cache
+ *     alls12 : stage1, stage2의 모든 tlb cache
+ *     el1    : exception level 1
+ *     vmall  : 현재 OS에 해당하는 stage1의 모든 tlb cache를 invalidation.
  *
  * - Program Ref p165
  *   ASID : 특정 ASID에 해당하는 tlb를 지운다는듯.
@@ -445,43 +436,40 @@ SYM_FUNC_START(__cpu_setup)
  *   VAA : any ASID + VA
  *   - VMALLE1 TLB invalidate by VMID, All at stage 1, EL1
  *
- *   ---
+ * - dsb: data synchronization barrier
+ *   nsh: Non-shareable
  */
 	tlbi	vmalle1				// Invalidate local TLB
 	dsb	nsh
 
-/*
- * IAMROOT, 2021.08.21:
- * - CPACR(Architectural Feature Access Control Register)
- *   Controls access to trace, and to Advanced SIMD and floating-point
- *   functionality from EL0, EL1, and EL3.
- * - MDSCR(Monitor Debug System Control Register)
- *   Main control register for the debug implementation.
- * - cpacr.fpen : floating point사용시 trap을 off한다는, 즉 사용하겠다는것.
- * - mdscr.tdcc : EL0가 DCC (Debug Communication Channel) 레지스터 접근시 trap 발생.
- * - enable_dbg : PSTATE의 DAIF에서 D비트를 클리어 (unmask, 즉 exception 허용).
+/* IAMROOT, 2021.08.21:
+ * - cpacr.fpen[21:20] bits를 1로 세팅.
+ *   trace, SVE, Advanced SIMD, floating-point 명령어 실행시 trap 하지 않도록
+ *   off 함. 결국 해당 명령어들을 사용하겠다는 의미이다.
  *
- * DCC:
- *   - PE와 debugger 사이에 데이터를 주고 받기 위한 채널이다.
- *
- * DAIF:
- *   - D: Debug exceptions mask.
- *   - A: SError interrupt process state mask.
- *   - I: IRQ interrupt process state mask.
- *   - F: FIQ interrupt process state mask.
+ * - cpacr: architectural feature access control reg.
+ *   trace, SVE, Advanced SIMD, floating-point 기능에 대해 접근 제어.
  */
 	mov	x1, #3 << 20
 	msr	cpacr_el1, x1			// Enable FP/ASIMD
+
+/* IAMROOT, 2023.10.27:
+ * - mdscr.tdcc: EL0가 DCC (Debug Communication Channel) 레지스터 접근시
+ *               trap 발생하도록 bit 설정.
+ *   DCC  : PE 와 debugger 사이에 데이터를 주고 받기 위한 채널.
+ *   mdscr: monitor debug system control reg.
+ *
+ * - enable_dbg : PSTATE에서 DAIF의 D bit 클리어 (exception 허용).
+ */
 	mov	x1, #1 << 12			// Reset mdscr_el1 and disable
 	msr	mdscr_el1, x1			// access to the DCC from EL0
 	isb					// Unmask debug exceptions now,
 	enable_dbg				// since this is per-cpu
-/*
- * IAMROOT, 2021.08.21:
- * - PMU (Performance Monitors), AMU (Activity Monitors)
- *  https://developer.arm.com/documentation/ka004659/latest
- *
- * EL0의 PMU, AMU 접근을 disable 한다.
+
+/* IAMROOT, 2021.08.21:
+ * - el0의 PMU, AMU 접근을 disable (trap) 한다.
+ *   PMU (Performance Monitors), AMU (Activity Monitors)
+ *   https://developer.arm.com/documentation/ka004659/latest
  */
 	reset_pmuserenr_el0 x1			// Disable PMU access from EL0
 	reset_amuserenr_el0 x1			// Disable AMU access from EL0
@@ -490,63 +478,90 @@ SYM_FUNC_START(__cpu_setup)
 	 * Default values for VMSA control registers. These will be adjusted
 	 * below depending on detected CPU features.
 	 */
-/*
- * IAMROOT, 2022.01.28:
- * - x17을 mair, x16을 tcr이라는 이름로 정의 한다는뜻.
+/* IAMROOT, 2022.01.28:
+ * - @x17에 접근할 수 있는 mair 라는 이름의 alias 정의.
+ *   @x16에 접근할 수 있는 tcr 라는 이름의 alias 정의.
  */
 	mair	.req	x17
 	tcr	.req	x16
-	mov_q	mair, MAIR_EL1_SET
 
-/*
- * IAMROOT, 2021.08.24:
+/* IAMROOT, 2023.10.28:
+ * - mair_el1과 tcr_el1 reg에 설정할 각각의 bits 값 세팅.
  *
- * tcr_el1 register를 크게 보면 다음과 같다.
+ * -- mair_el1: memory attribute indirection reg for el1
+ *    MAIR_EL1_SET를 따라가면 정의된 attrindex를 확인할 수 있다.
  *
- * [0:15], [16:31] : t0, t1에 대한 설정이 16bit를 기준으로 나눠져있다.
- * [32:63] : t0, t1에 대한 설정이 연속된 비트로 이뤄져있다.
- *
- *  [0:31]
- * ------------------------------
- *
- * - TCR_TxSZ(VA_BITS)[TCR_EL1.T0SZ, TCR_EL1.T1SZ]
- *	= 16씩 set 될것이다. 여기선 default로만 VA_BITS가 48이라는 가정하에
- *	설정하는 모양세이며 바로 뒤에 head.S에서 설정했던 vabits_actual/idmap_t0sz를
- *	사용해 다시 설정한다.
- *
- * - TCR_CACHE_FLAGS[TCR_EL1.IRGN0, TCR_EL1.IRGN1, TCR_EL1.ORGN0, TCR_EL1.ORGN1]
- *	= Cache를 Inner/Outer 모두 WBWA로 설정.
- *
- * - TCR_SMP_FLAGS[TCR_EL1.SH0, TCR_EL1.SH1]
- *   = Inner Shareable로 설정. Linux가 사용하는 모든 CPU에서 접근이 가능하게 함.
- *
- * - TCR_TG_FLAGS[TCR_EL1.TG0, TCR_EL1.TG] = TTBR0_EL1, TTBR1_EL1의 Granule size.
- *
- * [32:63]
- * ------------------------------
- *  
- * - TCR_KASLR_FLAGS[TCR_EL1.NFD1] = CONFIG_RANDOMIZE_BASE가 set되있을때만 설정.
- *   SVE사용시 특정 조건에서 커널 주소공간에 대한 timing attack의 공격을
- *   완하기 위함이라고 하며,
- *   이것을 안할 경우 SVE load에서 suppressed fault와 FFR을 사용해서
- *   커널 주소 공간을 probe 할수있다고 한다. (Git blame 참고)
- *
- * - TCR_ASID16[TCR_EL1.AS]
- *   = ASID Size에 대한 설정이며 16bit로 사용한다는것.
- *   TTBRx_EL1.ASID field와 매칭이 되는 내용이며 해당 필드를 몇 bit로 쓸건지에
- *   대한 설정이다.
- *
- * - TCR_TBI0[TCR_EL1.TBI0] = TTBR0_EL1 Address 계산시 Top byte를 무시하겠다는것.
- *
- * - TCR_A1[TCR_EL1.A1] = TTBR1_EL1.ASID를 사용하겠다는것.
- *
- * - TCR_KASAN_FLAGS[TCR_EL1.TCR_TBI1]
- *	= CONFIG_KASAN_SW_TAGS 사용시 TTBR1_EL1 Address 계산시 Top byte를
- *	무시하겠다는것.
- *	KASAN을 사용할려면 Top Byte가 무시되게 해야된다고 CONFIG_KASAN_SW_TAGS 설명에 
- *	나와있다. KASAN을 사용하면 해당영역은 TAG로 사용된다고 한다.
- *
+ * -- tcr_el1 : translation control reg for el1
+ *    1. TCR_TxSZ
+ *       - T0SZ[5:0]
+ *       - T1SZ[21:16]
+ *         TTBR{0/1}_EL1의 memory region addr 크기 offset.
+ *         region 크기는 2^(64-T{0/1}SZ) bytes 이다.
+ *    2. TCR_CACHE_FLAGS: cache를 Inner/Outer WBWA로 설정 (0b01)
+ *       - I[nner]RGN0[9:8]:
+ *       - O[uter]RGN0[11:10]:
+ *       - I[nner]RGN1[25:24]:
+ *       - O[uter]RGN1[27:26]:
+ *         TTBR{0/1}_EL1을 통해 translation table walk시 사용될 memory와 관련된
+ *         {inner/outer} cacheability attr 설정.
+ *             0b00: Normal memory, {Inner/Outer} Non-cacheable
+ *             0b01: Normal memory, {Inner/Outer} Write-Back Read-Allocate
+ *                                  Write-Allocate Cacheable
+ *             0b10: Normal memory, {Inner/Outer} Write-Through Read-Allocate
+ *                                  No Write-Allocate Cacheable
+ *             0b11: Normal memory, {Inner/Outer} Write-Back Read-Allocate
+ *                                  No Write-Allocate Cacheable
+ *    3. TCR_SMP_FLAGS: Inner Shareable로 설정 (0b11). Linux가 사용하는 모든
+ *                      cpu에서 접근 가능하도록 한다.
+ *       - SH0[13:12]:
+ *       - SH1[29:28]:
+ *         TTBR{0/1}_EL1을 통해 translation table walk시 사용될 memory와 관련된
+ *         shareability attr 설정.
+ *             0b00: Non-shareable
+ *             0b10: Outer Shareable
+ *             0b11: Inner Shareable
+ *    4. TCR_TG_FLAGS (page size == 4K)
+ *       - TG0_4K[15:14]:
+ *       - TG1_4K[31:30]:
+ *         TTBR{0/1}_EL1에서 사용되는 Granule 크기.
+ *             0b01: 16KB
+ *             0b10:  4KB
+ *             0b11: 64KB
+ *    5. TCR_KASLR_FLAGS:
+ *       - NFD1[54] if RANDOMIZE_BASE is on
+ *         'FEAT_SVE'가 구현되어 있을때만 동작하고 아니면 RES0.
+ *         SVE사용시 특정 조건에서 커널 주소공간에 대한 timing attack의 공격을
+ *         완하기 위함이라고 하며, 이를 안할경우 SVE load에서
+ *         suppressed fault와 FFR을 사용해서 커널 주소 공간을 probe 할수있다고
+ *         한다. (git log 참고)
+ *    6. TCR_ASID16
+ *       - AS[36]: ASID 크기 결정.
+ *             0b0: 8 bit, TTBRx_EL1의 상위 8 bit를 무시한다.
+ *             0b1: 16 bit, TTBRx_EL1의 상위 16 bit를 TLB allocation과 match에
+ *                  사용한다.
+ *    7. TCR_TBI0
+ *       - TBI0[37]: vaddr의 top byte를 addr match(TTBR0_EL1)에 사용할지
+ *                   무시하고 tagged addr에 사용할지 결정.
+ *             0b0: vaddr의 top byte를 addr calc에 사용한다.
+ *             0b1: vaddr의 top byte를 addr calc에서 제외한다.
+ *                  tagged addr에 사용한다는 의미이다.
+ *    8. TCR_A1
+ *       - A1[22]: TTBR0_EL1 또는 TTBR1_EL1 중 어느것이 ASID를 정의할지 선택.
+ *            0b0: TTBR0_EL1.ASID 값을 ASID로 정의.
+ *            0b1: TTBR1_EL1.ASID 값을 ASID로 정의.
+ *    9. TCR_KASAN_SW_FLAGS
+ *       TTBR1_EL1 addr 계산시 top byte를 무시. KASAN을 사용할려면 top byte를
+ *       무시해야 한다고 CONFIG_KASAN_SW_TAGS 설명에 나와있음. KASAN을 사용하면
+ *       해당영역은 TAG로 사용된다.
+ *       - TBI1[38]: vaddr의 top byte를 addr match(TTBR1_EL1)에 사용할지
+ *                   무시하고 tagged addr에 사용할지 결정.
+ *             0b0: vaddr의 top byte를 addr calc에 사용한다.
+ *             0b1: vaddr의 top byte를 addr calc에서 제외한다.
+ *                  tagged addr에 사용한다는 의미이다.
+ *       - TBID1[52]: TODO
+ *         'FEAT_PAuth'가 구현되어 있을때만 동작하고 아니면 RES0.
  */
+	mov_q	mair, MAIR_EL1_SET
 	mov_q	tcr, TCR_TxSZ(VA_BITS) | TCR_CACHE_FLAGS | TCR_SMP_FLAGS | \
 			TCR_TG_FLAGS | TCR_KASLR_FLAGS | TCR_ASID16 | \
 			TCR_TBI0 | TCR_A1 | TCR_KASAN_SW_FLAGS
@@ -556,20 +571,32 @@ SYM_FUNC_START(__cpu_setup)
 	 * Update MAIR_EL1, GCR_EL1 and TFSR*_EL1 if MTE is supported
 	 * (ID_AA64PFR1_EL1[11:8] > 1).
 	 */
+/* IAMROOT, 2023.10.30:
+ * - MTE 기능이 구현되어 있는지 확인해서 미구현이면 '1f'로 점프한다.
+ *   0b0000: MTE 기능 미구현.
+ *   0b0001: Instruction-only MTE 기능 구현.
+ *   0b0010: Full MTE 기능 구현.
+ *   0b0011: MTE 기능 및 asymmetric Tag Check Fault handling 지원.
+ *
+ * - MTE: Memory Tagging Extension
+ */
 	mrs	x10, ID_AA64PFR1_EL1
 	ubfx	x10, x10, #ID_AA64PFR1_MTE_SHIFT, #4
 	cmp	x10, #ID_AA64PFR1_MTE
 	b.lt	1f
 
-/*
- * IAMROOT, 2021.08.21:
- * - MTE를 사용하라고 CONFIG가 되있고, 해당 아키텍처가 MTE를 지원한다면.
- *   위 MAIR_EL1_SET에서 TAG에 해당하는 MEMORY ATTRIBUTE가 TAG를 사용안하도록 설정이 되잇엇는데
- *   이것을 TAG 속성이 되도록 갈아치우는 동작을 수행한다.
+/* IAMROOT, 2021.08.21:
+ * - MAIR_EL1_SET directive에서는 MT_NORMAL_TAGGED index의 값을
+ *   MAIR_ATTR_NORMAL 설정했지만 현재 MTE 기능을 지원하므로 기존의 값을
+ *   MAIR_ATTR_NORMAL_TAGGED로 변경하는 동작을 수행한다.
  */
 	/* Normal Tagged memory type at the corresponding MAIR index */
 	mov	x10, #MAIR_ATTR_NORMAL_TAGGED
 	bfi	mair, x10, #(8 *  MT_NORMAL_TAGGED), #8
+
+/* IAMROOT, 2023.10.31:
+ * - Tag Control reg 값을 설정한다.
+ */
 	mov	x10, #KERNEL_GCR_EL1
 	msr_s	SYS_GCR_EL1, x10
 
@@ -585,53 +612,52 @@ SYM_FUNC_START(__cpu_setup)
 	lsl	x10, x10, #SYS_RGSR_EL1_SEED_SHIFT
 	msr_s	SYS_RGSR_EL1, x10
 
-/*
- * IAMROOT, 2021.08.21:
- * TFSR_EL1 : Holds accumulated Tag Check Faults occurring in EL1 that are not taken precisely.
- * TFSRE0_EL1 : Holds accumulated Tag Check Faults occurring in EL0 that are not taken precisely.
+/* IAMROOT, 2021.08.21:
+ * - TFSR_EL1, TFSRE0_EL1의 Tag Check Fault bit 모두 zero로 초기화한다.
  *
- * 1. TFSR_EL1, TFSRE0_EL1:
- *      EL0, EL1에서 발생한 pending tag check faults를 클리어 해준다.
+ *   TFSR[E0]_EL1 : Tag Check Fault가 el{0/1}에서 발생시 처리 방식 결정.
+ *         .TF1[1]: vaddr[55] == 0b1일때 Tag Check Fault가 발생하면 async하게
+ *                  해당 bit가 1로 설정된다.
+ *         .TF0[0]: vaddr[55] == 0b0일때 Tag Check Fault가 발생하면 async하게
+ *                  해당 bit가 1로 설정된다.
  */
 	/* clear any pending tag check faults in TFSR*_EL1 */
 	msr_s	SYS_TFSR_EL1, xzr
 	msr_s	SYS_TFSRE0_EL1, xzr
 
+/* IAMROOT, 2023.10.31: TODO */
 	/* set the TCR_EL1 bits */
 	mov_q	x10, TCR_MTE_FLAGS
 	orr	tcr, tcr, x10
 1:
 #endif
-/*
- * IAMROOT, 2021.08.21:
- * - Fujitsu-A64FX 라는 슈퍼컴퓨터에서 문제가 생겨 보완한 코드.
- *   NFDx bit를 무조건 clear시킨다. (Git blame 참고)
+
+/* IAMROOT, 2021.08.21:
+ * - Fujitsu-A64FX 슈퍼컴퓨터에서 문제가 생겨 보완한 코드.
+ *   NFDx bit를 초기화한다.
  */
 	tcr_clear_errata_bits tcr, x9, x5
 
-/*
- * IAMROOT, 2021.08.26:
- * head.S에서 __create_page_tables에서 설정된 vabits_actual, idmap_t0sz를 불러와
- * register에 실제 설정을 하는 과정이다.
+/* IAMROOT, 2023.10.31:
+ * - H/W support 여부에 따라 va bits가 달라져 vabits_actual, idmap_t0sz에
+ *   저장한 값을 사용하여 tcr.t1sz, tcr.t0sz를 설정한다.
  */
 #ifdef CONFIG_ARM64_VA_BITS_52
-/*
- * IAMROOT, 2021.08.28:
- * vabits_actual:
- *   - CONFIG_ARM64_VA_BITS_52가 setting 되었을 때,
- *     하드웨어가 52비트를 support하는지 여부에 따라서
- *     -   support 하면: vabits_actual = 52
- *     - support 안하면: vabits_actual = 48
+/* IAMROOT, 2021.08.28:
+ * - VA_BITS == 52면 실행.
  *
- * 아래의 연산을 간단하게 적어보면,
- * x9 = 0 - x9 + 64 = 0 - 52 + 64 = 12.
- * TCR_EL1의 T1SZ 값을 12로 설정.
+ *   vabits_actual은 CONFIG_ARM64_VA_BITS_52가 enable 되었을때 h/w 52-bits
+ *   support 여부에 따라서 아래와 같아진다.
+ *     -     supported: 52 (vabits_actual)
+ *     - NOT supported: 48 (vabits_actual)
  *
- * tcr_el1에 x10의 값을 저장 할 것인데,
- * 그 전에 몇 가지 값을 수정을 할 것이다.
- * 여기서는 vabits_acutual의 값이 52일 때를 대비하여
- * T1SZ의 값을 x9으로 수정한다.
- * (간단히 말하면 64 - vabits_actual의 값을 저장한다.)
+ * - 설령 VA_BITS == 52로 설정되어 있더라도 H/W support가 되지 않으면 여전히
+ *   48 bits 가 되도록 한다.
+ *
+ * - vabits_actual == 52 라면 아래 공식에 따라 다음처럼 동작한다.
+ *   @x9 = 0 - 52(@vabits_actual) + 64 = 12
+ *   TCR_EL1.t1sz = 12
+ *   TCR_EL1.t0sz = 12
  */
 	ldr_l		x9, vabits_actual
 	sub		x9, xzr, x9
@@ -639,32 +665,42 @@ SYM_FUNC_START(__cpu_setup)
 	tcr_set_t1sz	tcr, x9
 #else
 /* IAMROOT, 2021.08.28:
- * VA bit <= 48 일때 해당 루틴을 실행.
+ * - VA_BITS <= 48면 실행.
  *
- * VA bit가 52면은 PA bit가 52보다 클 일이 없기 때문에
- * 해당 루틴 필요가 없다.
+ *   __idmap_text_end의 'pa bit > va bit'라면 매핑할 va space가 부족할 수 있어
+ *   va bit 확장을 했는데 그것을 반영하기 위한 코드.
  *
- * __idmap_text_end의 PA bit가 VA bit보다 크면 매핑할 virtual address space가
- * 부족할 수 있기 때문에 VA bit 확장을 하는 루틴이 이전에 있었다.
- * 그것을 반영하기 위해 해당 코드 실행.
+ * - VA_BITS == 52에서 'pa bit > 52'인 경우는 없으므로 아래 코드가 필요없다.
  */
 	ldr_l		x9, idmap_t0sz
 #endif
 	tcr_set_t0sz	tcr, x9
 
-/*
- * IAMROOT, 2021.08.28:
- * Feature 레지스터의 PARange값이 커널이 설정한 MAX PARange값
- * 을 넘지 않도록 설정하는 코드.
+/* IAMROOT, 2021.08.28:
+ * - aa64mmfr0_el1 reg의 PARange값이 kernel에 하드코딩된 MAX PARange 값보다
+ *   큰지 확인하고 크면 size를 제한한다.
  */
 	/*
 	 * Set the IPS bits in TCR_EL1.
 	 */
 	tcr_compute_pa_size tcr, #TCR_IPS_SHIFT, x5, x6
-/*
- * IAMROOT, 2021.08.28:
- * Hardware적으로 Access Flag Update기능이 지원되면
- * TCR_EL1.HA를 1로 세팅한다.
+
+/* IAMROOT, 2021.08.28:
+ * - aa64mmfr1_el1 reg를 참조하여 HAFDBS[3:0] bit fields의 값이 0이 아니면
+ *   tcr의 h/w access flag(ha)를 1로 설정한다.
+ *
+ * - aa64mmfr1_el1
+ *   HAFDBS[3:0]: translation table의 access flag 및 dirty state 업데이트하는
+ *                h/w 기능이 지원되는지 확인하는 bit fields.
+ *         0b000: access flag / dirty state 업데이트 기능 미지원.
+ *         0b001: access flag 업데이트 기능만 지원.
+ *         0b010: access flag / dirty state 업데이트 기능 모두 지원.
+ *
+ * - tcr
+ *   HA[39]: EL0/1의 stage 1 translation access flag 업데이트를 h/w로 동작
+ *           하도록 기능 enable/disable 여부.
+ *      0b0: stage 1 access flag 업데이트 disable.
+ *      0b1: stage 1 access flag 업데이트 enable.
  */
 #ifdef CONFIG_ARM64_HW_AFDBM
 	/*
@@ -678,15 +714,18 @@ SYM_FUNC_START(__cpu_setup)
 	orr	tcr, tcr, #TCR_HA		// hardware Access flag update
 1:
 #endif	/* CONFIG_ARM64_HW_AFDBM */
-	msr	mair_el1, mair
-/*
- * IAMROOT, 2021.08.28:
- * 지금까지 변경한 x10의 값을 tcr_el1에 세팅한다.
+
+/* IAMROOT, 2023.10.29:
+ * - 지금까지 설정한 mair, tcr alias의 값을 mair_el1과 tcr_el1에 설정.
  */
+	msr	mair_el1, mair
 	msr	tcr_el1, tcr
 	/*
 	 * Prepare SCTLR
 	 */
+/* IAMROOT, 2023.11.01:
+ * - arm64 linux kernel에서 사용하는 system control reg bit fields 설정.
+ */
 	mov_q	x0, INIT_SCTLR_EL1_MMU_ON
 	ret					// return to head.S
 

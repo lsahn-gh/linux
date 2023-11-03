@@ -789,10 +789,7 @@ SYM_FUNC_START_LOCAL(__create_page_tables)
 /* IAMROOT, 2021.08.21:
  * - linear mapping table 초기화를 위해 va(_text), va(_end)를 계산한다.
  *   @x5에 KIMAGE_VADDR을 저장하는데 이는 compile time에 계산된 값이다.
- *   @x6에 kernel va(_end)의 phys addr를 저장한다.
- *   @x3에 kernel va(_text)의 phys addr를 저장한다.
- *   @x3과 @x6의 차이는 kernel image 크기이므로, kernel 가상주소 start은 x5에
- *   해당 크기를 더하면 kernel 가상주소의 end값이 구해진다.(x6)
+ *   pa(_end) - pa(_text) 의 결과 값에 va(_text)를 더하여 va(_end)를 구한다.
  */
 	adrp	x0, init_pg_dir
 	mov_q	x5, KIMAGE_VADDR		// compile time __va(_text)
@@ -972,9 +969,7 @@ SYM_FUNC_END(__create_page_tables)
  *   x0 = __PHYS_OFFSET
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
-/*
- * IAMROOT, 2021.09.04:
- * ---- (old 5.10)
+/* IAMROOT, 2021.09.04:
  * - EL1 SP(Stack Pointer) 설정
  *   init_thread_union의 source 상 위치
  *   vmlinux.lds.S -> RW_DATA -> INIT_TASK_DATA -> init_thread_union
@@ -982,7 +977,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
  *   task 영역을 stack으로 사용하기 위해 task address를 가져온다.
  *
  * - Memory Layout
- *   
+ *
  *   (높은 주소)
  *   ..
  *   ..
@@ -995,15 +990,12 @@ SYM_FUNC_START_LOCAL(__primary_switched)
  *   (낮은 주소)
  *
  * - 참고 : Documentation/x86/kernel-stacks.rst 
- *   -----
  */
 	adr_l	x4, init_task
 	init_cpu_task x4, x5, x6
 
-/*
- * IAMROOT, 2021.09.04:
- * - kernel용 vector table 주소 설정.
- * - vectors 위치 : kernel/entry.S
+/* IAMROOT, 2021.09.04:
+ * - el1 vector table 주소 설정 (vectors == kernel/entry.S).
  */
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
@@ -1517,10 +1509,9 @@ SYM_FUNC_START_LOCAL(__secondary_too_slow)
 	b	__secondary_too_slow
 SYM_FUNC_END(__secondary_too_slow)
 
-/*
- * IAMROOT, 2021.08.28:
- * - status를 저장한다.
- *   status가 0이면 정상이다.
+/* IAMROOT, 2021.08.28:
+ * - @status를 __early_cpu_boot_status 변수에 저장한다.
+ *   @status == 0: 정상
  */
 /*
  * The booting CPU updates the failed status @__early_cpu_boot_status,
@@ -1553,18 +1544,24 @@ SYM_FUNC_END(__secondary_too_slow)
  * If it isn't, park the CPU
  */
 SYM_FUNC_START(__enable_mmu)
-/*
- * IAMROOT, 2021.08.28:
- * - Config 에 따른 Granule를 아키텍처가 지원하는지를 확인해서
- *   지원하지 않으면 __no_granule_support에서 무한루프 돌도록 하며
- *   지원하면 정상임을 의미하는 status(0)를 __early_cpu_boot_status에 저장한다.
- *   early startup에서는 H/W debugger 이용하여 status 코드를
- *   확인할 수 있다.
+/* IAMROOT, 2021.08.28:
+ * - 크기가 어찌되었든 granule size를 지원하지 않으면 __no_granule_support로
+ *   점프하여 오류 값을 설정하고 inf-loop를 수행한다. 지원하면 정상을 의미하는
+ *   상태코드, 0을 __early_cpu_boot_status 변수에 저장한다. early startup에서
+ *   H/W 디버거를 이용하여 status 코드를 확인할 수 있다.
  *
  * - TGRAN  : Translation Granule Size.
- * - TGRAN4 : 4KB TGRAN
- * - TGRAN16: 16KB TGRAN
- * - TGRAN64: 64KB TGRAN
+ * - TGran4[31:28] : 4KB granule size.
+ *           0b0000: supported
+ *           0b0001: supports 52-bit I/O addr
+ *           0b1111: NOT supported
+ * - TGran16[23:20]: 16KB granule size.
+ *           0b0000: NOT supported
+ *           0b0001: supported
+ *           0b0010: supports 52-bit I/O addr
+ * - TGran64[27:24]: 64KB granule size
+ *           0b0000: supported
+ *           0b1111: NOT supported
  */
 	mrs	x2, ID_AA64MMFR0_EL1
 	ubfx	x2, x2, #ID_AA64MMFR0_TGRAN_SHIFT, 4
@@ -1576,22 +1573,23 @@ SYM_FUNC_START(__enable_mmu)
 	adrp	x2, idmap_pg_dir
 	phys_to_ttbr x1, x1
 	phys_to_ttbr x2, x2
-/*
- * IAMROOT, 2021.08.28:
- * - x1 : init_pg_dir의 ttbr
- *   x2 : idmap_pg_dir의 ttbr
- * - ttbr0_el1 : user용이지만 부팅중에는 임시로 idmap으로 사용한다.
- *   ttbr1_el1 : kernel용이며 init_pg_dir을 가리킨다.
+
+/* IAMROOT, 2021.08.28:
+ * - ttbr{0/1}_el1 reg 각각에 idmap_pg_dir, init_pg_dir addr을 설정한다.
+ *
+ * - @x1: init_pg_dir의 ttbr
+ *   @x2: idmap_pg_dir의 ttbr
+ *   @ttbr0_el1 : user에서 사용되지만 부팅중에는 idmap을 위해 임시로 사용한다.
+ *   @ttbr1_el1 : kernel에서 사용되며 'init_pg_dir'을 가리킨다.
  */
 	msr	ttbr0_el1, x2			// load TTBR0
 	offset_ttbr1 x1, x3
 	msr	ttbr1_el1, x1			// load TTBR1
 	isb
 
-/*
- * IAMROOT, 2021.08.28:
- * - x0에 설정된 bits를 sctlr_el1에 set하며 MMU enable, D/I-cache 등
- *   메모리와 관련된 기능을 on 한다.
+/* IAMROOT, 2021.08.28:
+ * - @x0에 설정된 INIT_SCTLR_EL1_MMU_ON 값을 sctlr_el1에 set하여
+ *   MMU, trapping, d/i-cache 등 메모리와 관련된 기능을 on 한다.
  */
 	set_sctlr_el1	x0
 
@@ -1618,17 +1616,14 @@ SYM_FUNC_START(__cpu_secondary_check52bitva)
 2:	ret
 SYM_FUNC_END(__cpu_secondary_check52bitva)
 
-/*
- * IAMROOT, 2021.08.28:
- * - 아키텍처가 지원하지 않은 Granule를 설정하게 할려고 했기때문에
- *   status를 error bit로 설정하고 무한 wait로 들어간다.
+/* IAMROOT, 2021.08.28:
+ * - arch가 granule을 지원하지 않아 'status = error'로 설정하고 inf-wait 상태로
+ *   들어간다. H/W 디버깅을 할 때 해당 변수 값을 확인하여 error를 확인하기 위해
+ *   status 값을 세팅한다. (__early_cpu_boot_status)
  *
- *   후에 하드웨어 디버깅을 할때 해당 변수를 확인하면 무슨 error 보게 하기
- *   위함이다. (해당 변수: __early_cpu_boot_status)
- *
- *   wfe : wait for event
- *   wfi : wait for interrupt
- *   너무 빠르게 계속 동작하지 않게 하기 위함(전력 소비를 줄이기위함)
+ *   inf-loop에서 빠르게 동작하지 않도록 하여 전력 소비를 줄인다.
+ *   - wfe: wait for event
+ *   - wfi: wait for interrupt
  */
 SYM_FUNC_START_LOCAL(__no_granule_support)
 	/* Indicate that this CPU can't boot and is stuck in the kernel */
@@ -1865,27 +1860,21 @@ SYM_FUNC_START_LOCAL(__relocate_kernel)
 SYM_FUNC_END(__relocate_kernel)
 #endif
 
-/*
- * IAMROOT, 2021.08.28:
+/* IAMROOT, 2021.08.28:
  * - CONFIG_RELR : 일단 생략
  *
- * x0: __cpu_setup에서 제일 마지막에 INIT_SCTLR_EL1_MMU_ON define을 이용하여
- *     sctrl_el1에 설정하려는 bits 값이 들어 있음.
- *     x0 값은 sctrl_el1에서 읽은것이 아니라 bitmask를 통해 하드코딩으로
- *     설정된 값.
+ * @x0: __cpu_setup에서 마지막에 INIT_SCTLR_EL1_MMU_ON 매크로를 통해
+ *      sctrl_el1에 설정하려는 bit 값이 저장되어 있음.
  */
 SYM_FUNC_START_LOCAL(__primary_switch)
-/*
- * IAMROOT, 2021.09.04:
- * - CONFIG_RANDOMIZE_BASE를 살펴보면 해당 CONFIG가
- *   on시 반드시 CONFIG_RELOCATABLE도 on이 되야함이 보인다.
- *   kernel 주소가 randomized가 됬으므로 그에 따른 보정이 반드시 필요하기
- *   때문이다.
- */
+
 #ifdef CONFIG_RANDOMIZE_BASE
-/*
- * IAMROOT, 2021.09.04:
- * - x19에 sctrl_el1 값을 backup하고 설정되있던 sctlr_el1값을 가져온다.
+/* IAMROOT, 2021.09.04:
+ * - @x19에 INIT_SCTLR_EL1_MMU_ON 값을 백업하고 @x20에 sctlr_el1을 읽어온다.
+ *
+ * - Kconfig을 보면 CONFIG_RANDOMIZE_BASE가 enable 되었을때
+ *   CONFIG_RELOCATABLE도 반드시 enable 되어야 하는 것처럼 보인다.
+ *   이는 kimage addr가 randomized 되어 보정이 필요하기 때문이다.
  */
 	mov	x19, x0				// preserve new SCTLR_EL1 value
 	mrs	x20, sctlr_el1			// preserve old SCTLR_EL1 value
@@ -1893,8 +1882,9 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 
 	adrp	x1, init_pg_dir
 	bl	__enable_mmu
-/*
- * IAMROOT, 2021.09.06: 
+
+#ifdef CONFIG_RELOCATABLE
+/* IAMROOT, 2021.09.06:
  * - CONFIG_RELOCATABLE
  *   AArch64의 경우 PIE(position independant execution)를 위해 런타임에 
  *   커널이 초기화될 때 리로케이션 엔트리를 갱신해야 하기위해 이 커널 옵션을
@@ -1905,7 +1895,6 @@ SYM_FUNC_START_LOCAL(__primary_switch)
  *   이 커널 옵션을 사용하는 경우 __relocation_kernel: 을 한 번 더 호출한다.
  *   즉, 커널의 시작 위치가 변경되면 심볼 위치등을 모두 재 리로케이션한다.
  */
-#ifdef CONFIG_RELOCATABLE
 #ifdef CONFIG_RELR
 	mov	x24, #0				// no RELR displacement yet
 #endif
@@ -1923,16 +1912,12 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	pre_disable_mmu_workaround
 	msr	sctlr_el1, x20			// disable the MMU
 	isb
-/*
- * IAMROOT, 2021.09.04:
+
+/* IAMROOT, 2021.09.04:
  * - relocate를 했으므로 다시 한번 page table을 만든다.
  */
 	bl	__create_page_tables		// recreate kernel mapping
 
-/*
- * IAMROOT, 2022.02.07:
- * - tlbi(TLB Invalidate)
- */
 	tlbi	vmalle1				// Remove any stale TLB entries
 	dsb	nsh
 	isb
@@ -1942,67 +1927,63 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	bl	__relocate_kernel
 #endif
 #endif
-/*
- * IAMROOT, 2021.09.04:
- * - ldr, adr 차이
- *   1) ldr x0, label
- *      label에 위치한 8바이트 값을 로드한다.
- *   2) ldr x0, =label
- *      pesudo-insutruction 으로 컴파일러가 label 주소를 8바이트에 담아두고,
- *      이를 읽어오는 코드를 만들어낸다. 즉, 컴파일 타임의 label 주소를 알아온다.
- *   3) adr x0, label
- *      compile time에는 pc에서 label까징의 offset을 계산해 저장해 놓고,
- *      런타임에는 런타임 당시 pc + offset으로 주소를 알아온다.
- *
- * ---------------------------------------------------------------------------
+
+/* IAMROOT, 2021.09.04:
+ * - 현재 MMU, d/i-cache 등 메모리 기능이 모두 enable 된 상태이며
+ *   va(__primary_switched)로 점프한다.
  *
  * - 현재 상황을 정리하면 다음과 같다.
- *   - 현재 __primary_switch내부에 있다. section은 .idmap.text
- *   - mmu는 on or off인 상태
- *   - __primary_switched는 .init.text section에 존재한다.
- *   - mmu가 on인 경우 ttbr0_el1에서 동작
+ *   __primary_switch 내부에 있다. section은 .idmap.text 이며 mmu는 on인 상태.
+ *   __primary_switched는 .init.text section에 존재하고 ttbr0_el1을 통해
+ *   va를 얻어 접근한다.
  *
  * - mmu on / off에 따른 pc와 ttbrX_el1의 해석
  *
  *   현재 위치인 __primary_switch 은 .idmap.texts section에 존재하며, 이 섹션은
  *   가상주소와 물리주소가 1:1 매칭이되는 영역이고 ttbr0_el1에 설정되 있다.
  *
- *   mmu가 on / off에 따라 pc의 정의를 다음과 같이 생각할수 있다.
+ *   mmu의 on/off 여부에 따라 pc 값을 다음과 같이 정의할 수 있다.
+ *   - mmu == off: pc는 pa를 통해 direct로 메모리에 접근한다.
+ *   - mmu == on : pc는 ttbr0_el1을 통해 계산되는 va로 메모리에 접근한다.
  *
- *   mmu가 off : 여지껏 그래왔던 것처럼 pc는 물리주소인 상태,
- *   mmu가 on : pc는 ttbrX_el1으로 계산되는 mmu를 거친 주소.
- *   
- *   즉 .idmap.text외에 다른섹션은 ttbr1_el1에 연결되므로 주소값이 완전 다른
- *   체계를 가지되 .idmap.text와의 offset이 매우 커진다.
+ *   '.idmap.text' 외 다른 section은 ttbr1_el1을 통해 접근하므로 addr간 간격이
+ *   완전 달라지고 '.idmap.text' 와의 offset이 상당히 커진다. init_pg_dir은
+ *   linear mapping 되어 있으므로 0xffff... 로 시작하는 va 이기 때문이다.
  *
- *   ttbr0_el1 : idmap_pg_dir(.idmap.text)가 연결되어있음.
- *   ttbr1_el1 : init_pg_dir(kernel image)가 연결되있음.
+ *   ttbr0_el1: idmap_pg_dir (.idmap.text) 를 바라보고 있음.
+ *   ttbr1_el1: init_pg_dir (kimage) 를 바라보고 있음.
  *
- *   그러므로 __primary_switch에서 mmu가 off인 상태거나 점프하는 함수가
- *   같은 섹션(.idmap.text)이라면 b, bl을 사용해서 그냥 점프하면 되지만,
- *   mmu가 on이되면 에 다른 섹션으로 점프하는 경우에는 ttbr1_el0에서
- *   ttbr1_el1으로 이동을 해야되므로 offset을 사용하지 말고 해당 함수의
- *   가상주소값 그자체를 가져와서 점프를 하여 ttbr1_el1으로 이동하는 개념으로
- *   사용해야된다.
+ *   그러므로 __primary_switch label에서 mmu == off 라면 점프하는 label이
+ *   같은 섹션(.idmap.text)에 존재하므로 b, bl을 사용해서 가깝게 점프하지만
+ *   mmu == on이면 addr간 offset이 엄청나게 큰 다른 section으로 점프해야 하므로
+ *   ttbr0_el1에서 ttbr1_el1으로 이동하게 되고 offset 대신 va(label) 값 자체를
+ *   통해 점프한다.
  *
- * 즉 ldr 을 사용해서 __primary_switched로 넘어가는 것은 다음과 같이 정리된다.
+ *   결국 ldr 명령어를 통해 va(__primary_switched)로 점프하는 것은 다음과 같다.
+ *   +-----------+-------------+-----------+-------------------------------+
+ *   | 현재 위치 |    section  | ttbrX_el1 | pc                            |
+ *   +-----------+-------------+-----------+-------------------------------+
+ *   |  점프 전  | .idmap.text | ttbr0_el1 | ttbr0_el1의 주소 체계         |
+ *   +-----------+-------------+-----------+-------------------------------+
+ *   |  점프 후  | .init.text  | ttbr1_el1 | ttbr1_el1의 주소 체계         |
+ *   |           |             |           | (relocate, randomized 설정됨) |
+ *   +-----------+-------------+-----------+-------------------------------+
  *
- * 현재 위치 ||    section  | ttbrX_el1 | pc 
- * ----------++------------+-----------+--------------------------------
- *  점프 전  || .idmap.text | ttbr0_el1 | ttbr0_el1의 주소 체계
- * ----------++------------+-----------+--------------------------------
- *  점프 후  || .init.text  | ttbr1_el1 | ttbr1_el1의 주소 체계
- *           ||             |           | (relocate, randomized 설정됨)
- * ----------++------------+-----------+--------------------------------
+ * - __primary_switch에서 mmu on/off 에 따른 b, bl 정리
+ *   bl __enable_mmu      : mmu == off 이고 offset이 작아 b, bl 가능.
+ *   bl __relocate_kernel : mmu == on 이지만 offset이 작아 b, bl 가능.
+ *                          (같은 section)
+ *   bl __create_page_tables : mmu == off 이고 offset이 작아 b, bl 가능
+ *   blr __primary_switched  : mmu == on 이고 __primary_switch 와 다른 section,
+ *                             addr간 offset이 매우 커 va 전체를 가져와 점프.
  *
- * - __primary_switch에서 mmu on /off에 따른 b, bl정리
- *   bl __enable_mmu : mmu off인상태이므로 offset이 작기때문에 b, bl가능
- *   bl __relocate_kernel : mmu on이지만 offset이 작기때문에
- *                          (section이므로) b, bl 가능
- *   bl __create_page_tables : mmu off상태이고 offset이 작아
- *                             b, bl 사용가능
- *   blr x8(__primary_switched 점프) : mmu on상태에서 __primary_switch가 다른
- *    섹션에 위치하므로 offset이 매우커 가상주소 전체를 불러와서 점프.
+ * - ldr, adr 차이
+ *   1. 'ldr x0, label' : label에 위치한 8바이트 값을 로드한다.
+ *   2. 'ldr x0, =label': psuedo instr로 compiler가 label addr를 8 bytes 크기의
+ *                        임시 공간에 담아두고 읽어오는 코드를 만들어낸다.
+ *                        compile-time에 label addr가 결정된다.
+ *   3. 'adr x0, label' : compile-time에는 pc에서 label까지의 offset을 계산해
+ *                        저장하고 runtime에 pc + offset으로 addr를 알아낸다.
  */
 	ldr	x8, =__primary_switched
 	adrp	x0, __PHYS_OFFSET

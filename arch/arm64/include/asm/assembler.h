@@ -515,12 +515,11 @@ alternative_cb_end
  *	pos:		IPS or PS bitfield position
  *	tmp{0,1}:	temporary registers
  */
-/*
- * IAMROOT, 2021.08.28:
- * tmp0: feature 레지스터에서 읽어온 PARange 값.
- * tmp1: 커널이 설정한 MAX PARange 값.
- * tmp0와 tmp1을 unsigned로 비교해서
- * tmp0가 tmp1보다 크면 tmp0 = tmp1을 해준다.
+/* IAMROOT, 2021.08.28:
+ * @tmp0: aa64mmfr0_el1 reg에서 읽은 PARange 값 저장.
+ * @tmp1: kernel이 설정한 하드코딩된 MAX PARange 값.
+ *
+ * tmp0와 tmp1을 unsigned 비교하여 'tmp0 > tmp1'라면 'tmp0 = tmp1'을 한다.
  */
 	.macro	tcr_compute_pa_size, tcr, pos, tmp0, tmp1
 	mrs	\tmp0, ID_AA64MMFR0_EL1
@@ -626,15 +625,16 @@ alternative_endif
 	_cond_extable .Licache_op\@, \fixup
 	.endm
 
-/*
- * IAMROOT, 2021.08.21:
- * - id_aa64dfr0_el1.PMUVer:
- *     PMUVer가 0이면 즉, PME (Performance Monitor Extension) 가 not implemented 이면 아무것도 안함.
- *     PMUVer가 0이 아니면 즉, PMUv3가 implemented 되있으면 pmuserenr_el0를 0으로 초기화한다.
- *     pmuserenr_el0를 0으로 초기화 한다는 말은 EL0가 PM 관련 레지스터 접근시 trap 하겠다는 뜻이다. (Disable PMU).
- */
-/*
- * reset_pmuserenr_el0 - reset PMUSERENR_EL0 if PMUv3 present
+/* IAMROOT, 2021.08.21:
+ * - PME 기능이 구현되어 있다면 pmuserenr_el0를 0으로 초기화, 아니면 skip.
+ *   pmuserenr_el0을 0으로 설정하는 의미는 el0가 PM 관련 reg 접근시 trap.
+ *   (disable PMU)
+ *
+ *   id_aa64dfr0_el1: AArch64에서 debug system에 대해 top-level 정보 제공.
+ *   - PMUVer[11:8]: Performance Monitor Extension version.
+ *           0b0000: PME 기능 구현 안됨.
+ *           0b0001: PME 관련 기능 구현됨.
+ *             ... :
  */
 /*
  * reset_pmuserenr_el0 - reset PMUSERENR_EL0 if PMUv3 present
@@ -648,12 +648,16 @@ alternative_endif
 9000:
 	.endm
 
-/*
- * IAMROOT, 2021.08.28:
- * - id_aa64dfr0_el1.AMU:
- *     AMU가 0이면 즉, AME (Activity Monitors Extension) 가 not implemented 이면 아무것도 안함.
- *     AMU가 0이 아니면 즉, AMU가 implemented 되있으면 amuserenr_el0를 0으로 초기화한다
- *     amuserenr_el0를 0으로 초기화 한다는 말은 EL0가 AM 관련 레지스터 접근시 trap 하겠다는 뜻이다. (Disable AMU).
+/* IAMROOT, 2021.08.28:
+ * - AMU 기능이 구현되어 있다면 amuserenr_el0를 0으로 초기화, 아니면 skip.
+ *   amuserenr_el0을 0으로 설정하는 의미는 el0가 AM 관련 reg 접근시 trap.
+ *   (disable AMU)
+ *
+ *   id_aa64pfr0_el1: AArch64에서 PE에 구현된 기능에 대해 정보 제공.
+ *   - AMU[47:44]: Activity Monitors Extension 기능에 대한 정보.
+ *         0b0000: AMU 기능 구현 안됨.
+ *         0b0001: AMU 관련 기능 구현됨.
+ *           ... :
  */
 /*
  * reset_amuserenr_el0 - reset AMUSERENR_EL0 if AMUv1 present
@@ -888,9 +892,8 @@ alternative_endif
 /*
  * tcr_clear_errata_bits - Clear TCR bits that trigger an errata on this CPU.
  */
-/*
- * IAMROOT, 2021.08.25:
- * - ID register에서 Fujitsu 라는게 맞다면 TCR_NFD1, TCR_NFD0 bit 를 clear한다.
+/* IAMROOT, 2021.08.25:
+ * - Fujitsu PE라면 TCR_NFD{0/1} bit를 초기화한다.
  */
 	.macro	tcr_clear_errata_bits, tcr, tmp1, tmp2
 #ifdef CONFIG_FUJITSU_ERRATUM_010001
