@@ -1537,8 +1537,7 @@ static inline pte_t *fixmap_pte(unsigned long addr)
 	return &bm_pte[pte_index(addr)];
 }
 
-/*
- * IAMROOT, 2021.10.09: 
+/* IAMROOT, 2021.10.09:
  *                      pgd=p4d  ->    pud  ->      pmd   ->     pte
  *                   ------------------------------------------------
  * - normal case:    init_pg_dir -> bm_pud  ->   bm_pmd   ->  bm_pte

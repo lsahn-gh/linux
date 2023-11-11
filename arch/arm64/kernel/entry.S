@@ -1026,69 +1026,72 @@ tsk	.req	x28		// current thread_info
 /*
  * Exception vectors.
  */
+/* IAMROOT, 2022.02.08:
+ * - Exception handlers 등록
+ *
+ *   Exception 발생시 수행되는 일
+ *   1. PSTATE 정보를 spsr_elx에 백업.
+ *   2. PC 정보를 elr_elx에 백업.
+ *   3. PSTATE 값에서 i flag가 자동으로 set.
+ *
+ *   https://developer.arm.com/documentation/100933/0100/Exception-handling
+ *
+ * - 완성된 exception 함수 decl은 include/asm/exception.h 에 위치함.
+ *   예) el0 64bit user ---(irq)---> b el0t_64_irq_handler
+ *
+ *   tag 종류
+ *   - t[hread]
+ *   - h[andler]
+ *
+ *   예제: el1 64bit irq 처리 flow
+ *      vectors
+ *        v
+ *      kernel_ventry 1, h, 64, irq
+ *        v
+ *      el1h_64_irq
+ *        v
+ *      kernel_entry 1, 64
+ *        v
+ *      el1h_64_irq_handler
+ *        v
+ *      ret_to_kernel
+ */
 	.pushsection ".entry.text", "ax"
 
-/*
- * IAMROOT, 2022.02.08:
- * - exception 발생시 발생하는 일들
- *   1. pstate -> spsr_elx로 백업
- *   2. pc -> elr_elx로 백업
- *   3. pstate에서 i가 autu set.
- *   참고
- *   https://developer.arm.com/documentation/100933/0100/Exception-handling
- *   aarch64_exception_and_interrupt_handling
- *
- * - exception 함수들은 include/asm/exception.h에 위치
- * 예) el0 64bit user -----(irq)----> b el0t_64_irq_handler
- * - t(thread)
- * - h(handler)
- * - ex) el1 64bit irq발생시 flow
- *   vectors 
- *     v
- *   kernel_ventry 1, h, 64, irq
- *     v
- *   el1h_64_irq
- *     v
- *   kernel_entry 1, 64
- *     v
- *   el1h_64_irq_handler
- *     v
- *   ret_to_kernel
- */
 	.align	11
 SYM_CODE_START(vectors)
-/*
- * IAMROOT, 2022.11.07:
- * - thread
- * - sp가 sp_el0를 가리킬때 동작. user app용. kernel은 미사용.
+/* IAMROOT, 2022.11.07:
+ * - el1 t[hread]
+ *   el1에서 sp가 sp_el0를 가리킬때 동작.
+ *   User app에서 동작하다 진입하며 Kernel은 사용하지 않는다.
  */
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
 	kernel_ventry	1, t, 64, irq		// IRQ EL1t
 	kernel_ventry	1, t, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, t, 64, error		// Error EL1t
-/*
- * IAMROOT, 2022.11.07:
- * - handler
- * - sp가 sp_el1을 가리킬때 동작.
- *   kernel thread등의 동작중일때 진입.
+
+/* IAMROOT, 2022.11.07:
+ * - el1 h[andler]
+ *   el1에서 sp가 sp_el1을 가리킬때 동작.
+ *   Kernel thread 등에서 동작하다 진입한다.
  */
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
 	kernel_ventry	1, h, 64, irq		// IRQ EL1h
 	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
-/*
- * IAMROOT, 2022.11.07:
- * - lower64
- *   64bit app용
+
+/* IAMROOT, 2022.11.07:
+ * - el0 t[hread]
+ *   lower64, 64bit el0에서 사용.
  */
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
-/*
- * IAMROOT, 2022.11.07:
- * - lower32
- *   32bit app용
+
+/* IAMROOT, 2022.11.07:
+ * - el0 t[hread]lower32
+ *   lower32, 32bit el0에서 사용.
  */
 	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
 	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0

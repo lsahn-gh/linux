@@ -62,7 +62,7 @@ unsigned long init_shadow_call_stack[SCS_SIZE / sizeof(long)]
  * - CONFIG_THREAD_INFO_IN_TASK       : default on
  *
  *   CONFIG_ARCH_TASK_STRUCT_ON_STACK == on이면 INIT_TASK_DATA 정의에 따라
- *   stack의 첫번째에 위치함을 알 수 있다.
+ *   stack의 첫번째 init_task_struct가 위치한다.
  */
 /*
  * Set up the first task table, touch at your own risk!. Base=0,

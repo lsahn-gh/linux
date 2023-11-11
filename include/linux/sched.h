@@ -982,15 +982,14 @@ struct kmap_ctrl {
 };
 
 struct task_struct {
-/*
- * IAMROOT, 2022.11.05: 
+
+/* IAMROOT, 2022.11.05:
  * 아래 커널 옵션이 사용되는 경우 보안을 위해 task 구조체 내부의 가장 위에 
  * thread_info 구조체를 가지고 있게 한다.
  *
  * 기존엔 스택의 가장 마지막에 thread_info 구조체를 가지고 있어서,
  * 이를 통해 task_struct의 위치를 금방 찾는 단점이 있었다.
  */
-
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 	/*
 	 * For reasons of header soup (see current_thread_info()), this
@@ -2331,70 +2330,27 @@ extern void ia64_set_curr_task(int cpu, struct task_struct *p);
 
 void yield(void);
 
-/* IAMROOT, 2021.09.04:
- * - INIT_TASK_DATA, init_thread_info, init_task를 종합하여 살펴보자.
+/* IAMROOT, 2023.11.05:
+ * - thread_info struct가 task_struct에 포함될 수 있고 task_struct는 stack에
+ *   포함될 수 있도록 코드가 작성되어 있으므로 빠르게 접근하기 위해 union 구조를
+ *   차용했다.
  *
- *   CONFIG on/off에 따른 thread_info, task_struct 위치 (stack은 GROW DOWN 기준)
- *   CONFIG_ARCH_TASK_STRUCT_ON_STACK / CONFIG_THREAD_INFO_IN_TASK
+ * - CONFIG_ARCH_TASK_STRUCT_ON_STACK == off (default)
+ *   task struct가 stack에 포함되도록 설정 가능하며 기본값은 off.
  *
- * - on / on : stack에 task_struct가 저장되고 task_struct에는 thread_info 존재.
- *   +--------- stack ---------------------------------------+ TASK_SIZE
- *   | task_struct (thread_info 포함)    |                   |
- *   +-------------------------------------------------------+
- *                                       ^                   ^
- *                                       +-- stack end       +-- stack start
+ * - CONFIG_THREAD_INFO_IN_TASK == on (default)
+ *   task_struct에 thread_info struct가 포함되록 설정 가능하며 기본값은 on.
+ *   값이 off라면 kernel stack에 존재하게 된다.
  *
- * - on / off : stack에 task_struct, thread_info가 순서대로 저장. (사용안함)
- *   +--------- stack ---------------------------------------+ TASK_SIZE
- *   | task_struct    | thread_info      |                   |
- *   +-------------------------------------------------------+
- *                                       ^                   ^
- *                                       +-- stack end       +-- stack start
+ *   결국에 default는 stack으로만 사용되며 union으로도 접근 가능하다.
  *
- * - off / on : stack 용도로만 사용.
- *   +--------- stack ---------------------------------------+ TASK_SIZE
- *   |                                                       |
- *   +-------------------------------------------------------+
- *   ^                                                       ^
- *   +-- stack end                                           +-- stack start
- *
- * - off / off : stack에 thread_info 저장.
- *   +--------- stack ---------------------------------------+ TASK_SIZE
- *   | thread_info    |                                      |
- *   +-------------------------------------------------------+
- *                    ^                                      ^
- *                    +-- stack end                          +-- stack start
- *
- * current_thread_info()의 주석을 살펴보면 CONFIG_THREAD_INFO_IN_TASK == off
- * 에 대한것은 플랫폼 개발자가 정의해야되는거 같다.
- * task_thread_info에서도 기본적으로 task->stack으로 접근을 하여
- * task안에 thread_info가 없는 경우는 일단 무조건 stack의 첫주소를 보게는
- * 해놨지만 새로 정의 가능하게 해놓은걸 볼수있다.
- * ====================================================================
- *
- * thread_info가 task안에 들어갈수 있으며 task는 stack안에 들어갈수 있는
- * 구조이다. 그렇기 때문에 union구조가 된다
- * 
- * - CONFIG_ARCH_TASK_STRUCT_ON_STACK(default off)
- *   task 구조체가 stack안에 있는지 없는지에 대한 설정.
- *
- * - CONFIG_THREAD_INFO_IN_TASK(default on)
- *   struct task_struct 안에 thread_info가 존재하게하는지에 대한 설정.
- *   존재하지 않으면 kernel stack에 넣어야된다.
- *
- *   결국에 default는 task와 stack만 union으로 공유하고 있는 상황이다.
- *
- * 히스토리:
- * =========
- * 다음과 같은 순서대로 발전하였다.
- *
- * 1) 스택에 task 및 thread_info 구조체 존재
- *    - 현재 ia64 아키텍처만 사용
- * 2) 스택에서 task 구조체 분리하고, thread_info만 존재
- *    - 현재 arm, mips, ... 아키텍처에서 사용
- * 3) 스택에서 모든 구조체 분리
- *    - 현재 arm64, x86, powerpc, s390, riscv, ndis32 아키텍처에서 사용
- * ====================================================================
+ * - 변경 히스토리: 다음과 같은 순서대로 발전하였다.
+ *   1) 스택에 task 및 thread_info 구조체 존재
+ *      - 현재 ia64 아키텍처만 사용
+ *   2) 스택에서 task 구조체 분리하고, thread_info만 존재
+ *      - 현재 arm, mips, ... 아키텍처에서 사용
+ *   3) 스택에서 모든 구조체 분리
+ *      - 현재 arm64, x86, powerpc, s390, riscv, ndis32 아키텍처에서 사용
  */
 union thread_union {
 #ifndef CONFIG_ARCH_TASK_STRUCT_ON_STACK
@@ -2406,6 +2362,44 @@ union thread_union {
 	unsigned long stack[THREAD_SIZE/sizeof(long)];
 };
 
+/* IAMROOT, 2021.09.04:
+ * - INIT_TASK_DATA, init_thread_info, init_task에 대한 설명.
+ *
+ *   CONFIG on/off에 따른 thread_info, task_struct 위치 (stack은 GROW DOWN 기준)
+ *   CONFIG_ARCH_TASK_STRUCT_ON_STACK / CONFIG_THREAD_INFO_IN_TASK
+ *
+ * - on / on : stack에 task_struct가 저장되고 task_struct에는 thread_info 존재.
+ *   +--------- stack ---------------------------------------+
+ *   | task_struct (thread_info 포함)    |                   |
+ *   +-------------------------------------------------------+
+ *                                       ^                   ^
+ *                                       +-- stack end       +-- stack start
+ *
+ * - on / off : stack에 task_struct, thread_info가 순서대로 저장. (사용안함)
+ *   +--------- stack ---------------------------------------+
+ *   | task_struct    | thread_info      |                   |
+ *   +-------------------------------------------------------+
+ *                                       ^                   ^
+ *                                       +-- stack end       +-- stack start
+ *
+ * - off / on : stack 용도로만 사용.
+ *   +--------- stack ---------------------------------------+
+ *   |                                                       |
+ *   +-------------------------------------------------------+
+ *   ^                                                       ^
+ *   +-- stack end                                           +-- stack start
+ *
+ * - off / off : stack에 thread_info 저장.
+ *   +--------- stack ---------------------------------------+
+ *   | thread_info    |                                      |
+ *   +-------------------------------------------------------+
+ *                    ^                                      ^
+ *                    +-- stack end                          +-- stack start
+ *
+ * - task_thread_info에서도 기본적으로 task->stack으로 접근하여 task안에
+ *   thread_info가 없는 경우는 일단 무조건 stack의 첫주소를 보게 했지만
+ *   새로 정의할 수도 있다.
+ */
 #ifndef CONFIG_THREAD_INFO_IN_TASK
 extern struct thread_info init_thread_info;
 #endif

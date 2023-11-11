@@ -900,50 +900,44 @@ SYM_FUNC_END(__create_page_tables)
 	 * for consistency with user tasks and kthreads.
 	 */
 	.macro	init_cpu_task tsk, tmp1, tmp2
-/*
- * IAMROOT, 2021.09.04:
- * - sp, sp_elX의 차이점
- *   https://stackoverflow.com/questions/65059491/why-save-init-task-struct-address-to-sp-el0-in-arm64-boot-code-primary-switche
- *   
- *   위 링크에서는 다음과 같은 예제를 들어준다.
+/* IAMROOT, 2021.09.04:
+ * - sp, sp_el0, and sp_el1의 차이
+ *   sp_el0, sp_el1에 user, kernel에서 사용할 stack 주소를 각각 저장하고
+ *   el0 또는 el1 sp를 사용하기 위해 spsel 값을 설정하면 h/w에 의해 sp가
+ *   자동으로 sp_el0, sp_el1에 설정했던 주소로 바뀐다.
  *
- *   movz x1, 0x1000
- *   movz x2, 0x2000
- *   msr sp_el0, x1
- *   msr sp_el1, x2
- *   msr spsel, 0
- *   add x3, sp, 0x10
- *   msr spsel, 1
- *   add x4, sp, 0x20
- *   
- *   sp_el0, sp_el1에 user, kernel에서 사용할 stack 주소를 넣어주고
- *   spsel을 통해서 sp를 뭘쓸지 정해주면 sp가 자동으로 sp_el0, sp_el1에
- *   설정했던 주소로 바뀌는 모습이다.(링크에서는 spsel뿐만 아니라 excetpion이
- *   발생하면 자동으로 바꿔준다는것처럼 설명되있다.)
- *
- *   즉 sp는 다른 레지스터처럼 ldr, str등의 제어를 직접할 수 있는 레지스터이고
- *   sp_elX는 user, kernel에서 사용할 sp를 저장해놓는 공간이된다.
+ *   sp는 다른 레지스터처럼 ldr, str등의 제어를 직접할 수 있는 레지스터이고
+ *   sp_elX는 user, kernel에서 사용할 sp addr를 저장하는 공간이된다.
  *   하지만 kernel에서는 sp_el0를 위처럼 사용하진 않는다.
  *
- * sp_el0:
- * - sp_el0는 유저 공간으로 context switch 된 후 유저용 스택 위치를
- *   가리키는 용도로 사용된다. 그러나 커널(el1)에서는 사용하지 않는 
- *   스크래치 레지스터 용도일 뿐이므로 이를 활용하여 thread_info를 가리키는 
- *   레지스터로 사용합니다.
- * - 참고: https://github.com/torvalds/linux/commit/6cdf9c7ca687e01840d0215437620a20263012fc
+ *   sp_el0:
+ *     sp_el0는 유저 공간으로 context switch 된 후 유저 task의 스택 위치를
+ *     가리키는 용도로 사용된다. 그러나 커널(el1)에서는 사용하지 않는 스크래치
+ *     레지스터 이므로 이를 활용하여 thread_info를 가리키도록 한다.
  *
- * - sp_el0는 유저에서 커널 모드 들어올 때 현재 태스크를 저장하고 커널 모드에서
- *   현재 thread_info 를 빠르게 알아내는 용도로 사용되는데 사용된다.
- *   커널모드에서 sp_el0는 스택과는 관련이 없다.
- *   커널모드 스택은 sp 니모닉으로 바로 접근하며 이때 sp는 sp_el1이다.
+ *     https://github.com/torvalds/linux/commit/6cdf9c7ca687e01840d0215437620a20263012fc
+ *
+ *     sp_el0는 el0에서 el1으로 변경될 때 현재 태스크 정보를 (어디로?) 저장하고
+ *     el1에서 현재 thread_info를 빠르게 알아내는 용도로 사용된다.
+ *     el1에서 sp_el0는 스택과는 관련이 없고 el1 스택은 sp 니모닉으로 바로
+ *     접근하며 이때 sp는 sp_el1이다.
+ *
+ *   https://stackoverflow.com/questions/65059491/why-save-init-task-struct-address-to-sp-el0-in-arm64-boot-code-primary-switche
+ *
+ *   위 링크를 통해 assembly 예제를 확인할 수 있다.
  *
  * - get_current 함수 참고
  *
- * scs(Shadow Call Stack)
- * - 함수반환주소 overflow를 방지하는 기능.
+ * - scs(shadow call stack)
+ *   func return address overflow를 방지하는 기능.
  */
 	msr	sp_el0, \tsk
 
+/* IAMROOT, 2023.11.07:
+ * - init_stack에 struct pt_regs의 정보를 저장할 영역을 설정하여 pt_regs의
+ *   첫 offset에서 stackframe offset 까지를 0으로 초기화한다. 그리고
+ *   va(stackframe)를 @x29에 저장.
+ */
 	ldr	\tmp1, [\tsk, #TSK_STACK]
 	add	sp, \tmp1, #THREAD_SIZE
 	sub	sp, sp, #PT_REGS_SIZE
@@ -953,9 +947,10 @@ SYM_FUNC_END(__create_page_tables)
 
 	scs_load \tsk
 
-/*
- * IAMROOT, 2022.02.07:
- * - 현재 cpu번호를 tpidr register에 저장한다.
+/* IAMROOT, 2022.02.07:
+ * - 현재 cpu 번호는 #TSK_CPU를 통해서 가져오고 이를 index로 하여
+ *   __per_cpu_offset array의 bucket을 결정한다. bucket에 저장된 값을
+ *   읽어와 set_this_cpu_offset 매크로를 통해 tpidr reg에 저장한다.
  */
 	adr_l	\tmp1, __per_cpu_offset
 	ldr	w\tmp2, [\tsk, #TSK_CPU]
@@ -970,88 +965,87 @@ SYM_FUNC_END(__create_page_tables)
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
 /* IAMROOT, 2021.09.04:
- * - EL1 SP(Stack Pointer) 설정
- *   init_thread_union의 source 상 위치
- *   vmlinux.lds.S -> RW_DATA -> INIT_TASK_DATA -> init_thread_union
+ * - el1 sp(stack pointer)를 통해 init_stack에 존재하는 struct pt_regs 구조체를
+ *   0으로 초기화하고 sp_el0을 init_thread_union(init_task)를 바라보도록
+ *   설정한다. 또한 @x29 레지스터는 struct pt_regs의 stackframe을 바라본다.
  *
- *   task 영역을 stack으로 사용하기 위해 task address를 가져온다.
- *
- * - Memory Layout
- *
- *   (높은 주소)
- *   ..
- *   ..
- *   ..
- *   -----------------
- *   (end)   - init_thread_union, stack <- SP (Stack Pointer)
- *   THREAD_SIZE (Stack Size, 16k: CONFIG_KASAN off)
- *   (start) - init_thread_union, stack
- *   -----------------
- *   (낮은 주소)
- *
- * - 참고 : Documentation/x86/kernel-stacks.rst 
+ *   init_thread_union >> INIT_TASK_DATA >> RW_DATA >> vmlinux.lds.S
  */
 	adr_l	x4, init_task
 	init_cpu_task x4, x5, x6
 
+/* IAMROOT, 2023.11.08:
+ * - 현재 init_stack의 memory layout 다이어그램 (CONFIG에 따라 달라짐)
+ *
+ *           .           . --> 0xffff ... higher addr
+ *           | ...       |
+ *           | ...       |
+ *   +-------+-----------+ !!- end: init_stack
+ *           | 0000 .... |          stack size: THREAD_SIZE (16KB: kasan off)
+ *           | 0000 0000 |
+ *           |-----------| <-- struct pt_regs object의 offset
+ *    STACK  | xxxx .... |
+ *    RANGE  |           | <-- sp (el1 stack pointer, grow down)
+ *           |           |     pt_regs offset을 넘어서 사용할 수 없음
+ *           |           |
+ *           |           |
+ *   +-------+-----------+ !!- start: init_stack == init_thread_union
+ *           | ...       |
+ *           | ...       |
+ *           '           ' --> 0xffff ... lower addr
+ */
+
 /* IAMROOT, 2021.09.04:
- * - el1 vector table 주소 설정 (vectors == kernel/entry.S).
+ * - el1 vector table 주소 설정 ('vectors' in kernel/entry.S).
  */
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
 	isb
 
-/*
- * IAMROOT, 2021.09.04:
- *  stack_push(x29), stack_push(x30) 과 동일 의미
+/* IAMROOT, 2021.09.04:
+ * - init_stack을 초기화하였으니 previous stack frame 정보(fp, lr)를 kernel의
+ *   swapper stack에 저장한다. 이유는 현재 __primary_switched 함수를 호출한
+ *   상태이기 때문이다.
+ *   이제 nested procedure call이 가능하고 현재 stack frame을 가리키도록
+ *   fp(@x29)를 보정한다.
  *
- *  sp(before)
- *  ----------------
- *  (sp -= 16)
- *  sp - 16 : x29
- *  sp - 8  : x30
- *  ----------------
- *  sp(current)
+ * - FYI, 현재 stack frame에는 fp', lr'의 정보가 저장되어 있으며 위 내용은
+ *   AAPCS64 std를 확인하면 더 자세하게 알 수 있다.
+ *
+ * - 만약 fp, lr을 저장하지 않으면 아래 bl을 실행할 때 해당 정보가 손실된다.
+ *
+ *   @fp: frame pointer
+ *        이전 fp 정보를 가리키는 pointer.
+ *   @lr: link register
+ *        caller의 주소를 가지고 있는 reg.
  */
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
 
-/*
- * IAMROOT, 2021.09.04:
- * - 처음 부팅시 부트로더부터 가져온 fdt 주소를 x21에 backup 해놨었는데
- *   해당 값을 __fdt_pointer에 저장함
+/* IAMROOT, 2021.09.04:
+ * - 부팅시 부트로더에서 넘겨받은 pa(fdt)를 __fdt_pointer 변수에 저장한다.
+ *   @x5는 temp로 사용한다.
+ *
+ *   mmu enable 되어 먼거리로 branch가 가능하니 지금 변수에 저장한다.
  */
 	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
 
-/*
- * IAMROOT, 2021.09.04:
- * 
+/* IAMROOT, 2021.09.04:
+ * - va(_text)와 pa(_text) 간의 offset을 구해서 kimage_voffset에 저장한다.
+ *   voffset은 va와 pa간 주소변환에 사용된다.
+ *
  * - kimage_voffset = kimage_vaddr - __PHYS_OFFSET
- *   kimage_vaddr은 va(_text)이다. 그리고 __PHYS_OFFSET은 pa(_text)이므로
- *
- *   kimage_voffset = va(_text) - pa(_text)
- *
- *   즉 kimage_voffset은 가상주소에서 물리주소 변환을 위한 offset을 의미한다.
- *
- *   여기서 relocate 를 한다면 va(_text)는 relocate 된 va(_text)가 될것이다.
- *
- * - CONFIG_RANDOMIZE_BASE on시의 kimage_voffset
- *   CONFIG_RANDOMIZE_BASE가 on이 되면 __primary_switched를 총 2번 진입하는데
- *
- *   첫번째 진입할때에는 randomized가 되기 전인 relocate만 한 va(_text)이고,
- *   이후 뒷 code에서 kaslr_early_init의 결과값으로 주어진 random offset을
- *   사용해서 다시 relocate된 kimage_vaddr을 사용해서 offset을 다시 구한다.
+ *   kimage_vaddr  == va(_text)
+ *   __PHYS_OFFSET == pa(_text)
  */
 	ldr_l	x4, kimage_vaddr		// Save the offset between
 	sub	x4, x4, x0			// the kernel virtual and
 	str_l	x4, kimage_voffset, x5		// physical mappings
 
-/*
- * IAMROOT, 2021.09.04:
- * - 보통 일반 application을 동작시킬시에는 loader가 bss를 초기화 시켜주지만
- *   kernel은 자신이 초기화한다.
- *   memset에 대한 instruction을 내리고 해당 instruction이(store)끝날때까지
- *   기다린다.
+/* IAMROOT, 2021.09.04:
+ * - el0 app을 동작시킬때는 loader가 bss를 초기화하지만 kernel은 자신이
+ *   해야한다. AAPCS64 std에 따라 @x0, @x1, @x2 args를 세팅하고 memset을
+ *   호출한다.
  */
 	// Clear BSS
 	adr_l	x0, __bss_start
@@ -1064,28 +1058,22 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
 	bl	kasan_early_init
 #endif
+
+/* IAMROOT, 2023.11.11:
+ * - early_fdt_map, init_feature_override는 c로 작성된 procedure 이므로
+ *   stack frame 생성, sp 보정은 compiler가 처리한다.
+ */
 	mov	x0, x21				// pass FDT address in x0
 	bl	early_fdt_map			// Try mapping the FDT early
 	bl	init_feature_override		// Parse cpu feature overrides
-/*
- * IAMROOT, 2021.09.04:
- * - CONFIG_RANDOMIZE_BASE가 on이면 __primary_switch에서 __primary_switched
- *   가 2번을 호출하고 첫번째에는 ret을 통해 빠져나가고 두번째 호출에는
- *   tst를 통해 0번 label로 이동해서 start_kernel을 실행하는 구조이다.
- */
+
 #ifdef CONFIG_RANDOMIZE_BASE
-	tst	x23, ~(MIN_KIMG_ALIGN - 1)	// already running randomized?
-	b.ne	0f
-	bl	kaslr_early_init		// parse FDT for KASLR options
-	cbz	x0, 0f				// KASLR disabled? just proceed
-	orr	x23, x23, x0			// record KASLR offset
-	ldp	x29, x30, [sp], #16		// we must enable KASLR, return
-	ret					// to __primary_switch()
-0:
-#endif
-/*
- * IAMROOT, 2021.09.10:
- * - CONFIG_RELOCATABLE, CONFIG_RANDOMIZE_BASE on시
+/* IAMROOT, 2021.09.04:
+ * - CONFIG_RANDOMIZE_BASE == on이면 __primary_switch에서 __primary_switched를
+ *   2번 호출하고, 처음에는 ret을 실행하며 두번째에는 tst를 통해 0번 label로
+ *   이동하여 start_kernel을 실행하는 구조이다.
+ *
+ * - CONFIG_RELOCATABLE == on, CONFIG_RANDOMIZE_BASE == on시
  *   __primary_switch ~ start_kernel 사이의
  *   kimage_vaddr, kimage_voffset, init_pg_dir 변화 과정
  *
@@ -1108,15 +1096,19 @@ SYM_FUNC_START_LOCAL(__primary_switched)
  *                       | va(_text)     | va(_text)      | 
  *                       |               | -   pa(_text)  |
  * ----------------------+---------------+----------------+-------------
- */                                             
-/*
- * IAMROOT, 2021.09.04:
- * 위 코드에서 stack에 값2개를 push했었지만 CONFIG_RANDOMIZE_BASE가
- * off라고 했을때 해당값을 사용안하고 그냥 버린다.
- *
- * - PCS에 따르면 x29는 fp(frame pointer), x30은 lr(link register)를 사용한다고
- *   하며, 해당 값들을 0으로 초기화한다.
- *
+ */
+	tst	x23, ~(MIN_KIMG_ALIGN - 1)	// already running randomized?
+	b.ne	0f
+	bl	kaslr_early_init		// parse FDT for KASLR options
+	cbz	x0, 0f				// KASLR disabled? just proceed
+	orr	x23, x23, x0			// record KASLR offset
+	ldp	x29, x30, [sp], #16		// we must enable KASLR, return
+	ret					// to __primary_switch()
+0:
+#endif
+
+/* IAMROOT, 2021.09.04:
+ * - TODO
  * To avoid backtracing using PCs that fall in the idmap, or are controlled
  * by userspace, we must explcitly zero the FP and LR in startup paths, and
  * must ensure that the frame embedded in pt_regs is zeroed upon entry from
@@ -1124,6 +1116,12 @@ SYM_FUNC_START_LOCAL(__primary_switched)
  * is updated to avoid them.
  */
 	bl	switch_to_vhe			// Prefer VHE if possible
+
+/* IAMROOT, 2023.11.11:
+ * - start_kernel을 호출할 준비를 한다. start_kernel로 넘어가면 현재 함수에서
+ *   저장해둔 stack frame 정보(fp', lr'을 가리키는)는 더 이상 쓸모없으므로
+ *   stack에서 pop하여 버린다.
+ */
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
 	ASM_BUG()

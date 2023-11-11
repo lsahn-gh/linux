@@ -383,31 +383,28 @@
 	*(.data..cacheline_aligned)
 
 /* IAMROOT, 2021.09.05:
- * init_thread_union과 init_stack이 같은 주소를 공유하니 기본적으로
- * stack과 union이 동일하다고 보면된다.(stack은 unoion의 끝주소에서부터 자란다)
+ * - INIT_TASK_DATA의 크기를 결정한다. compile-time 결정되는 THREAD_SIZE에
+ *   따라 다른데 일반적으로 '1 << PAGE_SHIFT'의 크기를 가지므로 defconfig에서
+ *   4KB 크기이다.
  *
- * - CONFIG_ARCH_TASK_STRUCT_ON_STACK == off(default)
- *   .data..init_task에는 아무것도 없다.
+ *   또한 이 4KB 크기 안에서 init_thread_union과 init_stack이 같은 시작 주소를
+ *   가지고 있어 thread_union과 stack이 동일하다고 보면된다.
+ *   (stack은 thread_union의 end addr에서부터 커진다)
  *
- *   -- CONFIG_THREAD_INFO_IN_TASK == on(default)
- *    init_thread_info 또한 다른데에 위치가 된 init_task에 존재하므로
- *    .data..init_thread_info가 비게 된다.
- *   
- *   -- CONFIG_THREAD_INFO_IN_TASK == off(사용안함)
- *    .data..init_thread_info에 init_thread_info가 위치하게 된다.
+ *   - CONFIG_ARCH_TASK_STRUCT_ON_STACK == off (default)
+ *     '.data..init_task' section에는 아무것도 저장되지 않는다.
  *
- * - CONFIG_ARCH_TASK_STRUCT_ON_STACK == on
- *   .data..init_task에 init_task가 위치하게 된다.
- *   -- CONFIG_THREAD_INFO_IN_TASK == on
- *    init_thread_info 는 init_task에 존재하므로 .data..init_thread_info가 
- *    비게 되고, .data..init_task는 init_thread_info가 포함된 만큼 커질것이다.
- *   
- *   -- CONFIG_THREAD_INFO_IN_TASK == off(사용안함)
- *    .data..init_task에는 init_task가, .data..init_thread_info에는
- *    init_thread_info가 위치한다.
+ *   - CONFIG_ARCH_TASK_STRUCT_ON_STACK == on
+ *     '.data..init_task' section에 init_task 데이터가 저장된다.
  *
- * current_thread_info()의 주석을 살펴보면 CONFIG_THREAD_INFO_IN_TASK == off
- * 에 대한것은 고려안한거 같다.
+ *     - CONFIG_THREAD_INFO_IN_TASK == on (default)
+ *       init_thread_info는 init_task 내부에 저장되고 '.data..init_thread_info'
+ *       section에는 아무것도 저장되지 않는다. '.data..init_task' section은
+ *       init_thread_info가 포함된 만큼 크기가 커진다.
+ *
+ *     - CONFIG_THREAD_INFO_IN_TASK == off
+ *       init_thread_info가 전역 변수로 지정되고 '.data..init_thread_info'에
+ *       데이터가 저장된다.
  */
 #define INIT_TASK_DATA(align)						\
 	. = ALIGN(align);						\
@@ -1154,6 +1151,10 @@
  * matches the requirement of PAGE_ALIGNED_DATA.
  *
  * use 0 as page_align if page_aligned data is not used */
+/* IAMROOT, 2023.11.04:
+ * - defconfig 기준으로 arm64에서 .data section의 크기는 대략 3MB임.
+ *   @inittask는 CONFIG_VMAP_STACK == 1 이면 8KB, 아니면 4KB임.
+ */
 #define RW_DATA(cacheline, pagealigned, inittask)			\
 	. = ALIGN(PAGE_SIZE);						\
 	.data : AT(ADDR(.data) - LOAD_OFFSET) {				\

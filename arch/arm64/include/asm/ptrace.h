@@ -299,11 +299,10 @@ struct pt_regs {
 	s32 syscallno;
 	u32 unused2;
 #endif
-/*
- * IAMROOT, 2022.11.05: 
- * Software_Delegated_Exception_Interface
- */
 
+/* IAMROOT, 2022.11.05:
+ * - software delegated exception interface
+ */
 	u64 sdei_ttbr1;
 	/* Only valid when ARM64_HAS_IRQ_PRIO_MASKING is enabled. */
 	u64 pmr_save;

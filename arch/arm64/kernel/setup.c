@@ -55,12 +55,11 @@
 static int num_standard_resources;
 static struct resource *standard_resources;
 
-/*
- * IAMROOT, 2021.09.04:
- * - __initdata : include/linux/init.h
+/* IAMROOT, 2021.09.04:
+ * - mmu enable 이후에 __primary_switched 에서 변수 초기화가 이루어진다.
  *
- * - fdt : flattened device tree
- * - 부트로더에서 가져온 값이 head.S __primary_switched에서 저장된다.
+ *   fdt: flattened device tree
+ *   __initdata : include/linux/init.h
  */
 phys_addr_t __fdt_pointer __initdata;
 
