@@ -306,6 +306,10 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 {
 	int fdt_size;
 
+/* IAMROOT, 2023.11.18:
+ * - fdt 매핑 이전에 fixmap을 초기화하여 임시 page table을 생성한다.
+ *   현재는 dynamic mapping subsystem이 활성화되기 전이라 fixmap을 이용한다.
+ */
 	early_fixmap_init();
 	early_fdt_ptr = fixmap_remap_fdt(dt_phys, &fdt_size, PAGE_KERNEL);
 }

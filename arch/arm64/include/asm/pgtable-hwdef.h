@@ -110,7 +110,7 @@
  *   page size와 vabits의 값에 따라 정해진 PGTABLE_LEVELS을 확인할 수 있다.
  *
  * +-----------+--------+-----------------+-----+-----+-----+
- * | PAGE_SIZE | vabits | PAGTABLE_LEVELS | PGD | PUD | PMD |
+ * | PAGE_SIZE | vabits | PGTABLE_LEVELS  | PGD | PUD | PMD |
  * +-----------+--------+-----------------+-----+-----+-----+
  * | 4k(12)    | 39     | 3               | 30  | -   | 21  |
  * |           | 48     | 4               | 39  | 30  | 21  |
@@ -297,19 +297,19 @@
 
 /* IAMROOT, 2021.08.21:
  * - PTE_ADDR_LOW
- *   1 << (48 - PAGE_SHIFT) 를 하고 1을 빼고 , PAGE_SHIFT만큼 shift를 한다.
- *   즉 하위 SECTION_SHIFT만큼을 제외한 나머지 bit를 1로 하겠다는 뜻
- *   ex) PAGE_SHIFT == 12 일때
- *   1 << (48 - 12) = 1 << 36
- *   (1 << 36) - 1 = 0x10_0000_0000 - 1 = 0x0f_ffff_ffff
- *   0x0f_ffff_ffff << PAGE_SHIFT(12) > 0xf_fff_ffff_000
+ *   하위 PAGE_SHIFT 만큼의 bits를 제외한 나머지 bit를 1로 하여 Page 크기만큼
+ *   align된 주소를 얻는다.
+ *
+ *   예) PAGE_SHIFT == 12,
+ *       1 << (48 - 12) == 1 << 36
+ *       (1 << 36) - 1  == 0x10_0000_0000 - 1
+ *                      == 0x0f_ffff_ffff
+ *       0x0f_ffff_ffff << PAGE_SHIFT(12) == 0xf_fff_ffff_000
  *
  * - PTE_ADDR_HIGH
- *   이건 그냥 0xf000
+ *   0xf << 12 == 0xf000
  *
- * ---
- *
- *   즉 두개를 OR하면 0xff....ffff_f000
+ *   PTE_ADDR_HIGH | PTE_ADDR_LOW == 0xff ... ffff_f000
  */
 #define PTE_ADDR_LOW		(((_AT(pteval_t, 1) << (48 - PAGE_SHIFT)) - 1) << PAGE_SHIFT)
 #ifdef CONFIG_ARM64_PA_BITS_52

@@ -22,36 +22,35 @@
 #include <asm/page.h>
 #include <asm/pgtable-prot.h>
 
-/*
- * IAMROOT, 2021.09.04:
- * - 가상주소의 특정범위를 특정용도로 고정하여 사용하기 위한 정의이다.
- *   전체 size는 약 6MB가 조금 못되게 나온다.
+/* IAMROOT, 2021.09.04:
+ * - fixmap은 가상주소의 특정범위를 특정용도로 고정하여 사용하기 위함이다.
+ *   전체 크기는 대략 6MB 정도 나온다.
  *
  * - fixed map
- *   처음 compile time에 고정된 가상주소. 모든 메모리는 dynimic memory
- *   mappting에 의해 관리가 되야 되는데 처음엔 아직 동작을 안하고 있으므로
- *   임시로 사용하기 위함. 또한 몇가지 기능을 위한 고정 주소 또한 제공한다.
+ *   compile-time에 고정된 vaddr. 모든 메모리는 dynamic memory mapping에 의해
+ *   관리가 되야 되는데 초기엔 아직 기능이 동작을 안하므로 임시로 사용하기 위함.
+ *   또한 몇가지 extra 기능을 위한 고정 주소로 사용되기도 한다.
  *
- * - FIX_EARLYCON_MEM_BASE 같은 기능은 미리 driver를 부팅하기전에
- *   무슨 driver가 있는지에 대한 정보등을 제공하기 위한 용도이다.
+ * - FIX_EARLYCON_MEM_BASE:
+ *   부팅하고 driver를 셋업하기 전에 어떤 driver가 존재하는지 관련 정보 제공.
  *
- * - FIX_TEXT_POKE0 : kernel code가 read only mapping이 되있는데,
- *   이 주소는 read write 영역이고, kernel code를 수정할때 사용한다.
+ * - FIX_TEXT_POKE0:
+ *   kernel code가 read only 영역에 mapping 되있는데, 해당 fixmap region은
+ *   r/w 영역으로써 kernel code를 수정할때 사용된다.
  *
- * - FIX_ENTRY_TRAMP_DATA : 보안을 위해 유저측에서 kernel측을 감추기 위해
- *   사용한다.
+ * - FIX_ENTRY_TRAMP_DATA:
+ *   보안을 위해 el0로부터 el1을 감추기 위해 사용한다.
  *
- * - FIX_PGD... : FIX_TEXT_POKE0과 비슷한 이유로 인해 page table 수정할때
- *   잠시 mapping하기 위한 것이며, 4개의 page table을 전부 mapping후
- *   atomic하게 수정한다.
+ * - FIX_PGD ...:
+ *   FIX_TEXT_POKE0과 비슷한 이유로 page table을 수정할때 잠시 mapping하기
+ *   위한 것이며, 4개의 page table을 전부 mapping 한 후 atomic하게 수정한다.
  *
- * ----------
- *
- * - fixed_address는 __end_of_permanent_fixed_addresses를 기준으로
- *   2개로 나눠진다.
- *   여기서 FIXMAP_SIZE는 __end_of_fixed_addresses아래쪽의 FIX_PGD..등은
+ * - fixed_address는 __end_of_permanent_fixed_addresses를 기준으로 2개로 나뉜다.
+ *   여기서 FIXMAP_SIZE는 __end_of_fixed_addresses 아래의 FIX_PGD ... 등은
  *   제외한 크기가 된다.
  *
+ * - 각 enum item의 크기가 PAGE_SIZE라 할 때 nr * PAGE_SIZE로 계산하면
+ *   전체 fixmap의 크기를 예측할 수 있다.
  */
 /*
  * Here we define all the compile-time 'special' virtual
@@ -77,9 +76,11 @@ enum fixed_addresses {
 	 */
 #define FIX_FDT_SIZE		(MAX_FDT_SIZE + SZ_2M)
 	FIX_FDT_END,
-/*
- * IAMROOT, 2021.10.14:
- * FIX_FDT_END인 4MB뒤에 바로 위치하고 있음이 보인다.
+/* IAMROOT, 2021.10.14:
+ * - FIX_FDT == 1024 by the following values ...
+ *     FIX_FDT_SIZE == 4MB
+ *     PAGE_SIZE    == 4KB
+ *     FIX_FDT_END  == 1
  */
 	FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1,
 
@@ -101,14 +102,12 @@ enum fixed_addresses {
 	FIX_ENTRY_TRAMP_TEXT,
 #define TRAMP_VALIAS		(__fix_to_virt(FIX_ENTRY_TRAMP_TEXT))
 #endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
-/*
- * IAMROOT, 2021.09.04:
- * - 약 4MB(PAGE_SIZE 4kb 기준).
- *  크기를 적당히 계산해보면
- *  FIX_FDT_SIZE = 4MB가 되고 FIX_EARLYCON_MEM_BASE, FIX_TEXT_POKE0,
- *  FIX_ENTRY_TRAMP_DATA, FIX_ENTRY_TRAMP_TEXT가 존재 한다고할때
- *  4MB + 16KB 크기가 된다.
- *
+
+/* IAMROOT, 2021.09.04:
+ * - 크기를 대략 계산하면 FIX_FDT_SIZE == 4MB 이고
+ *    - FIX_EARLYCON_MEM_BASE (4KB)
+ *    - FIX_TEXT_POKE0 (4KB)
+ *   위 items가 enable 된다면 4MB + 8KB 크기를 가진다.
  */
 	__end_of_permanent_fixed_addresses,
 
@@ -116,19 +115,22 @@ enum fixed_addresses {
 	 * Temporary boot-time mappings, used by early_ioremap(),
 	 * before ioremap() is functional.
 	 */
-#define NR_FIX_BTMAPS		(SZ_256K / PAGE_SIZE)
-#define FIX_BTMAPS_SLOTS	7
-#define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
-
-/*
- * IAMROOT, 2021.09.04:
- * - 정규 매핑 (paging_init) 이전에 I/O 장치들이 사용되어야 하는 경우를 위한 영역.
+/* IAMROOT, 2023.11.12:
+ * - 정규 매핑(paging_init)전에 I/O 장치들이 사용되는 경우를 위한 영역.
  *   1. ACPI 테이블 접근 후 디바이스 정보를 읽어야 하는 경우.
  *   2. EFI 테이블 접근 후 디바이스 정보를 읽어야 하는 경우.
  *   3. 일부 디바이스에서 설정 정보를 읽어야 하는 경우.
  *
- * - 총 7개의 slot에 각각 256k 크기를 커버한다.
+ * - 총 7개의 slot에 slot당 64 page를 커버한다.
+ *
+ * - NR_FIX_BTMAPS    == 64 (256KB / 4KB == PAGE_SIZE)
+ *   FIX_BTMAPS_SLOTS == 7
+ *   TOTAL_FIX_BTMAPS == 448 (64 * 7)
  */
+#define NR_FIX_BTMAPS		(SZ_256K / PAGE_SIZE)
+#define FIX_BTMAPS_SLOTS	7
+#define TOTAL_FIX_BTMAPS	(NR_FIX_BTMAPS * FIX_BTMAPS_SLOTS)
+
 	FIX_BTMAP_END = __end_of_permanent_fixed_addresses,
 	FIX_BTMAP_BEGIN = FIX_BTMAP_END + TOTAL_FIX_BTMAPS - 1,
 
@@ -136,22 +138,24 @@ enum fixed_addresses {
 	 * Used for kernel page table creation, so unmapped memory may be used
 	 * for tables.
 	 */
-/*
- * IAMROOT, 2021.11.01:
- * vabits 48, 4k page 시스템에서 각 PGD/PUD/PMD/PTE는 4k addrs 커버
- */
 	FIX_PTE,
 	FIX_PMD,
 	FIX_PUD,
 	FIX_PGD,
 
+/* IAMROOT, 2023.11.12:
+ * - 여기까지 크기는 5.8MB + 24KB (4MB + 8KB + 1.8MB + 16KB).
+ */
+
 	__end_of_fixed_addresses
 };
 
-/*
- * IAMROOT, 2021.09.07:
- * arch/arm64/include/asm/memory.h 에서 그려논 memory map 참고하면 어느
- * 위치 쯤에 있는지 파악이된다.
+/* IAMROOT, 2021.09.07:
+ * - fixmap addr size와 start point를 정의한다.
+ *   __end_of_permanent_fixed_addresses 는 page 단위로 크기가 정해져있어
+ *   PAGE_SHIFT를 사용하여 left shift를 수행하면 '* PAGE_SIZE'를 한 것과 같다.
+ *
+ * - arch/arm64/include/asm/memory.h에서 그린 memory map 참고하면 파악 가능.
  */
 #define FIXADDR_SIZE	(__end_of_permanent_fixed_addresses << PAGE_SHIFT)
 #define FIXADDR_START	(FIXADDR_TOP - FIXADDR_SIZE)

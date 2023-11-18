@@ -58,9 +58,8 @@
  * because in such cases PTRS_PER_PxD equals 1.
  */
 
-/*
- * IAMROOT, 2021.10.02:
- * - va(@address)에 대응하는 pte table 인덱스를 구한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@address)의 pte table index를 구하는 macro 함수.
  *
  * - (@address >> 12) & (0x1ff)
  *   @address: 0xffff_0000_001f_f000
@@ -71,9 +70,8 @@ static inline unsigned long pte_index(unsigned long address)
 	return (address >> PAGE_SHIFT) & (PTRS_PER_PTE - 1);
 }
 
-/*
- * IAMROOT, 2021.10.02:
- * - va(@address)에 대응하는 pmd table 인덱스를 구한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@address)의 pmd table index를 구하는 macro 함수.
  *
  * - (@address >> 21) & (0x1ff)
  *   @address: 0xffff_0000_3fe0_0000
@@ -87,9 +85,8 @@ static inline unsigned long pmd_index(unsigned long address)
 #define pmd_index pmd_index
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - va(@address)에 대응하는 pud table 인덱스를 구한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@address)의 pud table index를 구하는 macro 함수.
  *
  * - (@address >> 30) & (0x1ff)
  *   @address: 0xffff_007f_c000_0000
@@ -103,36 +100,38 @@ static inline unsigned long pud_index(unsigned long address)
 #define pud_index pud_index
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - va(@address)에 대응하는 pgd table 인덱스를 구한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@address)의 pgd table index를 구하는 macro 함수.
  *
- * VA 48bits, 4단계 table 기준 (ARM64_HW_PGTABLE_LEVEL_SHIFT 참고)
+ * - PAGE_SIZE에 따른 addr bit 별 영역 정리
+ *   +--------+----------------+-------+-------+------+------+------+--------+
+ *   | PGSIZE |                | upper | PGD   | PUD  | PMD  | PTE  | phys-m |
+ *   +--------+----------------+-------+-------+------+------+------+--------+
+ *   |  4KB   | BITS per entry | 16    | 9     | 9    | 9    | 9    | 12     |
+ *   |        |   NR per entry |       | 512   | 512  | 512  | 512  |        |
+ *   |        | SIZE per entry |       | 512GB | 1GB  | 2MB  | 4KB  |        |
+ *   +--------+----------------+-------+-------+------+------+------+--------+
+ *   | 16KB   | BITS per entry | 16    | 1     | 11   | 11   | 11   | 14     |
+ *   |        |   NR per entry |       | 2     | 2048 | 2048 | 2048 |        |
+ *   |        | SIZE per entry |       | 128TB | 64GB | 32MB | 16KB |        |
+ *   +--------+----------------+-------+-------+------+------+------+--------+
+ *   (PAGE_SIZE == 16KB일때 PGD bit가 1로 세팅된다.)
  *
- * - address bit별 영역 정리
- *
- *                     | k/u   | PGD   | PUD  | PMD  | PTE  | OFFSET |
- * --------------------+-------+-------+------+------+------+--------+
- * 4kb address bits    | 16    | 9     | 9    | 9    | 9    | 12     | 
- * 4kb size per entry  | ----  | 512GB | 1GBa | 2MB  | 4KB  | -----  |
- * --------------------+-------+-------+------+------+------+--------+
- * 16kb address bits   | 16    | 1     | 11   | 11   | 11   | 14     | 
- * 16kb size per entry | ----  | 128TB | 64GB | 32MB | 16KB | -----  |
- * (16kb/4일때 PGD bit가 1인것을 짚고넘어간다.)
- *
- * - a : 0xffff_ff80_0000_0000 일때. masking 영역.
- * PAGE_SIZE | PGDIR_SHIFT | PTRS_PER_PGD | pgd_index(a)       | result
- * 4KB       | 39          | 512(0x200)   | (a >> 39 & (0x1ff) | 0x1ff
- * 16KB      | 47          | 2            | (a >> 47 & (0x2)   | 1
+ * - @a: 0xffff_ff80_0000_0000 일때 masking 영역은 아래와 같음.
+ *   +-----------+-------------+--------------+--------------------+--------+
+ *   | PAGE_SIZE | PGDIR_SHIFT | PTRS_PER_PGD | pgd_index(@a)      | result |
+ *   +-----------+-------------+--------------+--------------------+--------+
+ *   | 4KB       | 39          | 512(0x200)   | (a >> 39 & (0x1ff) | 0x1ff  |
+ *   | 16KB      | 47          | 2            | (a >> 47 & (0x2)   | 1      |
+ *   +-----------+-------------+--------------+--------------------+--------+
  */
 #ifndef pgd_index
 /* Must be a compile-time constant, so implement it as a macro */
 #define pgd_index(a)  (((a) >> PGDIR_SHIFT) & (PTRS_PER_PGD - 1))
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - address에 해당하는 pte page table entry주소를 가져온다.
+/* IAMROOT, 2021.10.02:
+ * - @address를 기반으로 @pmd에서 pte index를 계산하여 entry addr 반환.
  *   pud_offset과 동일 방식의 변환을 수행한다.
  */
 #ifndef pte_offset_kernel
@@ -149,19 +148,17 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 	 pte_index((address)))
 #define pte_unmap(pte) kunmap_atomic((pte))
 #else
-/*
- * IAMROOT, 2023.06.24:
+/* IAMROOT, 2023.06.24:
  * - 64bit
- *   address에 해당하는 pte page table entry주소를 가져온다.
+ *   @address에 해당하는 pte page table entry주소를 가져온다.
  */
 #define pte_offset_map(dir, address)	pte_offset_kernel((dir), (address))
 #define pte_unmap(pte) ((void)(pte))	/* NOP */
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - address에 해당하는 pmd page table entry주소를 가져온다.
- *   pud_offset과 동일 방식의 변환을 수행한다.
+/* IAMROOT, 2021.10.02:
+ * - @address를 기반으로 @pud에서 pmd index를 계산하여 entry addr 반환.
+ *   pud_offset과 동일 방식으로 변환한다.
  */
 /* Find an entry in the second-level page table.. */
 #ifndef pmd_offset
@@ -172,15 +169,11 @@ static inline pmd_t *pmd_offset(pud_t *pud, unsigned long address)
 #define pmd_offset pmd_offset
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - p4d : address의 p4d가 저장되있는 p4d entry
- *   p4d entry에는 pud page table entry의 pa가 저장되있고(flag등이 or된상태로),
- *   이 주소를 가상주소로 변환하고 address에서 pud_index를 구함으로써
- *   address에 해당하는 pud va를 구한다.
- *   
- * - page table entry에는 pa로 저장되어 있다.
- *   해당 entry에는 물리주소가 저장되있으므로 va로 변환이 되야 된다
+/* IAMROOT, 2021.10.02:
+ * - @address를 기반으로 @p4d에서 pud index를 계산하여 entry addr 반환.
+ *
+ *   @p4d entry에는 pud table entry의 addr가 저장되어 있고 이를 va를 변환하고
+ *   @address의 pud index와 함께 계산하여 va(pud) entry를 구한다.
  */
 #ifndef pud_offset
 static inline pud_t *pud_offset(p4d_t *p4d, unsigned long address)
@@ -190,9 +183,8 @@ static inline pud_t *pud_offset(p4d_t *p4d, unsigned long address)
 #define pud_offset pud_offset
 #endif
 
-/*
- * IAMROOT, 2021.10.02:
- * - address에 해당하는 pgd page table entry주소를 가져온다.
+/* IAMROOT, 2021.10.02:
+ * - @address를 기반으로 pgd table에서 대응되는 entry addr 반환.
  */
 static inline pgd_t *pgd_offset_pgd(pgd_t *pgd, unsigned long address)
 {
@@ -206,9 +198,9 @@ static inline pgd_t *pgd_offset_pgd(pgd_t *pgd, unsigned long address)
 #define pgd_offset(mm, address)		pgd_offset_pgd((mm)->pgd, (address))
 #endif
 
-/*
- * IAMROOT, 2021.10.12:
- * _k : kernel을 의미. init_mm을 사용한다.
+/* IAMROOT, 2021.10.12:
+ * - kernel의 경우 init_mm을 사용한다.
+ *   *_k: kernel을 의미한다.
  */
 /*
  * a shortcut which implies the use of the kernel's pgd, instead

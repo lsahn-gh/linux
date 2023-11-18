@@ -315,8 +315,7 @@ SECTIONS
 
 	BSS_SECTION(SBSS_ALIGN, 0, 0)
 
-/*
- * IAMROOT, 2021.11.16:
+/* IAMROOT, 2021.11.16:
  * - init_pg_dir 목적
  *   head.S에서 mmu가 enable되고 나서 처리되는 모든 va(kernel code)가 매핑된
  *   임시 page table. setup_arch() -> paging_init() 이후에 사용되지 않는다.

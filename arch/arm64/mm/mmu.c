@@ -1496,10 +1496,12 @@ void vmemmap_free(unsigned long start, unsigned long end,
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
-/*
- * IAMROOT, 2021.10.02:
- * - 가상주소인 addr에 해당하는 pud entry주소를 반환한다.
- *   fixmap은 kernel image안의 symbol 정의이므로 xxx_offset_kimg를 사용한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@addr)의 va(pud table)을 반환한다.
+ *   @return: va(pud table) == va(p4dp + pud offset)
+ *
+ *   bm_pud는 statically allocate 되어 있으므로 kernel image 공간에 저장되고
+ *   symbol로 접근 가능하므로 xxx_offset_kimg(..)를 사용한다.
  */
 static inline pud_t *fixmap_pud(unsigned long addr)
 {
@@ -1507,6 +1509,9 @@ static inline pud_t *fixmap_pud(unsigned long addr)
 	p4d_t *p4dp = p4d_offset(pgdp, addr);
 	p4d_t p4d = READ_ONCE(*p4dp);
 
+/* IAMROOT, 2023.11.18:
+ * - 이 시점에 *p4dp에는 이미 pa(bm_pud)가 매핑되어 있어야 한다.
+ */
 	BUG_ON(p4d_none(p4d) || p4d_bad(p4d));
 
 	return pud_offset_kimg(p4dp, addr);
@@ -1527,9 +1532,8 @@ static inline pmd_t *fixmap_pmd(unsigned long addr)
 	return pmd_offset_kimg(pudp, addr);
 }
 
-/*
- * IAMROOT, 2021.10.09: 
- * - 가상 주소 @addr에 대해 fixmap이 사용하는 bm_pte 테이블의 엔트리 주소를
+/* IAMROOT, 2021.10.09:
+ * - 가상 주소 @addr에 대해 fixmap이 사용하는 bm_pte 테이블의 entry addr를
  *   반환한다.
  */
 static inline pte_t *fixmap_pte(unsigned long addr)
@@ -1537,17 +1541,22 @@ static inline pte_t *fixmap_pte(unsigned long addr)
 	return &bm_pte[pte_index(addr)];
 }
 
-/* IAMROOT, 2021.10.09:
- *                      pgd=p4d  ->    pud  ->      pmd   ->     pte
- *                   ------------------------------------------------
- * - normal case:    init_pg_dir -> bm_pud  ->   bm_pmd   ->  bm_pte
- * - 16K, 4lvl case: init_pg_dir -> 기존pud ->   bm_pmd   ->  bm_pte
- */
 /*
  * The p*d_populate functions call virt_to_phys implicitly so they can't be used
  * directly on kernel symbols (bm_p*d). This function is called too early to use
  * lm_alias so __p*d_populate functions must be used to populate with the
  * physical address from __pa_symbol.
+ */
+/* IAMROOT, 2023.11.18:
+ * - compile-time에 vaddr가 결정되는 공간이며 주로 dynamic mapping subsystem이
+ *   활성화되기 전 vaddr 매핑이 필요할 때 사용하는 공간을 fixmap이라 한다.
+ *   주로 early console 사용이나 runtime에 kernel code 변경, 페이지 테이블 갱신
+ *   용도로 사용된다.
+ *
+ *                      pgd=p4d  ->    pud  ->      pmd   ->     pte
+ *                   ------------------------------------------------
+ * - normal case:    init_pg_dir -> bm_pud  ->   bm_pmd   ->  bm_pte
+ * - 16K, 4lvl case: init_pg_dir -> 기존pud ->   bm_pmd   ->  bm_pte
  */
 void __init early_fixmap_init(void)
 {
@@ -1560,38 +1569,34 @@ void __init early_fixmap_init(void)
 	pgdp = pgd_offset_k(addr);
 	p4dp = p4d_offset(pgdp, addr);
 	p4d = READ_ONCE(*p4dp);
-/*
- * IAMROOT, 2021.10.02:
- * - CONFIG_PGTABLE_LEVELS이 4레벨 이상이고,
- *   p4d가 매핑이 되있고 p4d가 bm_pud와 주소가 같지 않다면 이
- *   if문에 진입한다.
- *   p4d가 할당이 안되있으면 무조건 할당을 하거나
- *   p4d가 할당이 되있어도 bm_pud와 p4d가 일치한다면 굳이 p4d를 다시 세팅
- *   할필요 없다는것이다.
- *   하지만 p4d가 할당도 안되잇고 bm_pud가 일치도 안한다면 p4d를 세팅한다.
+/* IAMROOT, 2023.11.18:
+ * - pgdp, p4dp는 init_pg_dir을 가리킨다.
+ *   (kernel은 아직 p4dp를 사용하지 않으므로 pgdp == p4dp 이다.
+ */
+
+	if (CONFIG_PGTABLE_LEVELS > 3 &&
+	    !(p4d_none(p4d) || p4d_page_paddr(p4d) == __pa_symbol(bm_pud))) {
+/* IAMROOT, 2023.11.18:
+ * - 1) CONFIG_PGTABLE_LEVELS >= 4 이고
+ *   2) p4d가 가리키는 pud entry가 이미 세팅되어 있는데,
+ *      pa(p4d) != pa(bm_pud)라면 진입한다.
  *
- * - 각 table별 bits.
- *   (계산은 ARM64_HW_PGTABLE_LEVEL_SHIFT, PTRS_PER_PGD 주석 참고)
- *
+ *   +-----+------------+----------+----------+----------+-------------+
  *   | k/u | PGDIR bits | PUD bits | PMD bits | PTE bits | offset bits |
  *   | 16  | 1          | 11       | 11       | 11       | 14          |
+ *   +-----+------------+----------+----------+----------+-------------+
  *
  * - fixmap의 특정 주소를 예로 했을때 산출되는 각 table별 masking 값.
  *   1 : ---
  *   111_1101_1111 : 0x7df
  *   111_1111_1111 : 0x7ff
  *   001_0111_1110 : 0x17e
- *   
- * - 16k / 4 level일 경우 pgd는 2개 entry밖에 존재 하지 않는다.
- *   (VA가 48bit이므로 PTRS_PER_PGD 계산법에서 2가 나오게 된다.)
  *
- * - p4d가 이미 kernel에 의해 mapping이 되있으므로 있는걸 사용하겠다는
- *   의미로 else에서 p4d를 pm_pud와 매핑하는것과는 다르게 이 if문에서는
- *   mapping을 하지 않는다. else 처럼 pudp만을 구한다.
- *   이때 image 가상주소로 사용한다.
+ * - 16k / 4 level일 경우 pgd는 2개 entry밖에 존재 하지 않는다.
+ *
+ * - p4d가 이미 kernel에 의해 mapping 되어 있으므로 있는걸 사용한다.
+ *   bm_pud를 매핑하지 않고 va(pud table)만 구한다.
  */
-	if (CONFIG_PGTABLE_LEVELS > 3 &&
-	    !(p4d_none(p4d) || p4d_page_paddr(p4d) == __pa_symbol(bm_pud))) {
 		/*
 		 * We only end up here if the kernel mapping and the fixmap
 		 * share the top level pgd entry, which should only happen on
@@ -1600,59 +1605,54 @@ void __init early_fixmap_init(void)
 		BUG_ON(!IS_ENABLED(CONFIG_ARM64_16K_PAGES));
 		pudp = pud_offset_kimg(p4dp, addr);
 	} else {
-/*
- * IAMROOT, 2021.10.02:
- * 일반적으로 이 else문으로 진입한다.
+/* IAMROOT, 2021.10.02:
+ * - 1) p4d가 가리키는 pud entry가 세팅되어 있지 않거나,
+ *   2) pa(p4d) == pa(bm_pud)라면 진입한다.
  *
- * p4d가 매핑이 안되있으면 bm_pud로 매핑을 한다.
- * 그리고 fixmap_pud를 통해 pud entry 주소를 구한다.
+ *   만약 p4d에 pud가 매핑되어 있지 않다면 p4d에 bm_pud를 매핑하고 fixmap_pud를
+ *   통해 va(pud table)을 구한다.
  *
- * - as c code
+ * - C 코드 해석
  *   if (p4d == 0)
  *      *p4dp = __pa(bm_pud);
  *   pudp = __va(*p4dp + pud_index(addr) * 8);
- *
- *   va(bm_pud[index])를 구해온다.
+ *   pudp == va(bm_pud table);
  */
 		if (p4d_none(p4d))
 			__p4d_populate(p4dp, __pa_symbol(bm_pud), P4D_TYPE_TABLE);
 		pudp = fixmap_pud(addr);
 	}
-/*
- * IAMROOT, 2021.10.02:
- * - pud가 매핑이 안되있다면 위 bm_pud처럼 bm_pmd도 매핑을 해준다.
+
+/* IAMROOT, 2021.10.02:
+ * - 만약 pud에 pmd가 매핑되어 있지 않다면 pud에 bm_pmd를 매핑하고 fixmap_pmd를
+ *   통해 va(pmd table)을 구한다.
  *
- * - as c code
+ * - C 코드 해석
  *   if (*pudp == 0)
  *      *pudp = __pa(bm_pmd);
- *
- *   위에서 구해온 va(bm_pud[index])에 bm_pmd의 물리주소를 매핑한다.
+ *   pmdp == va(bm_pmd table);
  */
 	if (pud_none(READ_ONCE(*pudp)))
 		__pud_populate(pudp, __pa_symbol(bm_pmd), PUD_TYPE_TABLE);
-/*
- * IAMROOT, 2021.10.02:
- * - pmd entry를 구해와서 무조건 bm_pte로 매핑을 해준다.
- *
- * - as c code
- *   pmdp = __va(*pudp + pmd_index(addr) * 8);
- *   *pmdp = __pa(bm_pte);
- *
- *   @addr를 이용해 pa(bm_pmd) -> va(bm_pmd[index])로 변환하고
- *   bm_pmd[index]에 pa(bm_pte)를 저장한다.
- *
- *   pte는 최종 4k entries 가리키므로 fixmap에서 사용할 table을
- *   더이상 매핑하지 않는다.
- */
 	pmdp = fixmap_pmd(addr);
-	__pmd_populate(pmdp, __pa_symbol(bm_pte), PMD_TYPE_TABLE);
 
 /*
- * IAMROOT, 2021.10.18:
- * - @normal_case에서는 다음과 같은 메모리 공간을 커버한다.
- *   pg_dir -> bm_pud (1 bucket) -> bm_pmd (1 bucket) -> bm_pte (512 buckets)
- *   512 * 4k = 2MB
+ * IAMROOT, 2021.10.02:
+ * - pmd table entry에 pa(bm_pte)를 매핑한다.
+ *   pte는 최종 4KB page entries 가리키므로 fixmap에서 사용할 table을 더이상
+ *   매핑하지 않는다.
+ *
+ * - C 코드 해석
+ *   *pmdp = __pa(bm_pte);
  */
+	__pmd_populate(pmdp, __pa_symbol(bm_pte), PMD_TYPE_TABLE);
+
+/* IAMROOT, 2021.10.18:
+ * - 일반적인 상황에서는 early fixmap이 다음과 같은 메모리 공간을 커버한다.
+ *   pgd (1 table) >> bm_pud (1 table) >> bm_pmd (1 table) >> bm_pte (512 pages)
+ *   == 512 * 4KB == 2MB
+ */
+
 	/*
 	 * The boot-ioremap range spans multiple pmds, for which
 	 * we are not prepared:
@@ -1660,11 +1660,9 @@ void __init early_fixmap_init(void)
 	BUILD_BUG_ON((__fix_to_virt(FIX_BTMAP_BEGIN) >> PMD_SHIFT)
 		     != (__fix_to_virt(FIX_BTMAP_END) >> PMD_SHIFT));
 
-/*
- * IAMROOT, 2021.10.09: 
- * - fixmap의 중간 부분인 FIXADDR_START 가상 주소로 페이지 테이블을 구성한다.
- *   그리고 이 공간이 early_ioremap() API에서 사용하는 BTMAP을 커버할 수 
- *   있는지 체크한다.
+/* IAMROOT, 2021.10.09:
+ * - bm_pmd table로 FIX_BTMAP_* 영역을 커버할 수 있는지 확인한다.
+ *   BTMAP 영역은 early_ioremap() 용도로 사용되며 부팅 후 unmapping 될 수 있다.
  */
 	if ((pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_BEGIN)))
 	     || pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_END))) {

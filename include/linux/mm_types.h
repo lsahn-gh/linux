@@ -363,9 +363,9 @@ static inline atomic_t *compound_pincount_ptr(struct page *page)
 	return &page[2].hpage_pinned_refcount;
 }
 
-/*
- * IAMROOT, 2021.09.04:
- * - struct page는 기본 64byte. 즉 6이 나옴
+/* IAMROOT, 2021.09.04:
+ * - sizeof(struct page) == 64byte.
+ *   결국 2 << 6을 의미함.
  */
 /*
  * Used for sizing the vmemmap region on some architectures

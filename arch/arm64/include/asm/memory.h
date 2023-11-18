@@ -30,109 +30,92 @@
  * keep a constant PAGE_OFFSET and "fallback" to using the higher end
  * of the VMEMMAP where 52-bit support is not available in hardware.
  */
-/*
- * IAMROOT, 2021.09.04:
- * page 구조체가 mapping 되는 공간. 전체 kernel의 가상주소공간이
- * mapping 됬을때의 필요한 공간이 몇인지를 계산.
+/* IAMROOT, 2021.09.04:
+ * - struct page가 mapping 되는 공간.
+ *   linear mapping 공간 전체를 커버할 수 있는 struct page를 생성한다고
+ *   가정할 때 얼만큼의 mem size가 필요한지 계산한다.
  *
- * - PAGE_END : 0xffff_8000_0000_0000
- * - PAGE_OFFSET : 0xffff_0000_0000_0000
- * - STRUCT_PAGE_MAX_SHIFT : 6(default 값. debug등의 값이 더 존재하면 7).
+ *   PAGE_END    : 0xffff_8000_0000_0000
+ *   PAGE_OFFSET : 0xffff_0000_0000_0000
+ *   STRUCT_PAGE_MAX_SHIFT : 6 (default 값. debug 등 extra 멤버가 필요하면 7).
  *
- * 0xffff_8000_0000_0000 - 0xffff_0000_0000_0000 = 0x8000_0000_0000
- *
- * 0x8000_0000_0000 >> (12 - 6) = 0x200_0000_0000 = VMEMMAP_SIZE
- *
- * 즉 VMEMMAP_SIZE = 2TB
+ *   0x8000_0000_0000 == 0xffff_8000_0000_0000 - 0xffff_0000_0000_0000
+ *   0x200_0000_0000  == 0x8000_0000_0000 >> (12 - 6)
+ *   VMEMMAP_SIZE     == 2TB
 */
 #define VMEMMAP_SHIFT	(PAGE_SHIFT - STRUCT_PAGE_MAX_SHIFT)
 #define VMEMMAP_SIZE	((_PAGE_END(VA_BITS_MIN) - PAGE_OFFSET) >> VMEMMAP_SHIFT)
 
 /* IAMROOT, 2021.08.21:
- *-------------------------------------------------------------------------
- *   Kernel 가상 주소 공간 Mapping (VA 48bit 기준)
- * ======+=======================+=======================+===================
- * all   | virtual address       | 해당 주소의           |
- * size  |                       | source상의            | size
- *       |                       | 정의                  |
- * ======+=======================+=======================+===================
- * 128TB | 0xffff_ffff_ffff_ffff |
- *       +-----------------------+-----------------------+-------------------
- *       |                        2TB - 1byte(0x1ff_ffff_ffff)
- *       +-----------------------+-----------------------+-------------------
- *       | 0xffff_fe00_0000_0000 | VMEMMAP_END           |
- *       +-----------------------+                       |
- *       |                       | VMEMMAP_SIZE          | 2TB
- *       +-----------------------+                       |
- *       | 0xffff_fc00_0000_0000 | VMEMMAP_START         |
- *       +-----------------------+-----------------------+-------------------
- *       |                        SZ_8M(0x80_0000)
- *       +-----------------------+-----------------------+------------------
- *       | 0xffff_fbff_ff80_0000 | PCI_IO_END            |
- *       +-----------------------+                       |
- *       |                       | PCI_IO_SIZE           | SZ_16M(0x100_0000)
- *       +-----------------------+                       |
- *       | 0xffff_fbff_fe80_0000 | PCI_IO_START          |
- *       +-----------------------+-----------------------+------------------
- *       |                        SZ_8M(0x80_0000)
- *       +-----------------------+-----------------------+------------------
- *       | 0xffff_fbff_fe00_0000 | FIXADDR_TOP           |
- *       +-----------------------+                       |
- *       |                       | FIXADDR_SIZE          | 4MB(0x40_000)~약6MB
- *       +-----------------------+                       | CONFIG에 따라달라짐
- *       | 0xffff_fbff_fdc0_0000 | FIXADDR_START         | fixed_addresses참고
- *       |         ~             |                       |
- *       | 0xffff_fbff_fda0_0000 |                       |
- *       +-----------------------+-----------------------+--------+---------
- *       |      ~~~~~            |                       |      vmlloc
- *       +-----------------------+-----------------------+--------+
- *       |                       | (vmlinux.lds.S참고)   |        |
- *       |                       | _end                  |        |
- *       |                       | (vmlinux.lds.S참고)   |        |
- *       |                       | RO_DATA               |        |
- *       |                       | _etext                |        |
- *       |                       | _stex의 text들        |        |
- *       |                       | _stext                |        |
- *       |-----------------------+                       | kernel |
- *       | 0xffff_8000_1000_0000 | HEAD_TEXT             | image  |
- *       |                       | _text                 |        |
- *       |                       | KIMAGE_VADDR          |        |
- *       |                       | runtime에 randomize가 |        |
- *       |                       | 들어갈수있다.         |        |
- *       |                       +-----------------------+--------+---------
- *       |                       | MODULES_END           |
- *       +-----------------------+                       |
- *       |                       | MODULES_VSIZE         | SZ_128M
- *       +-----------------------+                       | (0x800_0000)
- *       | 0xffff_8000_0800_0000 | MODULES_VADDR         |
- *       |                       +-----------------------+------------------
- *       |                       | BPF_JIT_REGION_END    |
- *       +-----------------------+                       |
- *       |                       | BPF_JIT_REGION_SIZE   | SZ_128M
- *-------+-----------------------+                       | (0x800_0000)
- * 128TB | 0xffff_8000_0000_0000 | BPF_JIT_REGION_START  |
- *       |                       | == _PAGE_END(VA_BITS_ |
- *       |                       |    MIN)               |
- *       |                       +-----------------------+
- *       |                       | 1) KASAN CONFIG OFF   |
- *       |                       | PAGE_END              |
- *       |                       | == _PAGE_END(VA_BITS_ |
- *       |                       |    MIN)               |
- *       |                       | 2) KASAN CONFIG ON    |
- *       |                       | KASAN_SHADOW_END가    |
- *       |                       | 생기고 PAGE_END가 뒤에|
-*        |                       | 위치                  |
- *       +-----------------------+
- *       |
- *       | ~~~~~~~~~~~~
- *       |
- *       +-----------------------+
- *       | 0xffff_0000_0000_0000 | PAGE_OFFSET           |
- *-------+-----------------------+-----------------------+-------------------
+ * - Kernel 가상 주소 공간 mapping table (VA_BITS == 48)
  *
- * - 5.10 -> 5.15 변경점
- *   1) PAGE_END 정의가 원래는 _PAGE_END(vabits_actual)이였지만
- *   KASAN CONFIG 관련에 따라 바뀜.
+ *         virtual address          | purpose / size
+ *       +--------------------------+---------------------------------------+
+ * 128TB | 0xffff_ffff_ffff_ffff                                            |
+ *       +------------------------------------------------------------------+
+ *       |                        2TB - 1 byte (0x1ff_ffff_ffff)            |
+ *       +------------------------------------------------------------------+
+ *       | 0xffff_fe00_0000_0000   <!- VMEMMAP_END                          |
+ *       |                                                                  |
+ *       |                             VMEMMAP_SIZE == 2TB                  |
+ *       |                                                                  |
+ *       | 0xffff_fc00_0000_0000   <!- VMEMMAP_START                        |
+ *       +------------------------------------------------------------------+
+ *       |                        SZ_8M (0x80_0000)                         |
+ *       +------------------------------------------------------------------+
+ *       | 0xffff_fbff_ff80_0000   <!- PCI_IO_END                           |
+ *       |                                                                  |
+ *       |                             PCI_IO_SIZE == SZ_16M(0x100_0000)    |
+ *       |                                                                  |
+ *       | 0xffff_fbff_fe80_0000   <!- PCI_IO_START                         |
+ *       +------------------------------------------------------------------+
+ *       |                        SZ_8M (0x80_0000)                         |
+ *       +------------------------------------------------------------------+
+ *       | 0xffff_fbff_fe00_0000   <!- FIXADDR_TOP                          |
+ *       |                                                                  |
+ *       |                             FIXADDR_SIZE == 4MB ~ aprox. 6MB     |
+ *       |                             CONFIG에 따라 다름.                  |
+ *       |                             fixed_addresses 참고                 |
+ *       |                                                                  |
+ *       | 0xffff_fbff_fdc0_0000   <!- FIXADDR_START                        |
+ *       |         ~                                                        |
+ *       | 0xffff_fbff_fda0_0000                                            |
+ *       +------------------------------------------------------------------+
+ *       |      ??? (vmalloc)                                               |
+ *       +------------------------------------------------------------------+
+ *       |                         <!- END of KIMAGE                        |
+ *       |                             _end, RO_DATA, _etext, _stext        |
+ *       |                             (vmlinux.lds.S참고)                  |
+ *       |                                                                  |
+ *       |                             KERNEL IMAGE                         |
+ *       |                                                                  |
+ *       | 0xffff_8000_1000_0000   <!- KIMAGE_VADDR                         |
+ *       |                             _text, HEAD_TEXT                     |
+ *       |                             runtime에 randomize 될 수 있음.      |
+ *       +------------------------------------------------------------------+
+ *       | 0xffff_8000_1000_0000   <!- MODULES_END                          |
+ *       |                                                                  |
+ *       |                             MODULES_VSIZE == SZ_128M (0x800_0000)|
+ *       |                                                                  |
+ *       | 0xffff_8000_0800_0000   <!- MODULES_VADDR                        |
+ *       +------------------------------------------------------------------+
+ *       | 0xffff_8000_0800_0000   <!- BPF_JIT_REGION_END                   |
+ *       |                                                                  |
+ *       |                             BPF_JIT_REGION_SIZE == SZ_128M       |
+ *       |                                                                  |
+ *       | 0xffff_8000_0000_0000   <!- BPF_JIT_REGION_START                 |
+ *       +------------------------------------------------------------------+
+ * 128TB | 0xffff_8000_0000_0000   <!- PAGE_END (VA_BITS_MIN)               |
+ *       |                                                                  |
+ *       |                             linear mapping region                |
+ *       |                             KASAN == off 가정                    |
+ *       |                                                                  |
+ *       | 0xffff_0000_0000_0000   <!- PAGE_OFFSET                          |
+ *       +------------------------------------------------------------------+
+ *
+ * - PAGE_OFFSET, PAGE_END: Kernel linear mapping의 시작과 끝을 의미한다.
+ *   PAGE_OFFSET: 0xffff_0000_0000_0000
+ *   PAGE_END   : 0xffff_8000_0000_0000
  *
  *   2) KASAN CONFIG가 없으면 KASAN_SHADOW_END define 자체가 없어짐.
  *   KASAN이 적용안됬는데 define은 남아있는게 맞지 않다고 생각한거같고
@@ -157,12 +140,6 @@
  */
 #define VA_BITS			(CONFIG_ARM64_VA_BITS)
 #define _PAGE_OFFSET(va)	(-(UL(1) << (va)))
-
-/* IAMROOT, 2021.09.04:
- * compile time에 정해지는 kernel 공간의 va start addr.
- *
- * - VA 48Bit 4kb page 일때 : 0xffff_0000_0000_0000
- */
 #define PAGE_OFFSET		(_PAGE_OFFSET(VA_BITS))
 #define KIMAGE_VADDR		(MODULES_END)
 #define BPF_JIT_REGION_START	(_PAGE_END(VA_BITS_MIN))
@@ -171,14 +148,10 @@
 #define MODULES_END		(MODULES_VADDR + MODULES_VSIZE)
 #define MODULES_VADDR		(BPF_JIT_REGION_END)
 #define MODULES_VSIZE		(SZ_128M)
-/*
- * IAMROOT, 2021.09.04:
- * ------ (old 5.10)
- *  (0 - 0x200_0000_0000 - 0x20_0000) = 0xffff_fdff_feff_ffff
- * ------
- *  -1 << (48 - 6) = 0xfffffc0000000000
- *  0xffff_ffff_ffff_ffff 부터 약 4TB (4TB - 1byte) offset이 된다.
- **/
+
+/* IAMROOT, 2021.09.04:
+ * - VMEMMAP의 start addr은 아래 offset들로 계산됨.
+ */
 #define VMEMMAP_START		(-(UL(1) << (VA_BITS - VMEMMAP_SHIFT)))
 #define VMEMMAP_END		(VMEMMAP_START + VMEMMAP_SIZE)
 #define PCI_IO_END		(VMEMMAP_START - SZ_8M)
@@ -194,42 +167,28 @@
 #define VA_BITS_MIN		(VA_BITS)
 #endif
 
-/*
- * IAMROOT, 2021.08.21:
- * 해당 bit의 마지막 주소를 page 크기(마지막 주소)를 계산한다.
- * va == 48인 경우 => -2^(48 - 1) => 0xffff_8000_0000_0000
+/* IAMROOT, 2021.08.21:
+ * - PAGE_END를 결정한다. PAGE_END는 linear mapping의 마지막을 의미한다.
  *
- * 2^47 = 0x8000_0000_0000
- * -(2^47) = -0x8000_0000_0000 = 0xffff_7fff_ffff_ffff + 1
- *  => 0xffff_8000_0000_0000 => 이 공간의 크기가 256TB
+ *   -(2 << 47)이 어떻게 0xffff_8000_0000_0000이 될까?
+ *   -(2 << 47) == -(0x8000_0000_0000)
+ *              == 0xffff_7fff_ffff_ffff + 1 (2의 보수 결과)
  */
 #define _PAGE_END(va)		(-(UL(1) << ((va) - 1)))
 
-/*
- * IAMROOT, 2021.07.10: arch/arm64/kernel/vmlinux.lds.S 파일에서 
-		        _text, _end 등이 정의되어 있다.
+/* IAMROOT, 2021.07.10:
+ * - _text, _end는 arch/arm64/kernel/vmlinux.lds.S 파일에 정의되어 있다.
  */
 #define KERNEL_START		_text
 #define KERNEL_END		_end
 
 /*
- * IAMROOT, 2021.08.21:
- * - KASAN은 안쓴다고 가정. runtime memory debugger.
- * 
- * - 5.10 -> 5.15 변경사항
- * KASAN_SHADOW_SCALE_SHIFT는 arm64 Makefile에서 정의 되는데
- * 기존엔 CONFIG_KASAN_SW_TAGS가 yes면 4, 아니면 3이였지만
- * 5.15에서는 다음과 같이 변경됨.
- * ifeq ($(CONFIG_KASAN_SW_TAGS), y)
- * KASAN_SHADOW_SCALE_SHIFT := 4
- * else ifeq ($(CONFIG_KASAN_GENERIC), y)
- * KASAN_SHADOW_SCALE_SHIFT := 3
- * endif
- */
-/*
  * Generic and tag-based KASAN require 1/8th and 1/16th of the kernel virtual
  * address space for the shadow region respectively. They can bloat the stack
  * significantly, so double the (minimum) stack size when they are in use.
+ */
+/* IAMROOT, 2023.11.16:
+ * - KASAN은 쓰지 않는다고 가정한다. (runtime memory debugger)
  */
 #if defined(CONFIG_KASAN_GENERIC) || defined(CONFIG_KASAN_SW_TAGS)
 #define KASAN_SHADOW_OFFSET	_AC(CONFIG_KASAN_SHADOW_OFFSET, UL)
@@ -242,9 +201,9 @@
 #define PAGE_END		(_PAGE_END(VA_BITS_MIN))
 #endif /* CONFIG_KASAN */
 
-/*
- * IAMROOT, 2021.09.04:
- * - 최소 16k (CONFIG_KASAN off), 최대 32k (CONFIG_KASAN on)
+/* IAMROOT, 2021.09.04:
+ * - 최소 16KB (CONFIG_KASAN off)
+ *   최대 32KB (CONFIG_KASAN on)
  */
 #define MIN_THREAD_SHIFT	(14 + KASAN_THREAD_SHIFT)
 
@@ -352,10 +311,9 @@
  *  Open-coded (swapper_pg_dir - reserved_pg_dir) as this cannot be calculated
  *  until link time.
  */
-/*
- * IAMROOT, 2022.11.10:
- * - vmlinux.lds.S를 참고하면 reserved_이 swapper_pg_dir에서 PAGE_SIZE만큼
- *   멀리있다.
+/* IAMROOT, 2022.11.10:
+ * - reserved_pg_dir는 swapper_pg_dir에서 PAGE_SIZE 만큼 떨어져있다.
+ *   (vmlinux.lds.S 파일 참고)
  */
 #define RESERVED_SWAPPER_OFFSET	(PAGE_SIZE)
 
@@ -363,10 +321,9 @@
  *  Open-coded (swapper_pg_dir - tramp_pg_dir) as this cannot be calculated
  *  until link time.
  */
-/*
- * IAMROOT, 2022.11.10:
- * - vmlinux.lds.S를 참고하면 tramp_pg_dir이 swapper_pg_dir에서 2 PAGE_SIZE만큼
- *   멀리있다.
+/* IAMROOT, 2022.11.10:
+ * - tramp_pg_dir은 swapper_pg_dir에서 2 * PAGE_SIZE 만큼 떨어져있다.
+ *   (vmlinux.lds.S 파일 참고)
  */
 #define TRAMP_SWAPPER_OFFSET	(2 * PAGE_SIZE)
 
@@ -395,9 +352,6 @@ static inline unsigned long kaslr_offset(void)
 	return kimage_vaddr - KIMAGE_VADDR;
 }
 
-/*
- * Allow all memory at the discovery stage. We will clip it later.
- */
 /*
  * IAMROOT, 2021.10.16:
  * - arm64는 일단은 memory min,max를 아래 define과 같이 적당히 잡고 나중에 초기화
@@ -478,36 +432,23 @@ static inline const void *__tag_set(const void *addr, u8 tag)
  * lives in the [PAGE_OFFSET, PAGE_END) interval at the bottom of the
  * kernel's TTBR1 address range.
  */
-/*
- * IAMROOT, 2021.10.02:
+/* IAMROOT, 2021.10.02:
+ * - __is_lm_address(addr):
+ *   @addr이 linear mapping 영역인지 확인한다. linear mapping 영역은
+ *   page table에 사용된다.
+ *
+ * - __lm_to_phys(addr):
+ *   va(@addr) 주소를 pa로 변환한다. 여기서 @addr는 linear mapping 영역이다.
+ *
+ * - __kimg_to_phys(addr):
+ *   va(@addr) 주소를 pa로 변환한다. 여기서 @addr는 kernel image 영역이다.
+ *
  * - __virt_to_phys_nodebug(x)
- *   x가 리니어매핑된 주소라면 리니어매핑 물리주소 변환을, 아니면
- *   kimg_to_phys 변환을 수행한다.
+ *   va(@x)가 linear mapping 영역이라면 __lm_to_phys을 호출하고
+ *            kernel image mapping 영역이라면 __kimg_to_phys을 호출한다.
  *
- * - __kimg_to_phys, __pa_symbol_nodebug
- *   image 가상주소를 물리주소로 변환한다. randomize offset을 빼는것만으로
- *   구해진다.
- *
- * ------(old 5.10)
- * - __is_lm_address : 리니어매핑 가상주소인 경우 true
- *   top bit(VA bit)만을 검사하여 set되있으면 kernel image 영역이라고 판단한다.
- *   VA 48bit의 경우 0xffff_80000_0000_0000 부터 kernel image가
- *   mapping이 되있고 그 아래는 linear mapping 이므로(page table)
- *   top bit만을 검사하는것으로 충분하다.
- *
- * - __lm_to_phys
- *   리니어매핑 가상주소를 물리주소로 변환한다.
- *   PAGE_OFFSET bits를 전부 clear시키고 PHYS_OFFSET을 더하는것으로
- *   물리주소가 구해진다.
- * ------
- * - __is_lm_address : PAGE_OFFSET을 뺀게 PAGE_END와 PAGE_OFFSET 사이에 있으면
- *   리니어매핑이 됬다고 판단한다.
- *
- * - __lm_to_phys
- *   리니어매핑 가상주소를 물리주소로 변환한다.
- *   리니어 매핑이므로 PAGE_OFFSET만큼 빼고 PHYS_OFFSET을 더하면 바로
- *   물리주소가 나오게 된다.
- *
+ * - __pa_symbol_nodebug(x)
+ *   symbol은 kernel image내에 있으므로 __kimg_to_phys 사용.
  */
 #define __is_lm_address(addr)	(((u64)(addr) - PAGE_OFFSET) < (PAGE_END - PAGE_OFFSET))
 
@@ -519,10 +460,6 @@ static inline const void *__tag_set(const void *addr, u8 tag)
 	__is_lm_address(__x) ? __lm_to_phys(__x) : __kimg_to_phys(__x);	\
 })
 
-/*
- * IAMROOT, 2021.10.12:
- * symbol은 kernel image내에 있는 주소중 하나이므로 __kimg_to_phys를 사용한다.
- */
 #define __pa_symbol_nodebug(x)	__kimg_to_phys((phys_addr_t)(x))
 
 #ifdef CONFIG_DEBUG_VIRTUAL
@@ -533,10 +470,12 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
 #define __phys_addr_symbol(x)	__pa_symbol_nodebug(x)
 #endif /* CONFIG_DEBUG_VIRTUAL */
 
-/*
- * IAMROOT, 2021.10.02:
- * - __phys_to_virt: 물리주소를 리니어매핑된 가상주소로 변환.
- * - __phys_to_kimg: 물리주소를 image로 매핑된 가상주소로 변환.
+/* IAMROOT, 2021.10.02:
+ * - __phys_to_virt(x):
+ *   pa(@x)를 linear mapping된 va로 변환.
+ *
+ * - __phys_to_kimg(x):
+ *   pa(@x)를 kernel image mapping된 va로 변환.
  */
 #define __phys_to_virt(x)	((unsigned long)((x) - PHYS_OFFSET) | PAGE_OFFSET)
 #define __phys_to_kimg(x)	((unsigned long)((x) + kimage_voffset))
@@ -567,23 +506,25 @@ static inline void *phys_to_virt(phys_addr_t x)
 /*
  * Drivers should NOT use these either.
  */
-/*
- * IAMROOT, 2021.10.02:
- * kernel은 리니어 매핑이 되있기 때문에 PHYS_OFFSET을 +- 하고 PAGE_OFFSET
- * 을 OR 해주는것만으로도 va <-> pa 변환이 가능하다.
+/* IAMROOT, 2021.10.02:
+ * - __pa(x): lm vaddr를 paddr로 변환.
+ *   (kernel memory 전용)
  *
- * - __pa
- *   lm(linear mapping) va를 pa로 변환. kernel memory 전용.
+ * - __va(x): paddr를 lm vaddr로 변환.
+ *   (kernel memory 전용)
  *
- * - __va
- *   pa를 lm va로 변환. kernel memory 전용.
+ *   (__pa / __va는 lm 셋업 이후에 사용 가능)
  *
- * - __pa_symbol
- *   symbol의 phys addr을 구함.
- *   __phys_addr_symbol -> __kimg_to_phys을 호출하므로 lm 이전에
- *   사용 가능.
+ * - __pa_symbol(x): pa(symbol)을 구한다.
+ *   __kimg_to_phys(..)을 호출하므로 lm 초기화 전에 사용 가능.
  *
- * - __pa / __va는 lm 설정이 완료된 후에 사용 가능.
+ * - __pa_nodebug(x): TODO
+ * - pfn_to_kaddr(pfn): TODO
+ * - virt_to_pfn(x): TODO
+ * - sym_to_pfn(x): TODO
+ *
+ * - kernel은 linear mapping 되어 있으므로 PHYS_OFFSET을 +/-하고 PAGE_OFFSET을
+ *   OR 해주는 것만으로도 vaddr와 paddr 사이에 변환이 가능하다.
  */
 #define __pa(x)			__virt_to_phys((unsigned long)(x))
 #define __pa_symbol(x)		__phys_addr_symbol(RELOC_HIDE((unsigned long)(x), 0))
@@ -607,10 +548,16 @@ static inline void *phys_to_virt(phys_addr_t x)
 })
 #define virt_to_page(x)		pfn_to_page(virt_to_pfn(x))
 #else
-/*
- * IAMROOT, 2022.03.05:
- * - kernel memory에 대해서만 사용가능하다.
- *   page가 가리키는 linear 가상주소를 return한다.
+/* IAMROOT, 2022.03.05:
+ * - page_to_virt(x):
+ *   struct page에 대응되는 lm vaddr를 반환한다.
+ *   @x - VMEMMAP_START 계산으로 VMEMMAP region의 index를 구할 수 있고
+ *   이를 통해 lm region에 존재하는 vaddr를 구할 수 있게 된다.
+ *
+ * - virt_to_page(x):
+ *   lm vaddr에 대응되는 struct page를 반환한다.
+ *   @x - PAGE_OFFSET 계산으로 lm region의 index를 구할 수 있고 이를 통해
+ *   VMEMMAP region에 존재하는 struct page를 참조할 수 있게 된다.
  */
 #define page_to_virt(x)	({						\
 	__typeof__(x) __page = x;					\

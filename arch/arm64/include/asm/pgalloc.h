@@ -49,8 +49,7 @@ static inline void __pud_populate(pud_t *pudp, phys_addr_t pmdp, pudval_t prot)
 
 #if CONFIG_PGTABLE_LEVELS > 3
 
-/*
- * IAMROOT, 2021.10.02:
+/* IAMROOT, 2021.10.02:
  * - p4d entry에 pudp 물리주소와 속성을 저장한다.
  */
 static inline void __p4d_populate(p4d_t *p4dp, phys_addr_t pudp, p4dval_t prot)

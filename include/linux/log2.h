@@ -255,8 +255,7 @@ int __order_base_2(unsigned long n)
 	return n > 1 ? ilog2(n - 1) + 1 : 0;
 }
 
-/*
- * IAMROOT, 2021.09.04:
+/* IAMROOT, 2021.09.04:
  * __builtin_constant_p : 상수라면 true. gcc 명령어
  *
  * - n == 64 일때

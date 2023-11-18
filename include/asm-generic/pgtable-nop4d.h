@@ -2,8 +2,7 @@
 #ifndef _PGTABLE_NOP4D_H
 #define _PGTABLE_NOP4D_H
 
-/*
- * IAMROOT, 2021.10.12:
+/* IAMROOT, 2021.10.12:
  * p4d를 사용안하므로 pgd를 그대로 사용한다.
  */
 #ifndef __ASSEMBLY__
@@ -28,8 +27,7 @@ static inline int pgd_present(pgd_t pgd)	{ return 1; }
 static inline void pgd_clear(pgd_t *pgd)	{ }
 #define p4d_ERROR(p4d)				(pgd_ERROR((p4d).pgd))
 
-/*
- * IAMROOT, 2021.12.18:
+/* IAMROOT, 2021.12.18:
  * - arm64에서는 pgd를 p4d로 사용하기때문에 딱히 아무것도 안한다.
  */
 #define pgd_populate(mm, pgd, p4d)		do { } while (0)
@@ -40,9 +38,8 @@ static inline void pgd_clear(pgd_t *pgd)	{ }
  */
 #define set_pgd(pgdptr, pgdval)	set_p4d((p4d_t *)(pgdptr), (p4d_t) { pgdval })
 
-/*
- * IAMROOT, 2021.10.12:
- * p4d를 사용안하므로 pgd를 그대로 사용한다.
+/* IAMROOT, 2021.10.12:
+ * - 현재 kernel은 p4d를 사용하지 않으므로 pgd를 그대로 반환한다.
  */
 static inline p4d_t *p4d_offset(pgd_t *pgd, unsigned long address)
 {
