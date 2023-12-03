@@ -135,9 +135,16 @@
 #define IDMAP_DIR_SIZE		(IDMAP_PGTABLE_LEVELS * PAGE_SIZE)
 
 /* Initial memory map size */
-/*
- * IAMROOT, 2021.10.14:
- * option에 따라 SWAPPER를 PAGE_SIZE(4k)로 쓸지, SECTION_SIZE(2MB)로 쓸지
+/* IAMROOT, 2021.10.14:
+ * - ARM64_KERNEL_USES_PMD_MAPS config에 따라 SWAPPER_* 값이 달라진다.
+ *
+ *   enable:  BLOCK_SHIFT -> PMD_SHIFT : 21
+ *            BLOCK_SIZE  -> PMD_SIZE  : 2MB
+ *            TABLE_SHIFT -> PUD_SHIFT : 30
+ *
+ *   disable: BLOCK_SHIFT -> PAGE_SHIFT: 12 (4KB 기준)
+ *            BLOCK_SIZE  -> PAGE_SIZE : 4KB
+ *            TABLE_SHIFT -> PMD_SHIFT : 21
  */
 #if ARM64_KERNEL_USES_PMD_MAPS
 #define SWAPPER_BLOCK_SHIFT	PMD_SHIFT

@@ -273,9 +273,9 @@
  * Level 3 descriptor (PTE).
  */
 /* IAMROOT, 2022.06.04:
- * - PTE_VALID
- *   hardware mapping이 되있는지 확인.
- *   cpu가 접근 가능하게 한다는뜻.
+ * - *_VALID : page descriptor의 valid 표시 bit.
+ *             1: valid, MMU가 사용.
+ *             0: invalid, MMU가 사용하지 않음.
  */
 #define PTE_VALID		(_AT(pteval_t, 1) << 0)
 #define PTE_TYPE_MASK		(_AT(pteval_t, 3) << 0)
@@ -302,9 +302,9 @@
  *
  *   예) PAGE_SHIFT == 12,
  *       1 << (48 - 12) == 1 << 36
- *       (1 << 36) - 1  == 0x10_0000_0000 - 1
- *                      == 0x0f_ffff_ffff
- *       0x0f_ffff_ffff << PAGE_SHIFT(12) == 0xf_fff_ffff_000
+ *       (1 << 36) - 1  == 0x0010_0000_0000 - 1
+ *                      == 0x000f_ffff_ffff
+ *       0x000f_ffff_ffff << PAGE_SHIFT(12) == 0xffff_ffff_f000
  *
  * - PTE_ADDR_HIGH
  *   0xf << 12 == 0xf000

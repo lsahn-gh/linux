@@ -839,25 +839,22 @@ static inline void arch_swap_restore(swp_entry_t entry, struct page *page)
  * or the end address of the range if that comes earlier.  Although no
  * vma end wraps to 0, rounded up __boundary may wrap to 0 throughout.
  */
-/*
- * IAMROOT, 2021.10.09: 
- * pgd_addr_end(addr, end):
- *     addr 주소가 PGDIR_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 512G 단위의 다음 주소를 반환한다.
- * 
- * p4d_addr_end(addr, end):
- *     ARM64의 경우 pgd 테이블을 그래도 이용하므로 위의 함수와 동일하다.
- * 
- * pud_addr_end(addr, end):
- *     addr 주소가 P4D_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 1G 단위의 다음 주소를 반환한다.
- * 
- * pmd_addr_end(addr, end):
- *     addr 주소가 PMD_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 2M 단위의 다음 주소를 반환한다.
+/* IAMROOT, 2021.10.09:
+ *   pgd_addr_end(addr, end):
+ * - p4d_addr_end(addr, end):
+ *   va(@addr)와 va(@end)를 조합하여 PGDIR_SIZE 단위의 다음 mapping vaddr를
+ *   반환하며 만약 (@addr + PGDIR_SIZE) > @end 라면(초과) @end를 반환한다.
+ *   예) 4KB, 4레벨인 경우 512G 단위로 다음 vaddr를 반환한다.
+ *
+ * - pud_addr_end(addr, end):
+ *   va(@addr)와 va(@end)를 조합하여 PUD_SIZE 단위의 다음 mapping vaddr를
+ *   반환하며 만약 (@addr + PUD_SIZE) > @end 라면(초과) @end를 반환한다.
+ *   예) 4KB, 4레벨인 경우 1G 단위로 다음 vaddr를 반환한다.
+ *
+ * - pmd_addr_end(addr, end):
+ *   va(@addr)와 va(@end)를 조합하여 PMD_SIZE 단위의 다음 mapping vaddr를
+ *   반환하며 만약 (@addr + PMD_SIZE) > @end 라면(초과) @end를 반환한다.
+ *   예) 4KB, 4레벨인 경우 2MB 단위로 다음 vaddr를 반환한다.
  */
 #define pgd_addr_end(addr, end)						\
 ({	unsigned long __boundary = ((addr) + PGDIR_SIZE) & PGDIR_MASK;	\

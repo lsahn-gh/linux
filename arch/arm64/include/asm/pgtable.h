@@ -101,25 +101,33 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define __phys_to_pte_val(phys)	(((phys) | ((phys) >> 36)) & PTE_ADDR_MASK)
 #else
 /* IAMROOT, 2021.10.02:
- * - @pte 주소를 물리주소로 변환한다.
- *   pte에는 원래 물리주소로 저장되어 있지만 VA_BITS가 52bit, 48bit 인지에
- *   따라 변환이 다르고 memory 속성값들도 전부 clear 해줘야 하므로 이러한
+ * - @pte 주소를 paddr로 변환하는데 PTE_ADDR size 만큼 align 하여 반환한다.
+ *
+ *   pte에는 원래 paddr가 저장되어 있지만 VA_BITS가 52bit, 48bit 인가에 따라
+ *   변환 방법이 다르고 memory 속성값들도 전부 clear 해줘야 하므로 이러한
  *   masking 작업을 수행한다.
  */
 #define __pte_to_phys(pte)	(pte_val(pte) & PTE_ADDR_MASK)
 #define __phys_to_pte_val(phys)	(phys)
 #endif
 
-/*
- * IAMROOT, 2021.10.09: a
- * pfn_pte(pfn, prot):
- *   pfn과 속성 prot를 결합하여 pte 디스크립터를 만들어 반환한다.
+/* IAMROOT, 2021.10.09:
+ * - pte_pfn(pte):
+ *   @pte offset을 입력받아 pfn을 반환한다.
+ *
+ * - pfn_pte(pfn, prot):
+ *   @pfn과 @prot(속성)를 결합하여 pte descriptor를 만들어 entry를 반환한다.
+ *
+ * - pte_none(pte):
+ *   @pte entry descriptor 값이 0이면 mmu가 ignore 한다.
+ *
+ * - pte_clear(mm,addr,ptep):
+ *   @ptep가 가리키는 pte descriptor 값을 0으로 설정하여 entry를 clear 한다.
+ *
+ * - pte_page(pte):
+ *   @pte를 struct page로 변환한다.
  */
 #define pte_pfn(pte)		(__pte_to_phys(pte) >> PAGE_SHIFT)
-/*
- * IAMROOT, 2023.04.01:
- * - @pfn에 대한 pte entry 값 return.
- */
 #define pfn_pte(pfn,prot)	\
 	__pte(__phys_to_pte_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
 
@@ -350,9 +358,8 @@ static inline pte_t pte_mkdevmap(pte_t pte)
 	return set_pte_bit(pte, __pgprot(PTE_DEVMAP | PTE_SPECIAL));
 }
 
-/*
- * IAMROOT, 2021.10.09: 
- * @ptep 주소에 @pte 값을 기록한다. (매핑/언매핑)
+/* IAMROOT, 2021.10.09:
+ * - @ptep 주소에 @pte 값을 기록한다. (mapping/unmapping)
  */
 static inline void set_pte(pte_t *ptep, pte_t pte)
 {
@@ -747,7 +754,7 @@ static inline void pmd_clear(pmd_t *pmdp)
 }
 
 /* IAMROOT, 2021.10.12:
- * - @pmd가 가리키는 주소의 pa를 구한다.
+ * - @pmd에 mapping된 page의 paddr를 구한다.
  */
 static inline phys_addr_t pmd_page_paddr(pmd_t pmd)
 {
@@ -755,7 +762,7 @@ static inline phys_addr_t pmd_page_paddr(pmd_t pmd)
 }
 
 /* IAMROOT, 2021.10.12:
- * - @pmd를 통해 va(pte) page table을 구한다.
+ * - @pmd를 통해 va(pte page table)을 구한다.
  */
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
 {
@@ -778,9 +785,8 @@ static inline unsigned long pmd_page_vaddr(pmd_t pmd)
  * Conversion functions: convert a page and protection to a page entry,
  * and a page entry and page directory to the page they refer to.
  */
-/*
- * IAMROOT, 2023.04.01:
- * - @page + @prot에 대한 pte entry return.
+/* IAMROOT, 2023.04.01:
+ * - @page를 pte로 변환하여 반환하는데 이때 @prot도 적용한다.
  */
 #define mk_pte(page,prot)	pfn_pte(page_to_pfn(page),prot)
 
@@ -818,7 +824,7 @@ static inline void pud_clear(pud_t *pudp)
 }
 
 /* IAMROOT, 2021.10.12:
- * - @pud가 가리키는 주소의 pa를 구한다.
+ * - @pud에 mapping된 page의 paddr를 구한다.
  */
 static inline phys_addr_t pud_page_paddr(pud_t pud)
 {
@@ -826,7 +832,7 @@ static inline phys_addr_t pud_page_paddr(pud_t pud)
 }
 
 /* IAMROOT, 2021.10.12:
- * - @pud를 통해 va(pmd) page table을 구한다.
+ * - @pud를 통해 va(pmd page table)을 구한다.
  */
 static inline pmd_t *pud_pgtable(pud_t pud)
 {
@@ -888,7 +894,7 @@ static inline void p4d_clear(p4d_t *p4dp)
 }
 
 /* IAMROOT, 2021.10.02:
- * - @p4d가 가리키는 주소의 pa를 구한다.
+ * - @p4d에 mapping된 page의 paddr를 구한다.
  */
 static inline phys_addr_t p4d_page_paddr(p4d_t p4d)
 {
@@ -896,7 +902,7 @@ static inline phys_addr_t p4d_page_paddr(p4d_t p4d)
 }
 
 /* IAMROOT, 2021.10.02:
- * - @p4d를 통해 va(pud) page table을 구한다.
+ * - @p4d를 통해 va(pud page table)을 구한다.
  */
 static inline pud_t *p4d_pgtable(p4d_t p4d)
 {
@@ -905,8 +911,8 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
 
 /* IAMROOT, 2021.10.09:
  * - pud_offset_phys(dir, addr):
- *   va(@addr)을 이용하여 pud entry index를 구하고 @dir(p4dp 또는 pgdp)와 더하여
- *   @dir table의 pa(pud table)를 구한다.
+ *   va(@addr)을 이용하여 pud entry index를 구하고 @dir(p4dp 또는 pgdp)와
+ *   더하여 @dir table의 pa(pud table)를 구한다.
  */
 /* Find an entry in the first-level page table. */
 #define pud_offset_phys(dir, addr)	(p4d_page_paddr(READ_ONCE(*(dir))) + pud_index(addr) * sizeof(pud_t))
@@ -916,8 +922,7 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
  *   pud table의 pa(@addr)를 fixmap FIX_PUD region에 매핑한다.
  *
  * - pud_set_fixmap_offset(p4d, addr):
- *   p4d table addr인 @p4d와 va(@addr)을 사용하여 pud table을 찾고 FIX_PUD에
- *   매핑한다.
+ *   p4d table addr인 @p4d와 va(@addr)을 사용하여 pud table을 찾는다.
  */
 #define pud_set_fixmap(addr)		((pud_t *)set_fixmap_offset(FIX_PUD, addr))
 #define pud_set_fixmap_offset(p4d, addr)	pud_set_fixmap(pud_offset_phys(p4d, addr))

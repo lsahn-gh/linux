@@ -15,9 +15,14 @@ typedef struct {
 } pfn_t;
 #endif
 
-/*
- * IAMROOT, 2021.11.06:
- * - PFN(Page Frame Number)
+/* IAMROOT, 2021.11.06:
+ * - PFN: Page Frame Number
+ *   pfn은 phys page를 의미하므로 page size로 align 되어 있어야 한다.
+ *   따라서 pte >> PAGE_SHIFT를 통해 간단하게 계산할 수 있다.
+ *   A physical page of memory is identified by the Page Frame Number (PFN).
+ *   The PFN can be easily computed from the physical address by dividing it
+ *   with the size of the page (or by shifting the physical address with
+ *   PAGE_SHIFT bits to the right).
  */
 #define PFN_ALIGN(x)	(((unsigned long)(x) + (PAGE_SIZE - 1)) & PAGE_MASK)
 #define PFN_UP(x)	(((x) + PAGE_SIZE-1) >> PAGE_SHIFT)
