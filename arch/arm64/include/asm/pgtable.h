@@ -518,14 +518,20 @@ static inline pmd_t pte_pmd(pte_t pte)
 	return __pmd(pte_val(pte));
 }
 
+/* IAMROOT, 2023.12.05:
+ * - @prot에서 PUD_TABLE_BIT를 제거하고 PUD_TYPE_SECT bit 추가.
+ *   PUD entry가 section으로 사용되면 1G 크기를 가진다.
+ *   (VA_BITS == 48, PAGE_SIZE == 4KB)
+ */
 static inline pgprot_t mk_pud_sect_prot(pgprot_t prot)
 {
 	return __pgprot((pgprot_val(prot) & ~PUD_TABLE_BIT) | PUD_TYPE_SECT);
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - prot에 PMD_TABLE_BIT를 제거하고 PMD_TYPE_SECT를 추가한다.
+/* IAMROOT, 2021.12.18:
+ * - @prot에서 PMD_TABLE_BIT를 제거하고 PMD_TYPE_SECT bit 추가.
+ *   PMD entry가 section으로 사용되면 2MB 크기를 가진다.
+ *   (VA_BITS == 48, PAGE_SIZE == 4KB)
  */
 static inline pgprot_t mk_pmd_sect_prot(pgprot_t prot)
 {
@@ -603,20 +609,15 @@ static inline pmd_t pmd_mkdevmap(pmd_t pmd)
 }
 
 /* IAMROOT, 2021.10.12:
- * - __pmd_to_phys(p4d)     : @pmd 주소를 pa로 변환한다.
- *   __phys_to_pmd_val(phys): @phys 주소를 va로 변환한다.
+ * - __pmd_to_phys(p4d)     : @pmd를 pa로 변환한다.
+ *   __phys_to_pmd_val(phys): @phys를 va로 변환한다.
+ *   pmd_pfn(pmd)           : @pmd를 pfn으로 변환한다.
+ *   pfn_pmd(pfn,prot)      : @pfn을 pmd로 변환한다.
+ *   mk_pmd(page,prot)      : @page를 pmd로 변환한다.
  */
 #define __pmd_to_phys(pmd)	__pte_to_phys(pmd_pte(pmd))
 #define __phys_to_pmd_val(phys)	__phys_to_pte_val(phys)
 #define pmd_pfn(pmd)		((__pmd_to_phys(pmd) & PMD_MASK) >> PAGE_SHIFT)
-/*
- * IAMROOT, 2021.12.18:
- * - 해당 pfn을 pmd entry로 쓰기 위한 작업.
- *   해당 pfn의 물리주소와 prot로 값을만든다.
- * - ex) pfn = 0x12345, prot = PROT_SECT_NORMAL | PMD_TYPE_SECT
- *   address = 0x1234_5000 
- *   pmd = __pmd(0x1234_5000 | prot) = 0x1234_5000 | prot
- */
 #define pfn_pmd(pfn,prot)	__pmd(__phys_to_pmd_val((phys_addr_t)(pfn) << PAGE_SHIFT) | pgprot_val(prot))
 #define mk_pmd(page,prot)	pfn_pmd(page_to_pfn(page),prot)
 
@@ -627,8 +628,10 @@ static inline pmd_t pmd_mkdevmap(pmd_t pmd)
 #define pud_mkhuge(pud)		(__pud(pud_val(pud) & ~PUD_TABLE_BIT))
 
 /* IAMROOT, 2021.10.12:
- * - __pud_to_phys(p4d)     : @pud 주소를 pa로 변환한다.
- *   __phys_to_pud_val(phys): @phys 주소를 va로 변환한다.
+ * - __pud_to_phys(pud)     : @pud를 pa로 변환한다.
+ *   __phys_to_pud_val(phys): @phys를 pud로 변환한다.
+ *   pud_pfn(pud)           : @pud를 pfn으로 변환한다.
+ *   pfn_pud(pfn,prot)      : @pfn를 pud로 변환한다.
  */
 #define __pud_to_phys(pud)	__pte_to_phys(pud_pte(pud))
 #define __phys_to_pud_val(phys)	__phys_to_pte_val(phys)
@@ -920,6 +923,7 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
 /* IAMROOT, 2023.11.18:
  * - pud_set_fixmap(addr):
  *   pud table의 pa(@addr)를 fixmap FIX_PUD region에 매핑한다.
+ *   FIX_PUD fixmap은 bm_pte를 이용해서 임시 매핑한다.
  *
  * - pud_set_fixmap_offset(p4d, addr):
  *   p4d table addr인 @p4d와 va(@addr)을 사용하여 pud table을 찾는다.

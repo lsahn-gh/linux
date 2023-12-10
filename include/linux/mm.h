@@ -258,13 +258,19 @@ int __add_to_page_cache_locked(struct page *page, struct address_space *mapping,
 #define nth_page(page,n) ((page) + (n))
 #endif
 
-/* to align the pointer to the (next) page boundary */
-/*
- * IAMROOT, 2021.10.09: 
- * 페이지 단위로 round up한 주소를 반환한다.
- * 예) 0x1234 -> 0x2000
- *     0x1000 -> 0x1000
+/* IAMROOT, 2021.10.09:
+ * - PAGE_ALIGN(addr):
+ *   @addr 값을 PAGE 단위로 round up 하여 정렬한다.
+ *   - 예제1:
+ *     @x: 0x1234 / @a: 0x1000 (4KB)
+ *     = 0x2233 = (0x1234 + 0xfff)
+ *     = 0x2233 & (0xffff_ffff_ffff_f000)
+ *     = 0x2000
+ *   - 예제2:
+ *     @x: 0x1000 / @a: 0x1000 (4KB)
+ *     = 0x1000
  */
+/* to align the pointer to the (next) page boundary */
 #define PAGE_ALIGN(addr) ALIGN(addr, PAGE_SIZE)
 
 /* test whether an address (unsigned long or pointer) is aligned to PAGE_SIZE */

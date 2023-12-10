@@ -307,11 +307,10 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 	pmd_clear_fixmap();
 }
 
-/*
- * IAMROOT, 2021.10.09: 
- * cont pmd 매핑을 한다. (4K 기준 2M * 16 = 32M)
- *   pmd 단위가 16개 연속 가능한 경우 이렇게 처리하고, 
- *   그렇지 않은 경우 single pmd 매핑을 한다.
+/* IAMROOT, 2021.10.09:
+ * - cont pmd 매핑을 한다. (4K 기준 2M * 16 = 32M)
+ *   pmd entry를 16개 연속 mapping 가능한 경우 32M block mapping을 시도하고
+ *   그렇지 않은 경우 single pmd entry mapping을 한다.
  */
 static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 				unsigned long end, phys_addr_t phys,
@@ -324,13 +323,12 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	/*
 	 * Check for initial section mappings in the pgd/pud.
 	 */
-/*
- * IAMROOT, 2021.10.09: 
- * - 전 단계의 pud 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
- *   이러한 경우 새로운 pmd 테이블을 할당한다. 
- */
 	BUG_ON(pud_sect(pud));
 	if (pud_none(pud)) {
+/* IAMROOT, 2021.10.09:
+ * - pud entry 값이 none인 경우 @pgtable_alloc 함수를 통해 dynamic alloc을
+ *   수행하여 pmd를 mapping 한다.
+ */
 		pudval_t pudval = PUD_TYPE_TABLE | PUD_TABLE_UXN;
 		phys_addr_t pmd_phys;
 
@@ -380,8 +378,8 @@ static inline bool use_1G_block(unsigned long addr, unsigned long next,
 		return false;
 
 /* IAMROOT, 2021.10.09:
- * - PUD_MASK가 커버하는 bits 범위 중에 하나라도 1로 세팅되어 있으면 PUD 크기로
- *   정렬되어 있는게 아니므로 false 반환.
+ * - PUD_MASK가 커버하는 bits 범위 중에 하나라도 1로 세팅되어 있으면
+ *   PUD 크기로 정렬되어 있는게 아니므로 false 반환.
  */
 	if (((addr | next | phys) & ~PUD_MASK) != 0)
 		return false;
@@ -399,11 +397,11 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 	p4d_t *p4dp = p4d_offset(pgdp, addr);
 	p4d_t p4d = READ_ONCE(*p4dp);
 
-/* IAMROOT, 2021.10.09:
- * - p4d == none 이면 mapping 되지 않았으므로 alloc하고 populate를 수행해서
- *   새 pud table를 할당한다.
- */
 	if (p4d_none(p4d)) {
+/* IAMROOT, 2021.10.09:
+ * - p4d == none 라면 mapping 되지 않았으므로 memory를 alloc하고
+ *   populate를 수행하여 새 pud table를 할당한다.
+ */
 		p4dval_t p4dval = P4D_TYPE_TABLE | P4D_TABLE_UXN;
 		phys_addr_t pud_phys;
 
@@ -412,13 +410,13 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 
 /* IAMROOT, 2023.11.24:
  * - @pgtable_alloc 값은 다음과 같다.
- *   1. NULL:
+ *   1. NULL: -> fixmap_remap_fdt()
  *      할당할 수 없는 상황에서 사용한다.
- *      callstack: fixmap_remap_fdt() -> create_mapping_noalloc()
+ *      정규 메모리 할당자, memblock도 사용할 수 없으므로 fixmap을 통해
+ *      static allocated region에서 mapping을 수행한다.
  *
- *   2. early_pgtable_alloc():
- *      정규 메모리 할당자는 사용할 수 없지만 memblock 사용은 가능할 때.
- *      callstack: map_kernel_segment()
+ *   2. early_pgtable_alloc(): -> map_kernel_segment()
+ *      정규 메모리 할당자는 사용할 수 없지만 memblock은 사용 가능할 때.
  *
  *   3. pgd_pgtable_alloc():
  *   4. __pgd_pgtable_alloc():
@@ -430,6 +428,10 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 	}
 	BUG_ON(p4d_bad(p4d));
 
+/* IAMROOT, 2023.12.04:
+ * - @p4dp와 @addr를 이용하여 pgd entry에 pud table을 mapping 한다.
+ *   이때 entry의 attr은 page table을 명시하는 값으로 셋업된다.
+ */
 	pudp = pud_set_fixmap_offset(p4dp, addr);
 	do {
 		pud_t old_pud = READ_ONCE(*pudp);
@@ -440,7 +442,12 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 		 * For 4K granule only, attempt to put down a 1GB block
 		 */
 		if (use_1G_block(addr, next, phys) &&
-		    (flags & NO_BLOCK_MAPPINGS) == 0) {
+		    (flags & NO_BLOCK_MAPPINGS) == 0)
+		{
+/* IAMROOT, 2023.12.07:
+ * - PAGE_SIZE == 4KB && ALIGN(@addr && @next && @phys, PUD_SIZE) 이고
+ *   BLOCK_MAPPING이 허용일 때 1G block mapping을 시도한다.
+ */
 			pud_set_huge(pudp, phys, prot);
 
 			/*
@@ -450,6 +457,9 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 			BUG_ON(!pgattr_change_is_safe(pud_val(old_pud),
 						      READ_ONCE(pud_val(*pudp))));
 		} else {
+/* IAMROOT, 2023.12.10:
+ * - 4KB page 들을 contiguous 하게 이어 붙여서 block mapping을 시도한다.
+ */
 			alloc_init_cont_pmd(pudp, addr, next, phys, prot,
 					    pgtable_alloc, flags);
 
@@ -1689,6 +1699,12 @@ void __set_fixmap(enum fixed_addresses idx,
 
 	BUG_ON(idx <= FIX_HOLE || idx >= __end_of_fixed_addresses);
 
+/* IAMROOT, 2023.12.09:
+ * - bm_pte[..] table만 사용하고 있는데 @idx를 통해서 @addr를 구하므로
+ *   FIX_PUD, PMD, PTE에 따라 PAGE 크기만큼 정렬되어 있어 @idx만 같지 않으면
+ *   동일한 elem을 중복 사용하지 않으므로 bm_pte 하나로 3 level table을
+ *   커버할 수 있게 된다.
+ */
 	ptep = fixmap_pte(addr);
 
 	if (pgprot_val(flags)) {
@@ -1772,6 +1788,9 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 
 int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
 {
+/* IAMROOT, 2023.12.05:
+ * - 1G 크기의 block을 매핑할 수 있는 PUD entry를 가져온다.
+ */
 	pud_t new_pud = pfn_pud(__phys_to_pfn(phys), mk_pud_sect_prot(prot));
 
 	/* Only allow permission changes for now */

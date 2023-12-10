@@ -189,9 +189,8 @@ static __init void __parse_cmdline(const char *cmdline, bool parse_aliases)
 	} while (1);
 }
 
-/*
- * IAMROOT, 2022.02.07:
- * - dt에서 bootargs를 읽어온다.
+/* IAMROOT, 2022.02.07:
+ * - device tree에서 bootargs 값을 가져온다.
  */
 static __init const u8 *get_bootargs_cmdline(void)
 {
@@ -214,10 +213,12 @@ static __init const u8 *get_bootargs_cmdline(void)
 	return strlen(prop) ? prop : NULL;
 }
 
-/*
- * IAMROOT, 2022.02.07:
- * - CONFIG_CMDLINE_FORCE, dt bootargs 둘중하나만 정의됬을때에만
- *   정의된것을 사용한다.
+/* IAMROOT, 2022.02.07:
+ * - config과 prop의 값에 따라 아래와 같이 수행된다.
+ *   1). CONFIG_CMDLINE_FORCE == enable && prop == NULL
+ *       -> CONFIG_CMDLINE_FORCE
+ *   2). CONFIG_CMDLINE_FORCE == disable && prop != NULL
+ *       -> device-tree bootargs
  */
 static __init void parse_cmdline(void)
 {

@@ -4,12 +4,17 @@
 
 #include <linux/const.h>
 
-/*
- * IAMROOT, 2021.10.09: 
+/* IAMROOT, 2021.10.09:
  * - ALIGN(x, a)
- *   x 값을 a 정렬 단위로 round up 한다. (a 값은 2의 승수값만 사용가능하다)
- *   예) 0x1234 -> 0x2000
- *       0x1000 -> 0x1000
+ *   @x 값을 round up 하여 @a 단위로 정렬한다.
+ *   - 예제1:
+ *     @x: 0x1234 / @a: 0x1000 (4KB)
+ *     = 0x2233 = (0x1234 + 0xfff)
+ *     = 0x2233 & (0xffff_ffff_ffff_f000)
+ *     = 0x2000
+ *   - 예제2:
+ *     @x: 0x1000 / @a: 0x1000 (4KB)
+ *     = 0x1000
  */
 /* @a is a power of 2 value */
 #define ALIGN(x, a)		__ALIGN_KERNEL((x), (a))
