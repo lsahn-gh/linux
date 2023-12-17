@@ -20,18 +20,18 @@
 
 #if CONFIG_PGTABLE_LEVELS > 2
 
-/*
- * IAMROOT, 2021.10.13:
- * - pud entry에 pmdp 물리주소와 속성을 저장한다.
+/* IAMROOT, 2021.10.13:
+ * - va(@pudp) entry에 pa(@pmdp)을 저장하고 @prot attr을 세팅한다.
  */
 static inline void __pud_populate(pud_t *pudp, phys_addr_t pmdp, pudval_t prot)
 {
 	set_pud(pudp, __pud(__phys_to_pud_val(pmdp) | prot));
 }
 
-/*
- * IAMROOT, 2023.02.24:
- * - pudp entry에 pmdp 물리주소와 속성을 저장한다.
+/* IAMROOT, 2023.02.24:
+ * - va(@pudp) entry에 pa(@pmdp)을 저장한다.
+ *   @mm == &init_mm 이면 el1 이므로 *_UXN flag를 설정하고
+ *                 아니면 el0 이므로 *_PXN flag를 설정한다.
  */
 static inline void pud_populate(struct mm_struct *mm, pud_t *pudp, pmd_t *pmdp)
 {
@@ -50,16 +50,17 @@ static inline void __pud_populate(pud_t *pudp, phys_addr_t pmdp, pudval_t prot)
 #if CONFIG_PGTABLE_LEVELS > 3
 
 /* IAMROOT, 2021.10.02:
- * - p4d entry에 pudp 물리주소와 속성을 저장한다.
+ * - va(@p4dp) entry에 pa(@pudp)을 저장하고 @prot attr을 세팅한다.
  */
 static inline void __p4d_populate(p4d_t *p4dp, phys_addr_t pudp, p4dval_t prot)
 {
 	set_p4d(p4dp, __p4d(__phys_to_p4d_val(pudp) | prot));
 }
 
-/*
- * IAMROOT, 2023.02.24:
- * - p4dp entry에 pudp 물리주소와 속성을 저장한다.
+/* IAMROOT, 2023.02.24:
+ * - va(@p4dp) entry에 pa(@pudp)을 저장한다.
+ *   @mm == &init_mm 이면 el1 이므로 *_UXN flag를 설정하고
+ *                 아니면 el0 이므로 *_PXN flag를 설정한다.
  */
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4dp, pud_t *pudp)
 {
@@ -78,9 +79,8 @@ static inline void __p4d_populate(p4d_t *p4dp, phys_addr_t pudp, p4dval_t prot)
 extern pgd_t *pgd_alloc(struct mm_struct *mm);
 extern void pgd_free(struct mm_struct *mm, pgd_t *pgdp);
 
-/*
- * IAMROOT, 2021.10.13:
- * - pmd entry에 ptep 물리주소와 속성을 저장한다.
+/* IAMROOT, 2021.10.13:
+ * - va(@pmdp) entry에 pa(@ptep)을 저장하고 @prot attr을 세팅한다.
  */
 static inline void __pmd_populate(pmd_t *pmdp, phys_addr_t ptep,
 				  pmdval_t prot)
@@ -92,6 +92,10 @@ static inline void __pmd_populate(pmd_t *pmdp, phys_addr_t ptep,
  * Populate the pmdp entry with a pointer to the pte.  This pmd is part
  * of the mm address space.
  */
+/* IAMROOT, 2023.12.17:
+ * - va(@pmdp) entry에 pa(@ptep)을 저장한다.
+ *   el1 영역이므로 *_UXN flag를 추가로 설정한다.
+ */
 static inline void
 pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep)
 {
@@ -99,9 +103,9 @@ pmd_populate_kernel(struct mm_struct *mm, pmd_t *pmdp, pte_t *ptep)
 	__pmd_populate(pmdp, __pa(ptep), PMD_TYPE_TABLE | PMD_TABLE_UXN);
 }
 
-/*
- * IAMROOT, 2023.04.01:
- * - pmd에 pte를 populate한다.
+/* IAMROOT, 2023.04.01:
+ * - va(@pmdp) entry에 pa(@ptep)을 저장한다.
+ *   el0 영역이므로 *_PXN flag를 추가로 설정한다.
  */
 static inline void
 pmd_populate(struct mm_struct *mm, pmd_t *pmdp, pgtable_t ptep)

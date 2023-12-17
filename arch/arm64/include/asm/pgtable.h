@@ -154,17 +154,16 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 #define pte_tagged(pte)		((pte_val(pte) & PTE_ATTRINDX_MASK) == \
 				 PTE_ATTRINDX(MT_NORMAL_TAGGED))
 
-/*
- * IAMROOT, 2021.10.09: 
- * pte_cont_addr_end(addr, end):
- *     addr 주소가 CONT_PTE_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 4K * 16 = 64K 단위의 다음 주소를 반환한다.
- * 
- * pmd_cont_addr_end(addr, end):
- *     addr 주소가 CONT_PMD_SIZE 단위의 다음 주소를 반환한다. (매핑할 다음 주소)
- *     단 end를 초과하는 경우 end 값을 반환한다.
- *     예) 4K, 4레벨의 경우 2M * 16 = 32M 단위의 다음 주소를 반환한다.
+/* IAMROOT, 2021.10.09:
+ * - pte_cont_addr_end(addr, end):
+ *   va(@addr)와 va(@end)를 조합하여 CONT_PTE_SIZE 단위의 다음 mapping vaddr를
+ *   반환하며 만약 (@addr + CONT_PTE_SIZE) > @end 라면(초과) @end를 반환한다.
+ *   예) 4KB, 4레벨인 경우 4KB * 16 == 64KB 단위로 다음 vaddr를 반환한다.
+ *
+ * - pmd_cont_addr_end(addr, end):
+ *   va(@addr)와 va(@end)를 조합하여 CONT_PMD_SIZE 단위의 다음 mapping vaddr를
+ *   반환하며 만약 (@addr + CONT_PMD_SIZE) > @end 라면(초과) @end를 반환한다.
+ *   예) 4KB, 4레벨인 경우 2MB * 16 == 32MB 단위로 다음 vaddr를 반환한다.
  */
 #define pte_cont_addr_end(addr, end)						\
 ({	unsigned long __boundary = ((addr) + CONT_PTE_SIZE) & CONT_PTE_MASK;	\
@@ -842,15 +841,33 @@ static inline pmd_t *pud_pgtable(pud_t pud)
 	return (pmd_t *)__va(pud_page_paddr(pud));
 }
 
+/* IAMROOT, 2021.10.09:
+ * - pmd_offset_phys(dir, addr):
+ *   va(@addr)을 이용하여 pmd entry index를 구하고 @dir(pudp)와
+ *   더하여 @dir table의 pa(pmd table)를 구한다.
+ */
 /* Find an entry in the second-level page table. */
 #define pmd_offset_phys(dir, addr)	(pud_page_paddr(READ_ONCE(*(dir))) + pmd_index(addr) * sizeof(pmd_t))
 
+/* IAMROOT, 2023.11.18:
+ * - pmd_set_fixmap(addr):
+ *   pmd table의 pa(@addr)를 fixmap FIX_PMD region에 매핑한다.
+ *   FIX_PMD fixmap은 bm_pte를 이용해서 임시 매핑한다.
+ *
+ * - pmd_set_fixmap_offset(p4d, addr):
+ *   p4d table addr인 @p4d와 va(@addr)을 사용하여 pud table을 찾는다.
+ */
 #define pmd_set_fixmap(addr)		((pmd_t *)set_fixmap_offset(FIX_PMD, addr))
 #define pmd_set_fixmap_offset(pud, addr)	pmd_set_fixmap(pmd_offset_phys(pud, addr))
 #define pmd_clear_fixmap()		clear_fixmap(FIX_PMD)
 
 #define pud_page(pud)			phys_to_page(__pud_to_phys(pud))
 
+/* IAMROOT, 2021.10.02:
+ * - pmd_offset_kimg(dir,addr):
+ *   pmd_offset_phys(..)을 통해 구한 @dir table (+ offset)의 pa(pmd table)을
+ *   vaddr로 변환한다.
+ */
 /* use ONLY for statically allocated translation tables */
 #define pmd_offset_kimg(dir,addr)	((pmd_t *)__phys_to_kimg(pmd_offset_phys((dir), (addr))))
 

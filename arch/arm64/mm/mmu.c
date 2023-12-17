@@ -220,12 +220,12 @@ static void alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
 	unsigned long next;
 	pmd_t pmd = READ_ONCE(*pmdp);
 
-/*
- * IAMROOT, 2021.10.09: 
- * - 전 단계의 pmd 엔트리 값이 없으면 매핑이 되어 있지 않은 경우이다.
- *   이러한 경우 새로운 pte 테이블을 할당한다. 
- */
 	BUG_ON(pmd_sect(pmd));
+
+/* IAMROOT, 2023.12.17:
+ * - @pmd가 mapping 되지 않은 경우를 대비한 코드이며
+ *   @pgtable_alloc 함수를 통해 pmd table page를 alloc 한다.
+ */
 	if (pmd_none(pmd)) {
 		pmdval_t pmdval = PMD_TYPE_TABLE | PMD_TABLE_UXN;
 		phys_addr_t pte_phys;
@@ -267,10 +267,9 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 	unsigned long next;
 	pmd_t *pmdp;
 
-/*
- * IAMROOT, 2021.10.09: 
- * pmd 테이블에 매핑하는 동안 FIX_PMD에 pmd 테이블을 매핑한다.
- *   (pmd 테이블의 물리주소는 pudp와 addr로 알아온다)
+/* IAMROOT, 2023.12.04:
+ * - @pudp와 @addr를 이용하여 pud entry에 pmd table을 mapping 한다.
+ *   이때 entry의 attr은 page table을 명시하는 값으로 셋업된다.
  */
 	pmdp = pmd_set_fixmap_offset(pudp, addr);
 	do {
@@ -308,9 +307,11 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 }
 
 /* IAMROOT, 2021.10.09:
- * - cont pmd 매핑을 한다. (4K 기준 2M * 16 = 32M)
- *   pmd entry를 16개 연속 mapping 가능한 경우 32M block mapping을 시도하고
+ * - PMD table을 매핑을 한다.
+ *   pmd entry를 16개 연속 mapping 가능한 경우 32MB block mapping을 시도하고
  *   그렇지 않은 경우 single pmd entry mapping을 한다.
+ *
+ *   block mapping: PAGE_SIZE == 4KB, 4 LVL 기준 2MB * 16 == 32M
  */
 static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 				unsigned long end, phys_addr_t phys,
@@ -324,11 +325,12 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	 * Check for initial section mappings in the pgd/pud.
 	 */
 	BUG_ON(pud_sect(pud));
-	if (pud_none(pud)) {
-/* IAMROOT, 2021.10.09:
- * - pud entry 값이 none인 경우 @pgtable_alloc 함수를 통해 dynamic alloc을
- *   수행하여 pmd를 mapping 한다.
+
+/* IAMROOT, 2023.12.17:
+ * - @pud가 mapping 되지 않은 경우를 대비한 코드이며
+ *   @pgtable_alloc 함수를 통해 pud table page를 alloc 한다.
  */
+	if (pud_none(pud)) {
 		pudval_t pudval = PUD_TYPE_TABLE | PUD_TABLE_UXN;
 		phys_addr_t pmd_phys;
 
@@ -344,13 +346,20 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 	do {
 		pgprot_t __prot = prot;
 
-/* IAMROOT, 2021.10.09: 16 x PMD_SIZE의 다음 주소 */
+/* IAMROOT, 2021.10.09:
+ * - 아래 식을 통해 계산하여 다음 va(pmd table)을 구한다.
+ *   @next = va(@addr) + (PMD_SIZE * 16)
+ */
 		next = pmd_cont_addr_end(addr, end);
 
 		/* use a contiguous mapping if the range is suitably aligned */
-/*
- * IAMROOT, 2021.10.09: 
- * 16 X PMD_SIZE의 cont pmd 매핑이 가능한 경우 PTE_CONT 비트를 설정한다.
+/* IAMROOT, 2023.12.07:
+ * - ALIGN(@addr && @next && @phys, PMD_SIZE) 이고 BLOCK_MAPPING이 허용일 때
+ *   32MB 단위의 block mapping이 가능하니 PTE_CONT flag를 설정한다.
+ *
+ *   @addr과 @next이 PMD_SIZE로 정렬되어 있다면 @addr과 @next의 사이에
+ *   32MB 크기의 phys memory 갭이 있고 연속 사용 가능한 것이므로 4KB 단위로
+ *   끊는 것이 아닌 32MB 통으로 매핑한다.
  */
 		if ((((addr | next | phys) & ~CONT_PMD_MASK) == 0) &&
 		    (flags & NO_CONT_MAPPINGS) == 0)
@@ -397,11 +406,11 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 	p4d_t *p4dp = p4d_offset(pgdp, addr);
 	p4d_t p4d = READ_ONCE(*p4dp);
 
-	if (p4d_none(p4d)) {
-/* IAMROOT, 2021.10.09:
- * - p4d == none 라면 mapping 되지 않았으므로 memory를 alloc하고
- *   populate를 수행하여 새 pud table를 할당한다.
+/* IAMROOT, 2023.12.17:
+ * - @p4d(pgd)가 mapping 되지 않은 경우를 대비한 코드이며
+ *   @pgtable_alloc 함수를 통해 p4d table page를 alloc 한다.
  */
+	if (p4d_none(p4d)) {
 		p4dval_t p4dval = P4D_TYPE_TABLE | P4D_TABLE_UXN;
 		phys_addr_t pud_phys;
 
@@ -409,7 +418,7 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 			p4dval |= P4D_TABLE_PXN;
 
 /* IAMROOT, 2023.11.24:
- * - @pgtable_alloc 값은 다음과 같다.
+ * - @pgtable_alloc arg의 값은 다음 중에 하나가 된다.
  *   1. NULL: -> fixmap_remap_fdt()
  *      할당할 수 없는 상황에서 사용한다.
  *      정규 메모리 할당자, memblock도 사용할 수 없으므로 fixmap을 통해
@@ -418,8 +427,8 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
  *   2. early_pgtable_alloc(): -> map_kernel_segment()
  *      정규 메모리 할당자는 사용할 수 없지만 memblock은 사용 가능할 때.
  *
- *   3. pgd_pgtable_alloc():
- *   4. __pgd_pgtable_alloc():
+ *   3. pgd_pgtable_alloc(): TODO
+ *   4. __pgd_pgtable_alloc(): TODO
  */
 		BUG_ON(!pgtable_alloc);
 		pud_phys = pgtable_alloc(PUD_SHIFT);
@@ -447,6 +456,10 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 /* IAMROOT, 2023.12.07:
  * - PAGE_SIZE == 4KB && ALIGN(@addr && @next && @phys, PUD_SIZE) 이고
  *   BLOCK_MAPPING이 허용일 때 1G block mapping을 시도한다.
+ *
+ *   @addr과 @next이 PUD_SIZE로 정렬되어 있다면 @addr과 @next의 사이에
+ *   1G 크기의 phys memory 갭이 있고 연속 매핑 가능한 것이므로 4KB 단위로
+ *   끊는 것이 아닌 1G 통으로 매핑한다.
  */
 			pud_set_huge(pudp, phys, prot);
 
@@ -458,7 +471,9 @@ static void alloc_init_pud(pgd_t *pgdp, unsigned long addr, unsigned long end,
 						      READ_ONCE(pud_val(*pudp))));
 		} else {
 /* IAMROOT, 2023.12.10:
- * - 4KB page 들을 contiguous 하게 이어 붙여서 block mapping을 시도한다.
+ * - PMD entry를 초기화하기 위해 관련 함수 호출.
+ *   만약 32MB 단위의 block mapping이 가능하면 PTE_CONT flag를 설정하고
+ *   그렇지 않으면 4KB page 단위로 할당하도록 table을 세팅한다.
  */
 			alloc_init_cont_pmd(pudp, addr, next, phys, prot,
 					    pgtable_alloc, flags);
@@ -506,11 +521,11 @@ static void __create_pgd_mapping(pgd_t *pgdir, phys_addr_t phys,
  *   (alloc_init_pud 함수 호출)
  *
  *   예) addr: 1GB, end: 1025GB, PGDIR_SIZE: 512GB인 경우
- *       1st loop: 1G .. 512G
- *       2nd loop: 512G .. 1024G
- *       3th loop: 1024G .. 1025G
+ *       1st loop: 1G .. 513G
+ *       2nd loop: 513G .. 1025G
+ *       3th loop: None
  *
- *       총 3번 수행된다.
+ *       총 2번 수행된다.
  */
 	do {
 		next = pgd_addr_end(addr, end);
