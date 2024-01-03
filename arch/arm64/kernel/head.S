@@ -1107,20 +1107,21 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 0:
 #endif
 
-/* IAMROOT, 2021.09.04:
- * - TODO
- * To avoid backtracing using PCs that fall in the idmap, or are controlled
- * by userspace, we must explcitly zero the FP and LR in startup paths, and
- * must ensure that the frame embedded in pt_regs is zeroed upon entry from
- * EL0. To avoid these NULL entries showin in the backtrace, unwind_frame()
- * is updated to avoid them.
+/* IAMROOT, 2021.09.04: TODO
+ * - VHE로 동작할 수 있는 환경이면 hvc-call을 호출하여 host-OS를 el2에서
+ *   동작시킬 수 있도록 mode를 변경한다.
  */
 	bl	switch_to_vhe			// Prefer VHE if possible
 
 /* IAMROOT, 2023.11.11:
- * - start_kernel을 호출할 준비를 한다. start_kernel로 넘어가면 현재 함수에서
- *   저장해둔 stack frame 정보(fp', lr'을 가리키는)는 더 이상 쓸모없으므로
- *   stack에서 pop하여 버린다.
+ * - start_kernel(..)을 호출할 준비를 한다.
+ *   start_kernel가 호출되면 저장해둔 stack frame 정보(fp', lr')는
+ *   불필요하므로 stack에서 pop하여 버린다.
+ *
+ * - 현재 kernel은 다음 중 하나의 exception level에서 동작중이다.
+ *   el1        : bootmode == el1 && CurrentEL == el1
+ *   el1 w/ nVHE: bootmode == el2 && CurrentEL == el1 (hypervisor 환경)
+ *   el2 w/ VHE : bootmode == el2 && CurrentEL == el2 (kvm 환경)
  */
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
@@ -1155,7 +1156,7 @@ EXPORT_SYMBOL(kimage_vaddr)
  * - CurrentEL 1 -> EL1
  * - CurrentEL 2 and nVHE - > EL1
  * - CurrentEL 2 and VHE - > EL2
- *   EL2로 부팅을하여 VHE를 지원시 원래는 EL1 NVHE로 동작을 해야되는데
+ *   EL2로 부팅을하여 VHE를 지원시 원래는 EL1 nVHE로 동작을 해야되는데
  *   아래 주석에 있다 시피 일부 Fruity cpu (ex M1. Git blame 참고)에서
  *   EL1에서 nVHE로 동작을 못하는 현상이 있다. 그래서 EL2 VHE로
  *   여기서 초기화를 시킨다.
@@ -1245,7 +1246,7 @@ SYM_INNER_LABEL(init_el1, SYM_L_LOCAL)
  */
 SYM_INNER_LABEL(init_el2, SYM_L_LOCAL)
 /* IAMROOT, 2021.07.24:
- * - NVHE flags로 hcr_el2를 설정하여 시작하며 el2 관련 초기화를 진행한다.
+ * - nVHE flags로 hcr_el2를 설정하여 시작하며 el2 관련 초기화를 진행한다.
  *
  * - hcr_el2: hypervisor configuration reg.
  *            가상화 설정 관련 register.

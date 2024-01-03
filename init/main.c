@@ -1238,15 +1238,14 @@ static void __init print_unknown_bootoptions(void)
 	memblock_free_ptr(unknown_options, len);
 }
 
-/*
- * IAMROOT, 2021.09.11:
- * - __visible
- *   compile 최적화 때문에 안쓰는 함수를 global export를 안할수 있는데
- *   이를 방지하기위해 linker한테 알려주는 역할
- *   
- * - __no_sanitize_address
- *   sanitize address 관련 option이 켜져있을때 start_kernel은 영향을 안받게
- *   하기 위함.
+/* IAMROOT, 2021.09.11:
+ * - __visible:
+ *   compile optimization으로 인해 안쓰이는 함수는 symbol export가
+ *   되지 않을 수 있는 이를 방지하기 위해 linker에게 알려주는 역할.
+ *
+ * - __no_sanitize_address:
+ *   sanitize address 관련 compiler option이 enable 되어도 start_kernel은
+ *   영향을 받지 않게 한다.
  */
 asmlinkage __visible void __init __no_sanitize_address start_kernel(void)
 {

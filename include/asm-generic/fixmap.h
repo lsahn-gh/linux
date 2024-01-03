@@ -89,7 +89,7 @@ static inline unsigned long virt_to_fix(const unsigned long vaddr)
 
 /* Return a pointer with offset calculated */
 /* IAMROOT, 2021.10.09:
- * @phys를 fixmap @idx 위치에 매핑하고 vaddr로 변환하여 반환한다.
+ * - @phys를 fixmap @idx 위치에 매핑하고 vaddr로 변환하여 반환한다.
  */
 #define __set_fixmap_offset(idx, phys, flags)				\
 ({									\

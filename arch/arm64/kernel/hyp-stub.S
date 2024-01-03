@@ -273,20 +273,19 @@ SYM_FUNC_END(__hyp_reset_vectors)
 /*
  * Entry point to switch to VHE if deemed capable
  */
-/*
- * IAMROOT, 2022.02.07:
+/* IAMROOT, 2022.02.07:
  * - el1 -> el2
- * - boot를 EL2로 했으면서 current도 el1인경우 hvc mode가 된다.
- *   boot EL2, current el1인 상태면 현재는 nvhe로 동작중이지만 vhe로 동작할수있는
- *   상태일것이다. (init_el2에서 그렇게 동작시켰다.)
- *   커널은 vhe를 지원해도 일단 이 함수 직전까지와 같이 nvhe로 동작을 하다가
- *   start_kernel 진입직전에 vhe로 전환한다.
- * ---
- * - 옛날에는 Config로 VHE를 config에 따라 막을수있었지만
- *   지금은 default 로 무조건 하드웨어에서 vhe를 지원한다면 vhe로 동작하는게
- *   기본 정책이다. 만약 vhe 하드웨어에서 nvhe로 동작시킬려면 
- *   'kvm-arm.mode=nvhe' command-line option 을 사용해야된다고 한다.
- *   (참고 git log -p 2d726d0db6ac479d91bf74490455badd34af6b1d)
+ * - el2로 boot 했지만 sys-regs 초기화했음에도 CurrentEL == el1 라면
+ *   hypervisor 위에서 host-OS가 el1에서 동작하므로 그냥 return.
+ *   그게 아니라면 el2 boot && CurrentEL == el2 이므로 kvm을 VHE 모드에서
+ *   동작하도록 hvc-call 을 호출한다.
+ *
+ * - 예전 버전에서는 conf로 VHE를 enable/disable 할 수 있었지만 현재는
+ *   H/W에서 VHE를 지원하면 default로 동작시키도록 한다.
+ *   만약 VHE가 지원되는 H/W에서 nVHE로 동작시키고자 한다면 다음 bootargs를
+ *   사용해야 한다. 'kvm-arm.mode=nvhe'
+ *
+ *   참고: git log -p 2d726d0db6ac479d91bf74490455badd34af6b1d
  */
 SYM_FUNC_START(switch_to_vhe)
 	// Need to have booted at EL2

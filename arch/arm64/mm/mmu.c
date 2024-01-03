@@ -187,15 +187,17 @@ static void init_pte(pmd_t *pmdp, unsigned long addr, unsigned long end,
 {
 	pte_t *ptep;
 
-/*
- * IAMROOT, 2021.10.09: 
- * pte 테이블에 매핑하는 동안 FIX_PTE에 pte 테이블을 매핑한다.
- *   (pte 테이블의 물리주소는 pmdp와 addr로 알아온다)
+/* IAMROOT, 2023.12.04:
+ * - @pmdp와 @addr를 이용하여 pmd entry에 pte table을 mapping 한다.
+ *   이때 entry의 attr은 page table을 명시하는 값으로 셋업된다.
  */
 	ptep = pte_set_fixmap_offset(pmdp, addr);
 	do {
 		pte_t old_pte = READ_ONCE(*ptep);
 
+/* IAMROOT, 2023.12.18:
+ * - pte entry 에 page를 mapping 한다.
+ */
 		set_pte(ptep, pfn_pte(__phys_to_pfn(phys), prot));
 
 		/*
@@ -211,6 +213,13 @@ static void init_pte(pmd_t *pmdp, unsigned long addr, unsigned long end,
 	pte_clear_fixmap();
 }
 
+/* IAMROOT, 2021.10.09:
+ * - PTE table을 매핑을 한다.
+ *   pte entry를 16개 연속 mapping 가능한 경우 64KB block mapping을 시도하고
+ *   그렇지 않은 경우 single pte entry mapping을 한다.
+ *
+ *   block mapping: PAGE_SIZE == 4KB, 4 LVL 기준 4KB * 16 == 64KB
+ */
 static void alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
 				unsigned long end, phys_addr_t phys,
 				pgprot_t prot,
@@ -242,12 +251,19 @@ static void alloc_init_cont_pte(pmd_t *pmdp, unsigned long addr,
 	do {
 		pgprot_t __prot = prot;
 
-/* IAMROOT, 2021.10.09: PAGE_SIZE * 16의 다음 주소 */
+/* IAMROOT, 2021.10.09:
+ * - 아래 식을 통해 계산하여 다음 va(pte table)을 구한다.
+ *   @next = va(@addr) + (PTE_SIZE * CONT_PTES(16))
+ */
 		next = pte_cont_addr_end(addr, end);
 
-/*
- * IAMROOT, 2021.10.09: 
- * 16 X PAGE_SIZE의 cont pte 매핑이 가능한 경우 PTE_CONT 비트를 설정한다.
+/* IAMROOT, 2023.12.07:
+ * - ALIGN(@addr & @next & @phys, CONT_PTE_MASK) 이고 BLOCK_MAPPING이
+ *   허용일 때 64KB 단위의 block mapping이 가능하니 PTE_CONT flag를 설정한다.
+ *
+ *   @addr과 @next이 CONT_PTE_SIZE로 정렬되어 있다면 @addr과 @next의 사이에
+ *   64KB 크기의 phys memory 갭이 있고 연속 사용 가능한 것이므로 4KB 단위로
+ *   끊는 것이 아닌 64KB 통으로 매핑한다.
  */
 		/* use a contiguous mapping if the range is suitably aligned */
 		if ((((addr | next | phys) & ~CONT_PTE_MASK) == 0) &&
@@ -275,12 +291,11 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 	do {
 		pmd_t old_pmd = READ_ONCE(*pmdp);
 
-/* IAMROOT, 2021.10.09: PMD_SIZE의 다음 주소 */
 		next = pmd_addr_end(addr, end);
 
-/*
- * IAMROOT, 2021.10.09: 
- * PMD_SIZE 단위로 정렬이 가능한 경우 pmd 블럭 매핑을 한다.
+/* IAMROOT, 2023.12.07:
+ * - ALIGN(@addr && @next && @phys, PMD_SIZE) 이고 BLOCK_MAPPING이 허용일 때
+ *   PMD 단위로 block mapping 을 수행한다.
  */
 		/* try section mapping first */
 		if (((addr | next | phys) & ~PMD_MASK) == 0 &&
@@ -294,8 +309,13 @@ static void init_pmd(pud_t *pudp, unsigned long addr, unsigned long end,
 			BUG_ON(!pgattr_change_is_safe(pmd_val(old_pmd),
 						      READ_ONCE(pmd_val(*pmdp))));
 		} else {
+/* IAMROOT, 2023.12.10:
+ * - PTE entry를 초기화하기 위해 관련 함수 호출.
+ *   만약 64KB 단위의 block mapping이 가능하면 PTE_CONT flag를 설정하고
+ *   그렇지 않으면 4KB page 단위로 할당하도록 table을 세팅한다.
+ */
 			alloc_init_cont_pte(pmdp, addr, next, phys, prot,
-					    pgtable_alloc, flags);
+                    pgtable_alloc, flags);
 
 			BUG_ON(pmd_val(old_pmd) != 0 &&
 			       pmd_val(old_pmd) != READ_ONCE(pmd_val(*pmdp)));
@@ -348,16 +368,16 @@ static void alloc_init_cont_pmd(pud_t *pudp, unsigned long addr,
 
 /* IAMROOT, 2021.10.09:
  * - 아래 식을 통해 계산하여 다음 va(pmd table)을 구한다.
- *   @next = va(@addr) + (PMD_SIZE * 16)
+ *   @next = va(@addr) + (PMD_SIZE * CONT_PMDS(16))
  */
 		next = pmd_cont_addr_end(addr, end);
 
 		/* use a contiguous mapping if the range is suitably aligned */
 /* IAMROOT, 2023.12.07:
- * - ALIGN(@addr && @next && @phys, PMD_SIZE) 이고 BLOCK_MAPPING이 허용일 때
- *   32MB 단위의 block mapping이 가능하니 PTE_CONT flag를 설정한다.
+ * - ALIGN(@addr && @next && @phys, CONT_PMD_MASK) 이고 BLOCK_MAPPING이
+ *   허용일 때 32MB 단위의 block mapping이 가능하니 PTE_CONT flag를 설정한다.
  *
- *   @addr과 @next이 PMD_SIZE로 정렬되어 있다면 @addr과 @next의 사이에
+ *   @addr과 @next이 CONT_PMD_SIZE로 정렬되어 있다면 @addr과 @next의 사이에
  *   32MB 크기의 phys memory 갭이 있고 연속 사용 가능한 것이므로 4KB 단위로
  *   끊는 것이 아닌 32MB 통으로 매핑한다.
  */
@@ -1801,11 +1821,11 @@ void *__init fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot)
 	return dt_virt;
 }
 
-int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
-{
 /* IAMROOT, 2023.12.05:
  * - 1G 크기의 block을 매핑할 수 있는 PUD entry를 가져온다.
  */
+int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
+{
 	pud_t new_pud = pfn_pud(__phys_to_pfn(phys), mk_pud_sect_prot(prot));
 
 	/* Only allow permission changes for now */
@@ -1818,9 +1838,8 @@ int pud_set_huge(pud_t *pudp, phys_addr_t phys, pgprot_t prot)
 	return 1;
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - PMD_SIZE(2MB)인 phys를 PMD entry에 기록한다.
+/* IAMROOT, 2023.12.05:
+ * - 2MB 크기의 block을 매핑할 수 있는 PMD entry를 가져온다.
  */
 int pmd_set_huge(pmd_t *pmdp, phys_addr_t phys, pgprot_t prot)
 {

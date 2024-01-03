@@ -1023,8 +1023,7 @@ int __weak arch_dup_task_struct(struct task_struct *dst,
 	return 0;
 }
 
-/*
- * IAMROOT, 2023.04.01:
+/* IAMROOT, 2023.04.01:
  * - stack긑에 magic number를 설치한다.
  */
 void set_task_stack_end_magic(struct task_struct *tsk)
