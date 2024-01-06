@@ -2312,14 +2312,6 @@ extern struct task_struct *idle_task(int cpu);
  *
  * Return: 1 if @p is an idle task. 0 otherwise.
  */
-/*
- * IAMROOT. 2023.07.15:
- * - google-translate
- * is_idle_task - 지정된 작업이 유휴 작업입니까?
- * @p: 해당 작업.
- *
- * 반환: @p가 유휴 작업인 경우 1입니다. 그렇지 않으면 0입니다.
- */
 static __always_inline bool is_idle_task(const struct task_struct *p)
 {
 	return !!(p->flags & PF_IDLE);
@@ -2407,15 +2399,19 @@ extern struct thread_info init_thread_info;
 extern unsigned long init_stack[THREAD_SIZE / sizeof(unsigned long)];
 
 #ifdef CONFIG_THREAD_INFO_IN_TASK
-/*
- * IAMROOT, 2023.04.13:
- * - @task의 thread_info return.
+/* IAMROOT, 2023.04.13:
+ * - @task (struct task_struct) 구조체 내부에 thread_info 개체를 저장한
+ *   경우이므로 해당 pointer를 반환한다.
  */
 static inline struct thread_info *task_thread_info(struct task_struct *task)
 {
 	return &task->thread_info;
 }
 #elif !defined(__HAVE_THREAD_FUNCTIONS)
+/* IAMROOT, 2024.01.04:
+ * - CONFIG_THREAD_INFO_IN_TASK off 인 경우이므로 stack 내부에 thread_info가
+ *   저장되므로 end of stack에서 struct thread_info 크기만큼만 가져온다.
+ */
 # define task_thread_info(task)	((struct thread_info *)(task)->stack)
 #endif
 

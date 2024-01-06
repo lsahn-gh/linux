@@ -1024,7 +1024,7 @@ int __weak arch_dup_task_struct(struct task_struct *dst,
 }
 
 /* IAMROOT, 2023.04.01:
- * - stack긑에 magic number를 설치한다.
+ * - stack 끝에 magic number를 저장하여 overflow를 감지할 수 있도록 한다.
  */
 void set_task_stack_end_magic(struct task_struct *tsk)
 {

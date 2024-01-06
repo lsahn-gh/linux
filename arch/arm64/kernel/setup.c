@@ -314,9 +314,8 @@ asmlinkage void __init early_fdt_map(u64 dt_phys)
 	early_fdt_ptr = fixmap_remap_fdt(dt_phys, &fdt_size, PAGE_KERNEL);
 }
 
-/*
- * IAMROOT, 2021.10.09: 
- * FDT를 fixmap에 매핑한 후 스캔하여 몇 개의 주요 정보를 알아온다.
+/* IAMROOT, 2021.10.09:
+ * - FDT를 fixmap에 매핑한 후 스캔하여 몇개의 주요 정보를 알아온다.
  */
 static void __init setup_machine_fdt(phys_addr_t dt_phys)
 {
@@ -326,11 +325,11 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
+
 /*
  * IAMROOT, 2021.10.14:
  * dt_virt를 검색을 해서 이용을 하겠다는것.
  */
-
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
 			"Error: invalid device tree blob at physical address %pa (virtual address 0x%p)\n"
@@ -466,10 +465,12 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	arm64_use_ng_mappings = kaslr_requires_kpti();
 
-/*
- * IAMROOT, 2021.10.16:
- * - early : memory mapping등도 안된 상황.
- * - late : 나중에 해도 되는 작업들
+/* IAMROOT, 2021.10.16:
+ * - 정규 매핑 전에 I/O 장치들이 memory를 사용할 수 있도록 fixmap을 이용한
+ *   early memory mapping을 준비한다.
+ *
+ *   early: 정규 매핑, memblock 초기화도 안된 상황.
+ *   late : 나중에 해도 되는 작업들
  */
 	early_fixmap_init();
 	early_ioremap_init();

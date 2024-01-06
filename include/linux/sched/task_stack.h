@@ -9,11 +9,8 @@
 #include <linux/sched.h>
 #include <linux/magic.h>
 
-/*
- * IAMROOT, 2021.09.11:
- * - thread_info가 task 안에 있는 경우 stack을 그대로 사용한다.
- *   그렇지 않은 경우엔 thread_info가 stack에 존재하기 때문에 그거를 고려한다.
- *   (include/linux/sched.h thread_union 주석 참고)
+/* IAMROOT, 2021.09.11:
+ * - 참고: include/linux/sched.h thread_union 주석
  */
 #ifdef CONFIG_THREAD_INFO_IN_TASK
 
@@ -21,13 +18,6 @@
  * When accessing the stack of a non-current task that might exit, use
  * try_get_task_stack() instead.  task_stack_page will return a pointer
  * that could get freed out from under you.
- */
-/*
- * IAMROOT, 2022.11.08:
- * - papago
- *   종료될 수 있는 현재가 아닌 작업의 스택에 액세스할 때 대신
- *   try_get_task_stack()을 사용하십시오. task_stack_page는 아래에서 해제될 수
- *   있는 포인터를 반환합니다.
  */
 static inline void *task_stack_page(const struct task_struct *task)
 {
@@ -41,10 +31,10 @@ static inline void *task_stack_page(const struct task_struct *task)
  */
 #define setup_thread_stack(new,old)	do { } while(0)
 
-/*
- * IAMROOT, 2021.09.14:
- * CONFIG_THREAD_INFO_IN_TASK on. task_info는 struct task안에 존재 하므로
- * thread_stack엔 아무것도 없다. 첫주소가 stack의 끝이다.
+/* IAMROOT, 2021.09.14:
+ * - CONFIG_THREAD_INFO_IN_TASK == on.
+ * - thread_info는 struct task_struct에 존재하므로 stack은 stack으로만 사용된다.
+ *   따라서 stack addr가 stack end를 가리킨다.
  */
 static inline unsigned long *end_of_stack(const struct task_struct *task)
 {
@@ -66,24 +56,32 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
 	task_thread_info(p)->task = p;
 }
 
-/*
- * IAMROOT, 2021.09.14:
- * CONFIG_THREAD_INFO_IN_TASK off. task_info는 stack의 시작지부터 존재한다.
- * 
- * -GROW UP
- *  task_thread_info(p)를 통해서 task_info의 시작번지를 구해오는데, 이 시작
- *  번지 자체가 stack의 시작번지이므로, stack의 end는 자연스럽게
- *  THREAD_SIZE -1로 하면 나온다.
+/* IAMROOT, 2021.09.14:
+ * - CONFIG_THREAD_INFO_IN_TASK == off.
+ * - stack은 stack으로 사용될 뿐만 아니라 thread_info도 저장하므로 그에 알맞게
+ *   pointer를 조정하여 stack end를 구한다.
  *
- * +--------- stack ---------------------------------------> TASK_SIZE
- * +--task_info ->|stack start                             | stack end
+ * - GROW UP
+ *   task_thread_info(..)를 통해 thread_info의 addr를 구해오는데, 이 addr 가
+ *   stack의 start addr 이므로 stack end는 + THREAD_SIZE에 -1을 하여 구한다.
  *
- * -GROW DOWN
- *  task_thread_info(p)를 통해서 task_info의 시작번지를 구해오는데, 여기에 +1
- *  을하여 thread_info의 끝주소를 구해오며, 이 끝주소가 stack의 end 주소가된다.
+ *   +--------- stack ---------------------------------------+ << THREAD_SIZE
+ *   | thread_info |                                         |
+ *   +-------------------------------------------------------+
+ *                 ^                                         ^
+ *                 +-- stack start                           +-- stack end
  *
- * +--------- stack ---------------------------------------> TASK_SIZE
- * +--task_info ->|stack end                               | stack start
+ * - GROW DOWN
+ *   task_thread_info(..)를 통해 thread_info의 addr를 구해오는데, 이 addr에
+ *   sizeof(thread_info)를 해주면 stack end를 구할 수 있다.
+ *
+ *   +--------- stack ---------------------------------------+ << THREAD_SIZE
+ *   | thread_info |                                         |
+ *   +-------------------------------------------------------+
+ *                 ^                                         ^
+ *                 +-- stack end                             +-- stack start
+ *
+ * - Arm arch는 GROW DOWN 방식을 사용한다.
  */
 /*
  * Return the address of the last usable long on the stack.
@@ -96,10 +94,6 @@ static inline void setup_thread_stack(struct task_struct *p, struct task_struct 
  */
 static inline unsigned long *end_of_stack(struct task_struct *p)
 {
-/*
- * IAMROOT, 2021.09.11:
- * - arm, arm64는 보통 GROW DOWN이다
- */
 #ifdef CONFIG_STACK_GROWSUP
 	return (unsigned long *)((unsigned long)task_thread_info(p) + THREAD_SIZE) - 1;
 #else

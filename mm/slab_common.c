@@ -566,9 +566,8 @@ int kmem_cache_shrink(struct kmem_cache *cachep)
 }
 EXPORT_SYMBOL(kmem_cache_shrink);
 
-/*
- * IAMROOT, 2021.10.23:
- * - slap할당자가 동작중인지를 확인.
+/* IAMROOT, 2021.10.23:
+ * - slab allocator가 동작중인지 확인.
  */
 bool slab_is_available(void)
 {

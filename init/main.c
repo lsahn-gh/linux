@@ -1241,7 +1241,7 @@ static void __init print_unknown_bootoptions(void)
 /* IAMROOT, 2021.09.11:
  * - __visible:
  *   compile optimization으로 인해 안쓰이는 함수는 symbol export가
- *   되지 않을 수 있는 이를 방지하기 위해 linker에게 알려주는 역할.
+ *   되지 않을 수 있는데 이를 방지하기 위해 linker에게 알려주는 역할.
  *
  * - __no_sanitize_address:
  *   sanitize address 관련 compiler option이 enable 되어도 start_kernel은
