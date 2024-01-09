@@ -86,6 +86,18 @@
  * This macro does strict typechecking of @lo/@hi to make sure they are of the
  * same type as @val.  See the unnecessary pointer comparisons.
  */
+/* IAMROOT, 2024.01.09:
+ * - @val 값이 @lo, @hi 범위를 벗어나면 '@lo <= @val <= @hi'로 보정하는 매크로.
+ *   이때 보정된 값은 아래 식을 통해 결정된다.
+ *
+ *   @val = @hi if (@val > @hi) OR @lo if (@val < @lo)
+ *
+ *   예) @val = 999
+ *       @lo  = 1
+ *       @hi  = 10
+ *
+ *       10 == clamp(999, 1, 10);
+ */
 #define clamp(val, lo, hi) min((typeof(val))max(val, lo), hi)
 
 /*

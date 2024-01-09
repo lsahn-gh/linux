@@ -202,9 +202,11 @@ static inline void __next_physmem_range(u64 *idx, struct memblock_type *type,
  * @p_end: ptr to phys_addr_t for end address of the range, can be %NULL
  * @p_nid: ptr to int for nid of the range, can be %NULL
  */
-/*
- * IAMROOT, 2021.10.23:
- * - 높은 주소에서 시작해서 낮은 주소로 진행한다.
+/* IAMROOT, 2021.10.23:
+ * - higher addr -> lower addr로 진행하되 @type_b를 제외한 @type_a에 속한
+ *   region을 찾는다.
+ *   - @type_a: memblock memory region (사용 가능한 영역)
+ *   - @type_b: memblock reserved region (이미 사용중인 영역)
  */
 #define __for_each_mem_range_rev(i, type_a, type_b, nid, flags,		\
 				 p_start, p_end, p_nid)			\

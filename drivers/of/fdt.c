@@ -1351,23 +1351,20 @@ u64 __init dt_mem_next_cell(int s, const __be32 **cellp)
 int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 				     int depth, void *data)
 {
-/*
- * IAMROOT, 2021.10.16:
- * - device_type 은 cpu, pci, memory등의 값이 존재하며 여기서 memory
- *   만을 필터링한다.
- */
 	const char *type = of_get_flat_dt_prop(node, "device_type", NULL);
 	const __be32 *reg, *endp;
 	int l;
 	bool hotpluggable;
 
+/* IAMROOT, 2021.10.16:
+ * - DT는 cpu, pci, memory등의 node가 존재하며 memory만 scan 한다.
+ */
 	/* We are scanning "memory" nodes only */
 	if (type == NULL || strcmp(type, "memory") != 0)
 		return 0;
 
-/*
- * IAMROOT, 2021.10.16:
- * - reg == linux,usable-memory 이 관계는 memory node에서만 성립한다.
+/* IAMROOT, 2021.10.16:
+ * - reg == linux,usable-memory 관계는 memory node에서만 성립한다.
  */
 	reg = of_get_flat_dt_prop(node, "linux,usable-memory", &l);
 	if (reg == NULL)
@@ -1376,20 +1373,23 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 		return 0;
 
 	endp = reg + (l / sizeof(__be32));
-/*
- * IAMROOT, 2021.10.16:
- * - 일반적인 장치엔 없다. hotplug 가능한 memory일때만 사용하는것.
+
+/* IAMROOT, 2021.10.16:
+ * - hotpluggable memory 인 경우 사용한다.
  */
 	hotpluggable = of_get_flat_dt_prop(node, "hotpluggable", NULL);
 
 	pr_debug("memory scan node %s, reg size %d,\n", uname, l);
 
-/*
- * IAMROOT, 2021.10.16:
- * - loop를 도는 이유는 memory가 여러개일경우 reg의 value 값이 여러개 위치할수
- *   있기 때문
- *   ex) reg = <0x000000000 0x80000000 0x00000001 0x00000000>,
- *	       <0x000000008 0x00000000 0x00000001 0x00000000>;
+/* IAMROOT, 2021.10.16:
+ * - loop를 수행하는 이유는 memory reg addr가 여러개로 이루어질 수 있으므로.
+ *
+ *   예) reg = <0x000000000 0x80000000 0x00000001 0x00000000>,
+ *             <0x000000008 0x00000000 0x00000001 0x00000000>;
+ *
+ *       위 정의는 다음과 같음.
+ *       <0x0000_0000_8000_0000 0x0000_0001_0000_0000>,
+ *       <0x0000_0008_0000_0000 0x0000_0001_0000_0000>;
  */
 	while ((endp - reg) >= (dt_root_addr_cells + dt_root_size_cells)) {
 		u64 base, size;
@@ -1401,6 +1401,10 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 			continue;
 		pr_debug(" - %llx, %llx\n", base, size);
 
+/* IAMROOT, 2024.01.09:
+ * - 위 DT에서 parsing한 @base, @size를 기반으로 phys memory 영역을
+ *   memblock에 등록한다.
+ */
 		early_init_dt_add_memory_arch(base, size);
 
 		if (!hotpluggable)

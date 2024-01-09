@@ -35,8 +35,7 @@
  * Rounds @x down to next multiple of @y (which must be a power of 2).
  * To perform arbitrary rounding down, use rounddown() below.
  */
-/*
- * IAMROOT, 2021.11.04:
+/* IAMROOT, 2021.11.04:
  * - @y 단위로 align을 맞춘다.
  *
  * - 예)

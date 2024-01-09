@@ -326,10 +326,10 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
 
-/*
- * IAMROOT, 2021.10.14:
- * dt_virt를 검색을 해서 이용을 하겠다는것.
- */
+	/*
+	 * IAMROOT, 2021.10.14:
+	 * dt_virt를 검색을 해서 이용을 하겠다는것.
+	 */
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
 			"Error: invalid device tree blob at physical address %pa (virtual address 0x%p)\n"
@@ -452,6 +452,9 @@ u64 cpu_logical_map(unsigned int cpu)
 	return __cpu_logical_map[cpu];
 }
 
+/* IAMROOT, 2024.01.09:
+ * - arch에 의존적인 부분 early setup 영역.
+ */
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
 	setup_initial_init_mm(_stext, _etext, _edata, _end);
@@ -465,17 +468,18 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	arm64_use_ng_mappings = kaslr_requires_kpti();
 
-/* IAMROOT, 2021.10.16:
- * - 정규 매핑 전에 I/O 장치들이 memory를 사용할 수 있도록 fixmap을 이용한
- *   early memory mapping을 준비한다.
- *
- *   early: 정규 매핑, memblock 초기화도 안된 상황.
- *   late : 나중에 해도 되는 작업들
- */
+	/* IAMROOT, 2021.10.16:
+	 * - 정규 매핑 전에 I/O 장치들이 memory를 사용할 수 있도록 fixmap을 이용한
+	 *   early memory mapping을 준비한다.
+	 *
+	 *   early: 정규 매핑, memblock 초기화도 안된 상황.
+	 *   late : 나중에 해도 되는 작업들
+	 */
 	early_fixmap_init();
 	early_ioremap_init();
 
 	setup_machine_fdt(__fdt_pointer);
+
 /*
  * IAMROOT, 2021.10.16:
  * - static key
@@ -527,15 +531,15 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	arm64_memblock_init();
 
-/*
- * IAMROOT, 2021.10.31:
+/* IAMROOT, 2021.10.31:
  * - 현재 mmu config 상태
  *   1) ttbr1_el1 -> init_pg_dir
  *   2) ttbr0_el1 -> empty_zero_page
  */
+
 	paging_init();
-/*
- * IAMROOT, 2021.10.31:
+
+/* IAMROOT, 2021.10.31:
  * - 현재 mmu config 상태
  *   1) ttbr1_el1 -> swapper_pg_dir
  *   2) ttbr0_el1 -> empty_zero_page
