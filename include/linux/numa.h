@@ -3,8 +3,7 @@
 #define _LINUX_NUMA_H
 #include <linux/types.h>
 
-/*
- * IAMROOT, 2021.11.06:
+/* IAMROOT, 2021.11.06:
  * - default 4
  */
 #ifdef CONFIG_NODES_SHIFT
@@ -13,15 +12,13 @@
 #define NODES_SHIFT     0
 #endif
 
-/*
- * IAMROOT, 2021.11.06:
+/* IAMROOT, 2021.11.06:
  * - default 16. 0 ~ 15번. bitmap으로 관리된다.
  */
 #define MAX_NUMNODES    (1 << NODES_SHIFT)
 
-/*
- * IAMROOT, 2023.03.25:
- * - NODE 이든 상관이 없는 것을 나타냄(= anynode)
+/* IAMROOT, 2023.03.25:
+ * - ANY node를 의미한다.
  */
 #define	NUMA_NO_NODE	(-1)
 

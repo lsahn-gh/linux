@@ -392,10 +392,10 @@ static inline int memblock_get_region_node(const struct memblock_region *r)
 
 /* Flags for memblock allocation APIs */
 #define MEMBLOCK_ALLOC_ANYWHERE	(~(phys_addr_t)0)
-/*
- * IAMROOT, 2021.10.23:
- * - MEMBLOCK_ALLOC_ACCESSIBLE : memblock의 current_limit을 적용하겠다는것.
- * - MEMBLOCK_ALLOC_KASAN : kasan_init에서 호출시 skip하라는것.
+
+/* IAMROOT, 2021.10.23:
+ * - MEMBLOCK_ALLOC_ACCESSIBLE: memblock의 current_limit 적용.
+ * - MEMBLOCK_ALLOC_KASAN     : kasan_init에서 호출시 skip 요청.
  */
 #define MEMBLOCK_ALLOC_ACCESSIBLE	0
 #define MEMBLOCK_ALLOC_KASAN		1

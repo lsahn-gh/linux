@@ -434,10 +434,9 @@ again:
 
 static void __init_memblock memblock_remove_region(struct memblock_type *type, unsigned long r)
 {
-/*
- * IAMROOT, 2021.10.23:
- * - r보다 높은 region들을 한칸 땡기는 식으로 r region을 삭제를 진행한다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - rgn[@r + 1]을 rgn[@r]로 옮기는 방식을 이용하여 rgn[@r]을 삭제한다.
+	 */
 	type->total_size -= type->regions[r].size;
 	memmove(&type->regions[r], &type->regions[r + 1],
 		(type->cnt - (r + 1)) * sizeof(type->regions[r]));
@@ -459,7 +458,7 @@ static void __init_memblock memblock_remove_region(struct memblock_type *type, u
  * memblock_discard - discard memory and reserved arrays if they were allocated
  */
 /*
- * IAMROOT, 2021.10.23:
+ * IAMROOT, 2021.10.23: TODO
  * - memory를 buddy system으로 전환할때 관련된 함수.
  */
 void __init memblock_discard(void)
@@ -967,6 +966,10 @@ repeat:
  * Return:
  * 0 on success, -errno on failure.
  */
+/* IAMROOT, 2021.10.16:
+ * - pa(@base)에서 시작하여 @size 크기의 물리 메모리를 memory region에
+ *   추가하되 merge시 @nid를 참조하여 같을 때만 한다.
+ */
 int __init_memblock memblock_add_node(phys_addr_t base, phys_addr_t size,
 				       int nid)
 {
@@ -990,7 +993,7 @@ int __init_memblock memblock_add_node(phys_addr_t base, phys_addr_t size,
  * 0 on success, -errno on failure.
  */
 /* IAMROOT, 2021.10.16:
- * - pa(@base)에서 시작하여 @size 크기의 물리 메모리를 memory 영역에 추가.
+ * - pa(@base)에서 시작하여 @size 크기의 물리 메모리를 memory region에 추가.
  */
 int __init_memblock memblock_add(phys_addr_t base, phys_addr_t size)
 {
@@ -1139,10 +1142,9 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 			/* IAMROOT, 2021.10.23:
 			 * - 'rend > end' 조건은 아래의 상황이다.
 			 *
-			 *   기존에 하나였던 @rgn block에 아래처럼 계산되어 merge될
-			 *   준비를 하고 @rgn은 보정을, iso는 새로 추가된다.
-			 *   단, rgn[@rbase.. @base]은 여기서 처리하지 않고 merge도
-			 *   insert_region(..)내에서 수행된다.
+			 *   기존에 하나였던 @rgn block에 아래처럼 계산되어
+			 *   @rgn은 보정을, iso는 새로 추가된다.
+			 *   단, rgn[@rbase.. @base]은 여기서 처리하지 않는다.
 			 *
 			 *   Y = end - rbase
 			 *
@@ -1168,7 +1170,10 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 					       rgn->flags);
 		} else {
 			/* IAMROOT, 2021.10.23:
-			 * - TODO
+			 * - @rgn에 완전히 iso region에 포함되는 경우이며 1개 이상의
+			 *   regions이 포함될 수 있으므로 계속 recording 한다.
+			 *   @end_rgn + 1은 iteration 도중 종료 조건을 효율적으로 찾기
+			 *   위함이다.
 			 *
 			 *                 +-------+ end
 			 * rend  +-------+ |       |
@@ -1177,10 +1182,6 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 			 *       |       | |       |
 			 * rbase +-------+ |       |
 			 *                 +-------+ base
-			 *
-			 * 최초에 한번만 start_rgn이 set되고 end_rgn은 매번 갱신된다.
-			 * isolate 영역이 경우에따라 여러개의 region을 포함할수있다.
-			 * end_rgn + 1은 iterator과정에서 종료조건을 원활히 찾기 위함이다.
 			 */
 			/* @rgn is fully contained, record it */
 			if (!*end_rgn)
@@ -1205,20 +1206,20 @@ static int __init_memblock memblock_remove_range(struct memblock_type *type,
 	if (ret)
 		return ret;
 
+	/* IAMROOT, 2024.01.16:
+	 * - @start_rgn, @end_rgn이 record 되었다면 삭제한다.
+	 */
 	for (i = end_rgn - 1; i >= start_rgn; i--)
 		memblock_remove_region(type, i);
 	return 0;
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - base ~ base + size 주소를 지운다.
+/* IAMROOT, 2021.10.23:
+ * - memory region[@base .. @end] 까지의 영역을 삭제한다.
  *
- *   실제론 별로 호출될일이없다. 산업용장비에서 memory를 물리적으로(hotplug)
- *   제거하거나 guest os에 할당했던 메모리를 반환받는 상황등에서
- *   발생할수있다.
- *
- *   memblock_add의 반대.
+ *   실제 자주 호출되지 않는다. 산업용 장비에서 memory를
+ *   물리적으로 제거(hotplug) 하거나 guest-OS가 할당받은 메모리를
+ *   반환해야 하는 상황 등에서 호출된다.
  */
 int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
 {
@@ -1306,7 +1307,7 @@ int __init_memblock memblock_physmem_add(phys_addr_t base, phys_addr_t size)
  * Return: 0 on success, -errno on failure.
  */
 /*
- * IAMROOT, 2021.10.23:
+ * IAMROOT, 2021.10.23: TODO
  * - isolate로 해당 범위에 대한 memblock을 선별한뒤 flag를 고치고
  *   merge가 가능한 memblock은 merge한다.
  */
@@ -1340,6 +1341,9 @@ static int __init_memblock memblock_setclr_flag(phys_addr_t base,
  *
  * Return: 0 on success, -errno on failure.
  */
+/* IAMROOT, 2022.02.19:
+ * - region[@base .. (@base + @size)]까지 MEMBLOCK_HOTPLUG flag를 on 한다.
+ */
 int __init_memblock memblock_mark_hotplug(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_setclr_flag(base, size, 1, MEMBLOCK_HOTPLUG);
@@ -1352,9 +1356,8 @@ int __init_memblock memblock_mark_hotplug(phys_addr_t base, phys_addr_t size)
  *
  * Return: 0 on success, -errno on failure.
  */
-/*
- * IAMROOT, 2022.02.19:
- * - base ~ size까지 MEMINIT_HOTPLUG flag를 clear준다.
+/* IAMROOT, 2022.02.19:
+ * - region[@base .. (@base + @size)]까지 MEMBLOCK_HOTPLUG flag를 off 한다.
  */
 int __init_memblock memblock_clear_hotplug(phys_addr_t base, phys_addr_t size)
 {
@@ -1367,6 +1370,9 @@ int __init_memblock memblock_clear_hotplug(phys_addr_t base, phys_addr_t size)
  * @size: the size of the region
  *
  * Return: 0 on success, -errno on failure.
+ */
+/* IAMROOT, 2022.02.19:
+ * - region[@base .. (@base + @size)]까지 MEMBLOCK_MIRROR flag를 on 한다.
  */
 int __init_memblock memblock_mark_mirror(phys_addr_t base, phys_addr_t size)
 {
@@ -1390,9 +1396,10 @@ int __init_memblock memblock_mark_mirror(phys_addr_t base, phys_addr_t size)
  *
  * Return: 0 on success, -errno on failure.
  */
-/*
- * IAMROOT, 2021.10.30:
- * - mapping을 하지 말라는 flag를 기존 flag에 더한다.
+/* IAMROOT, 2021.10.30:
+ * - region[@base .. (@base + @size)]까지 MEMBLOCK_NOMAP flag를 on 한다.
+ *
+ *   NOMAP: mapping 하기를 원하지 않을때 사용.
  */
 int __init_memblock memblock_mark_nomap(phys_addr_t base, phys_addr_t size)
 {
@@ -1405,6 +1412,9 @@ int __init_memblock memblock_mark_nomap(phys_addr_t base, phys_addr_t size)
  * @size: the size of the region
  *
  * Return: 0 on success, -errno on failure.
+ */
+/* IAMROOT, 2021.10.30:
+ * - region[@base .. (@base + @size)]까지 MEMBLOCK_NOMAP flag를 off 한다.
  */
 int __init_memblock memblock_clear_nomap(phys_addr_t base, phys_addr_t size)
 {
@@ -1474,16 +1484,21 @@ static bool should_skip_region(struct memblock_type *type,
  * As both region arrays are sorted, the function advances the two indices
  * in lockstep and returns each intersection.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - arm64에서는 기본적으로 reverse로 search.
- * - type_a && !type_b의 영역을 구한다.
+/* IAMROOT, 2021.10.23:
+ * - region[@type_a && !@type_b]의 영역을 구한다.
+ *   다만, arm64에서는 기본적으로 reverse로 탐색한다.
  */
 void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 		      struct memblock_type *type_a,
 		      struct memblock_type *type_b, phys_addr_t *out_start,
 		      phys_addr_t *out_end, int *out_nid)
 {
+	/* IAMROOT, 2021.10.23:
+	 * - 이 for문에서 idx 0 ~ 31bit는 @type_a에 대한 idx,
+	 *   32 ~ 63bit는 @type_b에 대한 idx로 사용한다.
+	 *
+	 * - @type_a는 memory region, @type_b는 reserved region이다.
+	 */
 	int idx_a = *idx & 0xffffffff;
 	int idx_b = *idx >> 32;
 
@@ -1491,6 +1506,9 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 	"Usage of MAX_NUMNODES is deprecated. Use NUMA_NO_NODE instead\n"))
 		nid = NUMA_NO_NODE;
 
+	/* IAMROOT, 2021.10.23:
+	 * - @type_a(memory region)에 대해 탐색을 수행한다.
+	 */
 	for (; idx_a < type_a->cnt; idx_a++) {
 		struct memblock_region *m = &type_a->regions[idx_a];
 
@@ -1500,7 +1518,17 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 
 		if (should_skip_region(type_a, m, nid, flags))
 			continue;
+		/* IAMROOT, 2024.01.10:
+		 * - 아래 조건이면 skip 하지 않음.
+		 *   1) reserved, physmem regions 인 경우.
+		 *   2) memory region이면서 @nid와 region nid가 동일.
+		 *   3) memory region이면서 mirror, nomap flag == off.
+		 */
 
+		/* IAMROOT, 2021.10.23:
+		 * - @type_b가 null이면 @type_a의 비교군이 없으므로 out vars를
+		 *   설정하고 return한다.
+		 */
 		if (!type_b) {
 			if (out_start)
 				*out_start = m_start;
@@ -1513,36 +1541,42 @@ void __next_mem_range(u64 *idx, int nid, enum memblock_flags flags,
 			return;
 		}
 
+		/* IAMROOT, 2021.10.23:
+		 * - @type_b(reserved region)에 대해 탐색을 수행한다.
+		 */
 		/* scan areas before each reservation */
 		for (; idx_b < type_b->cnt + 1; idx_b++) {
 			struct memblock_region *r;
 			phys_addr_t r_start;
 			phys_addr_t r_end;
 
+			/* IAMROOT, 2021.10.23:
+			 * - reserved rgn[b]와 rgb[b-1] 사이의 free region을 탐색한다.
+			 *
+			 *   higher addr
+			 *      ...
+			 *   +----------+
+			 *   |          |
+			 *   | r(b)     |
+			 *   |          |
+			 *   +----------+  +----- >> r_end OR PHYS_ADDR_MAX
+			 *                 |
+			 *                 | free rgn
+			 *                 |
+			 *   +----------+  +----- >> r_start
+			 *   |          |
+			 *   | r(b-1)   |
+			 *   |          |
+			 *   +----------+
+			 *      ...
+			 *   lower addr
+			 *
+			 *   어떠한 영역도 사용되지 않은 최초의 경우에는 reserved region에
+			 *   아무것도 없는데 그럴때는 PHYS_ADDR_MAX 값을 사용한다.
+			 */
 			r = &type_b->regions[idx_b];
-/*
- * IAMROOT, 2022.03.22:
- * - not type_b인 영역 r_start ~ r_end를 구하는것이다.
- * - idx_b가 있다면 이전 region의 end가 not type_b의 start가 되므로
- *   이전 region을 참조[-1] 하여 start값을 구하는것이다. not type_b의 end는
- *   현재 start이므로 r->base가 될것이다.
- *
- * +--------+  
- * |        |       
- * | r[0]   |       
- * +--------+ r->base == r_end
- *            ^     
- *            | not type_b 영역
- *            v     
- * +--------+ r[-1].base + r[-1].size 
- * |        |       
- * | r[-1]  |       
- * +--------+ r[-1].base 
- *   ----
- */
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
-			r_end = idx_b < type_b->cnt ?
-				r->base : PHYS_ADDR_MAX;
+			r_end = idx_b < type_b->cnt ? r->base : PHYS_ADDR_MAX;
 
 			/*
 			 * if idx_b advanced past idx_a,
@@ -1873,9 +1907,8 @@ void __init_memblock __next_mem_pfn_range(int *idx, int nid,
  * Return:
  * 0 on success, -errno on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - 요청된 범위의 memblock의 nid를 교체후 merge
+/* IAMROOT, 2021.10.23:
+ * - region[@base .. (@base + size)] 영역의 nid를 @nid로 변경 후 merge.
  */
 int __init_memblock memblock_set_node(phys_addr_t base, phys_addr_t size,
 				      struct memblock_type *type, int nid)
@@ -1986,36 +2019,28 @@ __next_mem_pfn_range_in_zone(u64 *idx, struct zone *zone,
  * Return:
  * Physical address of allocated memory block on success, %0 on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * 인자에 올수있는 define에 대한 정리.
- * - start
- *   MEMBLOCK_LOW_LIMIT : 0
+/* IAMROOT, 2021.10.23:
+ * - 다음 args에 올 수 있는 값들.
+ *   - @start:
+ *     MEMBLOCK_LOW_LIMIT: 0
  *
- * - end
- *   MEMBLOCK_ALLOC_ACCESSIBLE : 0. current_limit 를 사용하라는것
- *   MEMBLOCK_ALLOC_KASAN : 1
- *   MEMBLOCK_ALLOC_ANYWHERE : max
+ *   - @end:
+ *     MEMBLOCK_ALLOC_ACCESSIBLE: 0
+ *                                (current_limit 사용 의미)
+ *     MEMBLOCK_ALLOC_KASAN     : 1
+ *     MEMBLOCK_ALLOC_ANYWHERE  : max
  */
 phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
 					phys_addr_t align, phys_addr_t start,
 					phys_addr_t end, int nid,
 					bool exact_nid)
 {
-/*
- * IAMROOT, 2021.10.23:
- * - system이 half mirror 운용중 인지에 대한 flags.
- * - full mirror면 어짜피 system mirror가 전체로 mirror로 운용되므로 딱히
- *   kernel이 알필요가 없을것이다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - 시스템이 half OR full mirror로 운영중인지 확인한다.
+	 */
 	enum memblock_flags flags = choose_memblock_flags();
 	phys_addr_t found;
 
-/*
- * IAMROOT, 2021.10.23:
- * - Any node의 경우 옛날엔 MAX_NUMNODES(16)을 사용햇었다.
- *   지금은 NUMA_NO_NODE(-1)을 사용한다.
- */
 	if (WARN_ONCE(nid == MAX_NUMNODES, "Usage of MAX_NUMNODES is deprecated. Use NUMA_NO_NODE instead\n"))
 		nid = NUMA_NO_NODE;
 
@@ -2028,18 +2053,18 @@ phys_addr_t __init memblock_alloc_range_nid(phys_addr_t size,
 again:
 	found = memblock_find_in_range_node(size, align, start, end, nid,
 					    flags);
-/*
- * IAMROOT, 2021.10.23:
- * - 할당할수 있는 영역을 찾고, reserve에 성공했으면 done.
- */
+
+	/* IAMROOT, 2021.10.23:
+	 * - 할당할 수 있는 region을 찾고, reserved region에 추가했다면
+	 *   done label로 점프한다.
+	 */
 	if (found && !memblock_reserve(found, size))
 		goto done;
 
-/*
- * IAMROOT, 2021.10.23:
- * - nid가 지정되있으면서 반드시 할필요가 없다면 nid를 그냥 Any로 해서
- *   전체 node에서 다시 검색.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - @nid가 지정되어 있고 @exact_nid == false라면 nid를 ANY node로
+	 *   변경해서 다시 탐색한다.
+	 */
 	if (nid != NUMA_NO_NODE && !exact_nid) {
 		found = memblock_find_in_range_node(size, align, start,
 						    end, NUMA_NO_NODE,
@@ -2048,10 +2073,9 @@ again:
 			goto done;
 	}
 
-/*
- * IAMROOT, 2021.10.23:
- * - flag가 mirror인 경우에만 다시 한번 빼보고 again한다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - flags에 MEMBLOCK_MIRROR가 설정되어 있다면 off해서 다시 시도한다.
+	 */
 	if (flags & MEMBLOCK_MIRROR) {
 		flags &= ~MEMBLOCK_MIRROR;
 		pr_warn("Could not allocate %pap bytes of mirrored memory\n",
@@ -2059,17 +2083,15 @@ again:
 		goto again;
 	}
 
-/*
- * IAMROOT, 2021.10.23:
- * - 실패
- */
+	/* IAMROOT, 2021.10.23:
+	 * - 실패
+	 */
 	return 0;
 
 done:
-/*
- * IAMROOT, 2021.10.23:
- * - kasan_init이 호출되는 경우는 pass.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - kasan_init()에서 호출된 경우라면 kmemleak_.. 호출을 skip 한다.
+	 */
 	/* Skip kmemleak for kasan_init() due to high volume. */
 	if (end != MEMBLOCK_ALLOC_KASAN)
 		/*
@@ -2080,6 +2102,9 @@ done:
 		 */
 		kmemleak_alloc_phys(found, size, 0, 0);
 
+	/* IAMROOT, 2024.01.20:
+	 * - 성공
+	 */
 	return found;
 }
 
@@ -2095,10 +2120,8 @@ done:
  * Return: physical address of the allocated memory block on success,
  * %0 on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - alloc 함수는 대부분 가상주소를 return하지만 이 함수는 물리주소를
- *   return 한다.
+/* IAMROOT, 2021.10.23:
+ * - ANY node로 하여 memory region에서 alloc을 시도한다.
  */
 phys_addr_t __init memblock_phys_alloc_range(phys_addr_t size,
 					     phys_addr_t align,
@@ -2124,6 +2147,10 @@ phys_addr_t __init memblock_phys_alloc_range(phys_addr_t size,
  *
  * Return: physical address of the allocated memory block on success,
  * %0 on failure.
+ */
+/* IAMROOT, 2021.10.23:
+ * - memory region에서 @nid과 같은 region에서 alloc을 시도하고 실패시
+ *   ANY node 하여 다시 시도한다.
  */
 phys_addr_t __init memblock_phys_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid)
 {
@@ -2151,10 +2178,8 @@ phys_addr_t __init memblock_phys_alloc_try_nid(phys_addr_t size, phys_addr_t ali
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - exact_nid는 보통은 false고 memblock_alloc_exact_nid_raw 함수에서만
- *   true로 들어오는게 보인다.
+/* IAMROOT, 2021.10.23:
+ * - @exact_nid: 해당 nid와 일치하는 node에서 region을 검색한다.
  */
 static void * __init memblock_alloc_internal(
 				phys_addr_t size, phys_addr_t align,
@@ -2168,20 +2193,24 @@ static void * __init memblock_alloc_internal(
 	 * this moment memblock may be deinitialized already and its
 	 * internal data may be destroyed (after execution of memblock_free_all)
 	 */
-/*
- * IAMROOT, 2021.10.23:
- * - slab 이 사용가능하다면 memblock api을 썻어도 그냥 slab으로 써버리는게
- *   확인된다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - slab allocator 사용 가능해지면 정규 매핑에서 할당한다.
+	 */
 	if (WARN_ON_ONCE(slab_is_available()))
 		return kzalloc_node(size, GFP_NOWAIT, nid);
 
+	/* IAMROOT, 2024.01.20:
+	 * - @max_addr이 current_limit 보다 높다면 @max_addr을 보정한다.
+	 */
 	if (max_addr > memblock.current_limit)
 		max_addr = memblock.current_limit;
 
 	alloc = memblock_alloc_range_nid(size, align, min_addr, max_addr, nid,
 					exact_nid);
 
+	/* IAMROOT, 2024.01.20:
+	 * - @min_addr 범위에서 alloc을 실패하면 0으로 설정하여 다시 시도한다.
+	 */
 	/* retry allocation without lower limit */
 	if (!alloc && min_addr)
 		alloc = memblock_alloc_range_nid(size, align, 0, max_addr, nid,
@@ -2190,10 +2219,10 @@ static void * __init memblock_alloc_internal(
 	if (!alloc)
 		return NULL;
 
-/*
- * IAMROOT, 2021.10.23:
- * paging init이 끝난 alloc함수들은 전부 가상주소로 return 한다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - memblock_alloc_* API가 호출되는 경우는 paging_init이 끝난 경우이므로
+	 *   pa(alloc)을 vaddr로 변경하여 return 한다.
+	 */
 	return phys_to_virt(alloc);
 }
 
@@ -2215,9 +2244,8 @@ static void * __init memblock_alloc_internal(
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - memset으로 초기화를 안시키고 바로 반환 한다.
+/* IAMROOT, 2024.01.20:
+ * - memory region에서 alloc 수행할 때 @nid과 동일한 region에서만 시도한다.
  */
 void * __init memblock_alloc_exact_nid_raw(
 			phys_addr_t size, phys_addr_t align,
@@ -2251,6 +2279,10 @@ void * __init memblock_alloc_exact_nid_raw(
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
+/* IAMROOT, 2024.01.20:
+ * - memory region에서 alloc 수행할 때 @nid과 동일한 region에서 우선 시도하고
+ *   실패시 ANY node에서 다시 시도한다.
+ */
 void * __init memblock_alloc_try_nid_raw(
 			phys_addr_t size, phys_addr_t align,
 			phys_addr_t min_addr, phys_addr_t max_addr,
@@ -2281,9 +2313,10 @@ void * __init memblock_alloc_try_nid_raw(
  * Return:
  * Virtual address of allocated memory block on success, NULL on failure.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - 해당 요청에 따른 memory를 할당받아온다. 가상주소 return
+/* IAMROOT, 2024.01.20:
+ * - memory region에서 alloc 수행할 때 @nid과 동일한 region에서 우선 시도하고
+ *   실패시 ANY node에서 다시 시도한다.
+ *   alloc 성공시 해당 메모리 영역의 값을 0으로 초기화한다.
  */
 void * __init memblock_alloc_try_nid(
 			phys_addr_t size, phys_addr_t align,
@@ -2295,13 +2328,11 @@ void * __init memblock_alloc_try_nid(
 	memblock_dbg("%s: %llu bytes align=0x%llx nid=%d from=%pa max_addr=%pa %pS\n",
 		     __func__, (u64)size, (u64)align, nid, &min_addr,
 		     &max_addr, (void *)_RET_IP_);
-/*
- * IAMROOT, 2021.10.23:
- * - ptr은 kernel에서 대부분 가상주소다.
- *   바로 다음줄에서 memset을 사용하는게 보이고, 즉 현재시점부터는
- *   할당받은 메모리를 바로 사용할수있는(리니어 매핑) 상태가 되있는것을
- *   알 수 있다.
- */
+
+	/* IAMROOT, 2021.10.23:
+	 * - kernel에서 pointer는 대부분 vaddr 이다.
+	 *   결국 지금 시점에서 allocated memory는 linear mapping 이다.
+	 */
 	ptr = memblock_alloc_internal(size, align,
 					   min_addr, max_addr, nid, false);
 	if (ptr)
@@ -2351,16 +2382,21 @@ phys_addr_t __init_memblock memblock_reserved_size(void)
 }
 
 /* lowest address */
-/*
- * IAMROOT, 2021.10.25:
- * - setup_machine_fdt -> early_init_dt_scan -> early_init_dt_scan_memory
- *   을 통해서 dt에서 읽은 memory 값으로 최초에 memblock에 추가가 될것이다.
+/* IAMROOT, 2021.10.25:
+ * - memory region에 등록된 regions 중에서 가장 낮은 paddr을 반환한다.
+ *   memory region은 사용 가능한 물리 메모리가 등록되어 있으므로
+ *   DRAM의 start addr 이기도 하다.
  */
 phys_addr_t __init_memblock memblock_start_of_DRAM(void)
 {
 	return memblock.memory.regions[0].base;
 }
 
+/* IAMROOT, 2024.01.17:
+ * - memory region에 등록된 regions 중에서 가장 높은 paddr을 반환한다.
+ *   memroy region은 사용 가능한 물리 메모리가 등록되어 있으므로
+ *   DRAM의 end addr 이기도 하다.
+ */
 phys_addr_t __init_memblock memblock_end_of_DRAM(void)
 {
 	int idx = memblock.memory.cnt - 1;
@@ -2409,9 +2445,9 @@ void __init memblock_enforce_memory_limit(phys_addr_t limit)
 			      PHYS_ADDR_MAX);
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - 요청된 범위이외의 영역을 전부 지운다.
+/* IAMROOT, 2021.10.23:
+ * - pa(@base .. (@base + @size)) 범위외의 모든 memory/reserved regions을
+ *   삭제한다.
  */
 void __init memblock_cap_memory_range(phys_addr_t base, phys_addr_t size)
 {
@@ -2462,9 +2498,8 @@ void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 	memblock_cap_memory_range(0, max_addr);
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - 해당 addr이 존재하는지 binsearch한다. 반한되는값은 memblock index
+/* IAMROOT, 2021.10.23:
+ * - @type region에 @addr block이 존재하는지 binary search 한다.
  */
 static int __init_memblock memblock_search(struct memblock_type *type, phys_addr_t addr)
 {
@@ -2496,9 +2531,8 @@ bool __init_memblock memblock_is_memory(phys_addr_t addr)
 
 /*
  * IAMROOT, 2022.07.16:
- * - memblock을 @addr로 search한다. mapping된 정상적인 memblcok이 존재했을때
- *   nomap flag가 없다면 return true.
- * - 즉 이미 mapping된 memblock인지 확인한다.
+ * - @addr가 memory regions에 이미 mapping 되어 있는지 확인한다.
+ *   만약 region 탐색에 성공하면 다시한번 NOMAP flag == on인지 확인한다.
  */
 bool __init_memblock memblock_is_map_memory(phys_addr_t addr)
 {
@@ -2556,18 +2590,17 @@ bool __init_memblock memblock_is_region_memory(phys_addr_t base, phys_addr_t siz
  * Return:
  * True if they intersect, false if not.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - reseved 영역에서 해당 범위가 겹치는지 여부를 반환.
+/* IAMROOT, 2021.10.23:
+ * - region[@base .. (@base + @size)] 요청범위가 reserved region과
+ *   겹치는지/사용중인지 확인한다.
  */
 bool __init_memblock memblock_is_region_reserved(phys_addr_t base, phys_addr_t size)
 {
 	return memblock_overlaps_region(&memblock.reserved, base, size);
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - 등록되있는 memory을 aligin단위로 정렬
+/* IAMROOT, 2021.10.23:
+ * - memory region에 등록된 모든 block을 @align 단위로 정렬한다.
  */
 void __init_memblock memblock_trim_memory(phys_addr_t align)
 {
@@ -2644,10 +2677,9 @@ static void __init_memblock __memblock_dump_all(void)
 #endif
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - command line에 memblock=debug param이 지정된 상태에서 동작하며
- *   해당 함수는 bootmem_init 마지막에서 호출해준다.
+/* IAMROOT, 2021.10.23:
+ * - bootarg에 memblock=debug param이 지정된 상태에서 동작하며 bootmem_init
+ *   마지막 stage에서 호출된다.
  */
 void __init_memblock memblock_dump_all(void)
 {
@@ -2655,19 +2687,17 @@ void __init_memblock memblock_dump_all(void)
 		__memblock_dump_all();
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - paging init이 완료 되고나서 memblock alloc이 사용가능해지면
- *   호출 된다.
+/* IAMROOT, 2021.10.23:
+ * - paging init이 완료되고나서 memblock_alloc_xx API 사용이 가능해지면
+ *   @memblock_can_resize 변수를 1로 설정한다.
  */
 void __init memblock_allow_resize(void)
 {
 	memblock_can_resize = 1;
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * - command line에 memblock=debug 와 같이 입력이 되어있으면 debug를 set한다.
+/* IAMROOT, 2021.10.23:
+ * - bootarg에 memblock=debug와 같이 입력되면 debug를 on한다.
  */
 static int __init early_memblock(char *p)
 {
@@ -2941,11 +2971,10 @@ void __init memblock_free_all(void)
 
 #if defined(CONFIG_DEBUG_FS) && defined(CONFIG_ARCH_KEEP_MEMBLOCK)
 
-/*
- * IAMROOT, 2021.10.23:
+/* IAMROOT, 2021.10.23:
  *
- * - kernel에서 debugfs 관련 config를 on해서 /sys/kernel/debug 등을 사용해서
- *   user 영역에서 확인할수있다.
+ * - kernel의 debugfs config를 on하여 /sys/kernel/debug을 생성하여
+ *   user 영역에서 memblock 정보를 확인 할 수있다.
  */
 static int memblock_debug_show(struct seq_file *m, void *private)
 {
