@@ -7,14 +7,14 @@
 
 #ifndef __ASSEMBLY__
 
-/*
- * IAMROOT, 2021.09.25: 
- * - yield 어셈블리 명령은 아키텍처에게 hint를 주는데,
- *   다른 스레드(미래의 dual hw thread)에게 파이프라인의 실행 유닛등을 양보할
- *   수 있다. 
+/* IAMROOT, 2021.09.25:
+ * - yield instr은 arch에게 다음과 같은 hint를 준다.
+ *   다른 thread(hyper-threading 구조)에게 pipeline의 실행 유닛을
+ *   양보할 수 있다.
  *
- * - 현재까지 출시된 ARM64 core들은 single hw thread per core 이므로 
- *   nop와 거의 유사할 것이라 추측함.
+ * - 현재까지 출시된 Arm64 cores는 single hyper-threading per core이므로
+ *   nop instr와 거의 유사하다고 추측됨.
+ *
  * - busy wait
  */
 static inline void cpu_relax(void)

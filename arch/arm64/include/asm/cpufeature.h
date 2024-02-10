@@ -1002,10 +1002,10 @@ static inline bool system_has_full_ptr_auth(void)
 	return system_supports_address_auth() && system_supports_generic_auth();
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - GIC NMI관련 함수
- * - 우선순위 필터를 제어함으로 irq enalbe/disable을 결정할수있는지 확인한다.
+/* IAMROOT, 2021.10.16:
+ * - GIC NMI 관련 함수.
+ *   priority 필터를 제어함으로 irq enable/disable을 결정할 수 있는지
+ *   확인한다.
  */
 static __always_inline bool system_uses_irq_prio_masking(void)
 {

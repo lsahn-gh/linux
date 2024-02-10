@@ -13,9 +13,11 @@
 #include <asm/ptrace.h>
 
 #define DAIF_PROCCTX		0
-/*
- * IAMROOT, 2022.11.07:
- * - irq, fiq disable
+/* IAMROOT, 2022.11.07:
+ * - irq, fiq disable.
+ *
+ *   daif에 설정된 bits는 현재 enable 되어 있다고 표현할 수 있어서
+ *   해당 h/w exception은 발생하지 않음.
  */
 #define DAIF_PROCCTX_NOIRQ	(PSR_I_BIT | PSR_F_BIT)
 #define DAIF_ERRCTX		(PSR_A_BIT | PSR_I_BIT | PSR_F_BIT)
@@ -73,12 +75,8 @@ static inline unsigned long local_daif_save(void)
 	return flags;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - flags값으로 설정.
- *
- * - 5.10 -> 5.15 변경사항
- *   PSR_I_BIT에 대해서만 검사했는데 PSR_F_BIT 검사까지 하도록 변경됨.
+/* IAMROOT, 2021.10.16: TODO
+ * - daif regs bits를 @flags 값으로 설정.
  */
 static inline void local_daif_restore(unsigned long flags)
 {

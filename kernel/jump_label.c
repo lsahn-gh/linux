@@ -86,10 +86,9 @@ static void jump_label_swap(void *a, void *b, int size)
 	jeb->key	= tmp.key + delta;
 }
 
-/*
- * IAMROOT, 2022.02.24:
- * - start ~ stop까지 jump_entry에 등록된 static_key의 주소와 code를 기준으로
- *   정렬을 수행한다.
+/* IAMROOT, 2022.02.24:
+ * - @start .. @stop까지 jump_entry에 등록된 static_key의 addr와 code를
+ *   기준으로 heapsort를 수행한다.
  */
 static void
 jump_label_sort_entries(struct jump_entry *start, struct jump_entry *stop)
@@ -116,11 +115,16 @@ static void jump_label_update(struct static_key *key);
  * 'static_key_disable()', which require bug.h. This should allow jump_label.h
  * to be included from most/all places for CONFIG_JUMP_LABEL.
  */
-/*
- * IAMROOT, 2022.02.24:
- * - header include 관련 문제로 이렇게 해놓은거 같다.
- * - enabled가 -1이면 inc중이기 때문에 true의 의미인 1을 return 한다.
- *   (static_key_slow_inc_cpuslocked 참고)
+/* IAMROOT, 2022.02.24:
+ * - @key의 enabled 값을 읽어 반환한다.
+ *
+ *   총 3개의 state로 표시되며 다음과 같다.
+ *   -  0: disabled
+ *   - -1: in progress to enable
+ *   -  n: enabled (or counted)
+ *
+ *   여기서 -1은 0에서 1로 변환되는 중간에 값이 읽힌 것이므로 1로 변경하여
+ *   반환된다. static_key_slow_inc_cpuslocked(..) 함수 참고.
  */
 int static_key_count(struct static_key *key)
 {
@@ -504,10 +508,8 @@ static void __jump_label_update(struct static_key *key,
 }
 #endif
 
-/*
- * IAMROOT, 2021.10.16:
- * - static_key를 정렬하고 static_key가 init section에 위치하는지 판단해
- *   flag를 set한다. 또한 static_key와 jump_entry끼리 mapping 한다.
+/* IAMROOT, 2021.10.16:
+ * - static_key 기능을 초기화한다.
  */
 void __init jump_label_init(void)
 {

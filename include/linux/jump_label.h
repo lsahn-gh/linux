@@ -129,16 +129,14 @@ struct static_key {
 #ifndef __ASSEMBLY__
 #ifdef CONFIG_HAVE_ARCH_JUMP_LABEL_RELATIVE
 
+/* IAMROOT, 2022.02.24:
+ * - @key
+ *   bit_field(0): code가 branch라면 set, 아니면(nop) clear.
+ *   bit_field(1): code가 init section에 존재하면 set, 아니면 clear.
+ */
 struct jump_entry {
 	s32 code;
 	s32 target;
-/*
- * IAMROOT, 2022.02.24:
- * - 0번 bit
- *   code가 branch인 상황이면 set, 아니면(nop) clear.
- * - 1번 bit
- *   code가 init section에 존재하면 set.
- */
 	long key;	// key may be far away from the core kernel under KASLR
 };
 
@@ -152,16 +150,13 @@ static inline unsigned long jump_entry_target(const struct jump_entry *entry)
 	return (unsigned long)&entry->target + entry->target;
 }
 
-/*
- * IAMROOT, 2022.02.24:
- * - key의 0, 1번 bit는 flag로 쓰니 걸러준다
- *   (static_key 주석, jump_entry_is_branch, jump_entry_is_init,
- *   jump_entry_set_init 참고)
- * - DEFINE_STATIC_KEY_TRUE / DEFINE_STATIC_KEY_FALSE로 정의한 static_key 주소를
- *   불러온다.
- *   static_key - (entry->key address) = entry->key
- *   => static_key = (entry->key address) + entry->key
- *                 = &entry->key + entry->key
+/* IAMROOT, 2022.02.24:
+ * - key의 bit_field(0 or 1)은 flag로 사용하니 필터링한다.
+ *   key를 이용한 offset은 4 bytes 기준으로 align 된다.
+ *
+ * - DEFINE_STATIC_KEY_TRUE / DEFINE_STATIC_KEY_FALSE로 정의한 static_key
+ *   주소를 불러온다.
+ *   => static_key = &entry->key + offset(entry->key)
  */
 static inline struct static_key *jump_entry_key(const struct jump_entry *entry)
 {
@@ -189,26 +184,31 @@ static inline struct static_key *jump_entry_key(const struct jump_entry *entry)
 
 #endif
 
-/*
- * IAMROOT, 2022.02.24:
- * - arch_static_branch 함수등에서 branch가 true일 경우 key member의 0번
- *   bit는 set되었을 것이다.
- *   즉 static_key가 branch(true)로 정의 됬는지 nop(false)로 정의 됬는지 확인한다.
+/* IAMROOT, 2022.02.24:
+ * - @entry의 branch 여부를 확인한다.
+ *   key의 bit_field(0)을 masking 하여 1 or 0을 확인한다.
+ *
+ * - arch_static_branch 함수등에서 branch가 true일 경우 bit_field(0)이
+ *   1로 set 된다. 결국 static_key가 branch(true)로 set인지 nop(false)인지
+ *   확인한다.
  */
 static inline bool jump_entry_is_branch(const struct jump_entry *entry)
 {
 	return (unsigned long)entry->key & 1UL;
 }
 
+/* IAMROOT, 2024.02.09:
+ * - @entry의 init section 사용 여부를 확인한다.
+ *   key의 bit_field(1)을 masking 하여 1 or 0을 확인한다.
+ */
 static inline bool jump_entry_is_init(const struct jump_entry *entry)
 {
 	return (unsigned long)entry->key & 2UL;
 }
 
-/*
- * IAMROOT, 2022.02.24:
- * - @entry가 init setction에 포함되었는지 여부(@set)에 따라 1번 bit를 
- *   set/clear한다.
+/* IAMROOT, 2022.02.24:
+ * - @set arg 값에 따라 @entry의 bit_field(1)을 set/clear 한다.
+ *   이는 init setction에 포함되었는지 여부를 확인하는 코드이다.
  */
 static inline void jump_entry_set_init(struct jump_entry *entry, bool set)
 {
@@ -450,10 +450,13 @@ struct static_key_false {
 
 extern bool ____wrong_branch_error(void);
 
-/*
- * IAMROOT, 2022.02.24:
- * - x가 정해진 type인지 compile type에 검사를 수행한다.
- * - enable == 0 이면 false, 0이 아니면 true
+/* IAMROOT, 2022.02.24:
+ * - @x key의 enable/disable 상태를 확인하여 반환한다.
+ *   -  true: enabled
+ *   - false: disabled
+ *
+ *   __builtin_types_compatible_p(..): GCC 확장 기능이며 compile time에
+ *                                     type 검사를 수행한다.
  */
 #define static_key_enabled(x)							\
 ({										\
@@ -471,26 +474,26 @@ extern bool ____wrong_branch_error(void);
  * to generate the desired result.
  *
  *
- * type\branch|	likely (1)	      |	unlikely (0)
+ * type\branch| likely (1)            | unlikely (0)
  * -----------+-----------------------+------------------
  *            |                       |
- *  true (1)  |	   ...		      |	   ...
- *            |    NOP		      |	   JMP L
- *            |    <br-stmts>	      |	1: ...
- *            |	L: ...		      |
- *            |			      |
- *            |			      |	L: <br-stmts>
- *            |			      |	   jmp 1b
+ *  true (1)  |    ...                |   ...
+ *            |    NOP                |    JMP L
+ *            |    <br-stmts>         | 1: ...
+ *            | L: ...                |
+ *            |                       |
+ *            |                       | L: <br-stmts>
+ *            |                       |    jmp 1b
  *            |                       |
  * -----------+-----------------------+------------------
  *            |                       |
- *  false (0) |	   ...		      |	   ...
- *            |    JMP L	      |	   NOP
- *            |    <br-stmts>	      |	1: ...
- *            |	L: ...		      |
- *            |			      |
- *            |			      |	L: <br-stmts>
- *            |			      |	   jmp 1b
+ *  false (0) |    ...                |    ...
+ *            |    JMP L              |    NOP
+ *            |    <br-stmts>         | 1: ...
+ *            | L: ...                |
+ *            |                       |
+ *            |                       | L: <br-stmts>
+ *            |                       |    jmp 1b
  *            |                       |
  * -----------+-----------------------+------------------
  *
@@ -502,17 +505,17 @@ extern bool ____wrong_branch_error(void);
  *
  * This gives the following logic table:
  *
- *	enabled	type	branch	  instuction
- * -----------------------------+-----------
- *	0	0	0	| NOP
- *	0	0	1	| JMP
- *	0	1	0	| NOP
- *	0	1	1	| JMP
+ *  enabled type    branch       instuction
+ *  ----------------------------+-----------
+ *  0       0       0           | NOP
+ *  0       0       1           | JMP
+ *  0       1       0           | NOP
+ *  0       1       1           | JMP
  *
- *	1	0	0	| JMP
- *	1	0	1	| NOP
- *	1	1	0	| JMP
- *	1	1	1	| NOP
+ *  1       0       0           | JMP
+ *  1       0       1           | NOP
+ *  1       1       0           | JMP
+ *  1       1       1           | NOP
  *
  * Which gives the following functions:
  *
@@ -521,122 +524,11 @@ extern bool ____wrong_branch_error(void);
  *
  * See jump_label_type() / jump_label_init_type().
  */
-
-/*
- * IAMROOT, 2021.10.16:
- * default
- * - key   | like?    | code | if(x)
- *   true  | likely   | nop  | likely(true)
- *   true  | unlikely | br   | unlikely(true)
- *   false | likely   | br   | likely(false)
- *   false | unlikely | nop  | unlikely(false)
- *
- * change
- *   true  | likely   | br  | likely(false)
- *   true  | unlikely | nop | unlikely(false)
- *   false | likely   | nop | likely(true)
- *   false | unlikely | br  | unlikely(true)
- */
-/*
- * IAMROOT, 2022.02.24:
- * //<-- 로 되있는 asm code부분이 key변경시 nop<->b #l_yes로 바뀔수있다.
- * -----------------
- * - c 
- *   if (static_branch_likely(static_key_true))
- *   {
- *		codeA
- *   } else
- *   {
- *		codeB
- *   }
- *   codeC
- *
- * - asm
- *   nop //<--
- *   codeA
- *   codeC
- *   b next
- * l_yes:
- *   codeB
- *   b codeC
- * next:
- *
- * if문 실행. codeB가 멀리 위치. codeC보다 뒤에 위치하는게 보인다.
- * -----------------
- *  -c 
- *   if (static_branch_likely(static_key_false))
- *   {
- *		codeA
- *   } else
- *   {
- *		codeB
- *   }
- *   codeC
- *
- * - asm
- *   1: b #l_yes //<--
- *   codeA
- *   codeC
- *   b next
- * l_yes:
- *   codeB
- *   b codeC
- * next:
- *
- * if문 else 실행. codeB가 멀리 위치. codeC보다 뒤에 위치하는게 보인다.
- * -----------------
- *   if (static_branch_unlikely(static_key_true))
- *   {
- *		codeA
- *   }else
- *   {
- *		codeB
- *   }
- *   codeC
- *
- * - asm
- *  1: b #l_yes //<--- 
- *   b skip
- * l_yes:
- *   codeA
- *   b next
- * skip:
- *   codeB
- * next:
- *   codeC
- * next:
- * ..
- *   
- * if문 수행. codeB가 codeC보다 가깝게 위치하는게 보인다.
- * -----------------
- *   if (static_branch_unlikely(static_key_false))
- *   {
- *		codeA
- *   } else
- *   {
- *		codeB
- *   }
- *   codeC
- *
- * - asm
- * 1: nop //<--
- *   b skip
- * l_yes:
- *   codeA
- *   b next
- * skip:
- *   codeB
- * next:
- *   codeC
- * next:
- * ..
- *
- * if문 else 수행. codeB가 codeC보다 가깝게 위치하는게 보인다.
- *
- * - static_key의 true false
- *   true : if문 실행. like인경우 nop로 진입,
- *                     unlike인 경우 branch로 진입.
- *   false : else실행. like, unlike 둘다 branch로 진입하는데 like인 경우엔
+/* IAMROOT, 2022.02.24: TODO
+ * - static_key의 true or false
+ *   true : if 실행. like인경우 nop로 진입,
+ *                   unlike인 경우 branch로 진입.
+ *   false: else 실행. like, unlike 둘다 branch로 진입하는데 like인 경우엔
  *                     code가 멀리 위치하고 있을수있다.
  * - static branch의 like, unlike의 의미
  *   like인경우 : else인 code들이 뒤쪽에 위치한다.
@@ -688,10 +580,6 @@ extern bool ____wrong_branch_error(void);
 
 /*
  * Normal usage; boolean enable/disable.
- */
-/*
- * IAMROOT, 2022.02.17:
- * - x를 enable로 전환한다.
  */
 #define static_branch_enable(x)			static_key_enable(&(x)->key)
 #define static_branch_disable(x)		static_key_disable(&(x)->key)

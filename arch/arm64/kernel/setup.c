@@ -323,12 +323,16 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	void *dt_virt = fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL);
 	const char *name;
 
+	/* IAMROOT, 2024.01.20:
+	 * - fdt를 fixmap mapping에 성공하면 memblock reserved region에도
+	 *   추가한다.
+	 */
 	if (dt_virt)
 		memblock_reserve(dt_phys, size);
 
-	/*
-	 * IAMROOT, 2021.10.14:
-	 * dt_virt를 검색을 해서 이용을 하겠다는것.
+	/* IAMROOT, 2021.10.14:
+	 * - dt_virt가 null이거나 early_init_dt_scan(..)이 실패하면
+	 *   cpu_relax(..) 호출하며 inf-loop를 수행한다.
 	 */
 	if (!dt_virt || !early_init_dt_scan(dt_virt)) {
 		pr_crit("\n"
@@ -340,11 +344,13 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 		while (true)
 			cpu_relax();
 	}
-/*
- * IAMROOT, 2021.10.16:
- * - 속성만 바꾸고(Read Only) remap
- */
+	/* IAMROOT, 2024.01.20:
+	 * - dt에서 물리 메모리 정보를 읽어 memblock에 추가한 상태.
+	 */
 
+	/* IAMROOT, 2021.10.16:
+	 * - fdt fixmap의 page table attr만 RO로 변경한다.
+	 */
 	/* Early fixups are done, map the FDT as read-only now */
 	fixmap_remap_fdt(dt_phys, &size, PAGE_KERNEL_RO);
 
@@ -480,19 +486,19 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	setup_machine_fdt(__fdt_pointer);
 
-/*
- * IAMROOT, 2021.10.16:
- * - static key
- *   if의 조건에 사용되는 변수가 변경될일이 거의 없으면서 read를 많이 해야되는경우
- *   매번 읽는것이 아니라 해당 조건문 자체를 nop나 branch로 교체해서 if문 자체를
- *   없애는 방법. 또한 likely와 unlikely를 사용해 branch되는 code의 주변 배치여부도
- *   정해 tlb cache나 data cache hit도 잘되도록 하여 효율을 높인다.
- *
- *   enable / disable의 비용이 매우크다. 해당 변수가 존재하는 모든 code를
- *   교체하는식으로 진행하며 tlb cache등도 비워줘야 되기 때문이다.
- *
- *   관련 api : static_branch_likely, static_branch_unlikely
- */
+	/*
+	 * IAMROOT, 2021.10.16: TODO
+	 * - static key
+	 *   if의 조건에 사용되는 변수가 변경될일이 거의 없으면서 read를 많이 해야되는경우
+	 *   매번 읽는것이 아니라 해당 조건문 자체를 nop나 branch로 교체해서 if문 자체를
+	 *   없애는 방법. 또한 likely와 unlikely를 사용해 branch되는 code의 주변 배치여부도
+	 *   정해 tlb cache나 data cache hit도 잘되도록 하여 효율을 높인다.
+	 *
+	 *   enable / disable의 비용이 매우크다. 해당 변수가 존재하는 모든 code를
+	 *   교체하는식으로 진행하며 tlb cache등도 비워줘야 되기 때문이다.
+	 *
+	 *   관련 api : static_branch_likely, static_branch_unlikely
+	 */
 	/*
 	 * Initialise the static keys early as they may be enabled by the
 	 * cpufeature code and early parameters.
@@ -500,12 +506,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	jump_label_init();
 	parse_early_param();
 
-/*
- * IAMROOT, 2021.10.16:
- * - IRQ를 제외한 나머지를 Enable하겠다는것.
- *   원래 local_daif_restore는 local_daif_save와 같이사용하지만 여기서는 강제로
- *   restore시킴이 보인다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - daif에서 irq, fiq를 제외한 나머지 exceptions을 enable.
+	 */
 	/*
 	 * Unmask asynchronous aborts and fiq after bringing up possible
 	 * earlycon. (Report possible System Errors once we can report this
@@ -513,10 +516,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	local_daif_restore(DAIF_PROCCTX_NOIRQ);
 
-/*
- * IAMROOT, 2021.10.16:
- * - head.S에서 idmap을 ttbr0에 썻었는데 그것을 해제하기 위함.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - head.S에서 ttbr0에 mapping 했던 idmap을 해제한다.
+	 */
 	/*
 	 * TTBR0 is only used for the identity mapping at this stage. Make it
 	 * point to zero page to avoid speculatively fetching new entries.

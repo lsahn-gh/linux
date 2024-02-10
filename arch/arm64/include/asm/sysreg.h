@@ -1456,9 +1456,8 @@
 		     : : "rZ" (__val));				\
 } while (0)
 
-/*
- * IAMROOT, 2021.09.11:
- * - gcc가 지원하지 않은 경우에 대비하여 아에 명령어를 만든다
+/* IAMROOT, 2021.09.11:
+ * - gcc가 지원하지 않는 sysreg에 접근하기 위해 assembly를 조합한다.
  */
 /*
  * For registers without architectural names, or simply unsupported by

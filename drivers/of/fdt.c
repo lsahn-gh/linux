@@ -661,9 +661,8 @@ void *of_fdt_unflatten_tree(const unsigned long *blob,
 }
 EXPORT_SYMBOL_GPL(of_fdt_unflatten_tree);
 
-/*
- * IAMROOT, 2021.10.16:
- * - dt에서 읽은 root node의 값을 저장하는 변수들
+/* IAMROOT, 2021.10.16:
+ * - dt에서 읽은 root node의 addr-cells, size-cells 값 저장.
  */
 /* Everything below here references initial_boot_params directly. */
 int __initdata dt_root_addr_cells;
@@ -965,16 +964,14 @@ unsigned long __init of_get_flat_dt_root(void)
  * This function can be used within scan_flattened_dt callback to get
  * access to properties
  */
-/*
- * IAMROOT, 2021.10.16:
- * dt에서는 다음과 같은 구조를 가지는데
+/* IAMROOT, 2021.10.16:
+ * - dt는 다음과 같은 구조를 가짐.
  *
- * node {
- *   prop = value
- * }
+ *   node {
+ *     prop = value
+ *   }
  *
- * 여기서 prop에 해당하는 value의 주소와 size를 구하는것. 주소는
- * return값으로 반환.
+ *   prop에 해당하는 value의 주소와 size를 구하고 vaddr 반환.
  */
 const void *__init of_get_flat_dt_prop(unsigned long node, const char *name,
 				       int *size)
@@ -1066,10 +1063,10 @@ const char * __init of_flat_dt_get_machine_name(void)
 	const char *name;
 	unsigned long dt_root = of_get_flat_dt_root();
 
-/*
- * IAMROOT, 2021.10.16:
- * - model : 제품명. 제품명이 없으면 그냥 driver 명(compatible)을 사용한다는것.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - @model     : 제품명.
+	 *   @compatible: 제품명이 없으면 그냥 compatible 사용.
+	 */
 	name = of_get_flat_dt_prop(dt_root, "model", NULL);
 	if (!name)
 		name = of_get_flat_dt_prop(dt_root, "compatible", NULL);
@@ -1333,9 +1330,9 @@ int __init early_init_dt_scan_root(unsigned long node, const char *uname,
 	return 1;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - s개만큼 cell을 읽는다. s가 1 or 2만 처리가능.
+/* IAMROOT, 2021.10.16:
+ * - @s만큼 @cellp를 읽고 다음 cell을 읽기 위해 @cellp를 보정한다.
+ *   1 cell은 최대 32bits 이다.
  */
 u64 __init dt_mem_next_cell(int s, const __be32 **cellp)
 {
@@ -1356,16 +1353,17 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 	int l;
 	bool hotpluggable;
 
-/* IAMROOT, 2021.10.16:
- * - DT는 cpu, pci, memory등의 node가 존재하며 memory만 scan 한다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - 'memory' prop만 scan 한다.
+	 */
 	/* We are scanning "memory" nodes only */
 	if (type == NULL || strcmp(type, "memory") != 0)
 		return 0;
 
-/* IAMROOT, 2021.10.16:
- * - reg == linux,usable-memory 관계는 memory node에서만 성립한다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - 'linux,usable-memory' prop을 찾고 없으면 'reg'을 찾는다.
+	 *   'linux,usable-memory'과 'reg' 관계는 memory node에서만 성립한다.
+	 */
 	reg = of_get_flat_dt_prop(node, "linux,usable-memory", &l);
 	if (reg == NULL)
 		reg = of_get_flat_dt_prop(node, "reg", &l);
@@ -1374,23 +1372,24 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 
 	endp = reg + (l / sizeof(__be32));
 
-/* IAMROOT, 2021.10.16:
- * - hotpluggable memory 인 경우 사용한다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - hotplug 가능한 memory인 경우 사용한다.
+	 */
 	hotpluggable = of_get_flat_dt_prop(node, "hotpluggable", NULL);
 
 	pr_debug("memory scan node %s, reg size %d,\n", uname, l);
 
-/* IAMROOT, 2021.10.16:
- * - loop를 수행하는 이유는 memory reg addr가 여러개로 이루어질 수 있으므로.
- *
- *   예) reg = <0x000000000 0x80000000 0x00000001 0x00000000>,
- *             <0x000000008 0x00000000 0x00000001 0x00000000>;
- *
- *       위 정의는 다음과 같음.
- *       <0x0000_0000_8000_0000 0x0000_0001_0000_0000>,
- *       <0x0000_0008_0000_0000 0x0000_0001_0000_0000>;
- */
+	/* IAMROOT, 2021.10.16:
+	 * - memory reg-addr가 아래와 같이 여러 cell로 이루어 질 수 있으므로
+	 *   loop를 수행한다.
+	 *
+	 *   예) reg = <0x000000000 0x80000000 0x00000001 0x00000000>,
+	 *             <0x000000008 0x00000000 0x00000001 0x00000000>;
+	 *
+	 *       위 정의는 다음과 같음.
+	 *       <0x0000_0000_8000_0000 0x0000_0001_0000_0000>,
+	 *       <0x0000_0008_0000_0000 0x0000_0001_0000_0000>;
+	 */
 	while ((endp - reg) >= (dt_root_addr_cells + dt_root_size_cells)) {
 		u64 base, size;
 
@@ -1401,15 +1400,18 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 			continue;
 		pr_debug(" - %llx, %llx\n", base, size);
 
-/* IAMROOT, 2024.01.09:
- * - 위 DT에서 parsing한 @base, @size를 기반으로 phys memory 영역을
- *   memblock에 등록한다.
- */
+		/* IAMROOT, 2024.01.09:
+		 * - 위 DT에서 parsing한 @base, @size를 기반으로 phys memory 영역을
+		 *   memblock에 등록한다.
+		 */
 		early_init_dt_add_memory_arch(base, size);
 
 		if (!hotpluggable)
 			continue;
 
+		/* IAMROOT, 2024.01.20:
+		 * - hotpluggable memory라면 MEMBLOCK_HOTPLUG flag를 setup 한다.
+		 */
 		if (memblock_mark_hotplug(base, size))
 			pr_warn("failed to mark hotplug range 0x%llx - 0x%llx\n",
 				base, base + size);
@@ -1418,9 +1420,9 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 	return 0;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - node는 dt에서의 offset을 의미하고, uname은 그 node의 이름을 의미한다.
+/* IAMROOT, 2021.10.16:
+ * - @node : dt에서 offset 의미.
+ *   @uname: @node의 stringified name 의미.
  */
 int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 				     int depth, void *data)
@@ -1431,15 +1433,17 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 
 	pr_debug("search \"chosen\", depth: %d, uname: %s\n", depth, uname);
 
-/*
- * IAMROOT, 2021.10.09: 
- * 루트 노드가 depth=0이다. 루트 노드 다음 즉, depth=1인 chosen 노드가 아니면
- * 함수를 빠져나간다. (skip)
- */
+	/* IAMROOT, 2021.10.09:
+	 * - root node가 depth == 0이며 next node인, depth == 1가 chosen이
+	 *   아니면 skip 한다.
+	 */
 	if (depth != 1 || !data ||
 	    (strcmp(uname, "chosen") != 0 && strcmp(uname, "chosen@0") != 0))
 		return 0;
 
+	/* IAMROOT, 2024.01.20:
+	 * - initrd, elfcorehdr, usable_mem_range prop을 찾는다.
+	 */
 	early_init_dt_check_for_initrd(node);
 	early_init_dt_check_for_elfcorehdr(node);
 	early_init_dt_check_for_usable_mem_range(node);
@@ -1449,16 +1453,18 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 	if (p != NULL && l > 0)
 		strlcpy(data, p, min(l, COMMAND_LINE_SIZE));
 
-/*
- * IAMROOT, 2021.10.16:
- * 
- * | dt bootargs | CMDLINE | EXTEND | FORCE | 실제 사용
- * | Y           | N       | -      | -     | dt bootargs
- * | Y           | Y       | Y      | Y     | Y/Y는 없음
- * | Y           | Y       | Y      | N     | dt + kernel
- * | Y           | Y       | N      | Y     | kernel
- * | Y           | Y       | N      | N     | dt ?: kernel (default)
- */
+	/* IAMROOT, 2021.10.16:
+	 * - kernel config에 설정된 cmdline 옵션을 추가한다.
+	 *
+	 *   +-------------+---------+--------+-------+--------------------------+
+	 *   | dt bootargs | CMDLINE | EXTEND | FORCE | 실제 사용                |
+	 *   +-------------+---------+--------+-------+--------------------------+
+	 *   | Y           | N       | -      | -     | dt bootargs              |
+	 *   | Y           | Y       | Y      | N     | dt bootargs + kern conf  |
+	 *   | Y           | Y       | N      | Y     | kern conf                |
+	 *   | Y           | Y       | N      | N     | dt bootargs ?: kern conf |
+	 *   +-------------+---------+--------+-------+--------------------------+
+	 */
 	/*
 	 * CONFIG_CMDLINE is meant to be a default in case nothing else
 	 * managed to set the command line, unless CONFIG_CMDLINE_FORCE
@@ -1479,11 +1485,10 @@ int __init early_init_dt_scan_chosen(unsigned long node, const char *uname,
 
 	pr_debug("Command line is: %s\n", (char *)data);
 
-/*
- * IAMROOT, 2021.10.16:
- * - dt에 rng_seed가 존재하면 config에 따라 entropy를 초기화한다.
- *   default kernel에서는 rng-seed가 없다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - dt에 rng-seed prop가 존재하면 config에 따라 entropy를 초기화한다.
+	 *   default kernel에서는 rng-seed가 없다.
+	 */
 	rng_seed = of_get_flat_dt_prop(node, "rng-seed", &l);
 	if (rng_seed && l > 0) {
 		add_bootloader_randomness(rng_seed, l);
@@ -1616,14 +1621,11 @@ bool __init early_init_dt_verify(void *params)
  * 함수에서 하는 일은 다음과 같다.
  * - choosen node
  *   initrd의(boot때 ramdisk를 사용할때의 ramdisk 크기 설정)
- *   물리메모리 시작주소와 사이즈를 읽어오고, bootargs prop를 읽어와
- *   kernel config를 읽어 kernel config에 따라 boot_command_line을 초기화한다.
- * - root node의 #address-cells, #size-cells 을 구해서 초기화
- * - memory node의 reg 값을 읽어 물리메모리의 시작주소와 사이즈를 읽어서
- *   memblock에 추가.
+ *   물리메모리 시작주소와 사이즈를 읽고, bootargs prop도 읽고,
+ *   kernel config도 읽어 boot_command_line을 초기화한다.
  *
- * - initrd란
- *   kernel이 ooting에서 쓸만한 application(cd, rm, cp, mount, busybox등)이
+ *   initrd란
+ *   kernel이 booting에서 쓸만한 application(cd, rm, cp, mount, busybox등)이
  *   user mode에서 동작하게 하기위한 기능.
  *   kernel을 build할때 특정 dir를 압축해서 통째로 kernel을 만들어(initrd)
  *   ramdisk에 풀어서 사용한다.
@@ -1633,6 +1635,11 @@ bool __init early_init_dt_verify(void *params)
  *   ext2 image + gzip을 사용한다.
  *
  *   대응되는 기능으론 initramfs가 존재한다.(cpio + gzip)
+ *
+ * - root node의 #address-cells, #size-cells을 구해서 초기화
+ *
+ * - memory node의 reg 값을 읽어 물리 메모리의 시작 주소와 사이즈를 읽어
+ *   memblock에 추가.
  */
 void __init early_init_dt_scan_nodes(void)
 {
