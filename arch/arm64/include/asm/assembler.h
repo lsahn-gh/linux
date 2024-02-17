@@ -33,10 +33,22 @@
 	wx\n	.req	w\n
 	.endr
 
-/*
- * IAMROOT, 2021.10.30:
- * - 원래 있던 daif에 대한 flag를 읽어온후 disable 시킨다.
- * - restore_daif와 한쌍이 된다.
+/* IAMROOT, 2021.10.30:
+ * - save_and_disable_daif(flags):
+ *   현재 cpsr.daif bits 값을 @flags에 저장하고 0b1111로 set하여 exception을
+ *   disable 한다.
+ *
+ * - disable_daif():
+ *   cpsr.daif bits를 모두 0b1111로 set하여 exception을 disable 한다.
+ *
+ * - enable_daif():
+ *   cpsr.daif bits를 모두 0b0000로 clear하여 exception을 enable 한다.
+ *
+ * - restore_daif(flags):
+ *   @flags에 저장된 daif bits를 cpsr.daif에 복구한다.
+ *
+ * - enable_da():
+ *   cpsr.daif에서 da bits만 0b00xx로 set하여 enable 한다.
  */
 	.macro save_and_disable_daif, flags
 	mrs	\flags, daif
@@ -51,11 +63,6 @@
 	msr	daifclr, #0xf
 	.endm
 
-/*
- * IAMROOT, 2021.10.30:
- * - 저장해놓은 flag를 다시 복귀 시킨다.
- * - save_and_disable_daif와 한쌍이 된다.
- */
 	.macro	restore_daif, flags:req
 	msr	daif, \flags
 	.endm

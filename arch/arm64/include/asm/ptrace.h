@@ -66,29 +66,12 @@
  * in the priority mask, it indicates that PSR.I should be set and
  * interrupt disabling temporarily does not rely on IRQ priorities.
  */
-
-/*
- * IAMROOT, 2022.10.29:
- * - papago
- *   인터럽트를 마스크/언마스크하는 데 사용되는 PMR 값입니다. 
- *
- *   GIC 우선순위 마스킹은 다음과 같이 작동합니다.
- *   IRQ의 우선순위가 PMR에 있는 값보다 높은 값이면 해당 IRQ는 마스킹됩니다.
- *   PMR 값을 낮추는 것은 더 많은 IRQ를 마스킹하는 것을 의미합니다
- *   (또는 적어도 동일한 IRQ가 마스킹된 상태로 유지됨). 
- *
- *   인터럽트를 마스크하기 위해 PMR의 최상위 비트를 지웁니다. 
- *
- *   일부 코드 섹션은 자동으로 PSR.I로 다시 전환하거나 우선 순위 마스킹을 사용하지 않도록
- *   명시적으로 요구합니다. 비트 GIC_PRIO_PSR_I_SET이 우선 순위 마스크에 포함되어 있으면
- *   PSR.I가 설정되어야 하고 일시적으로 인터럽트 비활성화가 IRQ 우선 순위에 의존하지
- *   않음을 나타냅니다.
- * --------
- *                 
- *  GIC_PRIO_IRQON       0b1110_0000
- *  __GIC_PRIO_IRQOFF    0b0110_0000   
- *  __GIC_PRIO_IRQOFF_NS 0b1010_0000
- *  GIC_PRIO_PSR_I_SET   0b0001_0000
+/* IAMROOT, 2022.10.29:
+ * - PMR[7:0]
+ *   1. GIC_PRIO_IRQON       : 0b1110_0000
+ *   2. __GIC_PRIO_IRQOFF    : 0b0110_0000
+ *   3. __GIC_PRIO_IRQOFF_NS : 0b1010_0000
+ *   4. GIC_PRIO_PSR_I_SET   : 0b0001_0000
  */
 #define GIC_PRIO_IRQON			0xe0
 #define __GIC_PRIO_IRQOFF		(GIC_PRIO_IRQON & ~0x80)

@@ -486,8 +486,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	setup_machine_fdt(__fdt_pointer);
 
-	/*
-	 * IAMROOT, 2021.10.16: TODO
+	/* IAMROOT, 2021.10.16: TODO
 	 * - static key
 	 *   if의 조건에 사용되는 변수가 변경될일이 거의 없으면서 read를 많이 해야되는경우
 	 *   매번 읽는것이 아니라 해당 조건문 자체를 nop나 branch로 교체해서 if문 자체를
@@ -507,7 +506,7 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	parse_early_param();
 
 	/* IAMROOT, 2021.10.16:
-	 * - daif에서 irq, fiq를 제외한 나머지 exceptions을 enable.
+	 * - daif에서 irq, fiq를 제외한 나머지 exception을 enable.
 	 */
 	/*
 	 * Unmask asynchronous aborts and fiq after bringing up possible
@@ -533,19 +532,19 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	arm64_memblock_init();
 
-/* IAMROOT, 2021.10.31:
- * - 현재 mmu config 상태
- *   1) ttbr1_el1 -> init_pg_dir
- *   2) ttbr0_el1 -> empty_zero_page
- */
+	/* IAMROOT, 2021.10.31:
+	 * - 현재 TTBRx 값은 아래와 같음.
+	 *   ttbr1_el1: init_pg_dir
+	 *   ttbr0_el1: reserved_pg_dir
+	 */
 
 	paging_init();
 
-/* IAMROOT, 2021.10.31:
- * - 현재 mmu config 상태
- *   1) ttbr1_el1 -> swapper_pg_dir
- *   2) ttbr0_el1 -> empty_zero_page
- */
+	/* IAMROOT, 2021.10.31:
+	 * - 현재 TTBRx 값은 아래와 같음.
+	 *   ttbr1_el1: swapper_pg_dir
+	 *   ttbr0_el1: reserved_pg_dir
+	 */
 
 	acpi_table_upgrade();
 

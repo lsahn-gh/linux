@@ -2404,6 +2404,15 @@ phys_addr_t __init_memblock memblock_end_of_DRAM(void)
 	return (memblock.memory.regions[idx].base + memblock.memory.regions[idx].size);
 }
 
+/* IAMROOT, 2024.02.15:
+ * - memory region에 등록된 regions에 대해 loop를 수행하며 'max_addr'을 구한다.
+ *
+ *   region[0]을 시작으로 for each region (@limit - r->size)을 계산하여
+ *   누적하다가 (@limit <= r->size)인 condition을 만나면 (r->base + @limit)을
+ *   계산하여 최종 값을 반환한다.
+ *
+ *   그림을 그려서 계산하면 이해하기 쉽다.
+ */
 static phys_addr_t __init_memblock __find_max_addr(phys_addr_t limit)
 {
 	phys_addr_t max_addr = PHYS_ADDR_MAX;
@@ -2482,6 +2491,10 @@ void __init memblock_cap_memory_range(phys_addr_t base, phys_addr_t size)
 			base + size, PHYS_ADDR_MAX);
 }
 
+/* IAMROOT, 2024.02.16:
+ * - @limit을 기반으로 max_addr을 구하여 memory/reserved region[0 .. max_addr]을
+ *   제외한 모든 memblock region을 삭제한다.
+ */
 void __init memblock_mem_limit_remove_map(phys_addr_t limit)
 {
 	phys_addr_t max_addr;

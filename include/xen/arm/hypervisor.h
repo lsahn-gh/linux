@@ -19,9 +19,8 @@ static inline enum paravirt_lazy_mode paravirt_get_lazy_mode(void)
 	return PARAVIRT_LAZY_NONE;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - 전용 hypervisor XEN을 위한 code
+/* IAMROOT, 2021.10.16:
+ * - Xen hypervisor를 위한 early init 코드.
  */
 #ifdef CONFIG_XEN
 void __init xen_early_init(void);

@@ -570,13 +570,16 @@ asmlinkage void post_ttbr_update_workaround(void)
 			ARM64_WORKAROUND_CAVIUM_27456));
 }
 
+/* IAMROOT, 2024.02.12:
+ * - ttbr0의 pgdir을 교체하기 위한 함수.
+ *   ttbr1의 경우 asid 값을 masking 하여 ttbr1에 다시 저장할 뿐이다.
+ */
 void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm)
 {
-/*
- * IAMROOT, 2021.10.30:
- * - ttbr1의 경우 원래 값을 가져온후 mm에 있는 asid값으로 교체를 하고
- *   ttbr0는 인자로 가져온 page table + asid + cnp로 설정한다.
- */
+	/* IAMROOT, 2021.10.30: TODO
+	 * - ttbr1의 경우 원래 값을 가져온후 mm에 있는 asid값으로 교체를 하고
+	 *   ttbr0는 인자로 가져온 page table + asid + cnp로 설정한다.
+	 */
 	unsigned long ttbr1 = read_sysreg(ttbr1_el1);
 	unsigned long asid = ASID(mm);
 	unsigned long ttbr0 = phys_to_ttbr(pgd_phys);

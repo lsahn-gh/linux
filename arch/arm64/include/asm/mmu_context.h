@@ -48,9 +48,8 @@ static inline void contextidr_thread_switch(struct task_struct *next)
 /*
  * Set TTBR0 to reserved_pg_dir. No translations will be possible via TTBR0.
  */
-/*
- * IAMROOT, 2021.10.16:
- * - ttbr0를 비우게 하기 위해 zero-page로 할당하는 역할
+/* IAMROOT, 2021.10.16:
+ * - reserved_pg_dir을 ttbr0에 설정하고 instruction pipeline을 비운다.
  */
 static inline void cpu_set_reserved_ttbr0(void)
 {
@@ -62,12 +61,11 @@ static inline void cpu_set_reserved_ttbr0(void)
 
 void cpu_do_switch_mm(phys_addr_t pgd_phys, struct mm_struct *mm);
 
-/*
- * IAMROOT, 2021.10.30:
- * - user공간 mm을 교체하기 위한 함수.,
- *
- * - booting중에 idmap로 잠시 교체할때 idmap도 user 영역인 ttbr0를 사용하므로 이
- *   함수를 사용한다.
+/* IAMROOT, 2021.10.30:
+ * - el0가 사용하는 ttbr0의 pgdir을 교체하기 위한 wrapper 함수.
+ *   보안을 위해 교체하기 이전에 ttbr0를 reserved_pg_dir로 미리 mapping 하고
+ *   난 뒤에 @pgd로 re-mapping 한다.
+ *   @mm는 ttbr1의 asid 값을 parsing 하기 위해 사용한다.
  */
 static inline void cpu_switch_mm(pgd_t *pgd, struct mm_struct *mm)
 {
@@ -87,13 +85,10 @@ extern u64 idmap_ptrs_per_pgd;
 /*
  * Ensure TCR.T0SZ is set to the provided value.
  */
-/*
- * IAMROOT, 2021.10.30:
- * -----(old 5.10)
- * - tcr_el1 에서 ttbr0 va사이즈를 재설정하는데, 그전에 설정한 값과 같은 경우라면
- *   하지 않는다.
- * ------
- *  - tcr_el1을 t0sz로 설정하는데, 이미 t0sz라면 설정하지 않는다.
+/* IAMROOT, 2021.10.30:
+ * - tcr_el1.t0sz에 @t0sz 값을 설정하는데 미리읽어온 값이 @t0sz와 같다면
+ *   설정하지 않고 그냥 return 한다. 마지막에 instruction pipeline을
+ *   flush 하므로 이미 값이 같다면 이러한 overhead를 발생시킬 이유가 없다.
  */
 static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 {
@@ -108,10 +103,12 @@ static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
 	isb();
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - id mdapping을 할때 특수한 경우에 대해서 vabits_actual을 좀 다르게 설정해야되는
- *   경우가 있었는데 여기서 이제 vabits_actual로 완전히 설정하는것.
+/* IAMROOT, 2021.10.16:
+ * - cpu_set_default_tcr_t0sz():
+ *   idmap을 수행할 때 특수한 경우에 대해 vabits_actual을 다르게
+ *   설정했는데 여기서 real vabits_actual로 다시 설정한다.
+ * - cpu_set_idmap_tcr_t0sz():
+ *   ttbr0에 idmap pgd을 사용하기 위해 idmap_t0sz을 설정한다.
  */
 #define cpu_set_default_tcr_t0sz()	__cpu_set_tcr_t0sz(TCR_T0SZ(vabits_actual))
 #define cpu_set_idmap_tcr_t0sz()	__cpu_set_tcr_t0sz(idmap_t0sz)
@@ -128,53 +125,51 @@ static inline void __cpu_set_tcr_t0sz(unsigned long t0sz)
  * which should not be installed in TTBR0_EL1. In this case we can leave the
  * reserved page tables in place.
  */
-/*
- * IAMROOT, 2021.10.30:
- * - idmap이 사용이 끝낫으므로 ttbr0을 다시 비운다.
+/* IAMROOT, 2021.10.30:
+ * - idmap 사용이 끝났으므로 ttbr0에서 unmapping 하고 다른 것으로 교체한다.
+ *   mm == init_mm: reserved_pg_dir
+ *   mm != init_mm: mm->pgd
  */
 static inline void cpu_uninstall_idmap(void)
 {
 	struct mm_struct *mm = current->active_mm;
 
+	/* IAMROOT, 2024.02.10:
+	 * - ttbr0를 reserved_pg_dir로 mapping하고 tlb cache를 flush 한다.
+	 */
 	cpu_set_reserved_ttbr0();
-/*
- * IAMROOT, 2021.10.16:
- * - page table을 위에서 비웠기때문에 tlb cache를 flush해주는것.
- */
 	local_flush_tlb_all();
 	cpu_set_default_tcr_t0sz();
 
-/*
- * IAMROOT, 2021.10.16:
- * - cpu_replace_ttbr1 에서 호출되는
- * - kernel에서 kernel로 변경을 하는건 의미가 없으므로 mm != init_mm이 있다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - @mm == init_mm이라면 kernel 영역이고 kernel의 pgdir을 ttbr0에
+	 *   설정하게됨. kernel 보안에 허점이 발생하므로 kernel pgdir이 ttbr0에
+	 *   설정되지 않도록 '@mm != init_mm'인 경우에만 pgdir을 re-mapping 하게끔
+	 *   작성되어 있음. 이 경우에는 ttbr0이 계속 reserved_pg_dir을 가리킴.
+	 */
 	if (mm != &init_mm && !system_uses_ttbr0_pan())
 		cpu_switch_mm(mm->pgd, mm);
 }
 
-/*
- * IAMROOT, 2021.10.30:
- * - idmap을 사용하기 위해 ttbr register를 설정한다.
- * - cpu_switch_mm에서 ttbr1도 설정하지만 사실상 ttbr1은 그대로 쓰는거나 마찬가지라
- *   변함이없지만 idmap자체가 user용 ttbr0을 쓰는거라 user용 ttbr0교체 함수인
- *   cpu_switch_mm을 사용하는것이다.
+/* IAMROOT, 2021.10.30:
+ * - ttbr1의 pgdir을 변경하기 이전에 idmap_pg_dir을 임시로 사용하기 위해
+ *   ttbr0에 idmap_pg_dir을 mapping 하는 작업을 수행한다.
  */
 static inline void cpu_install_idmap(void)
 {
-/*
- * IAMROOT, 2021.10.30:
- * - ttbr0원래 user용도지만 는 head.S부터 임시로 idmap으로 사용하고 잇었다.
- *   idmap을 임시로 다시 사용하기위해 ttbr0를 reserved 시켜준다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - ttbr0은 el0 apps이 사용하는 page table 용도지만 커널의 pgd를
+	 *   변경할 때도 사용하므로 이 경우를 위해 setup 한다.
+	 */
 	cpu_set_reserved_ttbr0();
 	local_flush_tlb_all();
 	cpu_set_idmap_tcr_t0sz();
 
-/*
- * IAMROOT, 2021.10.30:
- * - 공통함수를 사용하기위해 init_mm을 그냥 사용했다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - ttbr0의 pgdir를 idmap_pg_dir로 mapping 한다.
+	 *   ttbr0을 변경하므로 el0의 pgdir을 변경하는데 사용하는 함수를
+	 *   그대로 사용한다.
+	 */
 	cpu_switch_mm(lm_alias(idmap_pg_dir), &init_mm);
 }
 
@@ -182,27 +177,18 @@ static inline void cpu_install_idmap(void)
  * Atomically replaces the active TTBR1_EL1 PGD with a new VA-compatible PGD,
  * avoiding the possibility of conflicting TLB entries being allocated.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - 5.10 -> 5.15 변경사항
- *   __nocfi 추가
- *
- * - Git blame을 참고
- *   Disable CFI checking for functions that switch to linear mapping and
- *   make an indirect call to a physical address, since the compiler only
- *   understands virtual addresses and the CFI check for such indirect calls
- *   would always fail.
+/* IAMROOT, 2021.11.13:
+ * - 현재 ttbr1의 내용을 @pgdp로 교체한다.
  */
 static inline void __nocfi cpu_replace_ttbr1(pgd_t *pgdp)
 {
-/*
- * IAMROOT, 2021.10.30:
- * - mm/proc.S 에 해당 함수 존재.
- */
 	typedef void (ttbr_replace_func)(phys_addr_t);
 	extern ttbr_replace_func idmap_cpu_replace_ttbr1;
 	ttbr_replace_func *replace_phys;
 
+	/* IAMROOT, 2024.02.11:
+	 * - vaddr(@pgdp)를 paddr로 변환한다.
+	 */
 	/* phys_to_ttbr() zeros lower 2 bits of ttbr with 52-bit PA */
 	phys_addr_t ttbr1 = phys_to_ttbr(virt_to_phys(pgdp));
 
@@ -218,11 +204,38 @@ static inline void __nocfi cpu_replace_ttbr1(pgd_t *pgdp)
 		ttbr1 |= TTBR_CNP_BIT;
 	}
 
+	/* IAMROOT, 2024.02.11:
+	 * - replace에 사용할 'idmap_cpu_replace_ttbr1' function 선언.
+	 */
 	replace_phys = (void *)__pa_symbol(function_nocfi(idmap_cpu_replace_ttbr1));
 
+	/* IAMROOT, 2024.02.11:
+	 * - ttbr1_el1의 pgdir 값을 @ttbr1로 mapping 한다.
+	 *
+	 *   다음과 같이 변경되어도 init_mm.pgd 값은 여전히 init_pg_dir 임에
+	 *   주의하라.
+	 */
 	cpu_install_idmap();
+	/* IAMROOT, 2024.02.12:
+	 * - 현재 변수별 pgdir 값:
+	 *   @ttbr1   : swapper_pg_dir
+	 *   ttbr1_el1: init_pg_dir
+	 *   ttbr0_el1: idmap_pg_dir
+	 */
 	replace_phys(ttbr1);
+	/* IAMROOT, 2024.02.12:
+	 * - 현재 변수별 pgdir 값:
+	 *   @ttbr1   : swapper_pg_dir
+	 *   ttbr1_el1: swapper_pg_dir
+	 *   ttbr0_el1: idmap_pg_dir
+	 */
 	cpu_uninstall_idmap();
+	/* IAMROOT, 2024.02.12:
+	 * - 현재 변수별 pgdir 값:
+	 *   @ttbr1   : swapper_pg_dir
+	 *   ttbr1_el1: swapper_pg_dir
+	 *   ttbr0_el1: reserved_pg_dir (if mm == init_mm)
+	 */
 }
 
 /*

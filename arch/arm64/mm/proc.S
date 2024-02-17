@@ -174,9 +174,10 @@ SYM_FUNC_END(cpu_do_resume)
 
 	.pushsection ".idmap.text", "awx"
 
-/*
- * IAMROOT, 2021.10.30:
- * - reserved(zero) page로 ttbr1을 설정해준다.
+/* IAMROOT, 2021.10.30:
+ * - ttbr1에 reserved_pg_dir을 mapping 하고 tlb, d/i-cache 모두 flush 한다.
+ *
+ *   phys_to_ttbr(), offset_ttbr1() macro는 VA 52bits를 위한 vaddr 보정 용도.
  */
 .macro	__idmap_cpu_set_reserved_ttbr1, tmp1, tmp2
 	adrp	\tmp1, reserved_pg_dir
@@ -195,11 +196,10 @@ SYM_FUNC_END(cpu_do_resume)
  * This is the low-level counterpart to cpu_replace_ttbr1, and should not be
  * called by anything else. It can only be executed from a TTBR0 mapping.
  */
-/*
- * IAMROOT, 2021.10.30:
- * - idmap은 이미 ttbr0에 설정되있고, 그후 ttbr1을 재설정하기 위해 진입하는 함수.
- 
- * - 스터디 최초에 봤을때 cpu_replace_ttbr1에서 호출되었으며 x0는 ttbr1
+/* IAMROOT, 2021.10.30:
+ * - 중간에 interrupt handler가 가로채지 못하도록 daif bits를 모두 disable 하고
+ *   ttbr1의 pgdir을 @x0으로 mapping한 다음 다시 복구한다.
+ *   중간에 ttbr1을 reserved_pg_dir로 mapping 하여 kernel의 보안을 강화한다.
  */
 SYM_FUNC_START(idmap_cpu_replace_ttbr1)
 	save_and_disable_daif flags=x2

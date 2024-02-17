@@ -100,17 +100,15 @@ struct static_key {
  *	    0 if points to struct jump_entry
  */
 	union {
-/*
- * IAMROOT, 2022.02.24:
- * - true로 define되 있었으면 type = JUMP_TYPE_TRUE, 아니면 JUMP_TYPE_FALSE
+/* IAMROOT, 2022.02.24: TODO
+ * - @type: true or false에 따라 @type 값은 다음과 같이 설정됨.
+ *   1. true : JUMP_TYPE_TRUE
+ *   2. false: JUMP_TYPE_FALSE
+ *
+ * - @entries: TODO
+ * - @next: TODO
  */
 		unsigned long type;
-/*
- * IAMROOT, 2022.02.24:
- * - static_key를 가리키고 있는 entries.
- *   static_key가 정의 당시 type에 JUMP_TYPE값이 있는데, 후에 entries가
- *   set될때 orr된다.(static_key_set_entries 참고)
- */
 		struct jump_entry *entries;
 		struct static_key_mod *next;
 	};

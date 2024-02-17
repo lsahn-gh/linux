@@ -12,10 +12,11 @@
 
 #include "do_mounts.h"
 
-/*
- * IAMROOT, 2021.10.23:
- * - arm64_memblock_init에서 memstart_addr가 초기화가 되고 kernel 영역이
- *   reserve 된후 초기화가 된다.
+/* IAMROOT, 2021.10.23:
+ * - arm64_memblock_init(..)에서 아래 초기화가 순서대로 수행된 후 초기화된다.
+ *   1) initrd config == enable.
+ *   2) memstart_addr 초기화.
+ *   3) kernel region[.text .. .end]을 reserved region에 추가.
  */
 unsigned long initrd_start, initrd_end;
 int initrd_below_start_ok;

@@ -16,8 +16,8 @@
 /* IAMROOT, 2022.11.07:
  * - irq, fiq disable.
  *
- *   daif에 설정된 bits는 현재 enable 되어 있다고 표현할 수 있어서
- *   해당 h/w exception은 발생하지 않음.
+ *   bit_field(daif)에 설정된 bit는 현재 enable(exception taken)되어 있다고
+ *   표현할 수 있으므로 해당 h/w exception은 발생하지 않는다.
  */
 #define DAIF_PROCCTX_NOIRQ	(PSR_I_BIT | PSR_F_BIT)
 #define DAIF_ERRCTX		(PSR_A_BIT | PSR_I_BIT | PSR_F_BIT)
@@ -76,7 +76,10 @@ static inline unsigned long local_daif_save(void)
 }
 
 /* IAMROOT, 2021.10.16: TODO
- * - daif regs bits를 @flags 값으로 설정.
+ * - daif regs bits를 @flags 값으로 복구한다.
+ *   bit_field(daif)의 경우 각 bit가 설정되면 exception이 발생하지 않는다.
+ *   SPsel에 따른 elX에 따라 exception mask register는 다르나 el0만은
+ *   예외이며 요점은 masking을 통해 잠시 exception taken을 방지한다.
  */
 static inline void local_daif_restore(unsigned long flags)
 {

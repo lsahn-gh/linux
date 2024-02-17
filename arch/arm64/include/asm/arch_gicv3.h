@@ -127,6 +127,12 @@ static inline u32 gic_read_pmr(void)
 	return read_sysreg_s(SYS_ICC_PMR_EL1);
 }
 
+/* IAMROOT, 2024.02.10:
+ * - ICC_PMR: Interrupt Controller Interrupt Priority Mask Register
+ *   interrupt priority filter 기능 제공.
+ *   해당 reg의 값보다 높은(high) priority exception에 대한 signal만
+ *   PE로 전달함.
+ */
 static __always_inline void gic_write_pmr(u32 val)
 {
 	write_sysreg_s(val, SYS_ICC_PMR_EL1);
@@ -135,7 +141,7 @@ static __always_inline void gic_write_pmr(u32 val)
 
 /*
  * IAMROOT, 2022.10.15:
- * - Interrupt Controller Running Priority Register
+ * - ICC_RPR: Interrupt Controller Running Priority Register
  *   rpr은 64bits register지만 [7:0] priority만을 사용하기 위해 32bits로 가져온다.
  */
 static inline u32 gic_read_rpr(void)

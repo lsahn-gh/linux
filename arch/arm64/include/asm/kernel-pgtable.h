@@ -204,14 +204,18 @@
  * has a direct correspondence, and needs to appear sufficiently aligned
  * in the virtual address space.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - arm64 : 1GB로 고정되있음.
- * - arm32 : kernel을 만들때 변경 가능.
+/* IAMROOT, 2021.10.23:
+ * - Arm64: 아래 공식에 따라 가장 큰 shift 값을 이용하며 4k page size 기준
+ *          1GB align에 맞춰진다.
+ *   Arm32: kernel config 생성시 변경 가능.
  *
- * - 5.10 -> 5.15 변경점
- *   5.10에서는 CONFIG_SPARSEMEM_VMEMMAP 까지 설정되있엇어야됬는데
- *   그 조건이 삭제 됬다.
+ * - ARM64_MEMSTART_SHIFT:
+ *    4k page size: 1GB (1 << PUD_SHIFT)
+ *   16k page size: kernel config에 의존
+ *       otherwise: 2MB (1 << PMD_SHIFT)
+ * - SECTION_SIZE_BITS:
+ *   64k page size: 512MB (1 << 29)
+ *       otherwise: 128MB (1 << 27)
  */
 #if ARM64_MEMSTART_SHIFT < SECTION_SIZE_BITS
 #define ARM64_MEMSTART_ALIGN	(1UL << SECTION_SIZE_BITS)
