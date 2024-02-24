@@ -632,16 +632,15 @@ void __init arm64_memblock_init(void)
 		initrd_end = initrd_start + phys_initrd_size;
 	}
 
-	/*
-	 * IAMROOT, 2021.10.23:
-	 * - dt에서 지정한 reserved 영역 등록
+	/* IAMROOT, 2021.10.23:
+	 * - dts에서 지정한 memreserve, reserved-memory node 들을 NOMAP으로
+	 *   marking 하거나 reserved region에 추가한다.
 	 */
 	early_init_fdt_scan_reserved_mem();
 
-/*
- * IAMROOT, 2021.10.23:
- * - va를 사용시 범위를 벗어나면 안되서 -1을 해줬다가 결과 가상주소에 + 1을 한다.
- */
+	/* IAMROOT, 2021.10.23:
+	 * - vaddr 사용시 range를 벗어나면 안되므로 아래처럼 계산하여 저장한다.
+	 */
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
 

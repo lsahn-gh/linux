@@ -67,17 +67,16 @@ extern bool arm64_use_ng_mappings;
 #define PROT_DEFAULT		(_PROT_DEFAULT | PTE_MAYBE_NG)
 #define PROT_SECT_DEFAULT	(_PROT_SECT_DEFAULT | PMD_MAYBE_NG)
 
-/*
- * IAMROOT, 2022.07.16:
- * - PROT_DEVICE_nGnRE  : ioremap.(write through)
- *   PROT_NORMAL_NC     : ioremap_wc.(write combine)
- *   PROT_DEVICE_nGnRnE : ioremap_np.(가장 높은 strong order)
- * ---
- * G : gather
- * R : reorder
- * E : early ack
+/* IAMROOT, 2022.07.16:
+ * - PROT_DEVICE_nGnRE : ioremap    (write through)
+ *   PROT_NORMAL_NC    : ioremap_wc (write combine)
+ *   PROT_DEVICE_nGnRnE: ioremap_np (strong order)
  *
- * - memory 속도
+ *   G: Gather
+ *   R: Reorder
+ *   E: Early Ack
+ *
+ *   Memory Speed
  *   wb > wt > wc > nc
  */
 #define PROT_DEVICE_nGnRnE	(PROT_DEFAULT | PTE_PXN | PTE_UXN | PTE_WRITE | PTE_ATTRINDX(MT_DEVICE_nGnRnE))
@@ -93,8 +92,12 @@ extern bool arm64_use_ng_mappings;
 #define _PAGE_DEFAULT		(_PROT_DEFAULT | PTE_ATTRINDX(MT_NORMAL))
 
 /* IAMROOT, 2021.10.14:
- * - Kernel에서 가장 많이 사용하는 mapping property.
- *   NORMAL type이고 초기에는 kernel/user 모두 접근 불가능하게 attr을 셋업.
+ * - PAGE_KERNEL     : kernel에서 가장 많이 사용하는 mapping prot이며
+ *                     kernel/user 실행 권한을 제거 설정.
+ *   PAGE_KERNEL_RO  : write prot을 제거하고 ro만 추가한다.
+ *   PAGE_KERNEL_ROX : TODO
+ *   PAGE_KERNEL_EXEC: TODO
+ *   PAGE_KERNEL_EXEC_CONT: TODO
  */
 #define PAGE_KERNEL		__pgprot(PROT_NORMAL)
 #define PAGE_KERNEL_RO		__pgprot((PROT_NORMAL & ~PTE_WRITE) | PTE_RDONLY)

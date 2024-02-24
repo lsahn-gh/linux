@@ -14,9 +14,8 @@
 #define PAGE_SHIFT		CONFIG_ARM64_PAGE_SHIFT
 #define PAGE_SIZE		(_AC(1, UL) << PAGE_SHIFT)
 
-/*
- * IAMROOT, 2021.10.13:
- * 4k인 경우 : 0xffff_ffff_ffff_f000
+/* IAMROOT, 2021.10.13:
+ * - 4k인 경우 : 0xffff_ffff_ffff_f000
  */
 #define PAGE_MASK		(~(PAGE_SIZE-1))
 

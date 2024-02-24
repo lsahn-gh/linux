@@ -759,9 +759,12 @@ static int __init __reserved_mem_check_root(unsigned long node)
 	return 0;
 }
 
-/*
- * IAMROOT, 2021.10.23:
- * dt에서 지정되있는 reserved memory node 영역을 reserve 시킨다.
+/* IAMROOT, 2021.10.23:
+ * - dts의 reserved-memory { .. } node를 no-map property 여부에 따라
+ *   다음 동작 수행.
+ *
+ *   1) no-map == on : region[base .. size]에 NOMAP flag == on 한다.
+ *   2) no-map == off: region[base .. size]를 reserved region에 추가한다.
  */
 /*
  * __fdt_scan_reserved_mem() - scan a single FDT node for reserved memory
@@ -831,12 +834,16 @@ static void __init fdt_reserve_elfcorehdr(void)
  * defined in device tree structures. It should be called by arch specific code
  * once the early allocator (i.e. memblock) has been fully activated.
  */
-/*
- * IAMROOT, 2021.10.23:
+/* IAMROOT, 2021.10.23:
+ * - DTS의 node 중 reserved-memory { .. }에 정의된 reserved 영역을
+ *   memblock
  *
  * dt에서 요청한 reserve 영역을 reserve 시킨다.
  * ex) /memreserve/ 0x81000000 0x00200000;
  * 그외에 생략
+ *
+ *   예) qcom/ipq6018.dtsi
+ *
  */
 void __init early_init_fdt_scan_reserved_mem(void)
 {
@@ -846,6 +853,13 @@ void __init early_init_fdt_scan_reserved_mem(void)
 	if (!initial_boot_params)
 		return;
 
+	/* IAMROOT, 2024.02.20:
+	 * - header의 memreserve 영역을 reserved region에 추가한다.
+	 *
+	 *   예) s32v234.dtsi
+	 *
+	 *   /memreserve/ 0x80000000 0x00010000;
+	 */
 	/* Process header /memreserve/ fields */
 	for (n = 0; ; n++) {
 		fdt_get_mem_rsv(initial_boot_params, n, &base, &size);
@@ -854,6 +868,30 @@ void __init early_init_fdt_scan_reserved_mem(void)
 		early_init_dt_reserve_memory_arch(base, size, false);
 	}
 
+	/* IAMROOT, 2024.02.19:
+	 * - 아래 영역을 no-map property 여부에 따라 다음 동작 수행.
+	 *
+	 *   1) no-map == on : region[base .. size]에 NOMAP flag == on 한다.
+	 *   2) no-map == off: region[base .. size]를 reserved region에 추가한다.
+	 *
+	 *   예) ipq6018.dtsi
+	 *
+	 *   reserved-memory {
+	 *       #address-cells = <2>;
+	 *       #size-cells = <2>;
+	 *       ranges;
+	 *
+	 *       rpm_msg_ram: memory@60000 {
+	 *           reg = <0x0 0x60000 0x0 0x6000>;
+	 *           no-map;
+	 *       };
+	 *
+	 *       tz: memory@4a600000 {
+	 *           reg = <0x0 0x4a600000 0x0 0x00400000>;
+	 *           no-map;
+	 *       };
+	 *   };
+	 */
 	of_scan_flat_dt(__fdt_scan_reserved_mem, NULL);
 	fdt_init_reserved_mem();
 	fdt_reserve_elfcorehdr();
@@ -882,9 +920,8 @@ void __init early_init_fdt_reserve_self(void)
  * used to extract the memory information at boot before we can
  * unflatten the tree
  */
-/*
- * IAMROOT, 2021.10.09: 
- * 모든 노드에 대해서 @it 함수를 실행시킨다.
+/* IAMROOT, 2021.10.09:
+ * - 모든 node에 대해 @it(..) 함수를 실행한다.
  */
 int __init of_scan_flat_dt(int (*it)(unsigned long node,
 				     const char *uname, int depth,

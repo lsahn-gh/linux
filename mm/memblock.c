@@ -1399,7 +1399,7 @@ int __init_memblock memblock_mark_mirror(phys_addr_t base, phys_addr_t size)
 /* IAMROOT, 2021.10.30:
  * - region[@base .. (@base + @size)]까지 MEMBLOCK_NOMAP flag를 on 한다.
  *
- *   NOMAP: mapping 하기를 원하지 않을때 사용.
+ *   NOMAP: mapping을 원하지 않을때 사용.
  */
 int __init_memblock memblock_mark_nomap(phys_addr_t base, phys_addr_t size)
 {
