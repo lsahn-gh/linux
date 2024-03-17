@@ -890,12 +890,16 @@ static inline pmd_t *pud_pgtable(pud_t pud)
 	pr_err("%s:%d: bad pud %016llx.\n", __FILE__, __LINE__, pud_val(e))
 
 /* IAMROOT, 2021.10.12:
- * p4d에 값이 존재하면 false, 아니면 true. 즉 할당되있으면 false return
+ * - p4d에 값이 존재하면 false, 아니면 true.
+ *   할당되있으면 false return
  */
 #define p4d_none(p4d)		(!p4d_val(p4d))
 #define p4d_bad(p4d)		(!(p4d_val(p4d) & 2))
 #define p4d_present(p4d)	(p4d_val(p4d))
 
+/* IAMROOT, 2024.02.29:
+ * - @p4dp에 @p4d 값 저장.
+ */
 static inline void set_p4d(p4d_t *p4dp, p4d_t p4d)
 {
 	if (in_swapper_pgdir(p4dp)) {

@@ -551,6 +551,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	/* Parse the ACPI tables for possible boot-time configuration */
 	acpi_boot_table_init();
 
+	/* IAMROOT, 2024.03.15:
+	 * - @acpi_disabled == true 라면 dtb를 unflatten 한다.
+	 */
 	if (acpi_disabled)
 		unflatten_device_tree();
 

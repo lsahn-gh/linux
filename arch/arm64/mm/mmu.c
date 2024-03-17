@@ -687,18 +687,17 @@ static int __init enable_crash_mem_map(char *arg)
 }
 early_param("crashkernel", enable_crash_mem_map);
 
-/*
- * IAMROOT, 2021.10.30:
- * - kernel memory / 그외의  memory에 대한 mapping을 한다.
+/* IAMROOT, 2021.10.30:
+ * - @pgdp에 kernel/etc memory에 대한 mapping을 수행한다.
  */
 static void __init map_mem(pgd_t *pgdp)
 {
-/*
- * IAMROOT, 2021.10.30:
- * - kernel img + got + rodata + pgtable(idmap + tramp + swapper) 의 영역이된다.
- *   (init.text 전까지)
- */
 	static const u64 direct_map_end = _PAGE_END(VA_BITS_MIN);
+
+	/* IAMROOT, 2021.10.30:
+	 * - @kernel_start .. @kernel_end 까지는 아래 영역을 포함한다.
+	 *   KIMG(text) + got + RO_DATA + pgtable(idmap + reserved + swapper)
+	 */
 	phys_addr_t kernel_start = __pa_symbol(_stext);
 	phys_addr_t kernel_end = __pa_symbol(__init_begin);
 	phys_addr_t start, end;
@@ -717,10 +716,11 @@ static void __init map_mem(pgd_t *pgdp)
 	if (can_set_direct_map() || crash_mem_map || IS_ENABLED(CONFIG_KFENCE))
 		flags |= NO_BLOCK_MAPPINGS | NO_CONT_MAPPINGS;
 
-/*
- * IAMROOT, 2021.10.30:
- * - kernel 영역에대한 memory region을 일단 nomap으로 설정한다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - 아래 for_each loop에서 mapping 되는 것을 방지하기 위해
+	 *   memory region[@kernel_start .. size] 영역에 임시로 NOMAP flag를
+	 *   세팅한다.
+	 */
 	/*
 	 * Take care not to create a writable alias for the
 	 * read-only text and rodata sections of the kernel image.
@@ -729,15 +729,12 @@ static void __init map_mem(pgd_t *pgdp)
 	 */
 	memblock_mark_nomap(kernel_start, kernel_end - kernel_start);
 
-/*
- * IAMROOT, 2021.10.30:
- * - 그전 루틴에서 초기화했던 mm/memblock.c의 memory region를 순회를 하면서
- *   각 memory region에서 MEMBLOCK_NONE인 block들만을 위에 설정된 flags로
- *   설정하면서 page 속성을 PAGE_KERNEL_TAGGED로 mapping한다.
- *
- * - 바로 위에서 kernel 영역을 nomap으로 설정했으므로 kernel영역은 무조건 제외된다는게
- *   확인된다.
- */
+	/* IAMROOT, 2024.03.01:
+	 * - memblock memory region을 순회하면서 MEMBLOCK_NONE인 flag의 region에
+	 *   대해서만 __map_memblock(..)을 호출한다.
+	 *
+	 *   Kernel 영역은 위에서 NOMAP으로 flag 설정을 했으므로 제외된다.
+	 */
 	/* map all the memory banks */
 	for_each_mem_range(i, &start, &end) {
 		if (start >= end)
@@ -751,6 +748,14 @@ static void __init map_mem(pgd_t *pgdp)
 			       flags);
 	}
 
+	/* IAMROOT, 2021.10.30:
+	 * - memory region[@kernel_start .. size] 제외하고 위에서 mapping이
+	 *   끝났으므로 @kernel_start  영역의 property를 PAGE_KERNEL로 설정하고
+	 *   NO_CONT_MAPPINGS flag를 설정한다.
+	 *
+	 *   NO_CONT_MAPPINGS flag를 설정하는 이유는 후에 영역별로 r/rw 등을
+	 *   나누어야 하기 때문이다.
+	 */
 	/*
 	 * Map the linear alias of the [_stext, __init_begin) interval
 	 * as non-executable now, and remove the write permission in
@@ -761,20 +766,12 @@ static void __init map_mem(pgd_t *pgdp)
 	 * Note that contiguous mappings cannot be remapped in this way,
 	 * so we should avoid them here.
 	 */
-/*
- * IAMROOT, 2021.10.30:
- * - 이제 kernel 영역을 page를 PAGE_KERNEL로(rw), memory flag를 NO_CONT_MAPPINGS을
- *   한다.
- *
- * - NO_CONT_MAPPINGS을 하는 이유
- *   후에 영역별로 r / rw등으로 나눠야되기때문이다.
- */
 	__map_memblock(pgdp, kernel_start, kernel_end,
 		       PAGE_KERNEL, NO_CONT_MAPPINGS);
-/*
- * IAMROOT, 2021.10.30:
- * - 초반에 해놨던 kernel 영역 nomap 설정을 여기서 다시 풀어준다.
- */
+
+	/* IAMROOT, 2021.10.30:
+	 * - 위에서 설정한 NOMAP flag를 여기서 다시 해제한다.
+	 */
 	memblock_clear_nomap(kernel_start, kernel_end - kernel_start);
 }
 
@@ -817,12 +814,19 @@ static void __init map_kernel_segment(pgd_t *pgdp, void *va_start, void *va_end,
 	if (!(vm_flags & VM_NO_GUARD))
 		size += PAGE_SIZE;
 
+	/* IAMROOT, 2024.02.25:
+	 * - 위에서 생성한 page table 데이터를 @vma에 저장한다.
+	 */
 	vma->addr	= va_start;
 	vma->phys_addr	= pa_start;
 	vma->size	= size;
 	vma->flags	= VM_MAP | vm_flags;
 	vma->caller	= __builtin_return_address(0);
 
+	/* IAMROOT, 2024.02.25:
+	 * - 현재 vmalloc 초기화가 이루어지지 않아 vmlist를 사용하여 임시로
+	 *   관리한다.
+	 */
 	vm_area_add_early(vma);
 }
 
@@ -1008,15 +1012,13 @@ static void __init map_kernel(pgd_t *pgdp)
 			   &vmlinux_initdata, 0, VM_NO_GUARD);
 	map_kernel_segment(pgdp, _data, _end, PAGE_KERNEL, &vmlinux_data, 0, 0);
 
-/*
- * IAMROOT, 2021.10.30: 
- * 기존에 init_pg_dir에 fixmap을 매핑하였었다. 이 코드에서는 swapper_pg_dir에서
- * fixmap(FIXADDR_START) 주소 공간이 이미 매핑된 상태인지 확인하여 매핑하지
- * 않은 경우 fixmap을 매핑하도록 한다.
- *
- * 단 16K, 4레벨 페이지 테이블을 사용하는 경우는 else if 조건을 사용한다.
- * 예) 0x11111111_11111111 pgd(1) pud(11) pmd(11) pte(11) offset(14)
- */
+	/* IAMROOT, 2021.10.30:
+	 * - init_pg_dir에는 매핑되어 있지만 swapper_pg_dir에 fixmap(FIXADDR_START)
+	 *   주소 공간이 매핑되어 있지 않으면 해당 공간을 매핑한다.
+	 *
+	 *   단 16K, 4레벨 페이지 테이블을 사용하는 경우는 else if 조건을 사용한다.
+	 *   예) 0x11111111_11111111 pgd(1) pud(11) pmd(11) pte(11) offset(14)
+	 */
 	if (!READ_ONCE(pgd_val(*pgd_offset_pgd(pgdp, FIXADDR_START)))) {
 		/*
 		 * The fixmap falls in a separate pgd to the kernel, and doesn't
@@ -1045,10 +1047,9 @@ static void __init map_kernel(pgd_t *pgdp)
 		BUG();
 	}
 
-/*
- * IAMROOT, 2021.10.30: 
- * KASAN 용도로 페이지 테이블 사본을 만든다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - KASAN이 사용하는 용도의 page table을 생성한다.
+	 */
 	kasan_copy_shadow(pgdp);
 }
 
@@ -1070,23 +1071,21 @@ void __init paging_init(void)
 	map_kernel(pgdp);
 	map_mem(pgdp);
 
-/*
- * IAMROOT, 2021.10.30:
- * - mapping이 끝낫으므로 FIX_PGD를 해제한다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - mapping이 끝났으므로 FIX_PGD를 해제한다.
+	 */
 	pgd_clear_fixmap();
 
 	cpu_replace_ttbr1(lm_alias(swapper_pg_dir));
 
 	/* IAMROOT, 2021.10.30:
-	 * - 이제부터는 정식 page table인 swapper_pg_dir을 사용한다.
+	 * - 지금부터는 정규 page table인 swapper_pg_dir을 사용한다.
 	 */
 	init_mm.pgd = swapper_pg_dir;
 
-/*
- * IAMROOT, 2021.10.30:
- * - 이제 더이상 사용안하는 init_pg_dir은 삭제한다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - init_pg_dir은 더이상 필요하지 않으니 삭제한다.
+	 */
 	memblock_free(__pa_symbol(init_pg_dir),
 		      __pa_symbol(init_pg_end) - __pa_symbol(init_pg_dir));
 

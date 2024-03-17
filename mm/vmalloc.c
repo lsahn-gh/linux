@@ -2829,12 +2829,12 @@ static inline void set_vm_area_page_order(struct vm_struct *vm, unsigned int ord
  *
  * DO NOT USE THIS FUNCTION UNLESS YOU KNOW WHAT YOU'RE DOING.
  */
-/*
- * IAMROOT, 2021.10.30: 
- * vmalloc(vmap)을 사용할 수 없는 상태에서 매핑한 영역이 있는 경우 아래 함수를
- * 호출하여 임시적으로 vmlist에 시작 주소 순으로 vm_struct를 추가한다.
- * 이들은 나중에 vmalloc_init() 함수에서 호출될 때 vmalloc 자료 구조에 
- * 추가한다.
+/* IAMROOT, 2021.10.30:
+ * - vmap_instalized == false (vmalloc(vmap)을 사용할 수 없는 상태) 에서
+ *   mapping 한 영역이 있는 경우 임시로 vmlist를 사용하여 @vm을 관리하며
+ *   추후에 vmalloc_init(..) 함수가 호출되면 vmalloc 관리 영역에 추가된다.
+ *
+ *   여기서는 단순히 linked-list로 vmlist를 관리한다.
  */
 void __init vm_area_add_early(struct vm_struct *vm)
 {

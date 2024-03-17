@@ -124,9 +124,8 @@ extern int mmap_rnd_compat_bits __read_mostly;
 #define page_to_virt(x)	__va(PFN_PHYS(page_to_pfn(x)))
 #endif
 
-/*
- * IAMROOT, 2021.10.30:
- * - __pa kernel symbol에 대해서 lm va로 변환한다.
+/* IAMROOT, 2021.10.30:
+ * - @x의 paddr(kernel symbol)을 구하여 vaddr로 변환한다.
  */
 #ifndef lm_alias
 #define lm_alias(x)	__va(__pa_symbol(x))
