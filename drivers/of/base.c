@@ -2008,9 +2008,8 @@ int of_update_property(struct device_node *np, struct property *newprop)
 	return rc;
 }
 
-/*
- * IAMROOT, 2021.11.06:
- * - 후에 aliases만 빠르게 스캔할 목적으로 aliases_lookup에 넣는것이 보여진다.
+/* IAMROOT, 2021.11.06:
+ * - aliases만 빠르게 스캔할 목적으로 aliases_lookup에 추가한다.
  */
 static void of_alias_add(struct alias_prop *ap, struct device_node *np,
 			 int id, const char *stem, int stem_len)
@@ -2033,9 +2032,10 @@ static void of_alias_add(struct alias_prop *ap, struct device_node *np,
  * the global lookup table with the properties.  It returns the
  * number of alias properties found, or an error code in case of failure.
  */
-/*
- * IAMROOT, 2021.11.06:
- * - aliases node를 참고해 aliases_lookup에 등록한다.
+/* IAMROOT, 2021.11.06:
+ * - 아래 기능을 수행한다.
+ *   1) dts의 '/chosen' node 값을 parsing 하여 @of_stdout_options에 등록.
+ *   2) dts의 '/aliases' node 리스트를 parsing 하여 @aliases_lookup에 등록.
  */
 void of_alias_scan(void * (*dt_alloc)(u64 size, u64 align))
 {
@@ -2075,25 +2075,25 @@ void of_alias_scan(void * (*dt_alloc)(u64 size, u64 align))
 		    !strcmp(pp->name, "linux,phandle"))
 			continue;
 
-/*
- * IAMROOT, 2021.11.06:
- * -aliases node의 예
- *
- * aliases {
- *	serial0 = &uart3;
- *	serial1 = &uart0;
- *	serial2 = &uart1;
- *	serial3 = &uart2;
- * };
- *
- * 위와 같은 구조로 되어있고, value는 node의 이름이므로, 그 node가 존재하는지 찾는것. 그리고
- * 번호를 제외한 name(node 명)의 길이를 len으로 구하고, 번호를 id에 저장한다.
- * dt_alloc으로 메모리를 할당하고 해당 정보들을 설정한다.
- */
+		/* IAMROOT, 2021.11.06:
+		 * - aliases node는 아래 구조로 생성되고 rvalue가 value 이므로
+		 *   phandle을 참조하여 해당 node가 존재하는지 탐색한다.
+		 *
+		 *   aliases {
+		 *      serial0 = &uart3;
+		 *      serial1 = &uart0;
+		 *      serial2 = &uart1;
+		 *      serial3 = &uart2;
+		 *   };
+		 */
 		np = of_find_node_by_path(pp->value);
 		if (!np)
 			continue;
 
+		/* IAMROOT, 2024.03.25:
+		 * - 번호를 제외한 node name의 길이를 len에 저장하고 번호는 id에
+		 *   저장한다.
+		 */
 		/* walk the alias backwards to extract the id and work out
 		 * the 'stem' string */
 		while (isdigit(*(end-1)) && end > start)
@@ -2103,12 +2103,20 @@ void of_alias_scan(void * (*dt_alloc)(u64 size, u64 align))
 		if (kstrtoint(end, 10, &id) < 0)
 			continue;
 
+		/* IAMROOT, 2024.03.25:
+		 * - @dt_alloc arg에 early_init_dt_alloc_memory_arch(..)가 매핑되어
+		 *   최종적으로는 memblock에서 alloc 한다.
+		 */
 		/* Allocate an alias_prop with enough space for the stem */
 		ap = dt_alloc(sizeof(*ap) + len + 1, __alignof__(*ap));
 		if (!ap)
 			continue;
 		memset(ap, 0, sizeof(*ap) + len + 1);
 		ap->alias = start;
+
+		/* IAMROOT, 2024.03.25:
+		 * - @aliases_lookup에 등록.
+		 */
 		of_alias_add(ap, np, id, start, len);
 	}
 }

@@ -40,9 +40,8 @@ static void __init sort_memblock_regions(void)
 	     NULL);
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - memory region들을 전부 hyp_memblock으로 복사한다.
+/* IAMROOT, 2021.11.13:
+ * - memory region에 저장된 모든 block을 hyp_memory region으로 복사한다.
  */
 static int __init register_memblock_regions(void)
 {
@@ -69,18 +68,17 @@ void __init kvm_hyp_reserve(void)
 {
 	u64 nr_pages, prev, hyp_mem_pages = 0;
 	int ret;
-/*
- * IAMROOT, 2021.11.13:
- * - hyp mode가 될수없거나 현재 mode가 EL2면 return.
- *   return이 안된다면, EL2로 부팅을 시도했지만 어떤 이유에서 EL1인 상황.
- *   kvm nvhe인 상황이다. 
- */
+
+	/* IAMROOT, 2021.11.13:
+	 * - hyp mode를 사용할 수 없거나 현재 mode가 이미 el2면 아무것도
+	 *   하지 않고 바로 return 한다.
+	 */
 	if (!is_hyp_mode_available() || is_kernel_in_hyp_mode())
 		return;
-/*
- * IAMROOT, 2021.11.13:
- * - early param으로 mode가 설정됬는지 확인
- */
+
+	/* IAMROOT, 2021.11.13:
+	 * - bootarg에서 kvm mode가 설정되었는지 확인.
+	 */
 	if (kvm_get_mode() != KVM_MODE_PROTECTED)
 		return;
 
@@ -90,10 +88,10 @@ void __init kvm_hyp_reserve(void)
 		kvm_err("Failed to register hyp memblocks: %d\n", ret);
 		return;
 	}
-/*
- * IAMROOT, 2021.11.13:
- * - stage1, stage2에서 필요한 page table 개수를 구해온다.
- */
+
+	/* IAMROOT, 2021.11.13:
+	 * - stage1, stage2에서 필요한 page table 개수를 구해온다.
+	 */
 	hyp_mem_pages += hyp_s1_pgtable_pages();
 	hyp_mem_pages += host_s2_pgtable_pages();
 

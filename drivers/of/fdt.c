@@ -538,8 +538,7 @@ static int unflatten_dt_nodes(const void *blob,
  * Return: NULL on failure or the memory chunk containing the unflattened
  * device tree on success.
  */
-/*
- * IAMROOT, 2021.11.06:
+/* IAMROOT, 2021.11.06:
  * - fdt를 unflatten하여 memory에 할당한다.
  */
 void *__unflatten_device_tree(const void *blob,
@@ -572,10 +571,9 @@ void *__unflatten_device_tree(const void *blob,
 		return NULL;
 	}
 
-/*
- * IAMROOT, 2021.10.30:
- * - 처음엔 size만을 구해온다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - 처음엔 size만을 구해온다.
+	 */
 	/* First pass, scan for size */
 	size = unflatten_dt_nodes(blob, NULL, dad, NULL);
 	if (size <= 0)
@@ -584,11 +582,11 @@ void *__unflatten_device_tree(const void *blob,
 	size = ALIGN(size, 4);
 	pr_debug("  size is %d, allocating...\n", size);
 
-/*
- * IAMROOT, 2021.10.30:
- * - unflatten_device_tree로 불러와지는 early상황일때는
- *   early_init_dt_alloc_memory_arch 함수로 alloc된다.(memblock)
- */
+	/* IAMROOT, 2021.10.30:
+	 * - __unflatten_device_tree에서 호출하는 early stage 에서는
+	 *   @dt_alloc arg에 early_init_dt_alloc_memory_arch(..)가 매핑되어
+	 *   최종적으로는 memblock에서 alloc 한다.
+	 */
 	/* Allocate memory for the expanded device tree */
 	mem = dt_alloc(size + 4, __alignof__(struct device_node));
 	if (!mem)
@@ -596,19 +594,23 @@ void *__unflatten_device_tree(const void *blob,
 
 	memset(mem, 0, size);
 
+	/* IAMROOT, 2024.03.25:
+	 * - unflatten 후에 magic number를 overwritten 하지 않았는지 검사하기 위해
+	 *   @mem + size 주소에 '0xdeadbeef' magic number를 저장한다.
+	 */
 	*(__be32 *)(mem + size) = cpu_to_be32(0xdeadbeef);
 
 	pr_debug("  unflattening %p...\n", mem);
 
-/*
- * IAMROOT, 2021.10.30:
- * - 실제 unflatten하기 위해 다시한번 호출한다.
- *   
- * - 위에서 0xdeadbeef를 끝에 넣어서 혹시 size가 안맞는지 검사하는것이 보인다.
- */
+	/* IAMROOT, 2021.10.30:
+	 * - unflatten 하기 위해 다시 호출한다.
+	 */
 	/* Second pass, do actual unflattening */
 	ret = unflatten_dt_nodes(blob, mem, dad, mynodes);
 
+	/* IAMROOT, 2024.03.25:
+	 * - overwritten 검사.
+	 */
 	if (be32_to_cpup(mem + size) != 0xdeadbeef)
 		pr_warn("End of tree marker overwritten: %08x\n",
 			be32_to_cpup(mem + size));
@@ -1717,11 +1719,10 @@ bool __init early_init_dt_scan(void *params)
  * pointers of the nodes so the normal device-tree walking functions
  * can be used.
  */
-/*
- * IAMROOT, 2021.10.30:
- * - device tree는 전부 of_xxx.. 로 시작한다.
+/* IAMROOT, 2021.10.30:
+ * - flattened 형태의 dtb를 object (unflatten) 하기 위한 함수.
  *
- * - dtb는 flattened 형태였는데 이것을 다시 object화(unflatten) 시키기 위한것.
+ *   device tree는 전부 of_xxx..로 시작한다.
  */
 void __init unflatten_device_tree(void)
 {

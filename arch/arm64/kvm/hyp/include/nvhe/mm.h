@@ -88,8 +88,7 @@ static inline unsigned long __hyp_pgtable_total_pages(void)
 	return res;
 }
 
-/*
- * IAMROOT, 2021.11.13:
+/* IAMROOT, 2021.11.13: TODO
  * - hyp_memory에 필요한 page table + 1GB에 필요한 page table
  */
 static inline unsigned long hyp_s1_pgtable_pages(void)

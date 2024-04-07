@@ -611,8 +611,7 @@ static int __init arch_acpi_numa_init(void)
  * Try each configured NUMA initialization method until one succeeds. The
  * last fallback is dummy single node config encompassing whole memory.
  */
-/*
- * IAMROOT, 2021.11.13:
+/* IAMROOT, 2021.11.13: TODO
  * - numa 관련 초기화 수행.
  */
 void __init arch_numa_init(void)

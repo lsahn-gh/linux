@@ -1694,10 +1694,13 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  * PFN_SECTION_SHIFT		pfn to/from section number
  */
 #define PA_SECTION_SHIFT	(SECTION_SIZE_BITS)
-/*
- * IAMROOT, 2021.11.13:
- * - 1개의 section당 들어가는 pfn 수
- *   27 - 12 = 15
+
+/* IAMROOT, 2021.11.13:
+ * - section과 관련된 계산에 사용되는 SHIFT 값.
+ *
+ *   SECTION_SIZE_BITS: 27
+ *   PAGE_SHIFT       : 12 (page size == 4k)
+ *   PFN_SECTION_SHIFT: 15 = 27 - 12
  */
 #define PFN_SECTION_SHIFT	(SECTION_SIZE_BITS - PAGE_SHIFT)
 
@@ -1707,17 +1710,20 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  */
 #define NR_MEM_SECTIONS		(1UL << SECTIONS_SHIFT)
 
-/*
- * IAMROOT, 2021.11.13:
- * - 2^15 = 32k
- * - 결국 section이 128MB(48bit, 4kb page 기준)이므로 거기에 들어가는
- *   page 개수가 32k개라는것
+/* IAMROOT, 2021.11.13:
+ * - 하나의 section에서 관리하는 nr pages 값.
+ *
+ *   PFN_SECTION_SHIFT가 15 라면 section 당 32k pages 관리(1 << 15) 하며
+ *   48bit, 4kb page 기준으로 하나의 section당 32k * 4KB == 128MB 크기의
+ *   물리 메모리를 관리하게 된다.
  */
 #define PAGES_PER_SECTION       (1UL << PFN_SECTION_SHIFT)
-/*
- * IAMROOT, 2021.11.13:
- * - 0x8000 - 1 = 0x7fff (128MB)
- *   ~0x7fff = 0xffff_ffff_ffff_8000
+
+/* IAMROOT, 2021.11.13:
+ * - section에서 관리하는 nr pages (or sizeof(section)) mask 값.
+ *
+ *   0x7fff (32767) == 0x8000 - 1
+ *   ~0x7fff        == 0xffff_ffff_ffff_8000
  */
 #define PAGE_SECTION_MASK	(~(PAGES_PER_SECTION-1))
 

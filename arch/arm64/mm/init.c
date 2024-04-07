@@ -644,18 +644,24 @@ void __init arm64_memblock_init(void)
 	high_memory = __va(memblock_end_of_DRAM() - 1) + 1;
 }
 
-/*
- * IAMROOT, 2021.11.06:
- * - ex) 0x8000_0000 ~ 0xffff_ffff(2GB)
- *   memblock_start_of_DRAM = 0x8000_0000
- *   memblock_end_of_DRAM = 0x1_0000_0000
- *   min =  0x8_0000
- *   max = 0x10_0000
+/* IAMROOT, 2021.11.06: TODO
+ * - bootmem_init(..)이 어떤 역할을 수행하는지 서술.
  */
 void __init bootmem_init(void)
 {
 	unsigned long min, max;
 
+	/* IAMROOT, 2024.03.25:
+	 * - memblock에 저장된 DRAM의 pa(start), pa(end)를 기반으로
+	 *   아래 식을 통해 min, max 경계의 PFN을 구한다.
+	 *
+	 * - 예) range: 0x8000_0000 ~ 0xffff_ffff (2GB)
+	 *
+	 *   memblock_start_of_DRAM: 0x0_8000_0000
+	 *   memblock_end_of_DRAM  : 0x1_0000_0000
+	 *   min: 0x08_0000
+	 *   max: 0x10_0000
+	 */
 	min = PFN_UP(memblock_start_of_DRAM());
 	max = PFN_DOWN(memblock_end_of_DRAM());
 
