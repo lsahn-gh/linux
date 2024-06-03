@@ -34,20 +34,20 @@ typedef struct {
  *   PAGE_SHIFT: 12
  *   PAGE_MASK : 0xfff... ffff_f000
  *
- * - PFN_ALIGN(..):
+ * - PFN_ALIGN(x):
  *   0x8000_0000 == 0x8000_0034 & PAGE_MASK
  *
- * - PFN_UP(..):
+ * - PFN_UP(x):
  *   0x8000_1033 == 0x8000_0034 + (4096 - 1)
  *   0x0008_0001 == 0x8000_1033 >> 12
  *
- * - PFN_DOWN(..):
+ * - PFN_DOWN(x):
  *   0x0008_0000 == 0x8000_0034 >> 12
  *
- * - PFN_PHYS(..):
+ * - PFN_PHYS(x):
  *   0x8034_0000 == 0x0008_0340 << 12
  *
- * - PHYS_PFN(..):
+ * - PHYS_PFN(x):
  *   0x0008_0340 == 0x8034_0012 >> 12 (PAGE_SHIFT 만큼의 하위 비트는 절삭)
  */
 #define PFN_ALIGN(x)	(((unsigned long)(x) + (PAGE_SIZE - 1)) & PAGE_MASK)

@@ -152,22 +152,26 @@ static inline int sparse_early_nid(struct mem_section *section)
 }
 
 /* Validate the physical addressing limitations of the model */
-/*
- * IAMROOT, 2021.11.13:
- * - range 관련 예외 처리
+/* IAMROOT, 2021.11.13:
+ * - @start_pfn .. @end_pfn 범위에 대한 validation 체크.
  */
 void __meminit mminit_validate_memmodel_limits(unsigned long *start_pfn,
 						unsigned long *end_pfn)
 {
-/*
- * IAMROOT, 2021.11.13:
- * - 1 << (48 - 12) = 1 << (36) = 2^36
- */
+	/* IAMROOT, 2021.11.13:
+	 * - max pfn 값 정의.
+	 *   1 << (48 - 12) = 1 << (36) = 2^36
+	 */
 	unsigned long max_sparsemem_pfn = 1UL << (MAX_PHYSMEM_BITS-PAGE_SHIFT);
 
 	/*
 	 * Sanity checks - do not allow an architecture to pass
 	 * in larger pfns than the maximum scope of sparsemem:
+	 */
+	/* IAMROOT, 2024.06.02:
+	 * - @start_pfn, @end_pfn 의 값이 max_sparsemem_pfn을 넘는지 확인.
+	 *   넘는다면 arch setup 잘못이므로 로그 출력 후 해당 변수들의 값을
+	 *   max_sparsemem_pfn으로 제한.
 	 */
 	if (*start_pfn > max_sparsemem_pfn) {
 		mminit_dprintk(MMINIT_WARNING, "pfnvalidation",
@@ -287,26 +291,35 @@ void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 /* Record a memory area against a node. */
 /*
  * IAMROOT, 2021.11.13:
- * - nid, start, end에 해당하는 mem_section을 초기화하고 정보를 설정한다.
- *   mem_section의 section_mem_map에는 nid, online, present가 set될것이다.
+ * - @nid, @start, @end에 해당하는 mem_section[]을 초기화한다.
+ *   mem_section[]의 section_mem_map에는 nid, online, present가 set 된다.
+ *
+ *   @start: PFN type 이다.
+ *   @end  : PFN type 이다.
  */
 static void __init memory_present(int nid, unsigned long start, unsigned long end)
 {
 	unsigned long pfn;
-/*
- * IAMROOT, 2021.11.13:
- * - sparse memory는 extreme, static방식이 있다. static방식이 아니면
- *   extream 이다. default로 extreme을 사용한다.
- *
- * - extream방식에서는 mem_section memory를 할당해줘야하므로 관련작업을
- *   수행한다.
- *
- * - 일단 1차원 배열을 먼저 만들고 실제 memory가 들어오면 2차원 배열측을
- *   할당하는 방식을 수행하여 memory가 절약된다.
- *
- * - size = 8 * 8192 = 64kb
- */
+
 #ifdef CONFIG_SPARSEMEM_EXTREME
+	/* IAMROOT, 2021.11.13:
+	 * - sparse memory에는 extreme, static방식이 있으며 arm64는 default로
+	 *   extreme을 사용하며 해당 방식은 dynamic allocation 방식이므로
+	 *   memblock_alloc(..)을 이용하여 관련 작업을 수행한다.
+	 *
+	 * - 우선 root(1차원 배열)를 생성하고 node(phys memory)가 해당 section의
+	 *   범위에 할당되면 child(2차원 배열)을 할당하는 구조이기 때문에 section에
+	 *   사용되는 메모리를 절약하게 된다.
+	 *
+	 * - size = 8 * 8192 = 64kb
+	 */
+
+	/* IAMROOT, 2024.06.02:
+	 * - SPARSEMEM_EXTREME 환경에서는 boottime에 mem_section[]이 초기화되어
+	 *   있지 않으므로 이곳에서 크기를 계산하고 memblock에서 alloc 한다.
+	 *
+	 *   단, 32bits는 static 구조를 사용하므로 compile-time에 크기가 정해진다.
+	 */
 	if (unlikely(!mem_section)) {
 		unsigned long size, align;
 
@@ -321,6 +334,19 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
 
 	start &= PAGE_SECTION_MASK;
 	mminit_validate_memmodel_limits(&start, &end);
+	/* IAMROOT, 2024.06.02:
+	 * - validator에서 sanity check 이후 아래 loop를 다음 3가지 경우 중 하나로
+	 *   결정하여 수행함.
+	 *
+	 *   1). @start < @end : range가 올바르므로 validator가 adjust 하지 않고
+	 *                       loop 수행.
+	 *   2). @start < @end : @end > max_sparsemem_pfn 조건으로 인해 validator가
+	 *                       @end 값을 max_sparsemem_pfn으로 보정하였으나
+	 *                       range는 여전히 유효하므로 loop 수행.
+	 *   3). @start == @end: @start > max_sparsemem_pfn 조건으로 인해 validator가
+	 *                       @start, @end 값을 max_sparsemem_pfn으로 보정하고
+	 *                       loop cond로 인해 loop 수행하지 않고 함수 return.
+	 */
 	for (pfn = start; pfn < end; pfn += PAGES_PER_SECTION) {
 		unsigned long section = pfn_to_section_nr(pfn);
 		struct mem_section *ms;
@@ -757,10 +783,21 @@ failed:
  * Allocate the accumulated non-linear sections, allocate a mem_map
  * for each and record the physical to section mapping.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - memory model에는 크게 flat memory, sparse memory가 있는데
- *   arm64는 sparse memory만을 사용한다.
+/* IAMROOT, 2021.11.13:
+ * - Kenrel에 구현된 Physical Memory Model에는 크게 다음 3가지를 지원한다.
+ *   1) FLATMEM
+ *      - phys memory의 node가 1개일때 사용하는 모델이다. 모든 page frame이
+ *        선형적으로 연결되어 있다.
+ *   2) DISCONTGMEM
+ *      - phys memory의 node가 2개 이상일 때 사용가능하며 각 node에 대한
+ *        memblock region은 서로 떨어져 있을 수 있어 phys addr 상에 hole이
+ *        존재할 수 있다.
+ *   3) SPARSEMEM
+ *      - DISCONTGMEM과 비슷하지만 phys memory addr를 section 이란 논리적
+ *        영역으로 나눠서 section 단위로 관리한다.
+ *        - 32bits와 64bits arch 간에 설계 차이가 존재하기도 한다.
+ *
+ *
  * - mem_secion을 초기화한다.
  *   > mem_section root 및 present mem_secion 생성
  *   > mem_section_usage를 초기화한다.
@@ -849,10 +886,9 @@ failed:
  */
 void __init sparse_init(void)
 {
-/*
- * IAMROOT, 2021.11.25:
- * pnum : present section number
- */
+	/* IAMROOT, 2021.11.25:
+	 * pnum : present section number
+	 */
 	unsigned long pnum_end, pnum_begin, map_count = 1;
 	int nid_begin;
 

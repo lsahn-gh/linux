@@ -1878,9 +1878,22 @@ void __init_memblock __next_mem_pfn_range(int *idx, int nid,
 
 		if (PFN_UP(r->base) >= PFN_DOWN(r->base + r->size))
 			continue;
+
+		/* IAMROOT, 2024.06.02:
+		 * - PFN_UP(r->base) < PFN_DOWN(r->base + r->size)이고 @nid가 아래
+		 *   케이스 중 하나라면 loop에서 빠져나옴.
+		 *
+		 *   1). @nid가 MAX_NUMNODES라면 node에 상관없이 탐색 의미.
+		 *   2). @nid가 r_nid와 같은 경우. (특정 node 탐색)
+		 */
 		if (nid == MAX_NUMNODES || nid == r_nid)
 			break;
 	}
+
+	/* IAMROOT, 2024.06.02:
+	 * - 원하는 range의 region을 찾지 못하거나 phys memory 사용량이 full인
+	 *   경우 그냥 return.
+	 */
 	if (*idx >= type->cnt) {
 		*idx = -1;
 		return;
@@ -2055,7 +2068,7 @@ again:
 					    flags);
 
 	/* IAMROOT, 2021.10.23:
-	 * - 할당할 수 있는 region을 찾고, reserved region에 추가했다면
+	 * - 할당할 수 있는 region을 찾고, reserved region에 추가하고 난 뒤
 	 *   done label로 점프한다.
 	 */
 	if (found && !memblock_reserve(found, size))

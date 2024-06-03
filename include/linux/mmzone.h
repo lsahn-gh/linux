@@ -1704,9 +1704,11 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  */
 #define PFN_SECTION_SHIFT	(SECTION_SIZE_BITS - PAGE_SHIFT)
 
-/*
- * IAMROOT, 2021.11.13:
- * - 2^21 = 2MB 개
+/* IAMROOT, 2021.11.13:
+ * - 전체 section 갯수.
+ *
+ *   SECTIONS_SHIFT : 21
+ *   NR_MEM_SECTIONS: 2,000,000 == 2^21
  */
 #define NR_MEM_SECTIONS		(1UL << SECTIONS_SHIFT)
 
@@ -1746,17 +1748,16 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 #error Allocator MAX_ORDER exceeds SECTION_SIZE
 #endif
 
-/*
- * IAMROOT, 2021.11.13:
- * - pfn과 section의 shift 차이만큼만 고려해 번호를 알아낸다.
+/* IAMROOT, 2021.11.13:
+ * - @pfn을 입력받아 해당 page frame이 속한 section number를 알아내는 함수.
  */
 static inline unsigned long pfn_to_section_nr(unsigned long pfn)
 {
 	return pfn >> PFN_SECTION_SHIFT;
 }
-/*
- * IAMROOT, 2021.11.20:
- * - section nr -> pfn 변환
+
+/* IAMROOT, 2021.11.20:
+ * - @sec을 입력받아 해당 section이 pointing 하는 첫번째 pfn을 반환하는 함수.
  */
 static inline unsigned long section_nr_to_pfn(unsigned long sec)
 {

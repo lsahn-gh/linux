@@ -32,10 +32,14 @@
 
 #ifdef CONFIG_SPARSEMEM
 #include <asm/sparsemem.h>
-/*
- * IAMROOT, 2021.11.13:
- * - 48 - 27 = 21
- * 즉 2^21개의 section 개수라는 의미.
+/* IAMROOT, 2021.11.13:
+ * - section shift bits 값 (section 갯수를 구하는데 사용).
+ *
+ *   MAX_PHYSMEM_BITS : 48
+ *   SECTION_SIZE_BITS: 27
+ *   SECTION_SHIFT    : 21 == 48 - 27
+ *
+ *   section 갯수가 2^21개 라는 의미.
  */
 #define SECTIONS_SHIFT	(MAX_PHYSMEM_BITS - SECTION_SIZE_BITS)
 #else
