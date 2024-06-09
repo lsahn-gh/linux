@@ -1886,14 +1886,14 @@ struct mem_section {
 	 */
 };
 
-/*
- * IAMROOT, 2021.11.13:
- * - 한개의 root가 관리하는 section 숫자.
- * - extream인 경우
- *   PAGE_SIZE / sizeof(struct mem_sections)  = 4096 / 16 = 256 개
- *   section size가 2^27(128MB)인 경우
- *   root 한개당 32GB를 커버한다.
- * - static인 경우 root를 사용하지 않아서 그냥 1이됨.
+/* IAMROOT, 2021.11.13:
+ * - root 당 section 갯수 설정.
+ *
+ * - SPARSEMEM_EXTREME == enable
+ *   256 == 4096 / 16 (PAGE_SIZE / sizeof(struct mem_sections))
+ *   section size가 2^27(128MB)인 경우 root 당 32GB (256 * 128MB) 커버.
+ *
+ *   static인 경우 root를 사용하지 않으므로 1로 설정.
  */
 #ifdef CONFIG_SPARSEMEM_EXTREME
 #define SECTIONS_PER_ROOT       (PAGE_SIZE / sizeof (struct mem_section))
@@ -1901,16 +1901,20 @@ struct mem_section {
 #define SECTIONS_PER_ROOT	1
 #endif
 
+/* IAMROOT, 2024.06.04:
+ * - section을 입력받아 해당 section이 소속된 root를 반환한다.
+ *   @sec: section
+ */
 #define SECTION_NR_TO_ROOT(sec)	((sec) / SECTIONS_PER_ROOT)
-/*
- * IAMROOT, 2021.11.13:
- * - NR_SECTION_ROOTS. root 개수
+
+/* IAMROOT, 2021.11.13:
+ * - NR_SECTION_ROOTS: root 개수
  *
- * ex) 48PA bits, 4k page, static인 경우
- *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 1 =  2MB
- * ex) 48PA bits, 4k page, extreme인 경우
- *   NR_MEM_SECTIONS / SECTIONS_PER_ROOT = 2MB / 256 =  8192 
- *   root 한개당 32GB이므로 총 256TB에 대한 영역이 된다.
+ *   ex) 48PA bits, 4k page, static인 경우
+ *       2MB == 2MB / 1 (NR_MEM_SECTIONS / SECTIONS_PER_ROOT)
+ *   ex) 48PA bits, 4k page, extreme인 경우
+ *       8192 == 2MB / 256 (NR_MEM_SECTIONS / SECTIONS_PER_ROOT)
+ *       root 한개당 32GB이므로 총 256TB 크기의 영역이다.
  */
 #define NR_SECTION_ROOTS	DIV_ROUND_UP(NR_MEM_SECTIONS, SECTIONS_PER_ROOT)
 #define SECTION_ROOT_MASK	(SECTIONS_PER_ROOT - 1)
@@ -1926,11 +1930,12 @@ static inline unsigned long *section_to_usemap(struct mem_section *ms)
 	return ms->usage->pageblock_flags;
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - section 번호(nr)에 해당하는 mem_section을 구해온다.
- * - extream, 4KB page인 경우 root 한개당 32GB영역을 커버하고 그 root 한개안에서
- *   32GB가 section size인 128MB씩 8192개(NR_SECTION_ROOTS)로 관리되게 된다.
+/* IAMROOT, 2021.11.13:
+ * - @nr (section 번호)에 해당하는 struct mem_section을 반환한다.
+ *
+ * - extream, 4KB page인 경우 root 한개당 32GB영역(SECTIONS_PER_ROOT)을
+ *   커버하고 해당 root는 section size인 128MB씩 8192개(NR_SECTION_ROOTS)로
+ *   관리한다.
  */
 static inline struct mem_section *__nr_to_section(unsigned long nr)
 {
@@ -1982,18 +1987,16 @@ static inline struct page *__section_mem_map_addr(struct mem_section *section)
 	return (struct page *)map;
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - 해당 section에 memory가 존재하는지 확인
+/* IAMROOT, 2021.11.13:
+ * - phys memory가 존재하는 section인지 확인하는 함수.
  */
 static inline int present_section(struct mem_section *section)
 {
 	return (section && (section->section_mem_map & SECTION_MARKED_PRESENT));
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - 해당 section에 memory가 존재하는지 확인
+/* IAMROOT, 2021.11.13:
+ * - @nr을 입력받아 phys memory가 존재하는 section인지 확인하는 함수.
  */
 static inline int present_section_nr(unsigned long nr)
 {
@@ -2135,10 +2138,9 @@ static inline int pfn_in_present_section(unsigned long pfn)
 	return present_section(__nr_to_section(pfn_to_section_nr(pfn)));
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - section_nr다음 부터 제일 처음 present가 set되있는것을 찾아
- *   return 한다.
+/* IAMROOT, 2021.11.13:
+ * - @section_nr + 1에서 __highest_present_section_nr까지 loop를 수행하며
+ *   phys memory가 존재하는 section을 찾아 section 번호를 반환한다.
  */
 static inline unsigned long next_present_section_nr(unsigned long section_nr)
 {

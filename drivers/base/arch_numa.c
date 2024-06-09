@@ -60,9 +60,9 @@ static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
  */
 static int numa_distance_cnt;
 static u8 *numa_distance;
-/*
- * IAMROOT, 2021.11.06:
- * - default는 false이므로 numa는 on인 상태가 default
+
+/* IAMROOT, 2021.11.06:
+ * - 초기값은 false 이므로 numa는 on인 상태이다.
  */
 bool numa_off;
 
@@ -379,9 +379,8 @@ void __init numa_free_distance(void)
 /*
  * Create a new NUMA distance table.
  */
-/*
- * IAMROOT, 2021.11.06:
- * - node_distance의 memory를 할당하고 초기값을 설정한다.
+/* IAMROOT, 2021.11.06:
+ * - NUMA distance table을 생성하고 초기화한다.
  */
 static int __init numa_alloc_distance(void)
 {
@@ -389,12 +388,15 @@ static int __init numa_alloc_distance(void)
 	u64 phys;
 	int i, j;
 
-/*
- * IAMROOT, 2021.11.06:
- * - nr_node_ids mm/page_alloc.c에 위치
- *   compile time에는 넣을수있는 최대값이 들어가있고, runtime에 dt에 따라서 설정될것.
- * - numa node간에 길이 산출을 위한 memory할당.
- */
+	/* IAMROOT, 2021.11.06:
+	 * - NUMA node 간 distance 정보를 가지고 있는 table을 위한 memory alloc.
+	 *
+	 *   compile time에는 MAX_NUMNODES로 설정되었다가 boottime에
+	 *   setup_nr_node_ids(..)가 호출되면 dt에서 parsing 한것과 MAX_NUMNODES
+	 *   중에서 가장 큰 값을 nr_node_ids로 초기화한다.
+	 *
+	 *   nr_node_ids 변수는 mm/page_alloc.c 파일에 위치한다.
+	 */
 	size = nr_node_ids * nr_node_ids * sizeof(numa_distance[0]);
 	phys = memblock_phys_alloc_range(size, PAGE_SIZE, 0, PFN_PHYS(max_pfn));
 	if (WARN_ON(!phys))
@@ -404,6 +406,11 @@ static int __init numa_alloc_distance(void)
 	numa_distance_cnt = nr_node_ids;
 
 	/* fill with the default distances */
+	/* IAMROOT, 2024.06.09:
+	 * - nr_node_ids 만큼 loop 수행하며 distance table을 초기화한다.
+	 *
+	 *   i == j 라면 동일한 node에 있는 것이므로 LOCAL_DISTANCE로 초기화한다.
+	 */
 	for (i = 0; i < numa_distance_cnt; i++)
 		for (j = 0; j < numa_distance_cnt; j++)
 			numa_distance[i * numa_distance_cnt + j] = i == j ?
@@ -528,14 +535,25 @@ static int __init numa_init(int (*init_func)(void))
 	nodes_clear(node_possible_map);
 	nodes_clear(node_online_map);
 
+	/* IAMROOT, 2024.06.09:
+	 * - node distance table을 생성하고 초기화한다.
+	 */
 	ret = numa_alloc_distance();
 	if (ret < 0)
 		return ret;
 
+	/* IAMROOT, 2024.06.09:
+	 * - callback 함수 호출
+	 *
+	 *   ACPI 또는 DT의 callback을 사용한다.
+	 */
 	ret = init_func();
 	if (ret < 0)
 		goto out_free_distance;
 
+	/* IAMROOT, 2024.06.09:
+	 * - parsing 할 데이터가 없으면 configuration 하지 않고 나간다.
+	 */
 	if (nodes_empty(numa_nodes_parsed)) {
 		pr_info("No NUMA configuration found\n");
 		ret = -EINVAL;

@@ -54,11 +54,10 @@ int page_to_nid(const struct page *page)
 }
 EXPORT_SYMBOL(page_to_nid);
 
-/*
- * IAMROOT, 2021.11.13:
- * - 64bit system에서는 NODE_NOT_IN_PAGE_FLAGS가 0인 경우가
- *   대부분이겠지만 만약 들어온다면 table을 하나 더 만들어
- *   nid값을 저장한다.
+/* IAMROOT, 2021.11.13:
+ * - 64bits system에서는 NODE_NOT_IN_PAGE_FLAGS == disable인 경우가
+ *   대부분이지만 만약 enable 된다면 mem_section[..]가 pair인 table을
+ *   하나 더 생성하여 @section_nr 값을 기반으로 빠르게 탐색하도록 추적한다.
  */
 static void set_section_nid(unsigned long section_nr, int nid)
 {
@@ -71,17 +70,21 @@ static inline void set_section_nid(unsigned long section_nr, int nid)
 #endif
 
 #ifdef CONFIG_SPARSEMEM_EXTREME
-/*
- * IAMROOT, 2021.11.13:
- * - extreme에서는 array_size 는 PAGE_SIZE(4k)가 될것이다.
- * - slab이 아직 비활성일 경우 memblock으로 할당을 한다.
+/* IAMROOT, 2024.06.04:
+ * - root 마다 소유할 수 있는 최대 nr sections 만큼 alloc 하고 반환.
  */
 static noinline struct mem_section __ref *sparse_index_alloc(int nid)
 {
 	struct mem_section *section = NULL;
+	/* IAMROOT, 2024.06.04:
+	 * - extreme에서 @array_size == PAGE_SIZE(4k) 이다.
+	 */
 	unsigned long array_size = SECTIONS_PER_ROOT *
 				   sizeof(struct mem_section);
 
+	/* IAMROOT, 2024.06.04:
+	 * - slab 할당자가 아직 비활성화되어 있다면 memblock을 사용한다.
+	 */
 	if (slab_is_available()) {
 		section = kzalloc_node(array_size, GFP_KERNEL, nid);
 	} else {
@@ -95,11 +98,9 @@ static noinline struct mem_section __ref *sparse_index_alloc(int nid)
 	return section;
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - 이제 여기서 2차원배열(mem_section)을 memory 할당하고 연결한다.
- * - 만약 해당 mem_section root index에 이미 있는경우 할당이 되어있으므로
- *   pass한다.
+/* IAMROOT, 2021.11.13:
+ * - new section을 alloc하고 @section_nr을 root(index)로 변환하여
+ *   mem_section[root]에 매핑(초기화)한다.
  */
 static int __meminit sparse_index_init(unsigned long section_nr, int nid)
 {
@@ -113,6 +114,9 @@ static int __meminit sparse_index_init(unsigned long section_nr, int nid)
 	 *
 	 * The mem_hotplug_lock resolves the apparent race below.
 	 */
+	/* IAMROOT, 2024.06.04:
+	 * - 값이 이미 존재하면 skip.
+	 */
 	if (mem_section[root])
 		return 0;
 
@@ -120,6 +124,10 @@ static int __meminit sparse_index_init(unsigned long section_nr, int nid)
 	if (!section)
 		return -ENOMEM;
 
+	/* IAMROOT, 2024.06.04:
+	 * - @root가 가리키는 mem_section[..] bucket에 va(section) 저장.
+	 *   여기서 section은 SECTIONS_PER_ROOT 갯수만큼 담을 수 있는 배열.
+	 */
 	mem_section[root] = section;
 
 	return 0;
@@ -146,6 +154,9 @@ static inline unsigned long sparse_encode_early_nid(int nid)
 	return ((unsigned long)nid << SECTION_NID_SHIFT);
 }
 
+/* IAMROOT, 2024.06.06:
+ * - @section에 저장된 nid를 반환한다.
+ */
 static inline int sparse_early_nid(struct mem_section *section)
 {
 	return (section->section_mem_map >> SECTION_NID_SHIFT);
@@ -199,18 +210,22 @@ void __meminit mminit_validate_memmodel_limits(unsigned long *start_pfn,
  * those loops early.
  */
 unsigned long __highest_present_section_nr;
-/*
- * IAMROOT, 2021.11.13:
- * - 가장높은 section_nr를 갱신해주고 section_mem_map에
- *   SECTION_MARKED_PRESENT를 set한다. memory가 존재하는
- *   section이라는 의미.
+
+/* IAMROOT, 2021.11.13:
+ * - @ms (struct mem_section)에 SECTION_MARKED_PRESENT flag 설정.
  */
 static void __section_mark_present(struct mem_section *ms,
 		unsigned long section_nr)
 {
+	/* IAMROOT, 2024.06.04:
+	 * - highest section 정보를 빠르게 찾기 위해 mark할 때 계속 업데이트.
+	 */
 	if (section_nr > __highest_present_section_nr)
 		__highest_present_section_nr = section_nr;
 
+	/* IAMROOT, 2024.06.05:
+	 * - SECTION_MARKED_PRESENT flag는 memory가 존재하는 section이란 의미.
+	 */
 	ms->section_mem_map |= SECTION_MARKED_PRESENT;
 }
 
@@ -219,9 +234,9 @@ static void __section_mark_present(struct mem_section *ms,
 	     ((section_nr != -1) &&				\
 	      (section_nr <= __highest_present_section_nr));	\
 	     section_nr = next_present_section_nr(section_nr))
-/*
- * IAMROOT, 2021.11.13:
- * - 제일 처음 present인 section_nr을 return한다.
+
+/* IAMROOT, 2021.11.13:
+ * - phys memory가 존재하는 첫번째 section을 탐색하여 section 번호를 반환한다.
  */
 static inline unsigned long first_present_section_nr(void)
 {
@@ -351,15 +366,22 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
 		unsigned long section = pfn_to_section_nr(pfn);
 		struct mem_section *ms;
 
+		/* IAMROOT, 2024.06.04:
+		 * - 신규 section array (SECTIONS_PER_ROOT)을 alloc하고 @section 값을
+		 *   기반으로 index를 구해 mem_section[index]에 매핑.
+		 */
 		sparse_index_init(section, nid);
 		set_section_nid(section, nid);
 
+		/* IAMROOT, 2024.06.04:
+		 * - mem_section[root]에서 struct mem_section 오브젝트를 구해 ms에
+		 *   대입하고 필요시 section_mem_map 멤버변수를 초기화한다.
+		 */
 		ms = __nr_to_section(section);
 		if (!ms->section_mem_map) {
-/*
- * IAMROOT, 2021.11.13:
- * - nid와 online, present 정보를 section_mem_map에 함께 기록한다.
- */
+			/* IAMROOT, 2021.11.13:
+			 * - nid 번호, ONLINE/PRESENT flag를 section_mem_map에 기록한다.
+			 */
 			ms->section_mem_map = sparse_encode_early_nid(nid) |
 							SECTION_IS_ONLINE;
 			__section_mark_present(ms, section);
@@ -372,9 +394,9 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
  * This is a convenience function that is useful to mark all of the systems
  * memory as present during initialization.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - 사용하는 memory에 대해서 mem_section을 초기화한다.
+/* IAMROOT, 2021.11.13:
+ * - memblock.memory 타입을 탐색하여 사용중인/가능한 memory에 대해
+ *   mem_section[..] 및 root/section 모두를 초기화한다.
  */
 static void __init memblocks_present(void)
 {
@@ -892,18 +914,26 @@ void __init sparse_init(void)
 	unsigned long pnum_end, pnum_begin, map_count = 1;
 	int nid_begin;
 
+	/* IAMROOT, 2024.06.05:
+	 * - mem_section[..]을 초기화하고 memblock.memory에서 사용중인/가능한
+	 *   memory에 대해 root/section을 alloc하고 mem_section[..]에 초기화한다.
+	 */
 	memblocks_present();
-/*
- * IAMROOT, 2021.11.13:
- * - pnum_begin : 최초의 pregent section num begin.
- * - nid_begin : pnum_begin의 nid
- */
+
+	/* IAMROOT, 2021.11.13:
+	 * - phys memory가 존재하는 첫번째 section의 번호를 @pnum_begin에
+	 *   저장하고 @nid 정보를 가져와 nid_begin에 저장한다.
+	 */
 	pnum_begin = first_present_section_nr();
 	nid_begin = sparse_early_nid(__nr_to_section(pnum_begin));
 
 	/* Setup pageblock_order for HUGETLB_PAGE_SIZE_VARIABLE */
 	set_pageblock_order();
 
+	/* IAMROOT, 2024.06.06:
+	 * - range[@pnum_begin .. @pnum_end)까지 (!= -1 && <= __highest) 조건으로
+	 *   loop를 수행하며 sparse_init_nid(..)을 호출한다.
+	 */
 	for_each_present_section_nr(pnum_begin + 1, pnum_end) {
 		int nid = sparse_early_nid(__nr_to_section(pnum_end));
 

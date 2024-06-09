@@ -176,12 +176,10 @@ EXPORT_SYMBOL(latent_entropy);
 /*
  * Array of node states.
  */
-/*
- * IAMROOT, 2021.11.06:
- * - 하나의 node가 여러상태를 가질수있으므로 배열로 정의된것.
- * - 초기값으론 N_POSSIBLE 제외 전부 1로 된것이 보인다.
- *   현재 동작하는 boot node가 0번인데 당연히 cpu도 존재하고
- *   memory도 존재하므로 초기값이 1로 되있다.
+/* IAMROOT, 2021.11.06:
+ * - Node의 상태를 배열로 정의한 것이며 아래 중 하나의 상태를 가지게 된다.
+ *   초기값이 N_POSSIBLE bucket을 제외하고 전부 1로 되어 있는데 boot를 위해
+ *   동작중인 node는 0이고 cpu/memory 모두 존재하므로 미리 1로 초기화한다.
  */
 nodemask_t node_states[NR_NODE_STATES] __read_mostly = {
 	[N_POSSIBLE] = NODE_MASK_ALL,
