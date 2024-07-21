@@ -16,7 +16,14 @@
 #endif
 
 /* IAMROOT, 2021.09.30:
- * nr개의 bit를 수용하기 위해 해당 type들로 몇개가 필요한지 계산하는 매크로
+ * - @nr bit를 수용하기 위해 해당 type들로 몇개가 필요한지 계산하는 매크로.
+ *
+ *   예)                 @nr: 256
+ *       BITS_PER_TYPE(long): 32-bits
+ *       ----------------------------
+ *                            8
+ *
+ *       256bits를 수용하기 위해 long type 저장소 8개가 필요함.
  */
 #define BITS_PER_TYPE(type)	(sizeof(type) * BITS_PER_BYTE)
 #define BITS_TO_LONGS(nr)	__KERNEL_DIV_ROUND_UP(nr, BITS_PER_TYPE(long))

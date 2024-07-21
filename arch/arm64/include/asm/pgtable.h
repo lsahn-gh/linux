@@ -465,16 +465,17 @@ static inline void set_pte_at(struct mm_struct *mm, unsigned long addr,
  */
 #define HUGE_MAX_HSTATE		4
 
-/*
- * IAMROOT, 2021.11.13:
- * 2MB(4kb page size)
+/* IAMROOT, 2021.11.13:
+ * - HPAGE_SHIFT : 21 (PMD_SHIFT)
+ *   HPAGE_SIZE  : 2MB (4kb page 일때)
+ *   HPAGE_MASK  : TODO
  */
 #define HPAGE_SHIFT		PMD_SHIFT
 #define HPAGE_SIZE		(_AC(1, UL) << HPAGE_SHIFT)
 #define HPAGE_MASK		(~(HPAGE_SIZE - 1))
-/*
- * IAMROOT, 2021.11.13:
- * - 21 - 12 = 9 (4kb page size)
+
+/* IAMROOT, 2021.11.13:
+ * - HUGETLB_PAGE_ORDER : 9 == (21 - 12)
  */
 #define HUGETLB_PAGE_ORDER	(HPAGE_SHIFT - PAGE_SHIFT)
 

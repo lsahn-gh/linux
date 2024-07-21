@@ -54,18 +54,23 @@ enum pageblock_bits {
 #ifdef CONFIG_HUGETLB_PAGE
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
-/*
- * IAMROOT, 2021.11.13:
- * - variable로 사용한다.
+
+/* IAMROOT, 2021.11.13:
+ * - Runtime에 결정되는 order를 사용한다.
+ *   따라서 variable로 선언되어 있다.
  */
 /* Huge page sizes are variable */
 extern unsigned int pageblock_order;
 
 #else /* CONFIG_HUGETLB_PAGE_SIZE_VARIABLE */
-/*
- * IAMROOT, 2021.11.13:
- * - 고정된 order로 사용한다. 9.
- *  (2^9 * 4k = 2MB 라는뜻)
+
+/* IAMROOT, 2021.11.13:
+ * - Compile-time에 결정된 order를 사용한다.
+ *
+ *   4kb page 크기에서 값은 '9'이며 이는 다음을 의미함.
+ *   (2MB = 2^9 * 4K)
+ *
+ *   pageblock_order : 9 (HUGETLB_PAGE_ORDER)
  */
 /* Huge pages are a constant size */
 #define pageblock_order		HUGETLB_PAGE_ORDER

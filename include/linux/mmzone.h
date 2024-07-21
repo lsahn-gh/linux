@@ -1733,7 +1733,7 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  * IAMROOT, 2021.11.20:
  * - 128MB범위를 관리한다.
  *
- * - pageblock_order = HUGETLB_PAGE_ORDER 라고 가정 (9)
+ * - pageblock_order = HUGETLB_PAGE_ORDER (9) 라고 가정
  *   (1 << (15 - 9)) * 4 = 2^6 * 4 = 256(bits) = 32byte
  *
  * - 4GB를 관리하는데 필요한 bits 계산.
@@ -1784,10 +1784,9 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #if SUBSECTION_SHIFT > SECTION_SIZE_BITS
 #error Subsection size exceeds section size
 #else
-/*
- * IAMROOT, 2021.11.20:
- * - 27 - 21 = 6
- *   한 section당 subsecion의 개수 2^6 = 64
+/* IAMROOT, 2021.11.20:
+ * - Section 당 Subsection의 갯수 구함.
+ *   64 == 2^6 == 1 << (27 - 21)
  */
 #define SUBSECTIONS_PER_SECTION (1UL << (SECTION_SIZE_BITS - SUBSECTION_SHIFT))
 #endif
@@ -1803,19 +1802,17 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
  */
 struct mem_section_usage {
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
-/*
- * IAMROOT, 2021.11.20:
- * - Documentation/vm/memory-model.rst 참고
- * - 4K page기준 subsection은 0 ~ 63까지의 index를 가진다.
- *   사용하는 subsection index에 set bit가 된다.
- */
+	/*
+	 * IAMROOT, 2021.11.20:
+	 * - Documentation/vm/memory-model.rst 참고
+	 * - 4K page기준 subsection은 0 ~ 63까지의 index를 가진다.
+	 *   사용하는 subsection index에 set bit가 된다.
+	 */
 	DECLARE_BITMAP(subsection_map, SUBSECTIONS_PER_SECTION);
 #endif
 	/* See declaration of similar field in struct zone */
-/*
- * IAMROOT, 2021.11.20:
- * - pageblock_bits
- */
+	/* IAMROOT, 2021.11.20: TODO
+	 */
 	unsigned long pageblock_flags[0];
 };
 
