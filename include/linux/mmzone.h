@@ -1959,10 +1959,8 @@ extern size_t mem_section_usage_size(void);
  *      which results in PFN_SECTION_SHIFT equal 6.
  * To sum it up, at least 6 bits are available.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - 0~5번 bit까지 macro로 대로 사용하고 6bit부터 nid를
- *   저장할려는 용도로 사용한다.
+/* IAMROOT, 2021.11.13:
+ * - 0 .. 5번 bit까지는 flag로 사용.
  */
 #define SECTION_MARKED_PRESENT		(1UL<<0)
 #define SECTION_HAS_MEM_MAP		(1UL<<1)
@@ -1970,11 +1968,10 @@ extern size_t mem_section_usage_size(void);
 #define SECTION_IS_EARLY		(1UL<<3)
 #define SECTION_TAINT_ZONE_DEVICE	(1UL<<4)
 #define SECTION_MAP_LAST_BIT		(1UL<<5)
-/*
- * IAMROOT, 2021.11.27:
- * - 하위 5bit. 0xffff_ffff_ffff_ffe0 
- */
 #define SECTION_MAP_MASK		(~(SECTION_MAP_LAST_BIT-1))
+/* IAMROOT, 2024.07.27:
+ * - nid 정보를 저장하기 위해 사용하는 shift 값.
+ */
 #define SECTION_NID_SHIFT		6
 
 static inline struct page *__section_mem_map_addr(struct mem_section *section)

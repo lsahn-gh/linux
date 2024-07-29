@@ -440,22 +440,23 @@ struct page *sparse_decode_mem_map(unsigned long coded_mem_map, unsigned long pn
 }
 #endif /* CONFIG_MEMORY_HOTPLUG */
 
-/*
- * IAMROOT, 2021.11.27:
- * - mem_section에 mem_map address를 저장하고 mem_map을 가지고 있다는 flag와
- *   인자의 flags를 저장하고 mem_section_usage 주소를 세팅한다.
+/* IAMROOT, 2024.07.27:
+ * - @ms (struct mem_section)를 입력받아 section 오브젝트를 초기화한다.
  */
 static void __meminit sparse_init_one_section(struct mem_section *ms,
 		unsigned long pnum, struct page *mem_map,
 		struct mem_section_usage *usage, unsigned long flags)
 {
-/*
- * IAMROOT, 2021.11.30:
- * - SECTION_MAP_MASK가 아닌 영역. 즉 flag영역을 제외한 나머지는 지운다.
- *   section_mem_map에 임시적으로 SECTION_NID_SHIFT 로 nid를 저장했었고,
- *   flag는 SECTION_IS_ONLINE, SECTION_MARKED_PRESENT 가 set되 있었을 것이다.
- *   즉 nid값만 지우게 된다.
- */
+	/* IAMROOT, 2021.11.30:
+	 * - sparse_init_one_section(..)에서는 다음 작업을 수행한다.
+	 *   1) @ms에 struct page: va(@mem_map) 저장.
+	 *   2) @ms에 struct mem_section_usage: va(@usage) 저장.
+	 *   3) @flags와 SECTION_HAS_MEM_MAP flag 설정.
+	 *      section_mem_map에는 SECTION_IS_ONLINE, SECTION_MARKED_PRESENT
+	 *                          flag가 설정되어 있다.
+	 *
+	 *   &= ~SECTION_MAP_MASK: section_mem_map에 저장된 nid 정보를 지운다.
+	 */
 	ms->section_mem_map &= ~SECTION_MAP_MASK;
 	ms->section_mem_map |= sparse_encode_mem_map(mem_map, pnum)
 		| SECTION_HAS_MEM_MAP | flags;
@@ -511,7 +512,7 @@ static inline phys_addr_t pgdat_to_phys(struct pglist_data *pgdat)
 
 #ifdef CONFIG_MEMORY_HOTREMOVE
 /*
- * IAMROOT, 2021.11.20:
+ * IAMROOT, 2021.11.20: TODO
  * - nid에 해당하는 memory에서 mem_secion_usage로 사용할 memory를 얻어온다.
  *   node_data(pgdat)는 해당 nid에 존재하리라 예측하고, node_data 시작주소로해서
  *   secsion size내에서 구해오도록 노력한다.
@@ -520,7 +521,10 @@ static inline phys_addr_t pgdat_to_phys(struct pglist_data *pgdat)
  * - 일단 mem_secion 개수만큼 memory를 아래 함수에서 할당하고, 
  *   그 이후에 mem_secion을 하나하나돌며 mem_section_usage_size() 만큼 잘라서
  *   해당 mem_secion에서 사용할 memory를 mapping 해준다.
- *
+ */
+/* IAMROOT, 2024.07.25:
+ * - @pgdat를 위한 section을 생성하기 위해 memblock에서 @size 만큼
+ *   메모리를 할당한다.
  */
 static struct mem_section_usage * __init
 sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
@@ -529,10 +533,7 @@ sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 	struct mem_section_usage *usage;
 	unsigned long goal, limit;
 	int nid;
-/*
- * IAMROOT, 2021.11.20:
- * - remove가 가능한 상황에서 memory들은 최대한 한곳에 모은다.
- */
+
 	/*
 	 * A page may contain usemaps for other sections preventing the
 	 * page being freed and making a section unremovable while
@@ -542,6 +543,11 @@ sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 	 * sections become inter-dependent. This allocates usemaps
 	 * from the same section as the pgdat where possible to avoid
 	 * this problem.
+	 */
+	/* IAMROOT, 2024.07.25: TODO
+	 * - @goal : ??
+	 *   @limit: ??
+	 *   @nid  : 해당 node에서 우선적으로 alloc 시도
 	 */
 	goal = pgdat_to_phys(pgdat) & (PAGE_SECTION_MASK << PAGE_SHIFT);
 	limit = goal + (1UL << PA_SECTION_SHIFT);
@@ -635,10 +641,14 @@ static void __init check_usemap_section_nr(int nid,
 #endif /* CONFIG_MEMORY_HOTREMOVE */
 
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
-/*
- * IAMROOT, 2021.11.20:
- * - 2MB단위(section 단위)로 align한다.
- *   struct page는 64byte고, PAGE_PER_SECTION은 32k이므로 2MB에 딱 떨어진다.
+/* IAMROOT, 2021.11.20:
+ * - section당 NR(struct page 오브젝트)개를 저장할 수 있는 크기를 PMD 단위
+ *   (2MB)로 align 하여 반환한다. (PMD 단위는 Section 단위 이기도 하다)
+ *
+ *   sizeof(struct page) == 64byte
+ *   PAGES_PER_SECTION   == 32k
+ *   -----------------------------
+ *                          2MB
  */
 static unsigned long __init section_map_size(void)
 {
@@ -646,26 +656,44 @@ static unsigned long __init section_map_size(void)
 }
 
 #else
+/* IAMROOT, 2021.11.20:
+ * - section당 NR(struct page 오브젝트)개를 저장할 수 있는 크기를 PAGE 단위
+ *   (4KB)로 align 하여 반환한다.
+ *
+ *   sizeof(struct page) == 64byte
+ *   PAGES_PER_SECTION   == 32k
+ *   -----------------------------
+ *                          2MB
+ */
 static unsigned long __init section_map_size(void)
 {
 	return PAGE_ALIGN(sizeof(struct page) * PAGES_PER_SECTION);
 }
 
-/*
- * IAMROOT, 2021.11.20:
- * - 인자의 nid에 해당하는 memory에서 (그 전에 할당해놓은 sparse_buffer)
- *   size만큼 map을 가져오고, 실패하면 다른 node에서 map을 가져온다.
+/* IAMROOT, 2021.11.20:
+ * - 각 section에서 관리할 NR(struct page)를 sparsemap_buf 또는 memblock에서
+ *   alloc 하여 반환한다.
  */
 struct page __init *__populate_section_memmap(unsigned long pfn,
 		unsigned long nr_pages, int nid, struct vmem_altmap *altmap)
 {
+	/* IAMROOT, 2024.07.27:
+	 * - size: sizeof(struct page) * PAGES_PER_SECTION
+	 */
 	unsigned long size = section_map_size();
 	struct page *map = sparse_buffer_alloc(size);
 	phys_addr_t addr = __pa(MAX_DMA_ADDRESS);
 
+	/* IAMROOT, 2024.07.25:
+	 * - sparsemap_buf가 초기화되어 있고 population할 크기가 충분하다면
+	 *   해당 buf를 사용한다.
+	 */
 	if (map)
 		return map;
 
+	/* IAMROOT, 2024.07.25:
+	 * - @size 만큼 memblock에서 할당한다.
+	 */
 	map = memmap_alloc(size, size, addr, nid, false);
 	if (!map)
 		panic("%s: Failed to allocate %lu bytes align=0x%lx nid=%d from=%pa\n",
@@ -684,11 +712,9 @@ static inline void __meminit sparse_buffer_free(unsigned long size)
 	memblock_free_early(__pa(sparsemap_buf), size);
 }
 
-/*
- * IAMROOT, 2021.11.20:
- * - 인자의 nid의 node에서 메모리를 할당받아온다.
- *   section_map_size를 align으로 하고 MAX_DMA_ADDRESS를 min주소로 하여
- *   size만큼 memory를 할당받아온다.
+/* IAMROOT, 2021.11.20:
+ * - @nid를 입력받아 해당 node에서 memblock 메모리를 @size만큼 할당받아
+ *   sparsemap_buf를 초기화한다.
  */
 static void __init sparse_buffer_init(unsigned long size, int nid)
 {
@@ -698,6 +724,10 @@ static void __init sparse_buffer_init(unsigned long size, int nid)
 	 * Pre-allocated buffer is mainly used by __populate_section_memmap
 	 * and we want it to be properly aligned to the section size - this is
 	 * especially the case for VMEMMAP which maps memmap to PMDs
+	 */
+	/* IAMROOT, 2024.07.25:
+	 * - section_map_size()만큼 align하여 @size로 할당받는다.
+	 *   @nid와 일치하는 node의 memblock에서 할당에 실패하면 NULL을 반환한다.
 	 */
 	sparsemap_buf = memmap_alloc(size, section_map_size(), addr, nid, true);
 	sparsemap_buf_end = sparsemap_buf + size;
@@ -757,8 +787,11 @@ void __weak __meminit vmemmap_populate_print_last(void)
  * And number of present sections in this node is map_count.
  */
 /* IAMROOT, 2021.11.27:
- * - @nid에 대해 range[@pnum_begin .. @pnum_end]까지 @map_count 개의
- *   section을 sparse 방식으로 memmap에 초기화한다.
+ * - range[@pnum_begin .. @pnum_end]까지의 section을 다음 조건으로 초기화.
+ *   1). @nid에 대응되는 node에서 alloc을 하려고 노력한다.
+ *   2). memblock region에서 PRESENT인 것만 section 초기화 진행.
+ *   3). section 초기화시 저장하는 struct mem_section_usage는
+ *       @map_count에 기반한다.
  */
 static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 				   unsigned long pnum_end,
@@ -769,8 +802,8 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 	struct page *map;
 
 	/* IAMROOT, 2021.11.20:
-	 * - @nid에 대응되는 struct mem_section_usage 자료구조를 @map_count
-	 *   갯수만큼 생성한다.
+	 * - @nid에 해당하는 struct mem_section_usage 자료구조를 @map_count
+	 *   개수만큼 생성한다.
 	 */
 	usage = sparse_early_usemaps_alloc_pgdat_section(NODE_DATA(nid),
 			mem_section_usage_size() * map_count);
@@ -779,19 +812,27 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 		goto failed;
 	}
 
-/*
- * IAMROOT, 2021.11.20:
- * - nid에 해당하는 node memory에서 sparse buffer(mem_map)를 만든다.
- *   일단 sparse buffer자체는 nid에 맞는 memory로만 가져오고 추후에
- *   각 mem_secion에 나눠줄때 모자르게되면 nid무관으로해서 memory를 가져온다.
- */
+	/* IAMROOT, 2024.07.25:
+	 * - __populate_section_memmap(..)에서 사용하기 위해 sparsemap_buf를
+	 *   초기화하며 @nid에 해당하는 memblock에서 alloc이 실패하면 buf 자체는
+	 *   NULL로 설정된다.
+	 */
 	sparse_buffer_init(map_count * section_map_size(), nid);
+
+	/* IAMROOT, 2024.07.27: TODO
+	 * - loop는 과연 @map_count 개수만큼 수행할까? 그렇지 않으면 overflow가
+	 *   발생할텐데?
+	 */
 	for_each_present_section_nr(pnum_begin, pnum) {
 		unsigned long pfn = section_nr_to_pfn(pnum);
 
 		if (pnum >= pnum_end)
 			break;
 
+		/* IAMROOT, 2024.07.27:
+		 * - section에서 관리할 NR(struct page)를 alloc 하며 최대한 @nid에서
+		 *   alloc 하려고 노력한다.
+		 */
 		map = __populate_section_memmap(pfn, PAGES_PER_SECTION,
 				nid, NULL);
 		if (!map) {
@@ -802,10 +843,17 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 			goto failed;
 		}
 		check_usemap_section_nr(nid, usage);
+		/* IAMROOT, 2024.07.27:
+		 * - map, usage, 추가 flag를 section에 세팅한다.
+		 */
 		sparse_init_one_section(__nr_to_section(pnum), pnum, map, usage,
 				SECTION_IS_EARLY);
 		usage = (void *) usage + mem_section_usage_size();
 	}
+
+	/* IAMROOT, 2024.07.25:
+	 * - 위에서 초기화한 sparsemap_buf를 해제한다.
+	 */
 	sparse_buffer_fini();
 	return;
 failed:
@@ -824,7 +872,7 @@ failed:
  * Allocate the accumulated non-linear sections, allocate a mem_map
  * for each and record the physical to section mapping.
  */
-/* IAMROOT, 2021.11.13:
+/* IAMROOT, 2021.11.13: TODO
  * - Kenrel에 구현된 Physical Memory Model에는 크게 다음 3가지를 지원한다.
  *   1) FLATMEM
  *      - phys memory의 node가 1개일때 사용하는 모델이다. 모든 page frame이
@@ -838,15 +886,14 @@ failed:
  *        영역으로 나눠서 section 단위로 관리한다.
  *        - 32bits와 64bits arch 간에 설계 차이가 존재하기도 한다.
  *
- *
- * - mem_secion을 초기화한다.
- *   > mem_section root 및 present mem_secion 생성
- *   > mem_section_usage를 초기화한다.
- *   > mem_map을 초기화한다.
- *   > mem_section.usage에 mem_section_usage를 매핑하고
- *   mem_section.section_mem_map에 sparse_encode_mem_map을 통해 mem_map을
- *   매핑한다.
- *  - section_to_node_table을 초기화한다.
+ * - sparse 방식 기반으로 section을 초기화한다.
+ *   1). mem_section root 및 present mem_secion 생성.
+ *   2). mem_section_usage를 초기화한다.
+ *   3). mem_map을 초기화한다.
+ *   4). mem_section.usage에 mem_section_usage를 매핑하고
+ *       mem_section.section_mem_map에 sparse_encode_mem_map을 통해
+ *       mem_map을 매핑한다.
+ *   5). section_to_node_table을 초기화한다.
  *
  * ---
  * 4K page 기준 address 변환
@@ -935,7 +982,8 @@ void __init sparse_init(void)
 
 	/* IAMROOT, 2024.06.05:
 	 * - mem_section[..]을 초기화하고 memblock.memory에서 사용중인/가능한
-	 *   memory에 대해 root/section을 alloc하고 mem_section[..]에 초기화한다.
+	 *   memory에 대해 root/section을 PRESENT flag 세팅하고 mem_section[..]에
+	 *   초기화한다.
 	 */
 	memblocks_present();
 
@@ -971,15 +1019,18 @@ void __init sparse_init(void)
 		}
 
 		/* IAMROOT, 2024.07.09:
-		 * - pnum_begin과 pnum_end의 nid가 다르므로 pnum_begin에서 map_count
-		 *   갯수만큼 sparse_init_nid(..)을 호출하여 초기화한다.
+		 * - @nid node에서 pnum_begin .. pnum_end 까지의 section을 초기화한다.
+		 *   이때 map_count는 section에 세팅되는 struct mem_section_usage의
+		 *   개수를 의미한다.
+		 *
+		 *   sparse_init_nid(..)는 node 개수만큼 호출된다.
 		 */
 		/* Init node with sections in range [pnum_begin, pnum_end) */
 		sparse_init_nid(nid_begin, pnum_begin, pnum_end, map_count);
 
 		/* IAMROOT, 2024.07.09:
-		 * - @nid_begin의 section 초기화가 완료되었으므로 다음 nid/section
-		 *   초기화를 위해 관련 변수들을 다시 세팅한다.
+		 * - @nid_begin node의 section 초기화가 완료되었으므로 다음
+		 *   nid/section 초기화를 위해 관련 변수들을 다시 세팅한다.
 		 */
 		nid_begin = nid;
 		pnum_begin = pnum_end;

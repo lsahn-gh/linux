@@ -246,16 +246,16 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 	return min(zone_mask, memblock_end_of_DRAM() - 1) + 1;
 }
 
-/*
- * IAMROOT, 2021.11.27:
- * @min DRAM start pfn
- * @max DRAM end pfn + 1
+/* IAMROOT, 2021.11.27: TODO
+ * - 
+ *   @min: PFN_UP(memblock_start_of_DRAM())
+ *   @max: PFN_DOWN(memblock_end_of_DRAM())
  *
- * ZONE_DMA    : dt에서 읽은 device max address pfn
- * ZONE_DMA32  : 32bit pfn
- * ZONE_NORMAL : DRAM end pfn + 1
+ *   ZONE_DMA   : dt에서 읽은 device max address pfn
+ *   ZONE_DMA32 : 32bit pfn
+ *   ZONE_NORMAL: DRAM end pfn + 1
  *
- * arm64에서는 보통 ZONE_DMA가 없고 ZONE_DMA32를 쓴다.
+ *   arm64에서는 보통 ZONE_DMA가 없고 ZONE_DMA32를 쓴다.
  */
 static void __init zone_sizes_init(unsigned long min, unsigned long max)
 {
@@ -265,10 +265,6 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	phys_addr_t __maybe_unused dma32_phys_limit = max_zone_phys(32);
 
 #ifdef CONFIG_ZONE_DMA
-/*
- * IAMROOT, 2021.11.27:
- * - acpi가 disable일경우 fls64는 64.
- */
 	acpi_zone_dma_bits = fls64(acpi_iort_dma_get_max_cpu_address());
 	dt_zone_dma_bits = fls64(of_dma_get_max_cpu_address(NULL));
 	zone_dma_bits = min3(32U, dt_zone_dma_bits, acpi_zone_dma_bits);
@@ -689,7 +685,13 @@ void __init bootmem_init(void)
 	 * sparse_init() tries to allocate memory from memblock, so must be
 	 * done after the fixed reservations
 	 */
+	/* IAMROOT, 2024.07.27:
+	 * - phys memory 관리를 위해 sparse 방식으로 초기화한다.
+	 */
 	sparse_init();
+	/* IAMROOT, 2024.07.28:
+	 * - zone을 초기화한다.
+	 */
 	zone_sizes_init(min, max);
 
 	/*
