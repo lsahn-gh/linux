@@ -6,9 +6,14 @@
 #include <uapi/linux/types.h>
 
 #ifndef __ASSEMBLY__
-/*
- * IAMROOT, 2021.11.13:
- * - 최소 long byte
+/* IAMROOT, 2021.11.13:
+ * - BITS_TO_LONGS(..) 매크로를 사용하여 @bits 개수 만큼의 bit를 수용하기
+ *   위한 bitmap 선언.
+ *
+ *   예) bits: 16
+ *       1 == BITS_TO_LONGS(16)
+ *
+ *       따라서 16개의 bits를 수용하기 위해선 1개의 bucket이 필요함.
  */
 #define DECLARE_BITMAP(name,bits) \
 	unsigned long name[BITS_TO_LONGS(bits)]

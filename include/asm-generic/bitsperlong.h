@@ -32,9 +32,8 @@
  * but using the out-of-line functions, so that the inline implementations
  * can unconditionally dereference the pointer(s).
  */
-/*
- * IAMROOT, 2023.04.15:
- * - 0 < nbits <= 64 이고 nbits가 상수이면 true
+/* IAMROOT, 2023.04.15:
+ * - @nbits가 상수 값이고 0 < @nbits <= 64 범위라면 true.
  */
 #define small_const_nbits(nbits)					\
 	(__builtin_constant_p(nbits) && (nbits) <= BITS_PER_LONG && (nbits) > 0)

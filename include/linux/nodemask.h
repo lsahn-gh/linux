@@ -245,11 +245,10 @@ static inline int __nodes_full(const nodemask_t *srcp, unsigned int nbits)
 	return bitmap_full(srcp->bits, nbits);
 }
 
-#define nodes_weight(nodemask) __nodes_weight(&(nodemask), MAX_NUMNODES)
-/*
- * IAMROOT, 2022.05.14:
- * - set된 bit 개수
+/* IAMROOT, 2022.05.14:
+ * - @nodemask 비트맵에서 MAX_NUMNODES bits 이내의 설정된 bit 개수 반환.
  */
+#define nodes_weight(nodemask) __nodes_weight(&(nodemask), MAX_NUMNODES)
 static inline int __nodes_weight(const nodemask_t *srcp, unsigned int nbits)
 {
 	return bitmap_weight(srcp->bits, nbits);

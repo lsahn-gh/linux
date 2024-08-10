@@ -179,65 +179,21 @@ static void __init reserve_crashkernel(void)
  * limit. If DRAM starts above 32-bit, expand the zone to the maximum
  * available memory, otherwise cap it at 32-bit.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - DRAM start주소가 U32_MAX가 넘으면 zone 범위를 그냥 DRAM end주소로 확장하고
- *   그게 아니면 U32_MAX범위의 DRAM에 포함되는 영역에서 DRAM end, 
- *   DRAM start, zone_mask를 비교해 DRAM 내에서 max_zone_phys 를 구한다
- *
+/* IAMROOT, 2024.08.06:
+ * - @zone_bits를 입력받아 해당 zone이 수용할 수 있는 최대 paddr를 구한다.
+ *   이때 paddr는 memblock_end_of_DRAM() 크기를 넘을 수 없다.
  */
 static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 {
 	phys_addr_t zone_mask = DMA_BIT_MASK(zone_bits);
 	phys_addr_t phys_start = memblock_start_of_DRAM();
-/*
- * IAMROOT, 2021.11.27:
- * - DRAM start 주소가 32bit max보다 크면 zone_mask가 MAX값이 되므로 결국
- *   memblock_end_of_DRAM()을 쓰겟다는것.
- *
- *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
- *   | DRAM |
- *   +------+ DRAM memblock_start_of_DRAM() > U32_MAX
- *
- * - DRAM start 주소가 zone_mask보다 크면 min(U32_MAX, memblock_end_of_DRAM()).
- *   memblock_start_of_DRAM()은 U32_MAX보다 작거나 같다.
- *
- *   > zone_mask(U32_MAX) <= memblock_end_of_DRAM()
- *
- *   +------+ DRAM memblock_end_of_DRAM()
- *   | DRAM | new zone_mask(U32_MAX) == max_zone_phys
- *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
- *   |      |
- *   +------+ old zone_mask
- *
- *   > zone_mask(U32_MAX) > memblock_end_of_DRAM()
- *
- *   +------+ new zone_mask(U32_MAX)
- *   |      |
- *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
- *   | DRAM | 
- *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
- *   |      |
- *   +------+ old zone_mask
- *
- * - 위 두경우가 아니면 zone_mask를 그대로 DMA_BIT_MASK(zone_bits).
- *   zone_mask는 memblock_start_of_DRAM() 보다 크거나 같은상태.
- *
- *   > zone_mask < memblock_end_of_DRAM();
- *
- *   +------+ DRAM memblock_end_of_DRAM()
- *   | DRAM | zone_mask == max_zone_phys
- *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
- *
- *   > zone_mask > memblock_end_of_DRAM();
- *
- *   +------+ zone_mask
- *   |      | 
- *   +------+ DRAM memblock_end_of_DRAM() == max_zone_phys
- *   | DRAM |
- *   +------+ DRAM memblock_start_of_DRAM() <= U32_MAX
- *
- */
+
+	/* IAMROOT, 2024.08.06:
+	 * - zone_mask 값:
+	 *   PHYS_ADDR_MAX  (if) phys_start > U32_MAX
+	 *   U32_MAX        (if) phys_start > zone_mask
+	 *   DMA_BIT_MASK() (if) else
+	 */
 	if (phys_start > U32_MAX)
 		zone_mask = PHYS_ADDR_MAX;
 	else if (phys_start > zone_mask)
@@ -246,16 +202,13 @@ static phys_addr_t __init max_zone_phys(unsigned int zone_bits)
 	return min(zone_mask, memblock_end_of_DRAM() - 1) + 1;
 }
 
-/* IAMROOT, 2021.11.27: TODO
- * - 
+/* IAMROOT, 2021.11.27:
+ * - ZONE_DMA(opt), DMA32(opt), and NORMAL의 max pfn을 구한다.
+ *
  *   @min: PFN_UP(memblock_start_of_DRAM())
  *   @max: PFN_DOWN(memblock_end_of_DRAM())
  *
- *   ZONE_DMA   : dt에서 읽은 device max address pfn
- *   ZONE_DMA32 : 32bit pfn
- *   ZONE_NORMAL: DRAM end pfn + 1
- *
- *   arm64에서는 보통 ZONE_DMA가 없고 ZONE_DMA32를 쓴다.
+ *   arm64은 일반적으로 ZONE_DMA 대신 ZONE_DMA32가 enable 된다.
  */
 static void __init zone_sizes_init(unsigned long min, unsigned long max)
 {
@@ -268,16 +221,26 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	acpi_zone_dma_bits = fls64(acpi_iort_dma_get_max_cpu_address());
 	dt_zone_dma_bits = fls64(of_dma_get_max_cpu_address(NULL));
 	zone_dma_bits = min3(32U, dt_zone_dma_bits, acpi_zone_dma_bits);
+	/* IAMROOT, 2024.08.06:
+	 * - ZONE_DMA는 dt에서 읽은 device max addr 값으로 max pfn을 구한다.
+	 */
 	arm64_dma_phys_limit = max_zone_phys(zone_dma_bits);
 	max_zone_pfns[ZONE_DMA] = PFN_DOWN(arm64_dma_phys_limit);
 #endif
 #ifdef CONFIG_ZONE_DMA32
+	/* IAMROOT, 2024.08.06:
+	 * - ZONE_DMA32는 상수 32를 이용하여 max pfn을 구한다.
+	 */
 	max_zone_pfns[ZONE_DMA32] = PFN_DOWN(dma32_phys_limit);
 	if (!arm64_dma_phys_limit)
 		arm64_dma_phys_limit = dma32_phys_limit;
 #endif
 	if (!arm64_dma_phys_limit)
 		arm64_dma_phys_limit = PHYS_MASK + 1;
+	/* IAMROOT, 2024.08.06:
+	 * - ZONE_NORMAL은 @max 값을 이용하며 arm64 arch에서는
+	 *   memblock_end_of_DRAM() 값이 넘어온다.
+	*/
 	max_zone_pfns[ZONE_NORMAL] = max;
 
 	free_area_init(max_zone_pfns);
@@ -689,6 +652,7 @@ void __init bootmem_init(void)
 	 * - phys memory 관리를 위해 sparse 방식으로 초기화한다.
 	 */
 	sparse_init();
+
 	/* IAMROOT, 2024.07.28:
 	 * - zone을 초기화한다.
 	 */

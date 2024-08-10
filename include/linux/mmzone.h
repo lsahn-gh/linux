@@ -24,11 +24,13 @@
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
-/*
- * IAMROOT, 2021.11.13:
- * - buddy system에서 사용하는 메모리 승수
- *   2^0 ~ 2^10까지 관리한다는것.
- * - MAX_ORDER_NR_PAGES = 1024
+/* IAMROOT, 2021.11.13:
+ * - Buddy Allocator에서 order 계산에 사용하는 exponent 값.
+ *   MAX_ORDER가 11이면 MAX_ORDER_NR_PAGES는 -1 계산하여 10이 됨.
+ *
+ *   2^0 .. 2^10 까지이며 이때 0..10이 order.
+ *
+ *   MAX_ORDER_NR_PAGES: min(1) .. max(1024)
  */
 #ifndef CONFIG_FORCE_MAX_ZONEORDER
 #define MAX_ORDER 11
@@ -610,11 +612,16 @@ enum zone_type {
 	 * platforms may need both zones as they support peripherals with
 	 * different DMA addressing limitations.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - kernel에서 memory를 할당할때 가능한 ZONE_DMA에 할당하지 않도록
- *   노력을 한다
- */
+	/* IAMROOT, 2021.11.27: TODO
+	 * - ZONE_DMA: 현재 kernel에서 사용하는 addr space를 지원하지 않는
+	 *             legacy peripheral을 사용하기 위한 zone.
+	 *             kernel에서 memory를 할당할때 가능한 ZONE_DMA에 할당하지
+	 *             않도록 한다.
+	 *   ZONE_DMA32:
+	 *   ZONE_NORMAL:
+	 *   ZONE_HIGHMEM:
+	 *   ZONE_MOVABLE:
+	 */
 #ifdef CONFIG_ZONE_DMA
 	ZONE_DMA,
 #endif

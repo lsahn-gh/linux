@@ -481,9 +481,8 @@ static inline bool bitmap_full(const unsigned long *src, unsigned int nbits)
 	return find_first_zero_bit(src, nbits) == nbits;
 }
 
-/*
- * IAMROOT, 2021.11.27:
- * - @src 비트맵에서 @nbits 이내에 설정된 비트의 갯수 반환
+/* IAMROOT, 2021.11.27:
+ * - @src 비트맵에서 @nbits 이내에 설정된 비트의 개수 반환
  */
 static __always_inline int bitmap_weight(const unsigned long *src, unsigned int nbits)
 {

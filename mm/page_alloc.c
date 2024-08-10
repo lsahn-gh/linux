@@ -177,9 +177,12 @@ EXPORT_SYMBOL(latent_entropy);
  * Array of node states.
  */
 /* IAMROOT, 2021.11.06:
- * - Node의 상태를 배열로 정의한 것이며 아래 중 하나의 상태를 가지게 된다.
- *   초기값이 N_POSSIBLE bucket을 제외하고 전부 1로 되어 있는데 boot를 위해
- *   동작중인 node는 0이고 cpu/memory 모두 존재하므로 미리 1로 초기화한다.
+ * - Node의 상태를 배열로 정의한 것이며 아래 중 하나의 상태를 가진다.
+ *   초기값인 N_POSSIBLE bucket을 제외하고 전부 1로 되어 있으며 boot를
+ *   위해 동작중인 node는 0이고 cpu/memory 모두 존재하므로 미리 1로
+ *   초기화한다.
+ *
+ *   node_states 각 node가 어떤 상태 인지 정보를 저장하고 있다.
  */
 nodemask_t node_states[NR_NODE_STATES] __read_mostly = {
 	[N_POSSIBLE] = NODE_MASK_ALL,
@@ -406,9 +409,10 @@ static unsigned long nr_kernel_pages __initdata;
 static unsigned long nr_all_pages __initdata;
 static unsigned long dma_reserve __initdata;
 
-/*
- * IAMROOT, 2021.11.27:
- * - free_area_init 에서 초기화된다. zone의 start pfn, end pfn이 저장된다.
+/* IAMROOT, 2021.11.27:
+ * - 각 zone의 lowest, highest pfn 값을 기록한다.
+ *
+ *   free_area_init(..)에서 초기화.
  */
 static unsigned long arch_zone_lowest_possible_pfn[MAX_NR_ZONES] __initdata;
 static unsigned long arch_zone_highest_possible_pfn[MAX_NR_ZONES] __initdata;
@@ -9515,16 +9519,19 @@ void __init get_pfn_range_for_nid(unsigned int nid,
  * assumption is made that zones within a node are ordered in monotonic
  * increasing memory addresses so that the "highest" populated zone is used
  */
-/*
- * IAMROOT, 2021.11.27:
- * - movable로 사용할 zone을 찾는다. 높은 ZONE부터 순회를 하므로
- *   arm64의 경우 ZONE_NORMAL이 선택될것이다.
- *   (메모리가 작은 경우는 ZONE_DMA32밖에 없을것이므로 ZONE_DMA32)가
- *   선택될수도 있다. menconfig에 따라 달라진다.)
+/* IAMROOT, 2021.11.27:
+ * - ZONE_MOVABLE로 사용할 zone을 탐색한다.
  */
 static void __init find_usable_zone_for_movable(void)
 {
 	int zone_index;
+
+	/* IAMROOT, 2024.08.06:
+	 * - ZONE_NORMAL -> DMA32 -> DMA 순으로 순회하며 highest > lowest pfn
+	 *   조건이 성립하면 해당 zone을 사용한다.
+	 *
+	 *   NORMAL을 사용할 수 없으면 DMA32/DMA를 사용하게 된다.
+	 */
 	for (zone_index = MAX_NR_ZONES - 1; zone_index >= 0; zone_index--) {
 		if (zone_index == ZONE_MOVABLE)
 			continue;
@@ -9534,6 +9541,10 @@ static void __init find_usable_zone_for_movable(void)
 			break;
 	}
 
+	/* IAMROOT, 2024.08.08:
+	 * - arm64에서 특별한 경우가 아니라면 충분한 크기의 phys memory를
+	 *   사용하는 시스템에서 movable_zone은 zone normal의 index를 가리킨다.
+	 */
 	VM_BUG_ON(zone_index == -1);
 	movable_zone = zone_index;
 }
@@ -10297,9 +10308,8 @@ unsigned long __init node_map_pfn_alignment(void)
  * Return: the minimum PFN based on information provided via
  * memblock_set_node().
  */
-/*
- * IAMROOT, 2021.11.27:
- * - DRAM start pfn을 가져온다.
+/* IAMROOT, 2021.11.27:
+ * - memblock_start_of_DRAM()을 통해 minimum PFN을 반환한다.
  */
 unsigned long __init find_min_pfn_with_active_regions(void)
 {
@@ -10311,9 +10321,9 @@ unsigned long __init find_min_pfn_with_active_regions(void)
  * Sum pages in active regions for movable zone.
  * Populate N_MEMORY for calculating usable_nodes.
  */
-/*
- * IAMROOT, 2021.11.27:
- * - 모든 memblock을 순회해 page개수를 합산하고 해당 nid를 N_MEMORY 한다.
+/* IAMROOT, 2021.11.27:
+ * - memblock.memory의 모든 region을 순회하면서 page 개수를 합산하고
+ *   반환한다.
  */
 static unsigned long __init early_calculate_totalpages(void)
 {
@@ -10325,6 +10335,10 @@ static unsigned long __init early_calculate_totalpages(void)
 		unsigned long pages = end_pfn - start_pfn;
 
 		totalpages += pages;
+		/* IAMROOT, 2024.08.06:
+		 * - 유효한 범위의 page가 존재하는 node라면 해당 node의 상태를
+		 *   N_MEMORY로 변경한다.
+		 */
 		if (pages)
 			node_set_state(nid, N_MEMORY);
 	}
@@ -10351,40 +10365,57 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	unsigned long usable_startpfn;
 	unsigned long kernelcore_node, kernelcore_remaining;
 	/* save the state before borrow the nodemask */
-/*
- * IAMROOT, 2021.11.27:
- * - 현재 N_MEMORY를 저장을 일단 하고 early_calculate_totalpages에서 page개수를
- *   세면서 N_MEMORY를 갱신한다. 갱신된 N_MEMORY으 개수를 usable_nodes에 저장한다.
- *   saved_node_state는 이 함수가 끝나는시점에 복구된다.
- */
+
+	/* IAMROOT, 2024.08.06:
+	 * - 현재 N_MEMORY 상태인 node의 bitmap 정보를 백업한다.
+	 */
 	nodemask_t saved_node_state = node_states[N_MEMORY];
+	/* IAMROOT, 2024.08.06:
+	 * - memblock.memory를 순회하면서 total pages 개수를 계산하고
+	 *   유효한 pfn 범위의 node는 상태를 N_MEMORY로 변경한다.
+	 */
 	unsigned long totalpages = early_calculate_totalpages();
+	/* IAMROOT, 2024.08.06:
+	 * - N_MEMORY 상태로 설정된 node의 개수를 반환한다.
+	 */
 	int usable_nodes = nodes_weight(node_states[N_MEMORY]);
 	struct memblock_region *r;
 
 	/* Need to find movable_zone earlier when movable_node is specified. */
+	/* IAMROOT, 2024.08.06:
+	 * - NORMAL/DMA32/DMA 중에서 movable 용도로 사용할 zone을 찾는다.
+	 *   movable_zone은 여기서 초기화된다.
+	 */
 	find_usable_zone_for_movable();
 
 	/*
 	 * If movable_node is specified, ignore kernelcore and movablecore
 	 * options.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - 각 nid별로 movable로 사용할수있는 pfn을 전부 설정한다는것.
- */
+	/* IAMROOT, 2024.08.06:
+	 * - 'movable_node' parameter가 enable 이면 아래 로직 수행.
+	 *
+	 *   memblock.memory의 모든 region을 순회하면서 hotplug memory region을
+	 *   우선적으로 zone movable에서 사용하도록 설정함.
+	 *
+	 *   movable_node: hotplugged memory를 의미하는 것 같음.
+	 */
 	if (movable_node_is_enabled()) {
-/*
- * IAMROOT, 2021.11.27:
- * - hotplug인 memblock을 찾아서, 해당 membloc의 nid를 구한다.
- *   nid에 맞는 zone_movable_pfn에 해당 nid에서 제일 작은 pfn을 넣는다.
- */
 		for_each_mem_region(r) {
 			if (!memblock_is_hotpluggable(r))
 				continue;
 
+			/* IAMROOT, 2024.08.06:
+			 * - memory.region의 flag가 hotplug 인 것만 수행.
+			 */
 			nid = memblock_get_region_node(r);
 
+			/* IAMROOT, 2024.08.06:
+			 * - zone_movable_pfn[nid]에 저장된 기존 값과 memory.region을
+			 *   참조한 pfn을 비교하여 min 값을 다시 세팅한다.
+			 *
+			 *   만약 초기화되지 않았다면 usable_startpfn 사용.
+			 */
 			usable_startpfn = PFN_DOWN(r->base);
 			zone_movable_pfn[nid] = zone_movable_pfn[nid] ?
 				min(usable_startpfn, zone_movable_pfn[nid]) :
@@ -10397,17 +10428,18 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	/*
 	 * If kernelcore=mirror is specified, ignore movablecore option
 	 */
+	/* IAMROOT, 2024.08.06:
+	 * - 'kernelcore' parameter 값이 mirror 라면 아래 로직을 수행.
+	 *
+	 *   memblock memory region을 순회하면서 mirror가 아니고 '> 4GB' 영역이면
+	 *   zone movable 용도로 사용할 수 있도록 한다.
+	 *
+	 *   '<= 4GB' 영역은 kernelcore(중요)이므로 mirror 여야 한다.
+	 *   결국 mirror 영역을 movable 용도로 사용할 수 없다.
+	 */
 	if (mirrored_kernelcore) {
 		bool mem_below_4gb_not_mirrored = false;
 
-/*
- * IAMROOT, 2021.11.27:
- * - mirror가 아닌 memblock을 순회한다.
- * - 4GB미만 영역은 중요영역(kernelcore)이므로 mirror여야 된다. 즉
- *   early param으로 kernelcore를 mirror라고 설정했는데 정작 dt에서
- *   에서 중요 memory 영역(4GB 미만) 설정에선 mirror로 안되있어 warrning을 뿌린것.
- * - mirror 영역인것은 movable로 사용할수 없다는 의미가 내포된다.
- */
 		for_each_mem_region(r) {
 			if (memblock_is_mirror(r))
 				continue;
@@ -10416,6 +10448,9 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 
 			usable_startpfn = memblock_region_memory_base_pfn(r);
 
+			/* IAMROOT, 2024.08.06:
+			 * - '< 4GB' 영역은 skip
+			 */
 			if (usable_startpfn < 0x100000) {
 				mem_below_4gb_not_mirrored = true;
 				continue;
@@ -10436,10 +10471,17 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * If kernelcore=nn% or movablecore=nn% was specified, calculate the
 	 * amount of necessary memory.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - 해당 percent 에따른 totalpage 개수를 구한다.
- */
+	/* IAMROOT, 2021.11.27:
+	 * - percent 값에 따른 totalpages 개수를 구한다.
+	 *
+	 *   예)
+	 *   totalpages: 500,000
+	 *   required_kernelcore_percent: 80
+	 *
+	 *   (500,000 * 100 * 80) / 10000
+	 *   ----------------------------
+	 *                        400,000 개
+	 */
 	if (required_kernelcore_percent)
 		required_kernelcore = (totalpages * 100 * required_kernelcore_percent) /
 				       10000UL;
@@ -10455,13 +10497,14 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * will be used for required_kernelcore if it's greater than
 	 * what movablecore would have allowed.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - movablecore, kernelcore 개수를 정한다.
- *   percent로 구했거나 early param으로 구한 required_movablecore값을 buddy단위로
- *   (MAX_ORDER_NR_PAGES)로 고치고, 범위를 한번 검사하여 required_kernelcore까지
- *   구한다.
- */
+	/* IAMROOT, 2024.08.06: TODO
+	 * - 'movablecore=' 옵션이 사용되면 아래 로직을 수행한다.
+	 *
+	 *   movablecore, kernelcore 개수를 정한다.
+	 *   percent로 구했거나 early param으로 구한 required_movablecore값을
+	 *   buddy단위로 (MAX_ORDER_NR_PAGES)로 고치고, 범위를 한번 검사하여
+	 *   required_kernelcore까지 구한다.
+	 */
 	if (required_movablecore) {
 		unsigned long corepages;
 
@@ -10481,31 +10524,57 @@ static void __init find_zone_movable_pfns_for_nodes(void)
 	 * If kernelcore was not specified or kernelcore size is larger
 	 * than totalpages, there is no ZONE_MOVABLE.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - kernelcore 가 없거나 kernelcore가 totalpage보다 많은 상황은 말이 안되므로
- *   ZONE_MOVABLE를 그냥 안하고 복귀한다.
- */
+	/* IAMROOT, 2021.11.27:
+	 * - 'kernelcore=' 커널 파라미터가 사용되지 않았거나 요청된 값이
+	 *   totalpages 보다 크면 ZONE_MOVABLE을 설정하지 않고 반환한다.
+	 */
 	if (!required_kernelcore || required_kernelcore >= totalpages)
 		goto out;
 
-/*
- * IAMROOT, 2021.11.27:
- * - arm64의 경우 대부분의 경우 ZONE_NORMAL -> ZONE_DMA32순으로 지정되었으며,
- *   movable zone은 해당 zone의 start pfn이 될것이다.
- */
+	/* IAMROOT, 2021.11.27:
+	 * - arm64은 대부분 ZONE_NORMAL -> ZONE_DMA32순으로 지정되며,
+	 *   movable zone은 해당 zone의 start pfn이 된다.
+	 *
+	 *   충분한 크기의 RAM을 가진 시스템에서는 zone normal이다.
+	 */
 	/* usable_startpfn is the lowest possible pfn ZONE_MOVABLE can be at */
 	usable_startpfn = arch_zone_lowest_possible_pfn[movable_zone];
 
+	/* IAMROOT, 2024.08.07:
+	 * - 'kernelcore=' 파라미터가 사용되었고 arm64 기준 zone normal의
+	 *   lowest_possible_pfn을 usable_startpfn으로 사용한다.
+	 *
+	 *   지금부터는 kernelcore 값을 통해 movable을 계산하여 나눈다.
+	 */
+
 restart:
 	/* Spread kernelcore memory as evenly as possible throughout nodes */
-/*
- * IAMROOT, 2021.11.27:
- * - required_kernelcore : kernelcore pfn. (movable이 아닌 memory)
- *   usable_nodes        : node 개수
- *   kernelcore_node     : node당 kernelcore pfn의 개수
- */
+	/* IAMROOT, 2021.11.27:
+	 * - required_kernelcore 값을 각 node에 적절히 배분하기 위한 계산식이며
+	 *   kernelcore_node에는 node당 가져야할 zone normal(non-movable)의
+	 *   pfn 개수가 저장된다.
+	 *
+	 *   required_kernelcore: kernelcore를 위한 전체 pfn 개수
+	 *                        (non-movable 이며 zone normal 영역이다)
+	 *   usable_nodes       : N_MEMORY 상태인 전체 node 개수
+	 *   kernelcore_node    : kernelcore pfn 개수 / per node
+	 */
 	kernelcore_node = required_kernelcore / usable_nodes;
+
+	/* IAMROOT, 2021.12.04:
+	 * - kernelcore 영역을 node 시작주소 .. kernelcore 크기 만큼 하나의
+	 *   node(예, node 0)에 할당하면 해당 node에 kernelcore 영역이
+	 *   몰리게 된다.
+	 *
+	 *   kernelcore 영역을 분할하여 각 node에 나누는 것이 CPU core가
+	 *   가장 가까운 memory node에 접근하게 되므로 성능상 이점이 생긴다.
+	 *
+	 *   아래는 kernelcore를 memory node에 분배하기 위한 로직.
+	 */
+
+	/* IAMROOT, 2024.08.07:
+	 * - N_MEMORY 상태의 node만 순회한다.
+	 */
 	for_each_node_state(nid, N_MEMORY) {
 		unsigned long start_pfn, end_pfn;
 
@@ -10524,69 +10593,67 @@ restart:
 		 */
 		kernelcore_remaining = kernelcore_node;
 
-/*
- * IAMROOT, 2021.12.04:
- * - kernel core 영역을 그냥 시작주소 ~ kernel core사용량 만큼의 영역을
- *   할당하면 node 0번에 모든 kerenl core영역이 있게 된다.
- *
- *   각 node 별로 kernel core영역이 존재해야 해당 cpu가 자기 node memory에서
- *   kernel core로 접근이 되는게 성능상 이점이 있다.
- *
- *   즉 아래 code는 kernel core를 각 node memory마다 적절히 분배하기 위함이다.
- */
+		/* IAMROOT, 2021.12.04: TODO
+		 *
+		 * - 다음 상황으로 가정을 하고 진행한다.
+		 * node 마다 16기가 라고 가정. DMA32 ZONE이 있다고 가정.
+		 * DMA32의 크기는 2GB, NORMAL의 크기는 30GB
+		 * DMA32의 끝주소는 4GB. 즉
+		 * usable_startpfn = arch_zone_lowest_possible_pfn[movable_zone] = 0x880000
+		 * kernel core : movable core = 1 : 3 = 8 : 24
+		 *
+		 *   ZONE      NODE
+		 * +------+ +--------+ node1의 end_pfn
+		 * |      | |        |
+		 * |      | | node 1 |
+		 * |      | |        |
+		 * |      | +-----+  | -> movable core (16 - 4) = 12GB
+		 * |      | | 4GB |  |    kernel core (4GB)
+		 * |NORMAL| +-----+--+ -> start_pfn (node 1)
+		 * |      |
+		 * |      |
+		 * |      | +--------+ node0의 end_pfn
+		 * |      | |        |
+		 * |      | | node 0 |
+		 * |      | |        |
+		 * |      | +-----+  | -> movable core (16 - 2 - 2) = 12GB
+		 * |      | | 2GB |  |    kernel core (2GB)
+		 * +------+ +-----+--+ -> usable_startpfn -> (갱신) node0의 start_pfn
+		 *
+		 * +------+ +--------+
+		 * |      | |        | -> start_pfn < usable_startpfn 조건문에서
+		 * |DMA32 | | node 0 |    kernel core 영역으로 들어가게된다.
+		 * |      | | 2GB    |    kernel core 8GB중 2GB기가 할당. 6GB가 남음.
+		 * +------+ +--------+ -> start_pfn (node 0)
+		 *
+		 * 한 node에서 usable_startpfn이 중간에 있으므로 kernel core영역을 node0에
+		 * 나눠서 넣어야 되는 상황이 있고
+		 */
 		/* Go through each range of PFNs within this node */
 		for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
 			unsigned long size_pages;
 
+			/* IAMROOT, 2024.08.08:
+			 * - loop가 처음 순회할 때 zone_movable_pfn[nid]는 0임.
+			 */
 			start_pfn = max(start_pfn, zone_movable_pfn[nid]);
 			if (start_pfn >= end_pfn)
 				continue;
 
-/*
- * IAMROOT, 2021.12.04:
- *
- * - 다음 상황으로 가정을 하고 진행한다.
- * node 마다 16기가 라고 가정. DMA32 ZONE이 있다고 가정.
- * DMA32의 크기는 2GB, NORMAL의 크기는 30GB
- * DMA32의 끝주소는 4GB. 즉
- * usable_startpfn = arch_zone_lowest_possible_pfn[movable_zone] = 0x880000
- * kernel core : movable core = 1 : 3 = 8 : 24
- *
- *  ZONE     NODE
- * +------+ +--------+ node1의 end_pfn
- * |      | |        |
- * |      | | node 1 | 
- * |      | |        |
- * |      | |_______ |_movable core(16 - 4) = 12GB
- * |      | | 4GB  | | kernel core 4GB
- * |NORMAL| +--------+ node1의 start_pfn
- * |      |
- * |      |
- * |      | +--------+ node0의 end_pfn
- * |      | | node 0 |
- * |      | |        |           
- * |      | |        |
- * |      | |______  |_movable core(16 - 2 - 2) = 12GB
- * |      | | 2GB  | | kernel core 2GB
- * +------+ +--------+ -> usable_startpfn -> (갱신) node0의 start_pfn
-
- *
- * +------+ +--------+
- * |      | |        | -> start_pfn < usable_startpfn 조건문에서 kernel core
- * |DMA32 | | node 0 |    영역으로 들어가게된다.
- * |      | | 2GB    |    kernel core 8GB중 2GB기가 할당. 6GB가 남음.
- * +-----+  +--------+ node0의 start_pfn
- *
- * 한 node에서 usable_startpfn이 중간에 있으므로 kernel core영역을 node0에
- * 나눠서 넣어야 되는 상황이 있고
- */
+			/* IAMROOT, 2024.08.09:
+			 * - 'start_pfn < usable_startpfn'라면 start_pfn 값을 보정한다.
+			 *
+			 *   arm64 아키텍처에서 usable_startpfn은 보통 zone NORMAL의
+			 *   pfn을 가르키게 되는데 그 하위인 zone DMA32가 존재할 수
+			 *   있으며 이때 DMA32도 고려하기 위해 start_pfn 값을 보정한다.
+			 */
 			/* Account for what is only usable for kernelcore */
 			if (start_pfn < usable_startpfn) {
 				unsigned long kernel_pages;
-/*
- * IAMROOT, 2021.12.04:
- * - kernel core로 쓸 page를 일단 계산한다.
- */
+				/*
+				 * IAMROOT, 2021.12.04:
+				 * - kernel core로 쓸 page를 일단 계산한다.
+				 */
 				kernel_pages = min(end_pfn, usable_startpfn)
 								- start_pfn;
 
@@ -10594,14 +10661,14 @@ restart:
 							kernelcore_remaining);
 				required_kernelcore -= min(kernel_pages,
 							required_kernelcore);
-/*
- * IAMROOT, 2021.12.04:
- * - kernel core영역이 더 남아 있는 상황. 계속 진행해야되서 zone_movable_pfn이
- *   갱신된다.
- */
+
+				/*
+				 * IAMROOT, 2021.12.04:
+				 * - kernel core영역이 더 남아 있는 상황. 계속 진행해야되서 zone_movable_pfn이
+				 *   갱신된다.
+				 */
 				/* Continue if range ow fully accounted */
 				if (end_pfn <= usable_startpfn) {
-
 					/*
 					 * Push zone_movable_pfn to the end so
 					 * that if we have to rebalance
@@ -10618,6 +10685,12 @@ restart:
 			 * The usable PFN range for ZONE_MOVABLE is from
 			 * start_pfn->end_pfn. Calculate size_pages as the
 			 * number of pages used as kernelcore
+			 */
+			/* IAMROOT, 2024.08.10:
+			 * - memblock memory region의 block에서 start/end pfn을 계산하여
+			 *   이를 zone movable pfn으로 설정하지만 kernelcore_remaining이
+			 *   조금 남았다면 이를 size_pages로 설정하여 그 이후를
+			 *   zone movable 영역으로 사용한다.
 			 */
 			size_pages = end_pfn - start_pfn;
 			if (size_pages > kernelcore_remaining)
@@ -10653,10 +10726,10 @@ restart:
 
 out2:
 	/* Align start of ZONE_MOVABLE on all nids to MAX_ORDER_NR_PAGES */
-/*
- * IAMROOT, 2021.11.27:
- * - max order 로 roundup한다.
- */
+	/* IAMROOT, 2024.08.06:
+	 * - 모든 node를 순회하면서 zone_movable_pfn 값을 MAX_ORDER_NR_PAGES에
+	 *   기반하여 nearest round up을 수행하여 정렬한다.
+	 */
 	for (nid = 0; nid < MAX_NUMNODES; nid++)
 		zone_movable_pfn[nid] =
 			roundup(zone_movable_pfn[nid], MAX_ORDER_NR_PAGES);
@@ -10748,23 +10821,21 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 	start_pfn = find_min_pfn_with_active_regions();
 	descending = arch_has_descending_max_zone_pfns();
 
-/*
- * IAMROOT, 2021.11.27:
- * - DRAM start pfn과 비교해서 zone의 start, end pfn을
- *   arch_zone_.. 전역변수에 설정한다.
- * - ZONE_DMA -> ZONE_DMA32 -> ZONE_NORMAL 순으로 설정이 된다.
- *   만약 DRAM end 주소가 충분히 작을경우 ZONE_DMA나 ZONE_DMA32에서
- *   memblock_end_of_DRAM() PFN이 되있을것이므로 ZONE_DMA, ZONE_DMA32에
- *   pfn이 다할당되고 ZONE_NORMAL은 start_pfn, end_pfn이 같을것이다.
- *
- *   > ZONE_DMA이 DRAM end pfn일경우
- *   ZONE_DMA32, ZONE_NORMAL 의 start, end pfn은 같을것이다.
- *   > ZONE_DMA32이 DRAM end pfn일경우
- *   ZONE_NORMAL의 start, end pfn이 같을 것이다.
- *
- *   > ZONE_DMA의 max pfn과 ZONE_DMA32의 max pfn이 같거나 ZONE_DMA가 클경우
- *   ZONE_DMA32의 start, end pfn이 같을 것이다.
- */
+	/* IAMROOT, 2024.08.05:
+	 * - CONFIG으로 define된 모든 zone(movable 제외)을 순회하면서
+	 *   lowest(min), highest(max) pfn 값을 전역변수에 설정한다.
+	 *
+	 *   ZONE_DMA > ZONE_DMA32 > ZONE_NORMAL 순으로 순회한다.
+	 *
+	 *   만약 memblock_end_of_DRAM(..) <= ZONE_DMA or ZONE_DMA32 라면 대부분
+	 *   PFN이 DMA/DMA32에 할당되고 NORMAL은 start_pfn == end_pfn이 된다.
+	 *   결국 DRAM 크기가 작다면 대부분의 pfn은 DMA zone에 소속된다.
+	 *
+	 *   - PFN(end_of_DRAM)이 ZONE_DMA인 경우 ZONE_DMA32, ZONE_NORMAL은
+	 *     start_pfn == end_pfn 이다.
+	 *   - PFN(end_of_DRAM)이 ZONE_DMA32인 경우 ZONE_NORMAL은
+	 *     start_pfn == end_pfn 이다.
+	 */
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		if (descending)
 			zone = MAX_NR_ZONES - i - 1;
@@ -10782,6 +10853,9 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 	}
 
 	/* Find the PFNs that ZONE_MOVABLE begins at in each node */
+	/* IAMROOT, 2024.08.06:
+	 * - ZONE_MOVABLE의 pfn을 찾는다.
+	 */
 	memset(zone_movable_pfn, 0, sizeof(zone_movable_pfn));
 	find_zone_movable_pfns_for_nodes();
 
@@ -10902,6 +10976,13 @@ static int __init cmdline_parse_movablecore(char *p)
 				  &required_movablecore_percent);
 }
 
+/* IAMROOT, 2024.08.06:
+ * - kernelcore : nn[KMGTPE], nn%, mirror 값을 가지는 커널 파라미터이며
+ *                kernel이 사용할 수 있는 non-movable 메모리 영역의 크기를
+ *                지정할 수 있다.
+ *                여기서 지정된 나머지 영역은 movable로 사용된다.
+ *   movablecore:
+ */
 early_param("kernelcore", cmdline_parse_kernelcore);
 early_param("movablecore", cmdline_parse_movablecore);
 

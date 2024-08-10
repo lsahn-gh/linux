@@ -19,9 +19,9 @@
  * - @nr bit를 수용하기 위해 해당 type들로 몇개가 필요한지 계산하는 매크로.
  *
  *   예)                 @nr: 256
- *       BITS_PER_TYPE(long): 32-bits
+ *       BITS_PER_TYPE(long): 64-bits (64-bit platform)
  *       ----------------------------
- *                            8
+ *                            4
  *
  *       256bits를 수용하기 위해 long type 저장소 8개가 필요함.
  */
