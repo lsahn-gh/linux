@@ -491,9 +491,8 @@ static __always_inline int bitmap_weight(const unsigned long *src, unsigned int 
 	return __bitmap_weight(src, nbits);
 }
 
-/*
- * IAMROOT, 2023.04.08:
- * - @map 에서 @start부터 @nbits 수만큼 설정
+/* IAMROOT, 2023.04.08:
+ * - @start부터 @nbits 수만큼의 bit를 @map에 설정
  */
 static __always_inline void bitmap_set(unsigned long *map, unsigned int start,
 		unsigned int nbits)

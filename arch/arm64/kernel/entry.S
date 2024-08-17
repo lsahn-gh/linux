@@ -1156,7 +1156,6 @@ SYM_CODE_END(__bad_stack)
  *    ex) el1h_64_sync_handler
  * 3. 유저 or 커널로 복귀하기 전에 context를 복구한다.
  */
-	.macro entry_handler el:req, ht:req, regsize:req, label:req
 /*
  * IAMROOT, 2022.11.07:
  * - 함수가 macro로 만들어진다. 내부에선 뒤에 _handler가 붙은 함수로 호출된다.
@@ -1164,17 +1163,17 @@ SYM_CODE_END(__bad_stack)
  *   el1t_64_irq	0x080
  *   el1t_64_fiq	0x100
  *   el1t_64_error	0x180
- *  
+ *
  *   el1h_64_sync	0x200
- *   el1h_64_irq	0x280	
+ *   el1h_64_irq	0x280
  *   el1h_64_fiq	0x300
  *   el1h_64_error	0x380
- *  
+ *
  *   el0t_64_sync	0x400
  *   el0t_64_irq	0x480
  *   el0t_64_fiq	0x500
  *   el0t_64_error	0x580
- *  
+ *
  *   el0t_32_sync	0x600
  *   el0t_32_irq	0x680
  *   el0t_32_fiq	0x700
@@ -1193,6 +1192,7 @@ SYM_CODE_END(__bad_stack)
  *     v
  *   ret_to_kernel <-- 끝
  */
+	.macro entry_handler el:req, ht:req, regsize:req, label:req
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
 	mov	x0, sp

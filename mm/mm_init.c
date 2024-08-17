@@ -71,9 +71,8 @@ void __init mminit_verify_zonelist(void)
 	}
 }
 
-/*
- * IAMROOT, 2021.12.04:
- * - debug print
+/* IAMROOT, 2021.12.04:
+ * - Debugging 용도로 출력함.
  */
 void __init mminit_verify_pageflags_layout(void)
 {

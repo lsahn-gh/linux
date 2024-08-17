@@ -1157,19 +1157,22 @@ struct deferred_split {
  * Memory statistics and page replacement data structures are maintained on a
  * per-zone basis.
  */
+/* IAMROOT, 2024.08.17:
+ * - 각 bank에 설치된 물리 메모리를 node라 말하며 struct pglist_data는
+ *   node에 대한 자료구조이다.
+ */
 typedef struct pglist_data {
 	/*
 	 * node_zones contains just the zones for THIS node. Not all of the
 	 * zones may be populated, but it is the full list. It is referenced by
 	 * this node's node_zonelists as well as other node's node_zonelists.
 	 */
-/*
- * IAMROOT, 2021.12.04:
- * - calculate_node_totalpages에서 초기화 된다.
- *
- * - 해당 node에 대한 zone을 가지고 있으며 'node_zonelists'이 각 원소를 참조한다.
- *   예) ZONE_DMA, NORMAL, HIGHMEM ...
- */
+	/* IAMROOT, 2021.12.04:
+	 * - 현재 node가 가지고 있는 zone에 대한 정보를 가지고 있다.
+	 *   예) DMA, DMA32, NORMAL, HIGHMEM, MOVABLE .. and so on.
+	 *
+	 *   Note: calculate_node_totalpages(..)에서 초기화.
+	 */
 	struct zone node_zones[MAX_NR_ZONES];
 
 	/*
@@ -1777,12 +1780,12 @@ static inline unsigned long section_nr_to_pfn(unsigned long sec)
 #define SUBSECTION_SHIFT 21
 #define SUBSECTION_SIZE (1UL << SUBSECTION_SHIFT)
 
-/*
- * IAMROOT, 2021.12.04:
- * - 4k page기준. 21 - 12 = 9
- *   PFN_SUBSECTION_SHIFT = 9
- *   PAGES_PER_SUBSECTION = 2^9 = 512
- *   PAGE_SUBSECTION_MASK = ~(0x1ff)
+/* IAMROOT, 2021.12.04:
+ * - PFN_SUBSECTION_SHIFT: 9   == (21 - 12)
+ *   PAGES_PER_SUBSECTION: 512 == (1 << 9)
+ *   PAGE_SUBSECTION_MASK: 0xffff_ffff_ffff_fe00 == ~(0x1ff)
+ *
+ *   Note: 위 계산은 4k page 기준.
  */
 #define PFN_SUBSECTION_SHIFT (SUBSECTION_SHIFT - PAGE_SHIFT)
 #define PAGES_PER_SUBSECTION (1UL << PFN_SUBSECTION_SHIFT)
@@ -2063,13 +2066,11 @@ static inline struct mem_section *__pfn_to_section(unsigned long pfn)
 
 extern unsigned long __highest_present_section_nr;
 
-/*
- * IAMROOT, 2021.12.04:
- * - SUBSECTION 단위의 subsection index를 가져온다. (0 ~ 63)
- * ex) 0x12345
- * (0x12345 & 0x7fff) / 0x200 
- * = (0x2345) / 0x200 = 0x11 = 17
- *  
+/* IAMROOT, 2021.12.04:
+ * - @pfn을 입력받아 subsection의 index를 구한다. (0 .. 63)
+ *
+ *   예) pfn == 0x12345
+ *       0x11 (17) == (0x12345 & 0x7fff) / 0x200
  */
 static inline int subsection_map_index(unsigned long pfn)
 {

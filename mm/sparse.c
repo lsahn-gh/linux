@@ -244,13 +244,17 @@ static inline unsigned long first_present_section_nr(void)
 }
 
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
-/*
- * IAMROOT, 2021.12.04:
- * - 해당 section의 start subsection idx, end subsection idx를 구해서 bitmap set한다.
- * - pfn은 section단위 pfn.
- * ex) pfn = 0x1000, nr_pages = 0x400
- * idx = 0, end = 31
- * bitmap_set(map, 0, 32)
+/* IAMROOT, 2021.12.04:
+ * - @pfn, @nr_pages를 입력받아 idx, end를 구하여 @map에 설정.
+ *   @pfn은 section 단위이다.
+ *
+ *   예) @pfn == 0x1000,
+ *       @nr_pages == 0x400
+ *
+ *       idx == 0
+ *       end == 31
+ *
+ *       bitmap_set(@map, 0, 32)
  */
 static void subsection_mask_set(unsigned long *map, unsigned long pfn,
 		unsigned long nr_pages)
@@ -261,20 +265,28 @@ static void subsection_mask_set(unsigned long *map, unsigned long pfn,
 	bitmap_set(map, idx, end - idx + 1);
 }
 
-/*
- * IAMROOT, 2021.12.04:
+/* IAMROOT, 2021.12.04: TODO
  * - memblock단위로 해당 함수에 진입한다.
  *   해당 pfn의 start section ~ end section까지의 section을 순회하며
  *   해당 section내에서 subsection을 초기화한다.
+ *
+ *   CONFIG_SPARSEMEM_VMEMMAP이 enable 되었을 때만 아래 로직이 수행됨.
  */
 void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 {
+	/* IAMROOT, 2024.08.16:
+	 * - @pfn, @nr_pages를 통해 start_sec, end_sec 값을 우선 구한다.
+	 */
 	int end_sec = pfn_to_section_nr(pfn + nr_pages - 1);
 	unsigned long nr, start_sec = pfn_to_section_nr(pfn);
 
 	if (!nr_pages)
 		return;
 
+	/* IAMROOT, 2021.12.04:
+	 * - start_sec .. end_sec 까지의 모든 section에 대해 subsection_map을
+	 *   초기화한다.
+	 */
 	for (nr = start_sec; nr <= end_sec; nr++) {
 		struct mem_section *ms;
 		unsigned long pfns;
@@ -282,11 +294,7 @@ void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 		pfns = min(nr_pages, PAGES_PER_SECTION
 				- (pfn & ~PAGE_SECTION_MASK));
 		ms = __nr_to_section(nr);
-/*
- * IAMROOT, 2021.12.04:
- * - 현재 memblock의 start pfn(pfn)과 현재 section의 pfn개수(pfns)를 가지고
- *   현재 section의 mem_section의 subsection_map에 초기화한다.
- */
+
 		subsection_mask_set(ms->usage->subsection_map, pfn, pfns);
 
 		pr_debug("%s: sec: %lu pfns: %lu set(%d, %d)\n", __func__, nr,
