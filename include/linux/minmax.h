@@ -90,13 +90,39 @@
  * - @val 값이 @lo, @hi 범위를 벗어나면 '@lo <= @val <= @hi'로 보정하는 매크로.
  *   이때 보정된 값은 아래 식을 통해 결정된다.
  *
- *   @val = @hi if (@val > @hi) OR @lo if (@val < @lo)
+ *   @val = min(x, @hi)
+ *      x = max(@val, @lo)
+ *
+ *
+ *                   <-- @val 이라면 @val == @hi
+ *
+ *   @hi -- +------+
+ *          |      |
+ *          |      | <-- @val 이라면 @val == @val
+ *          |      |
+ *          |      |
+ *   @lo -- +------+
+ *
+ *                   <-- @val 이라면 @val == @lo
+ *
  *
  *   예) @val = 999
  *       @lo  = 1
  *       @hi  = 10
  *
  *       10 == clamp(999, 1, 10);
+ *
+ *   예) @val = 9
+ *       @lo  = 20
+ *       @hi  = 30
+ *
+ *       20 == clamp(9, 20, 30);
+ *
+ *   예) @val = 9
+ *       @lo  = 1
+ *       @hi  = 10
+ *
+ *       9  == clamp(9, 1, 10);
  */
 #define clamp(val, lo, hi) min((typeof(val))max(val, lo), hi)
 

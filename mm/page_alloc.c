@@ -9492,9 +9492,9 @@ void __meminit init_currently_empty_zone(struct zone *zone,
  * with no available memory, a warning is printed and the start and end
  * PFNs will be 0.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - nid에 대응하는 memblock을 찾다 start pfn(min), end pfn(max)을 찾는다.
+/* IAMROOT, 2021.11.13:
+ * - node (@nid)에 존재하는 memory region들을 순회하면서
+ *   min(@start_pfn), max(@end_pfn) 값으로 변수를 보정한다.
  */
 void __init get_pfn_range_for_nid(unsigned int nid,
 			unsigned long *start_pfn, unsigned long *end_pfn)
@@ -9505,6 +9505,29 @@ void __init get_pfn_range_for_nid(unsigned int nid,
 	*start_pfn = -1UL;
 	*end_pfn = 0;
 
+	/* IAMROOT, 2024.08.22:
+	 * - @nid가 동일한 memory region을 순회하면서 @{start,end}_pfn을
+	 *   보정한다.
+	 *
+	 *   예) node 0에 memory region이 2개 있는 경우 아래와 같이
+	 *       @start_pfn과 @end_pfn가 변경된다.
+	 *
+	 *   +---------+  --> @end_pfn
+	 *   |         |
+	 *   | node 0  |
+	 *   | region1 |
+	 *   |         |
+	 *   |         |
+	 *   +---------+
+	 *
+	 *   +---------+
+	 *   |         |
+	 *   | node 0  |
+	 *   | region0 |
+	 *   |         |
+	 *   |         |
+	 *   +---------+  --> @start_pfn
+	 */
 	for_each_mem_pfn_range(i, nid, &this_start_pfn, &this_end_pfn, NULL) {
 		*start_pfn = min(*start_pfn, this_start_pfn);
 		*end_pfn = max(*end_pfn, this_end_pfn);
@@ -9559,27 +9582,13 @@ static void __init find_usable_zone_for_movable(void)
  * highest usable zone for ZONE_MOVABLE. This preserves the assumption that
  * zones within a node are in order of monotonic increases memory addresses
  */
-/*
- * IAMROOT, 2021.12.04:
- * - 해당 nid에 대한 movable 영역은 이전에 zone_movable_pfn에 초기화를 했었다.
- *   만약 해당 nid에 대해서 zone movable이 존재를 안한다면 adjust를 안한다.
- *   ex) 해당 nid에 zone movable이 존재안하는 경우
- *   해당 영역이 mirror.
+/* IAMROOT, 2021.12.04:
+ * - zone movable이 존재하는 node(@nid)를 고려하여 @zone_{start,end}_pfn을
+ *   보정한다.
  *
- * - zone_type이 ZONE_MOVABLE인 경우
- *   start는 해당 nid의 zone_movable_pfn, end는 해당 nid의 end_pfn과
- *   movable_zone의 end pfn중 작은것을 고른다.
- *
- * - kernelcore가 mirror가 아닌 경우 이면서 zone_type이 ZONE_MOVABLE이
- *   아닌 경우, 현재 zone_type이 nid의 movable zone과 겹치는 상황이다.
- *   이 경우 해당 zone_type의 end주소를 movable zone의 시작주소로 낮춰
- *   버린다.
- *   mirrored kernelcore인경우는(kernel core영역은 4GB)
- *   kernelcore외엔 자동으로 모두 movable 이 된다.
- *
- * - zone_type의 start주소가 nid의 zone_movable보다 큰경우.
- *   즉 해당 zone_type에 대한 영역은 존재하지 않고 ZONE_MOVABLE만 존재
- *   하는 상황이므로 해당 zone 영역을 없앤다.
+ *   @zone_{start,end}_pfn이 zone movable에 overlap 되는지 확인하는 함수이며
+ *   만약 overlap 된다면 start_pfn OR end pfn을 보정하여 overlap 되지
+ *   않도록 한다.
  */
 static void __init adjust_zone_range_for_zone_movable(int nid,
 					unsigned long zone_type,
@@ -9589,9 +9598,19 @@ static void __init adjust_zone_range_for_zone_movable(int nid,
 					unsigned long *zone_end_pfn)
 {
 	/* Only adjust if ZONE_MOVABLE is on this node */
+	/* IAMROOT, 2024.08.22:
+	 * - node(@nid)에 zone movable이 존재하는 경우에만 아래 로직을
+	 *   수행한다.
+	 */
 	if (zone_movable_pfn[nid]) {
 		/* Size ZONE_MOVABLE */
 		if (zone_type == ZONE_MOVABLE) {
+			/* IAMROOT, 2024.08.22:
+			 * - @zone_type이 ZONE_MOVABLE인 경우.
+			 *   @zone_start_pfn는 zone_movable_pfn[@nid], @zone_end_pfn는
+			 *   @nid의 @node_end_pfn과 highest_possible_pfn[movable_zone]에서
+			 *   작은것을 고른다.
+			 */
 			*zone_start_pfn = zone_movable_pfn[nid];
 			*zone_end_pfn = min(node_end_pfn,
 				arch_zone_highest_possible_pfn[movable_zone]);
@@ -9600,10 +9619,28 @@ static void __init adjust_zone_range_for_zone_movable(int nid,
 		} else if (!mirrored_kernelcore &&
 			*zone_start_pfn < zone_movable_pfn[nid] &&
 			*zone_end_pfn > zone_movable_pfn[nid]) {
+			/* IAMROOT, 2024.08.23:
+			 * - kernelcore=mirror가 아니면서 아래 조건인 경우.
+			 *   '@zone_start_pfn < zone_movable_pfn[@nid] < @zone_end_pfn'
+			 *
+			 *   결국 @zone_end_pfn이 zone_movable_pfn[@nid] 영역과 overlap된
+			 *   경우이므로 @zone_end_pfn을 zone_movable_pfn[@nid]로 보정하여
+			 *   overlap되지 않도록 한다.
+			 *
+			 *   kernelcore=mirror인 경우 kernelcore외엔 모두 movable이다.
+			 *   (kernelcore 영역은 4GB)
+			 *
+			 *   node(@nid) zone movable이 없는 경우 해당 영역이 mirror.
+			 */
 			*zone_end_pfn = zone_movable_pfn[nid];
 
 		/* Check if this whole range is within ZONE_MOVABLE */
 		} else if (*zone_start_pfn >= zone_movable_pfn[nid])
+			/* IAMROOT, 2024.08.23:
+			 * - 'zone_movable_pfn[@nid] <= @zone_{start,end}_pfn'인 경우.
+			 *   zone movable에 완전히 overlap 되어 있으므로 해당 zone을
+			 *   지우고 zone movable만 존재하게 한다.
+			 */
 			*zone_start_pfn = *zone_end_pfn;
 	}
 }
@@ -9612,15 +9649,18 @@ static void __init adjust_zone_range_for_zone_movable(int nid,
  * Return the number of pages a zone spans in a node, including holes
  * present_pages = zone_spanned_pages_in_node() - zone_absent_pages_in_node()
  */
-/*
- * IAMROOT, 2021.12.04:
- * @zone_type : zone index (enum zone_type)
- * @node_start_pfn : memblock의 node start pfn
- * @node_end_pfn   : memblock의 node end pfn
- * @zone_start_pfn, zone_end_pfn
- *  해당 nid에 대응하는 zone_type에 대한 영역과 movable_zone과의
- *  영역을 비교해서 수정된 zone start, end pfn
- * @return : zone size pfn
+/* IAMROOT, 2021.12.04:
+ * - @zone_type, @node_start_pfn, @node_end_pfn을 입력받아
+ *   zone(@zone_type)의 spanned pages 개수를 구한다.
+ *
+ *   @zone_type      : zone index (enum zone_type)
+ *   @node_start_pfn : memblock의 node start pfn
+ *   @node_end_pfn   : memblock의 node end pfn
+ *   @zone_start_pfn :
+ *   @zone_end_pfn   : 해당 nid에 대응하는 zone_type에 대한 영역과
+ *                     movable_zone과의 영역을 비교해서 수정된
+ *                     zone start, end pfn
+ *   @return         : zone size pfn
  */
 static unsigned long __init zone_spanned_pages_in_node(int nid,
 					unsigned long zone_type,
@@ -9631,19 +9671,23 @@ static unsigned long __init zone_spanned_pages_in_node(int nid,
 {
 	unsigned long zone_low = arch_zone_lowest_possible_pfn[zone_type];
 	unsigned long zone_high = arch_zone_highest_possible_pfn[zone_type];
+
 	/* When hotadd a new node from cpu_up(), the node should be empty */
 	if (!node_start_pfn && !node_end_pfn)
 		return 0;
 
 	/* Get the start and end of the zone */
-/*
- * IAMROOT, 2021.12.04:
- * - memblock의 node pfn과 zone 전체 주소에 대한 start, end 주소 사이에서
- *   zone_start_pfn, zone_end_pfn을 일단 구한다. 그리고
- *   nid마다의 movable 영역과 비교하여 zone 영역을 수정한다.
- */
+	/* IAMROOT, 2024.08.22:
+	 * - 'zone_low <= @node_{start,end}_pfn <= zone_high'로 보정하여
+	 *   @zone_{start,end}_pfn을 구한다.
+	 */
 	*zone_start_pfn = clamp(node_start_pfn, zone_low, zone_high);
 	*zone_end_pfn = clamp(node_end_pfn, zone_low, zone_high);
+
+	/* IAMROOT, 2024.08.22:
+	 * - @zone_{start,end}_pfn이 zone movable과 overlap 되는지 확인하며
+	 *   필요시 보정한다.
+	 */
 	adjust_zone_range_for_zone_movable(nid, zone_type,
 				node_start_pfn, node_end_pfn,
 				zone_start_pfn, zone_end_pfn);
@@ -9653,6 +9697,10 @@ static unsigned long __init zone_spanned_pages_in_node(int nid,
 		return 0;
 
 	/* Move the zone boundaries inside the node if necessary */
+	/* IAMROOT, 2024.08.23:
+	 * - @zone_{start,end}_pfn이 @node_{start,end}_pfn의 boundary를 넘지
+	 *   않도록 다시 한번 체크한다.
+	 */
 	*zone_end_pfn = min(*zone_end_pfn, node_end_pfn);
 	*zone_start_pfn = max(*zone_start_pfn, node_start_pfn);
 
@@ -9664,24 +9712,39 @@ static unsigned long __init zone_spanned_pages_in_node(int nid,
  * Return the number of holes in a range on a node. If nid is MAX_NUMNODES,
  * then all holes in the requested range will be accounted for.
  */
-/*
- * IAMROOT, 2021.12.04:
- * - 해당 nid의 zone영역에 대해서 전체 memory를 돌며 해당 nid의 memory 사이즈를 뺀다.
- *   남은 영역이 결국 hole영역이 될것이다.
+/* IAMROOT, 2021.12.04:
+ * - @nid, @range_start_pfn, @range_end_pfn을 입력받아 해당 zone의
+ *   absent pages 개수를 구한다.
+ *
+ *   absent_pages > 0 == hole 존재함을 의미함.
  */
 unsigned long __init __absent_pages_in_range(int nid,
 				unsigned long range_start_pfn,
 				unsigned long range_end_pfn)
 {
+	/* IAMROOT, 2024.08.23:
+	 * - zone 전체 pages 개수를 nr_absent 변수에 우선 저장한다.
+	 */
 	unsigned long nr_absent = range_end_pfn - range_start_pfn;
 	unsigned long start_pfn, end_pfn;
 	int i;
 
+	/* IAMROOT, 2024.08.23:
+	 * - node(@nid)의 memblock memory region을 전체 순회하면서
+	 *   @{start,end}_pfn을 구하여 해당 region의 page 개수를 구한 뒤,
+	 *   nr_absent 에서 계속 뺀다.
+	 */
 	for_each_mem_pfn_range(i, nid, &start_pfn, &end_pfn, NULL) {
 		start_pfn = clamp(start_pfn, range_start_pfn, range_end_pfn);
 		end_pfn = clamp(end_pfn, range_start_pfn, range_end_pfn);
 		nr_absent -= end_pfn - start_pfn;
 	}
+
+	/* IAMROOT, 2024.08.23:
+	 * - nr_absent의 값은 다음 중 하나가 된다.
+	 *   1) nr_absent > 0 : @range_{start,end}_pfn 사이에 hole 존재.
+	 *   2) nr_absent == 0: @range_{start,end}_pfn 사이에 hole 없음.
+	 */
 	return nr_absent;
 }
 
@@ -9699,9 +9762,9 @@ unsigned long __init absent_pages_in_range(unsigned long start_pfn,
 }
 
 /* Return the number of page frames in holes in a zone on a node */
-/*
- * IAMROOT, 2021.12.04:
- * - 해당 node zone안에있는 hole영역 page수를 구한다.
+/* IAMROOT, 2021.12.04:
+ * - @zone_type, @node_start_pfn, @node_end_pfn을 입력받아
+ *   zone(@zone_type)의 absent(hole) pages 개수를 구한다.
  */
 static unsigned long __init zone_absent_pages_in_node(int nid,
 					unsigned long zone_type,
@@ -9717,20 +9780,25 @@ static unsigned long __init zone_absent_pages_in_node(int nid,
 	if (!node_start_pfn && !node_end_pfn)
 		return 0;
 
-/*
- * IAMROOT, 2021.12.04:
- * - 해당 nid의 영역과 zone이 겹치는 부분으로 영역을 세팅한다.
- */
+	/* IAMROOT, 2024.08.22:
+	 * - 필요시 'zone_low <= @node_{start,end}_pfn <= zone_high'로
+	 *   보정하여 zone_{start,end}_pfn을 구한다.
+	 */
 	zone_start_pfn = clamp(node_start_pfn, zone_low, zone_high);
 	zone_end_pfn = clamp(node_end_pfn, zone_low, zone_high);
 
-/*
- * IAMROOT, 2021.12.04:
- * - movable 영역과 비교하여 해당 nid의 zone영역을 구한다.
- */
+	/* IAMROOT, 2024.08.22:
+	 * - @zone_{start,end}_pfn이 zone movable과 overlap 되는지 확인하며
+	 *   필요시 보정한다.
+	 */
 	adjust_zone_range_for_zone_movable(nid, zone_type,
 			node_start_pfn, node_end_pfn,
 			&zone_start_pfn, &zone_end_pfn);
+
+	/* IAMROOT, 2024.08.23:
+	 * - zone_{start,end}_pfn 사이에 존재하는 absent pages(in hole) 개수를
+	 *   구한다.
+	 */
 	nr_absent = __absent_pages_in_range(nid, zone_start_pfn, zone_end_pfn);
 
 	/*
@@ -9738,15 +9806,12 @@ static unsigned long __init zone_absent_pages_in_node(int nid,
 	 * Treat pages to be ZONE_MOVABLE in ZONE_NORMAL as absent pages
 	 * and vice versa.
 	 */
-/*
- * IAMROOT, 2021.12.04:
- * - mirrored kernelcore 인경우, movable 영역의 nid인 경우 실행된다.
- *   즉 mirror아니므로 movable을 할수있는 nid memory
- *   movable이면서 mirror인 경우, 그리고
- *   normal이면서 mirror아 닌경우는 mirrored_kernelcore인 상황에서
- *   valid하지 않은 상황이므로 해당 영역을 다시 점검해서 absent로
- *   하는것처럼 보인다.
- */
+	/* IAMROOT, 2024.08.23:
+	 * - mirrored_kernelcore bootarg가 설정된 경우 mirror region도
+	 *   absent(hole)로 처리하기 위한 후처리 영역이다.
+	 *
+	 *   단, node(@nid)에 zone movable이 있을 때만 수행한다.
+	 */
 	if (mirrored_kernelcore && zone_movable_pfn[nid]) {
 		unsigned long start_pfn, end_pfn;
 		struct memblock_region *r;
@@ -9757,10 +9822,25 @@ static unsigned long __init zone_absent_pages_in_node(int nid,
 			end_pfn = clamp(memblock_region_memory_end_pfn(r),
 					zone_start_pfn, zone_end_pfn);
 
+			/* IAMROOT, 2024.08.23:
+			 * - @zone_type이 MOVABLE 이면서 r(memblock region)이
+			 *   mirror이면 absent(hole)로 간주하고 nr_absent에 추가한다.
+			 */
 			if (zone_type == ZONE_MOVABLE &&
 			    memblock_is_mirror(r))
 				nr_absent += end_pfn - start_pfn;
 
+			/* IAMROOT, 2024.08.23:
+			 * - 다음 조건이라면 absent로 간주하고 nr_absent에 추가한다.
+			 *   1) node(@nid)에 zone movable 존재
+			 *   2) @zone_type == NORMAL
+			 *   3) r(memblock region) != mirror
+			 *
+			 * - 결국 다음을 의미한다.
+			 *   zone movable이 존재하는 node(@nid)의 zone normal region중에
+			 *   MEMBLOCK_MIRROR flag 설정이 되지 않는 region은 모두
+			 *   absent(hole)로 가정한다는 것인데 이는 
+			 */
 			if (zone_type == ZONE_NORMAL &&
 			    !memblock_is_mirror(r))
 				nr_absent += end_pfn - start_pfn;
@@ -9770,11 +9850,9 @@ static unsigned long __init zone_absent_pages_in_node(int nid,
 	return nr_absent;
 }
 
-/*
- * IAMROOT, 2021.12.04:
- * - nid의 각 zone에 spanned_pages수와 present_pages를 저장하고,
- *   node_data에도 해당 nid의 total spanned_pages수와
- *   total present_pages수를 저장한다.
+/* IAMROOT, 2021.12.04:
+ * - @pgdat(node)의 각 zone이 가진 page 개수와 totalpages 개수를 계산하고
+ *   초기화한다.
  */
 static void __init calculate_node_totalpages(struct pglist_data *pgdat,
 						unsigned long node_start_pfn,
@@ -9783,10 +9861,15 @@ static void __init calculate_node_totalpages(struct pglist_data *pgdat,
 	unsigned long realtotalpages = 0, totalpages = 0;
 	enum zone_type i;
 
-/*
- * IAMROOT, 2021.12.04:
- * - zone index를 순회하며 nid에 대한 zone정보를 초기화한다.
- */
+	/* IAMROOT, 2021.12.04:
+	 * - @pgdat의 zone을 순회하면서 각각의 struct zone 정보를 초기화한다.
+	 *
+	 *   Arm64 기준 zone DMA32, NORMAL의 다음 정보.
+	 *   1) zone_start_pfn
+	 *   2) spanned_pages
+	 *   3) present_pages
+	 *   4) present_early_pages
+	 */
 	for (i = 0; i < MAX_NR_ZONES; i++) {
 		struct zone *zone = pgdat->node_zones + i;
 		unsigned long zone_start_pfn, zone_end_pfn;
@@ -9815,10 +9898,18 @@ static void __init calculate_node_totalpages(struct pglist_data *pgdat,
 		zone->present_early_pages = real_size;
 #endif
 
+		/* IAMROOT, 2024.08.22:
+		 * - 각 zone의 page 개수를 누적한다.
+		 */
 		totalpages += size;
 		realtotalpages += real_size;
 	}
 
+	/* IAMROOT, 2024.08.22:
+	 * - @pgdat(node)의 다음 정보들을 초기화한다.
+	 *   1) node_spanned_pages == totalpages
+	 *   2) node_present_pages == realtotalpages
+	 */
 	pgdat->node_spanned_pages = totalpages;
 	pgdat->node_present_pages = realtotalpages;
 	pr_debug("On node %d totalpages: %lu\n", pgdat->node_id, realtotalpages);
@@ -10207,11 +10298,10 @@ static void __init free_area_init_node(int nid)
 	/* pg_data_t should be reset to zero when it's allocated */
 	WARN_ON(pgdat->nr_zones || pgdat->kswapd_highest_zoneidx);
 
-/*
- * IAMROOT, 2021.12.04:
- * - memblock읠 순회해 해당 nid의 start_pfn, end_pfn을 구해와서
- *   pgdata에 설정을 한다.
- */
+	/* IAMROOT, 2021.12.04:
+	 * - node(@nid)의 min(@start_pfn)과 max(@end_pfn)을 구하여
+	 *   pgdat(@nid) 오브젝트를 초기화한다.
+	 */
 	get_pfn_range_for_nid(nid, &start_pfn, &end_pfn);
 
 	pgdat->node_id = nid;
@@ -10221,6 +10311,11 @@ static void __init free_area_init_node(int nid)
 	pr_info("Initmem setup node %d [mem %#018Lx-%#018Lx]\n", nid,
 		(u64)start_pfn << PAGE_SHIFT,
 		end_pfn ? ((u64)end_pfn << PAGE_SHIFT) - 1 : 0);
+
+	/* IAMROOT, 2024.08.22:
+	 * - @pgdat(node)의 각 zone이 가진 page 개수와 totalpages 개수를
+	 *   계산하고 초기화한다.
+	 */
 	calculate_node_totalpages(pgdat, start_pfn, end_pfn);
 
 	alloc_node_mem_map(pgdat);
