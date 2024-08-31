@@ -243,9 +243,8 @@ enum zone_stat_item {
 	NR_VM_ZONE_STAT_ITEMS };
 
 
-/*
- * IAMROOT, 2022.03.05:
- * - node에서 관리하는 conter stat
+/* IAMROOT, 2022.03.05:
+ * - per-node vmstats을 위한 item 별 enum 정의.
  */
 enum node_stat_item {
 	NR_LRU_BASE,
@@ -710,14 +709,16 @@ enum zone_type {
 
 #define ASYNC_AND_SYNC 2
 
+/* IAMROOT, 2024.08.30:
+ * - zone 정보를 관리하는데 사용하는 자료구조
+ */
 struct zone {
 	/* Read-mostly fields */
 
 	/* zone watermarks, access with *_wmark_pages(zone) macros */
-/*
- * IAMROOT, 2022.02.12:
- * - /proc/zoneinfo 의 zone 정보에서 min, low, high
- */
+	/* IAMROOT, 2022.02.12:
+	 * - 각 원소는 /proc/zoneinfo의 zone 정보에서 min, low, high 의미.
+	 */
 	unsigned long _watermark[NR_WMARK];
 	unsigned long watermark_boost;
 
@@ -773,17 +774,18 @@ struct zone {
 #ifdef CONFIG_NUMA
 	int node;
 #endif
-  /*
-   * IAMROOT, 2021.12.11:
-   * - zone_pcp_init 에서 초기화된다.
-   */
+
+	/* IAMROOT, 2024.08.30:
+	 * - zone이 속한 node의 object를 가리킨다.
+	 */
 	struct pglist_data	*zone_pgdat;
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
-/*
- * IAMROOT, 2022.03.05:
- * - lock을 걸지 않고 stat을 관리한다. 특정 값 이상이 vm_stat과 차이나면
- *   vm_stat에 적용한다.(threshold 방식)
- */
+
+	/* IAMROOT, 2022.03.05:
+	 * - zone stats을 관리하기 위한 member 이며 성능을 위해 lock 대신
+	 *   per-cpu 방식을 이용한다. 값이 threshold 이상 넘어가면 vm_stat에
+	 *   저장하는 방식을 이용한다.
+	 */
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 	/*
 	 * the high and batch values are copied to individual pagesets for
@@ -845,21 +847,32 @@ struct zone {
 	 * mem_hotplug_begin/end(). Any reader who can't tolerant drift of
 	 * present_pages should get_online_mems() to get a stable value.
 	 */
-/*
- * IAMROOT, 2021.12.04:
- *
- * - managed_pages : buddy system이 관리하는 pages. 대표적으로
- *   reserved pages(mem_map)를 제외한 것들.
- *   present_pages - managed_pages를 통해 간접적으로 unmanaged
- *   page를 알 수 있다고 주석에 나온다.
- * - cma_pages : 보통 driver를 짜면 cma_pages를 자주쓴다.
- *
- *----
- * calculate_node_totalpages, zone_init_internals 에서 설정된다.
- * - spanned_pages : hole을 포함한 해당 node및 zone의 page수
- * - present_pages : hole을 제외한 해당 node zone의 page수
- * - present_early_pages : 일단 present_pages와 같게 설정된다.
-*/
+	/* IAMROOT, 2024.08.30:
+	 * - spanned_pages: zone에 할당된 total pages 개수를 의미하며,
+	 *                  hole pages 개수도 포함하고 있다.
+	 *                  (spanned = zone_end_pfn - zone_start_pfn)
+	 *   present_pages: zone에 할당된 phys-pages 개수를 의미하며,
+	 *                  hole pages 개수는 제외된다.
+	 *                  (present = spanned - absent(hole pages))
+	 *   managed_pages: zone이 가지고 있는 present pages 중에서
+	 *                  buddy system이 관리하는 영역이다.
+	 *                  (managed = present - reserved)
+	 *                  reserved에는 bootmem(memblock) allocator에서
+	 *                  allocated pages도 제외한다.
+	 *   cma_pages    : CMA에 사용되는 present_pages를 의미한다.
+	 *                  (MIGRATE_CMA)
+	 *                  보통 driver를 작성하면 cma_pages를 자주 사용한다.
+	 *
+	 *   present_early_pages: hotplugged memory 영역을 제외한 boot
+	 *                        단계에서부터 사용 가능했던 pages 개수를
+	 *                        의미한다.
+	 *
+	 *   present_pages 영역은 memory hotplug 또는 memory power management
+	 *   로직에서 사용되며 이는 unmanaged_pages 개수를 구하는데 사용된다.
+	 *   (unmanaged = present - managed)
+	 *   또한 managed_pages 영역은 page allocator(buddy)와 vm scanner에서
+	 *   사용되며 이는 memory watermarks와 thresholds 계산에 이용된다.
+	 */
 	atomic_long_t		managed_pages;
 	unsigned long		spanned_pages;
 	unsigned long		present_pages;
@@ -1015,10 +1028,8 @@ enum zone_flags {
 	ZONE_RECLAIM_ACTIVE,		/* kswapd may be scanning the zone. */
 };
 
-/*
- * IAMROOT, 2022.02.12: 
- * 부트업중 reserved 페이지를 제외하고, 버디 시스템이 관리하는 페이지가
- * 존재하면 해당 페이지 수를 반환한다.
+/* IAMROOT, 2022.02.12:
+ * - managed_pages 개수 반환 (buddy 에서 사용하는 pages)
  */
 static inline unsigned long zone_managed_pages(struct zone *zone)
 {
@@ -1435,10 +1446,8 @@ static inline bool zone_is_zone_device(struct zone *zone)
  * populated_zone(). If the whole zone is reserved then we can easily
  * end up with populated_zone() && !managed_zone().
  */
-/*
- * IAMROOT, 2022.02.12: 
- * 부트업중 reserved 페이지를 제외하고, 버디 시스템이 관리하는 페이지가
- * 존재하면 true를 반환한다.
+/* IAMROOT, 2022.02.12:
+ * - managed_pages가 존재하면 true, 아니면 false 반환.
  */
 static inline bool managed_zone(struct zone *zone)
 {
@@ -1446,6 +1455,9 @@ static inline bool managed_zone(struct zone *zone)
 }
 
 /* Returns true if a zone has memory */
+/* IAMROOT, 2024.08.30:
+ * - present_pages가 존재하면 true, 아니면 false 반환.
+ */
 static inline bool populated_zone(struct zone *zone)
 {
 	return zone->present_pages;
