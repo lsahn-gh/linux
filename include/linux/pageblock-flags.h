@@ -11,28 +11,40 @@
 #ifndef PAGEBLOCK_FLAGS_H
 #define PAGEBLOCK_FLAGS_H
 
+/* IAMROOT, 2024.09.02:
+ * - pageblock 이란?
+ *
+ *   page 들을 그룹화한 더 큰 단위. 메모리 관리의 효율성을 높이기 위해
+ *   여러 page를 묶어 관리하는데, 이 묶음의 단위가 pageblock임.
+ *   kernel은 필요시 여러 pages 를 한번에 할당하거나 해제하기 위해
+ *   pageblock 개념을 사용함.
+ *
+ *   pageblock 단위는 메모리의 연속성을 유지하고,
+ *   TLB(Translation Lookaside Buffer) 효율을 높이며 시스템 전반의 성능 향상.
+ */
+
 #include <linux/types.h>
-/*
- * IAMROOT, 2021.11.20:
- * - migratetype 참고
- *   MIGRATE_PCPTYPES 들을 의미함.
+/* IAMROOT, 2021.11.20:
+ * - MIGRATE_PCPTYPES을 나타내는데 사용되는 bits 수.
+ *
+ *   'enum migratetype' 참고 필요.
  */
 #define PB_migratetype_bits 3
 
 /* Bit indices that affect a whole block of pages */
-/*
- * IAMROOT, 2021.11.20:
+/* IAMROOT, 2021.11.20: TODO
  * - pageblock을 나타내는데 필요한 bits수
- * - PB_migrate_end = 0 + 3 - 1 = 2
- *   PB_migrate_skip            = 3
- *   NR_PAGEBLOCK_BITS          = 4
  *
- * - migrate가 가능한 memory, 불가능한 memory가 존재한다.
- *   (ex. kerenl이 사용하는 memory는 migrate가 불가능,
- *   application memory는 가능(hop plug))
- * - migrate라는 의미가 이동이 가능하다는 의미도 된다.
- * - page_order 단위로 관리한다.
- * - page scan할때 필요로하는 정보를 기록
+ *   o PB_migrate                 = 0
+ *   o PB_migrate_end (0 + 3 - 1) = 2
+ *   o PB_migrate_skip            = 3
+ *   o NR_PAGEBLOCK_BITS          = 4
+ *
+ *   o migration이 가능한 memory, 불가능한 memory 존재.
+ *     - kernel이 사용하는 memory는 migration 불가능.
+ *     - application memory는 가능 (hotplug)
+ *   o page order 단위로 관리.
+ *   o page scan시 필요로 하는 정보 기록.
  */
 enum pageblock_bits {
 	PB_migrate,
@@ -78,12 +90,14 @@ extern unsigned int pageblock_order;
 #endif /* CONFIG_HUGETLB_PAGE_SIZE_VARIABLE */
 
 #else /* CONFIG_HUGETLB_PAGE */
-/*
- * IAMROOT, 2021.11.13:
- * - buddy system에서 사용하는 것 그대로 그냥쓴다.
- *   2^0 ~ 2^9 로 사용.
- */
+
 /* If huge pages are not used, group by MAX_ORDER_NR_PAGES */
+/* IAMROOT, 2021.11.13:
+ * - buddy system에서 사용하는 order 그대로 사용.
+ *
+ *   MAX_ORDER      : 11
+ *   pageblock_order: 10
+ */
 #define pageblock_order		(MAX_ORDER-1)
 
 #endif /* CONFIG_HUGETLB_PAGE */

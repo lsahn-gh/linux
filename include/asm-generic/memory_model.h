@@ -26,14 +26,14 @@
  * supports 3 memory models.
  */
 #if defined(CONFIG_FLATMEM)
-/* IAMROOT, 2023.11.27:
- * - FLATMEM을 사용하는 경우 global mem_map을 통해 관리한다.
- */
 
 #ifndef ARCH_PFN_OFFSET
 #define ARCH_PFN_OFFSET		(0UL)
 #endif
 
+/* IAMROOT, 2023.11.27:
+ * - FLATMEM을 사용하는 경우 global mem_map을 통해 관리한다.
+ */
 #define __pfn_to_page(pfn)	(mem_map + ((pfn) - ARCH_PFN_OFFSET))
 #define __page_to_pfn(page)	((unsigned long)((page) - mem_map) + \
 				 ARCH_PFN_OFFSET)
@@ -43,7 +43,6 @@
  * - SPARSEMEM + VMEMMAP을 사용하는 경우 vmemmap을 통해 pfn을 구하면 되므로
  *   FLATMEM과 동일한 성능으로 변환이 가능하다.
  */
-
 /* memmap is virtually contiguous.  */
 #define __pfn_to_page(pfn)	(vmemmap + (pfn))
 #define __page_to_pfn(page)	(unsigned long)((page) - vmemmap)
@@ -63,6 +62,14 @@
 	(unsigned long)(__pg - __section_mem_map_addr(__nr_to_section(__sec)));	\
 })
 
+/* IAMROOT, 2024.09.05:
+ * - @pfn을 입력받아 ptr(struct page)로 변환한다.
+ *
+ *   1) @pfn이 속한 section을 구한다.
+ *   2) section의 mem_map 주소를 가져온다.
+ *   3) mem_map 주소에 @pfn을 더해 해당 page를 구한다.
+ *
+ */
 #define __pfn_to_page(pfn)				\
 ({	unsigned long __pfn = (pfn);			\
 	struct mem_section *__sec = __pfn_to_section(__pfn);	\

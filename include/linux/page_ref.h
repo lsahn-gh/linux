@@ -72,9 +72,8 @@ static inline int page_count(const struct page *page)
 	return atomic_read(&compound_head(page)->_refcount);
 }
 
-/*
- * IAMROOT, 2022.02.26: 
- * 참조카운터를 v로 변경한다.
+/* IAMROOT, 2022.02.26:
+ * - @page의 refcount를 @v로 변경한다.
  */
 static inline void set_page_count(struct page *page, int v)
 {
@@ -87,11 +86,8 @@ static inline void set_page_count(struct page *page, int v)
  * Setup the page count before being freed into the page allocator for
  * the first time (boot or memory hotplug)
  */
-/*
- * IAMROOT, 2021.12.11:
- * - 최초에 struct page가 초기화되면 _refcount가 1로 설정될것이다.
- * - page allocator(buddy system)에서 최초에 page를 초기화할때
- *   _refcount를 -1시킨다. 그래서 미리 +1을 해놓는것이다.
+/* IAMROOT, 2021.12.11:
+ * - @page의 refcount를 1로 설정한다.
  */
 static inline void init_page_count(struct page *page)
 {

@@ -1872,9 +1872,8 @@ static inline void set_page_node(struct page *page, unsigned long node)
 	page->flags |= (node & NODES_MASK) << NODES_PGSHIFT;
 }
 
-/*
- * IAMROOT, 2021.12.11:
- * - 해당 page가 속한 zone, node, section을 flag에 encode한다.
+/* IAMROOT, 2021.12.11:
+ * - struct @page에 @zone, nid(@node), section(@pfn) 정보를 저장한다.
  */
 static inline void set_page_links(struct page *page, enum zone_type zone,
 	unsigned long node, unsigned long pfn)

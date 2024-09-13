@@ -45,42 +45,35 @@
  * coalesce naturally under reasonable reclaim pressure and those which
  * will not.
  */
-/*
- * IAMROOT, 2022.02.12:
- * - buddy system의 단편화 문제를 어느정도 타협하기 위한 order 범위(8 pages)
+/* IAMROOT, 2022.02.12:
+ * - buddy system의 단편화 문제를 어느정도 타협하기 위한 order 값.
+ *
+ *   8 pages == 2^3
  */
 #define PAGE_ALLOC_COSTLY_ORDER 3
 
-/*
- * IAMROOT, 2021.11.20:
- * - PCP Type이라함은 이 3개를 가리킨다.
- *   PCP Type : buddy system에서 cache역할을 하는 memory.
- *              memory에서 가장 많이 사용하는 type을 이런 cache
- *              로 쓰겟다는것.
- *   MIGRATE_UNMOVABLE : kernel 이 사용하는것과 비슷한 제거 불가능한것.
- *   MIGRATE_MOVABLE : 보통 hotplug로 추가 되는 memory들.
- *   MIGRATE_RECLAIMABLE : 회수가 가능한 memory. disk를 불러올때 
- *                         많은 memory를 load하는 상황등의 memory
- * - MIGRATE_HIGHATOMIC
- *   각 zone마다 예비로 atomic요청에 응답을 빠르게 할수 있도록 하는 공간.
- *   order 0나 1로 오면 대부분 성공하지만, order가 큰 경우 실패를 할수있는데,
- *   이 경우 MIGRATE_HIGHATOMIC 공간에서 할당 요청을 할것이다.
- *
- * - MIGRATE_CMA
- *   kernel에서 연속된 공간을 할당하기엔 매우 어려움이 있는데,
- *   이를 해결하기 위한 공간. driver등(application)에서만 사용하며
- *   kernel에서는 사용하지 않음. 이동(movable, reclimable)이 가능하다.
- *   dt에서 영역을 설정한다.
- *
- * - MIGRATE_ISOLATE
- *   memory를 remove하는 상황에서 잠깐 isolate type등으로 바꾼다.
- *   이동, 삭제등의 작업중의 memory에 접근하지 말라는 의미
- */
 enum migratetype {
+	/* IAMROOT, 2024.09.02:
+	 * - PCP(per-cpu page allocator) types
+	 *
+	 *   PCP는 buddy system에서 per-cpu 기반 cache pages를 관리한단
+	 *   의미이며 order-0 pages 만 PCP 대상이다.
+	 *
+	 *   UNMOVABLE  : Kernel이 사용하는 것과 비슷하며 migration/remove 불가능.
+	 *   MOVABLE    : Hotplug로 추가되는 page frames 의미.
+	 *   RECLAIMABLE: 회수 가능한 page frames. disk 내용을 불러올때 처럼
+	 *                많은 page frames 이 필요한 상황.
+	 */
 	MIGRATE_UNMOVABLE,
 	MIGRATE_MOVABLE,
 	MIGRATE_RECLAIMABLE,
 	MIGRATE_PCPTYPES,	/* the number of types on the pcp lists */
+
+	/* IAMROOT, 2024.09.02: TODO
+	 * - 각 zone 마다 spare 용도로 atomic 요청에 응답을 빠르게 하기 위한 공간.
+	 *   order-{0,1}은 대부분 성공하지만, order가 큰 경우 실패할 수 있다.
+	 *   이 경우 HIGHATOMIC 공간에서 alloc을 수행한다.
+	 */
 	MIGRATE_HIGHATOMIC = MIGRATE_PCPTYPES,
 #ifdef CONFIG_CMA
 	/*
@@ -96,9 +89,19 @@ enum migratetype {
 	 * MAX_ORDER_NR_PAGES should biggest page be bigger than
 	 * a single pageblock.
 	 */
+	/* IAMROOT, 2024.09.02:
+	 * - Kernel에서 연속된 공간을 할당하기 매우 까다로운데, 이를 해결하기
+	 *   위한 공간이다. driver (application) 에서만 사용하며 Kernel에서는
+	 *   사용하지 않는다. 이동(movable, reclaimable)이 가능하다.
+	 *   DT에서 영역을 설정한다.
+	 */
 	MIGRATE_CMA,
 #endif
 #ifdef CONFIG_MEMORY_ISOLATION
+	/* IAMROOT, 2024.09.02: TODO
+	 * - (hotplug) memory를 remove 하는 상황에서 잠깐 isolate type으로 바꾼다.
+	 *   해당 type 일때는 move, remove 작업이 불가능하다.
+	 */
 	MIGRATE_ISOLATE,	/* can't allocate from here */
 #endif
 	MIGRATE_TYPES
@@ -550,14 +553,16 @@ enum zone_watermarks {
 #define wmark_pages(z, i) (z->_watermark[i] + z->watermark_boost)
 
 /* Fields and list protected by pagesets local_lock in page_alloc.c */
-struct per_cpu_pages {
-/*
- * IAMROOT, 2022.02.12:
- * - count : 현재 가지고 있는 cache pages. 이 page는 lock이 필요없이
- *   가져올수있다. 소진되면 batch만큼 buddy system에 요청한다.
- * - high : 최대 가지고 있을수있는 cache page size
- * - batch : 한번에 buddy system에 add, remove하는 양
+/* IAMROOT, 2022.02.12: TODO
+ * - struct per_cpu_pages는 lock 요청없이 per-cpu 기반으로 동작한다.
+ *
+ *   count      : 현재 보유중인 cache pages 개수.
+ *                소진되면 batch 값 만큼 buddy system에 요청한다.
+ *   high       : 최대로 보유가능한 cache pages 개수.
+ *   batch      : buddy system에 요청 후 한번에 add/remove 되는 양.
+ *   free_factor:
  */
+struct per_cpu_pages {
 	int count;		/* number of pages in the list */
 	int high;		/* high watermark, emptying needed */
 	int batch;		/* chunk size for buddy add/remove */
@@ -779,12 +784,21 @@ struct zone {
 	 * - zone이 속한 node의 object를 가리킨다.
 	 */
 	struct pglist_data	*zone_pgdat;
+
+	/* IAMROOT, 2024.09.01:
+	 * - 성능 최적화를 위해 order-0 크기의 page만 per-cpu pageset에서
+	 *   우선 alloc을 시도하는데 이때 사용되는 struct.
+	 *
+	 *   Note.
+	 *   zone에서 관리하는 free area의 lock이 held 되지 않으므로
+	 *   성능이 상대적으로 좋다.
+	 */
 	struct per_cpu_pages	__percpu *per_cpu_pageset;
 
 	/* IAMROOT, 2022.03.05:
 	 * - zone stats을 관리하기 위한 member 이며 성능을 위해 lock 대신
-	 *   per-cpu 방식을 이용한다. 값이 threshold 이상 넘어가면 vm_stat에
-	 *   저장하는 방식을 이용한다.
+	 *   per-cpu 방식을 이용한다. 값이 threshold를 넘어가면 vm_stat에
+	 *   누적하는 메커니즘을 이용한다.
 	 */
 	struct per_cpu_zonestat	__percpu *per_cpu_zonestats;
 	/*
@@ -798,6 +812,10 @@ struct zone {
 	/*
 	 * Flags for a pageblock_nr_pages block. See pageblock-flags.h.
 	 * In SPARSEMEM, this map is stored in struct mem_section
+	 */
+	/* IAMROOT, 2024.09.02:
+	 * - FLATMEM에서는 struct zone에 pageblock_flags field가 존재하고
+	 *   SPARSEMEM은 section 자료구조에 등록한다.
 	 */
 	unsigned long		*pageblock_flags;
 #endif /* CONFIG_SPARSEMEM */
@@ -1387,6 +1405,11 @@ bool zone_watermark_ok_safe(struct zone *z, unsigned int order,
  * Memory initialization context, use to differentiate memory added by
  * the platform statically or via memory hotplug interface.
  */
+/* IAMROOT, 2024.09.05:
+ * - memory가 추가된 방식에 따라 사용할 flags.
+ *   1) EARLY: DT를 통해 추가된 메모리
+ *   2) HOTPLUG: hotplug를 통해 추가된 메모리
+ */
 enum meminit_context {
 	MEMINIT_EARLY,
 	MEMINIT_HOTPLUG,
@@ -1719,6 +1742,8 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 
 /* IAMROOT, 2021.11.13:
  * - section과 관련된 계산에 사용되는 SHIFT 값.
+ *   4kb page : 27
+ *   64kb page: 29
  *
  *   SECTION_SIZE_BITS: 27
  *   PAGE_SHIFT       : 12 (page size == 4k)
@@ -1727,10 +1752,16 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 #define PFN_SECTION_SHIFT	(SECTION_SIZE_BITS - PAGE_SHIFT)
 
 /* IAMROOT, 2021.11.13:
- * - 전체 section 갯수.
+ * - 전체 section 개수.
  *
  *   SECTIONS_SHIFT : 21
  *   NR_MEM_SECTIONS: 2,000,000 == 2^21
+ *
+ *   예)
+ *   PAGES_PER_SECTION: 32k (128MB)
+ *   NR_MEM_SECTIONS  : 2,000,000개
+ *   ------------------------------
+ *                           256TB 커버 가능
  */
 #define NR_MEM_SECTIONS		(1UL << SECTIONS_SHIFT)
 
@@ -1751,12 +1782,14 @@ static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
  */
 #define PAGE_SECTION_MASK	(~(PAGES_PER_SECTION-1))
 
-/*
- * IAMROOT, 2021.11.20:
+/* IAMROOT, 2021.11.20: TODO
  * - 128MB범위를 관리한다.
  *
- * - pageblock_order = HUGETLB_PAGE_ORDER (9) 라고 가정
- *   (1 << (15 - 9)) * 4 = 2^6 * 4 = 256(bits) = 32byte
+ *   PFN_SECTION_SHIFT: 15
+ *   pageblock_order  : 9
+ *   NR_PAGEBLOCK_BITS: 4
+ *   ---------------------
+ *   SECTION_BLOCKFLAGS_BITS: 256(bits) == 32bytes == (1 << (15 - 9)) * 4
  *
  * - 4GB를 관리하는데 필요한 bits 계산.
  *   pageblock_order당 2MB를 커버한다. 2MB 당 4bit
@@ -1842,12 +1875,14 @@ void subsection_map_init(unsigned long pfn, unsigned long nr_pages);
 
 struct page;
 struct page_ext;
-/*
- * IAMROOT, 2021.11.13:
- * - 한 section을 관리하기 위한 자료구조. usage, mem_map이 mapping된다.
- * - 4K page일경우 section은 128MB. 32k개의 page를 관리한다.
- * - page는 mem_map이라는 이름으로 section_mem_map에 주소가 mapping된다.
- * - CONFIG_PAGE_EXTENSION이 unset인 경우에
+
+/* IAMROOT, 2021.11.13:
+ * - SPARSEMEM 구조에서 section을 관리하기 위한 자료 구조.
+ *   usemap, memmap이 mapping 된다.
+ *
+ *   48bit, 4k page 시스템에서 하나의 section은 32k(128MB) pages를 관리한다.
+ *
+ *   CONFIG_PAGE_EXTENSION == disable 이라면
  *   sizeof(struct mem_section) = 16byte
  */
 struct mem_section {
@@ -1863,33 +1898,40 @@ struct mem_section {
 	 * Making it a UL at least makes someone do a cast
 	 * before using it wrong.
 	 */
-/*
- * IAMROOT, 2021.11.27:
- * - section mem map에 대한 pointer 겸 해서 flag(SECTION_MAP_MASK)를 저장한다.
- *   bit | 63...32 | 31...15 | 14...5 | 4     | 3     | 2      | 1   | 0       |
- *       | mem map - pfn     | -      | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
- * - 참고 함수
- *   sparse_encode_mem_map
- *  pfn을 offset으로 하여 해당 pfn의 struct page에 바로 접근할수있게 하는
- *  형식이다.
- *
- * - sparse_init일때 잠깐 nid는 mem_section을 초기화 할때만 잠깐 사용한다.
- *   그래서 early nid라고 표현하고, 이 nid 정보는 mem_map 포인터와 
- *   같이 저장되는 일은 없다. early nid의 정보가 담긴 후에 나중에 실제
- *   엔코딩된 mem_map 포인터를 담아 사용한다.
- *   참고로 nid 정보는 mem_map 초기화 이후 page->flags에 저장된다.
- * 
- *   bit | 63....6 | 5 | 4     | 3     | 2      | 1   | 0       |
- *       | nid     | - | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
- *
- * - mem_map
- *   mem_section에 대한 struct page들.
- *   section크기가 128MB, 4k page일경우 section 1개당 32k개의 page를 가져야되니
- *   mem_map은 32k개의 struct page가 되고, struct page가 64byte일경우 32k개의
- *   크기는 2MB가 되어 PMD size와 같아진다.
- */
+	/* IAMROOT, 2024.09.02:
+	 * - memmap(array of struct page)의 pointer가 저장되는 field.
+	 *   va(memmap), nid, flags 저장은 sparse_encode_mem_map(..)을 통해
+	 *   이루어진다.
+	 *
+	 *   1) bit[63:22]: va(memmap)이 저장되는 공간.
+	 *                  memblock alloc시 2MB align 이므로 22bit 아래에
+	 *                  영향이 가지는 않는다.
+	 *   2) bit[14:06]: 해당 memmap이 저장된 node의 id 기록 용도.
+	 *                  early boot 단계에서만 저장되며 후에
+	 *                  real memmap 저장할때는 값을 clear 시킨다.
+	 *                  (임시로 가지고 있는 것임)
+	 *   3) bit[04:00]: memmap에 대한 flags 저장.
+	 *             04 : SECTION_TAINT_ZONE_DEVICE
+	 *             03 : SECTION_IS_EARLY
+	 *             02 : SECTION_IS_ONLINE
+	 *             01 : SECTION_HAS_MEM_MAP
+	 *             00 : SECTION_MARKED_PRESENT
+	 *
+	 *   bit |  63...22   | 14:06 | 4     | 3     | 2      | 1   | 0       |
+	 *       | va(memmap) |  nid  | Z-DEV | EARLY | ONLINE | HAS | PRESENT |
+	 */
 	unsigned long section_mem_map;
 
+	/* IAMROOT, 2024.09.02:
+	 * - usemap 용도로 사용하는 field.
+	 *
+	 *   sparsemem에서는 각 section의 page가 실제로 사용되는지 추적해야 하는데
+	 *   이때 사용되는 것이 usemap임.
+	 *
+	 *   o 각 section에서 실제로 사용되는 page를 추적하는 bitmap.
+	 *   o bitmap의 bit 들은 해당 page가 사용중인지 아닌지를 나타냄.
+	 *   o 이를 통해 page 사용 현황을 효율적으로 관리.
+	 */
 	struct mem_section_usage *usage;
 #ifdef CONFIG_PAGE_EXTENSION
 	/*
@@ -1930,7 +1972,7 @@ struct mem_section {
  * - NR_SECTION_ROOTS: root 개수
  *
  *   ex) 48PA bits, 4k page, static인 경우
- *       2MB == 2MB / 1 (NR_MEM_SECTIONS / SECTIONS_PER_ROOT)
+ *       2M == 2M / 1 (NR_MEM_SECTIONS / SECTIONS_PER_ROOT)
  *   ex) 48PA bits, 4k page, extreme인 경우
  *       8192 == 2MB / 256 (NR_MEM_SECTIONS / SECTIONS_PER_ROOT)
  *       root 한개당 32GB이므로 총 256TB 크기의 영역이다.
@@ -1996,6 +2038,9 @@ extern size_t mem_section_usage_size(void);
  */
 #define SECTION_NID_SHIFT		6
 
+/* IAMROOT, 2024.09.05:
+ * - @section을 입력받아 masking 작업 후 memmap의 첫 struct page를 반환한다.
+ */
 static inline struct page *__section_mem_map_addr(struct mem_section *section)
 {
 	unsigned long map = section->section_mem_map;
@@ -2071,6 +2116,9 @@ void online_mem_sections(unsigned long start_pfn, unsigned long end_pfn);
 void offline_mem_sections(unsigned long start_pfn, unsigned long end_pfn);
 #endif
 
+/* IAMROOT, 2024.09.05:
+ * - @pfn을 입력받아 struct mem_section을 반환한다.
+ */
 static inline struct mem_section *__pfn_to_section(unsigned long pfn)
 {
 	return __nr_to_section(pfn_to_section_nr(pfn));

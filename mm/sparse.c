@@ -145,9 +145,8 @@ static inline int sparse_index_init(unsigned long section_nr, int nid)
  * node.  This keeps us from having to use another data structure.  The
  * node information is cleared just before we store the real mem_map.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - nid는 bit6부터 저장한다. sparse를 초기화할때만 사용한다.
+/* IAMROOT, 2021.11.13:
+ * - @nid는 '<< 6' 한 뒤에 저장하며 sparse를 초기화할 때만 사용.
  */
 static inline unsigned long sparse_encode_early_nid(int nid)
 {
@@ -265,12 +264,13 @@ static void subsection_mask_set(unsigned long *map, unsigned long pfn,
 	bitmap_set(map, idx, end - idx + 1);
 }
 
-/* IAMROOT, 2021.12.04: TODO
- * - memblock단위로 해당 함수에 진입한다.
- *   해당 pfn의 start section ~ end section까지의 section을 순회하며
- *   해당 section내에서 subsection을 초기화한다.
+/* IAMROOT, 2021.12.04:
+ * - @pfn(start_pfn) .. @nr_pages(end_pfn) 까지 section 들을 순회하며
+ *   subsection을 초기화한다.
  *
- *   CONFIG_SPARSEMEM_VMEMMAP이 enable 되었을 때만 아래 로직이 수행됨.
+ *   Note.
+ *   1) memblock memory region 단위로 해당 함수에 진입한다.
+ *   2) CONFIG_SPARSEMEM_VMEMMAP이 enable 되어야만 수행된다.
  */
 void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 {
@@ -312,8 +312,7 @@ void __init subsection_map_init(unsigned long pfn, unsigned long nr_pages)
 #endif
 
 /* Record a memory area against a node. */
-/*
- * IAMROOT, 2021.11.13:
+/* IAMROOT, 2021.11.13:
  * - @nid, @start, @end에 해당하는 mem_section[]을 초기화한다.
  *   mem_section[]의 section_mem_map에는 nid, online, present가 set 된다.
  *
@@ -359,8 +358,12 @@ static void __init memory_present(int nid, unsigned long start, unsigned long en
 	mminit_validate_memmodel_limits(&start, &end);
 
 	/* IAMROOT, 2024.06.02:
-	 * - validator에서 sanity check 이후 아래 loop를 다음 3가지 경우 중 하나로
-	 *   결정하여 수행함.
+	 * - section 초기화를 수행한다. pfn을 기반으로 loop를 수행하며 다음
+	 *   section을 가르키기 위해 현재 pfn 값에 '+ PAGES_PER_SECTION(32k개)'
+	 *   한다.
+	 *
+	 *   validator에서 sanity check 이후 start/end는 다음 3가지 경우 중
+	 *   하나로 결정되어 수행됨.
 	 *
 	 *   1). @start < @end : range가 올바르므로 validator가 adjust 하지 않고
 	 *                       loop 수행.
@@ -421,11 +424,9 @@ static void __init memblocks_present(void)
  * the identity pfn - section_mem_map will return the actual
  * physical page frame number.
  */
-/*
- * IAMROOT, 2021.11.30:
- * - mem_map은 section_map_size() 으로(2MB) align되되어 생성되었고, 
- *   mem_section에 나눠줄때도 section_map_size()으로 align해서 잘라서 주기
- *   때문에 ~SECTION_MAP_MASK에 걸릴일은 없을것이다.
+/* IAMROOT, 2021.11.30:
+ * - va(@mem_map)을 인코딩하여 8-bytes addr를 반환한다.
+ *   이때 @mem_map은 2MB align 되어 있어 하위 bits 는 절삭된다.
  */
 static unsigned long sparse_encode_mem_map(struct page *mem_map, unsigned long pnum)
 {
@@ -471,26 +472,25 @@ static void __meminit sparse_init_one_section(struct mem_section *ms,
 	ms->usage = usage;
 }
 
-/*
- * IAMROOT, 2021.11.20: TODO
+/* IAMROOT, 2021.11.20:
  * - struct mem_section_usage의 pageblock_flags의 크기를 결정하기 위한 함수.
- *   Section 크기, 수가 결정되어야지만 이를 통해 계산이 가능하다.
+ *   section 크기, 수가 결정되어야지만 이를 통해 계산이 가능하다.
  *
  *   SECTION_BLOCKFLAGS_BITS: 256
- *   BITS_PER_TYPE(long)    : 32 bits (4 bytes)
+ *   BITS_PER_TYPE(long)    : 64 bits (8 bytes)
  *   ----------------------------------------
- *   BITS_TO_LONGS(x)       : 8
+ *   BITS_TO_LONGS(x)       : 4
  *
- *   따라서 256 bits를 수용하는데 long type 저장소 8개가 필요함.
+ *   따라서 256 bits를 수용하는데 long type 저장소 4개가 필요함.
  *
- *   128MB 영역관리당 32byte
+ *   128MB 영역관리당 32byte (4 * sizeof unsigned long)
  */
 static unsigned long usemap_size(void)
 {
 	return BITS_TO_LONGS(SECTION_BLOCKFLAGS_BITS) * sizeof(unsigned long);
 }
 
-/* IAMROOT, 2021.11.20: TODO
+/* IAMROOT, 2021.11.20:
  * - struct mem_section_usage 구조체의 크기를 구한다.
  *
  *   sizeof(struct mem_section_usage):  8 bytes
@@ -554,8 +554,8 @@ sparse_early_usemaps_alloc_pgdat_section(struct pglist_data *pgdat,
 	 */
 	/* IAMROOT, 2024.07.25: TODO
 	 * - @goal : ??
-	 *   @limit: ??
-	 *   @nid  : 해당 node에서 우선적으로 alloc 시도
+	 *   @limit: memblock에 alloc 요청시 제한할 addr 범위.
+	 *   @nid  : 해당 node에서 우선적으로 alloc 시도.
 	 */
 	goal = pgdat_to_phys(pgdat) & (PAGE_SECTION_MASK << PAGE_SHIFT);
 	limit = goal + (1UL << PA_SECTION_SHIFT);
@@ -577,45 +577,53 @@ static void __init check_usemap_section_nr(int nid,
 	static unsigned long old_pgdat_snr;
 	struct pglist_data *pgdat = NODE_DATA(nid);
 	int usemap_nid;
-/*
- * IAMROOT, 2021.11.20:
- * - 가장 높은 번호의 section 번호를 default로 설정
- */
+
+	/* IAMROOT, 2021.11.20:
+	 * - old_{usemap,pgdat}_snr 변수 초기화.
+	 */
 	/* First call */
 	if (!old_usemap_snr) {
 		old_usemap_snr = NR_MEM_SECTIONS;
 		old_pgdat_snr = NR_MEM_SECTIONS;
 	}
 
+	/* IAMROOT, 2024.09.02:
+	 * - @usage와 @pgdat가 존재하는 section nr를 저장한다.
+	 */
 	usemap_snr = pfn_to_section_nr(__pa(usage) >> PAGE_SHIFT);
 	pgdat_snr = pfn_to_section_nr(pgdat_to_phys(pgdat) >> PAGE_SHIFT);
-/*
- * IAMROOT, 2021.11.20:
- * - usemap과 pgdat이 있는곳이 같은 section에 있는지 검사한다.
- *   pgdat(node_data)와 usage는 이전에 같은 section에 위치하도록 노력했었다.
- *   같은 section이면 return
- */
+
+	/* IAMROOT, 2021.11.20:
+	 * - usemap과 pgdat가 같은 section에서 존재하는지 검사.
+	 */
 	if (usemap_snr == pgdat_snr)
 		return;
 
-/*
- * IAMROOT, 2021.11.20:
- * - pgdat와 usage가 같지 않더라도 그전 section과 같다면 return.
- */
+	/* IAMROOT, 2021.11.20:
+	 * - 'usemap != pgdat' 라면 old_{usemap,pgdat}_snr과 비교하여 검사.
+	 */
 	if (old_usemap_snr == usemap_snr && old_pgdat_snr == pgdat_snr)
 		/* skip redundant message */
 		return;
 
-/*
- * IAMROOT, 2021.11.20:
- * - usemap, pgdat가 같은 section이 아닌 경우에 들어온다.
- * - old section number를 갱신한다.
- * - usage가 존재하는 memory와 usage가 mapping되있는 mem_section의
- *   nid가 같은지 검사한다. 같지 않다면 return.
- */
+	/* IAMROOT, 2024.09.02:
+	 * - 여기서부터는 아래 조건이 성립된다.
+	 *
+	 *   o usemap_snr != (pgdat_snr | old_usemap_snr)
+	 *   o pgdat_snr != (usemap_snr | old_pgdat_snr)
+	 */
+
+	/* IAMROOT, 2021.11.20:
+	 * - old_{usemap,pgdat}_snr 변수를 갱신한다.
+	 * - usage가 존재하는 memory와 usage가 mapping되있는 mem_section의
+	 *   nid가 같은지 검사한다. 같지 않다면 return.
+	 */
 	old_usemap_snr = usemap_snr;
 	old_pgdat_snr = pgdat_snr;
 
+	/* IAMROOT, 2024.09.02:
+	 * - usemap이 존재하는 section nid와 @nid가 다르면 로그 출력 후 return.
+	 */
 	usemap_nid = sparse_early_nid(__nr_to_section(usemap_snr));
 	if (usemap_nid != nid) {
 		pr_info("node %d must be removed before remove section %ld\n",
@@ -687,6 +695,8 @@ struct page __init *__populate_section_memmap(unsigned long pfn,
 {
 	/* IAMROOT, 2024.07.27:
 	 * - size: sizeof(struct page) * PAGES_PER_SECTION
+	 *
+	 *   예) 2MB
 	 */
 	unsigned long size = section_map_size();
 	struct page *map = sparse_buffer_alloc(size);
@@ -700,7 +710,7 @@ struct page __init *__populate_section_memmap(unsigned long pfn,
 		return map;
 
 	/* IAMROOT, 2024.07.25:
-	 * - @size 만큼 memblock에서 할당한다.
+	 * - @size로 align 하여 @size 만큼 memblock에서 할당한다.
 	 */
 	map = memmap_alloc(size, size, addr, nid, false);
 	if (!map)
@@ -750,10 +760,9 @@ static void __init sparse_buffer_fini(void)
 	sparsemap_buf = NULL;
 }
 
-/*
- * IAMROOT, 2021.11.27:
- * - sparse buffer에서 size align에 맞게 공간을 구해온다.
- *   만약에 구해오는 ptr 주소와 그 전 ptr 사이에 공간이 있다면 그 공간은 free를한다.
+/* IAMROOT, 2024.09.02:
+ * - @size 만큼 sparsemap_buf에서 alloc 하며 중간에 hole이 발생하면
+ *   해당 range는 free 한다.
  */
 void * __meminit sparse_buffer_alloc(unsigned long size)
 {
@@ -764,19 +773,25 @@ void * __meminit sparse_buffer_alloc(unsigned long size)
 		if (ptr + size > sparsemap_buf_end)
 			ptr = NULL;
 		else {
-/*
- * IAMROOT, 2021.11.20:
- *
- * sparse_buffer_init
- * Reserve ffffffc07d000000 - ffffffc07d600000 (6M)
- *
- * Sparse_buffer_alloc
- * Alloc   ffffffc07d000000 - ffffffc07d001000 (4k)
- * Sparse_buffer_alloc
- * Alloc   ffffffc07d200000 - ffffffc07d400000 (2M) <- 2MB - 4k 할당해제
- * Sparse_buffer_fini
- * Free    ffffffc07d400000 - ffffffc07d600000 (2M) <- 남은 부분 할당해제
- */
+			/* IAMROOT, 2021.11.20:
+			 * - 예)
+			 *
+			 *   1) sparse_buffer_init
+			 *      reserve: ffffffc07d000000 - ffffffc07d600000 (6M)
+			 *
+			 *   2) sparse_buffer_alloc (4k)
+			 *      alloc  : ffffffc07d000000 - ffffffc07d001000 (4k)
+			 *
+			 *   3) sparse_buffer_alloc (2M)
+			 *      alloc  : ffffffc07d200000 - ffffffc07d400000 (2M)
+			 *
+			 *   4) sparse_buffer_free (2MB - 4KB)
+			 *      free   : ffffffc07d001001 - ffffffc07d1fffff
+			 *                                  위 범위 할당 해제
+			 *   4) sparse_buffer_fini
+			 *      free   : ffffffc07d400000 - ffffffc07d600000 (2M)
+			 *                                  남은 부분 할당 해제
+			 */
 			/* Free redundant aligned space */
 			if ((unsigned long)(ptr - sparsemap_buf) > 0)
 				sparse_buffer_free((unsigned long)(ptr - sparsemap_buf));
@@ -838,8 +853,8 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 			break;
 
 		/* IAMROOT, 2024.07.27:
-		 * - section에서 관리할 NR(struct page)를 alloc 하며 최대한 @nid에서
-		 *   alloc 하려고 노력한다.
+		 * - section에서 관리할 sizeof NR(struct page)를 alloc 하며 최대한
+		 *   node(@nid)에 근접하게 하려고 노력한다.
 		 */
 		map = __populate_section_memmap(pfn, PAGES_PER_SECTION,
 				nid, NULL);
@@ -850,6 +865,9 @@ static void __init sparse_init_nid(int nid, unsigned long pnum_begin,
 			sparse_buffer_fini();
 			goto failed;
 		}
+		/* IAMROOT, 2024.09.02:
+		 * - usemap 관련 circular dependency 체크 후 필요시 로그 출력.
+		 */
 		check_usemap_section_nr(nid, usage);
 		/* IAMROOT, 2024.07.27:
 		 * - map, usage, 추가 flag를 section에 세팅한다.
@@ -881,7 +899,7 @@ failed:
  * for each and record the physical to section mapping.
  */
 /* IAMROOT, 2021.11.13: TODO
- * - Kenrel에 구현된 Physical Memory Model에는 크게 다음 3가지를 지원한다.
+ * - kernel이 support 하는 phys-memory model에는 다음 3가지가 있다.
  *   1) FLATMEM
  *      - phys memory의 node가 1개일때 사용하는 모델이다. 모든 page frame이
  *        선형적으로 연결되어 있다.

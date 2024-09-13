@@ -299,6 +299,8 @@ bool pm_suspended_storage(void)
 #endif /* CONFIG_PM_SLEEP */
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
+/* IAMROOT, 2024.09.02: TODO
+ */
 unsigned int pageblock_order __read_mostly;
 #endif
 
@@ -520,11 +522,8 @@ static inline bool __meminit early_page_uninitialised(unsigned long pfn)
  * Returns true when the remaining initialisation should be deferred until
  * later in the boot cycle when it can be parallelised.
  */
-/*
- * IAMROOT, 2021.12.11:
- * @nid node id
- * @pfn 현재 확인하는 pfn
- * @end_pfn zone의 end_pfn
+/* IAMROOT, 2021.12.11: TODO
+ * - defer 여부 확인하는 함수.
  *
  * - defer를 하는 경우
  *   zone은 해당 node에서 최상위 zone만이 해당된다.
@@ -545,50 +544,68 @@ defer_init(int nid, unsigned long pfn, unsigned long end_pfn)
 	 * prev_end_pfn static that contains the end of previous zone
 	 * No need to protect because called very early in boot before smp_init.
 	 */
+	/* IAMROOT, 2024.09.05:
+	 * - node(@nid)의 특정 zone에서 defer_init(..)이 처음 호출되는 시점에는
+	 *   prev_end_pfn != end_pfn이므로 end_pfn를 prev_end_pfn에 저장하고
+	 *   nr_initialised를 0으로 초기화한다.
+	 *
+	 *   prev_end_pfn: previous zone의 end_pfn 값.
+	 */
 	if (prev_end_pfn != end_pfn) {
 		prev_end_pfn = end_pfn;
 		nr_initialised = 0;
 	}
 
-/*
- * IAMROOT, 2021.12.11:
- *
- * +------+------+ node end_pfn
- * |      |      |
- * |      |      |
- * | nid  |      | 
- * |      | zone |
- * |      |      |
- * |      +------+ end_pfn(zone_end_pfn)
- * |      | zone |
- * |      |      |
- * |      +------+
- *
- * 이 경우 defer를 안한다.
- * nid에 여러 zone이 있을경우 가장 상위 zone을 제외한 zone이 defer를 안하게
- * 하는것.
- */
+	/* IAMROOT, 2021.12.11:
+	 * - node(@nid)에 여러 zone이 존재하는 경우 상위 zone을 제외한
+	 *   zone은 defer 하지 않도록 false 반환.
+	 *
+	 * +------+------+ --> pgdat_end_pfn (node)
+	 * |      |      |
+	 * |      |      |
+	 * | node | zone |
+	 * |      |      |
+	 * |      +------+ --> end_pfn (zone_end_pfn)
+	 * |      |      |
+	 * |      | zone |
+	 * |      |      |
+	 * |      +------+
+	 * :      :      :
+	 * .      .      .
+	 */
 	/* Always populate low zones for address-constrained allocations */
 	if (end_pfn < pgdat_end_pfn(NODE_DATA(nid)))
 		return false;
 
-/*
- * IAMROOT, 2021.12.11:
- * - 이미 defer를 했으므로 skip
- */
+	/* IAMROOT, 2024.09.05: TODO
+	 * - 여기서부터는 end_pfn > pgdat_end_pfn(NODE_DATA(nid))인 경우.
+	 *
+	 *   Note. 이게 무슨 의미인지 모르겠다.
+	 */
+
+	/* IAMROOT, 2021.12.11:
+	 * - 이전에 first_deferred_pfn 값을 설정 했으므로 skip.
+	 */
 	if (NODE_DATA(nid)->first_deferred_pfn != ULONG_MAX)
 		return true;
+
 	/*
 	 * We start only with one section of pages, more pages are added as
 	 * needed until the rest of deferred pages are initialized.
 	 */
+	/* IAMROOT, 2024.09.05:
+	 * - @pfn < @end_pfn 동안 nr_initialised를 증가시킨다.
+	 */
 	nr_initialised++;
-/*
- * IAMROOT, 2021.12.11:
- * - PAGES_PER_SECTION 개의 page까지는 defer를 하지 않지만 그 보다 많은
- *   page를 defer하게되면, 최초에 PAGES_PER_SECTION으로 정렬된 pfn을
- *   defer시작으로 설정한다.
- */
+
+	/* IAMROOT, 2024.09.05:
+	 * - nr_initialised < PAGES_PER_SECTION 이라면 false를 반환하여
+	 *   pfn(page frame)에 대해 memmap_init을 수행하고 PAGES_PER_SECTION
+	 *   이상으로 넘어가면 defer 한다.
+	 *
+	 *   boot 단계에서는 필요한 만큼만 초기화하고 그 이상은 post-processing
+	 *   단계에서 parallel 하게 init 한다.
+	 */
 	if ((nr_initialised > PAGES_PER_SECTION) &&
 	    (pfn & (PAGES_PER_SECTION - 1)) == 0) {
 		NODE_DATA(nid)->first_deferred_pfn = pfn;
@@ -599,7 +616,7 @@ defer_init(int nid, unsigned long pfn, unsigned long end_pfn)
 #else
 static inline bool should_skip_kasan_poison(struct page *page, fpi_t fpi_flags)
 {
-	return (!IS_ENABLED(CONFIG_KASAN_GENERIC) &&
+	return (!IS_ENABLED(CONFIG_KASAN_GENERIC) && TODO
 		(fpi_flags & FPI_SKIP_KASAN_POISON)) ||
 	       PageSkipKASanPoison(page);
 }
@@ -2041,16 +2058,27 @@ static void free_one_page(struct zone *zone,
 	spin_unlock_irqrestore(&zone->lock, flags);
 }
 
-/*
- * IAMROOT, 2021.12.11:
- * - struct page를 초기화한다.
+/* IAMROOT, 2021.12.11:
+ * - struct @page를 초기화한다.
  */
 static void __meminit __init_single_page(struct page *page, unsigned long pfn,
 				unsigned long zone, int nid)
 {
+	/* IAMROOT, 2024.09.06:
+	 * - struct @page를 0으로 초기화한다.
+	 */
 	mm_zero_struct_page(page);
+	/* IAMROOT, 2024.09.06:
+	 * - struct @page에 @zone, @nid, @pfn 정보를 저장한다.
+	 */
 	set_page_links(page, zone, nid, pfn);
+	/* IAMROOT, 2024.09.06:
+	 * - struct @page의 refcount를 초기화한다.
+	 */
 	init_page_count(page);
+	/* IAMROOT, 2024.09.06:
+	 * - struct @page의 mapcount를 초기화한다.
+	 */
 	page_mapcount_reset(page);
 	page_cpupid_reset_last(page);
 	page_kasan_tag_reset(page);
@@ -8765,8 +8793,7 @@ void __ref build_all_zonelists(pg_data_t *pgdat)
 }
 
 /* If zone is ZONE_MOVABLE but memory is mirrored, it is an overlapped init */
-/*
- * IAMROOT, 2021.12.11:
+/* IAMROOT, 2021.12.11: TODO
  * - movable zone은 mirror가 될수없다.
  * - kernelcore가 mirror일경우에만 검사를 하는데, 해당 zone이 movable일경우 일단 
  *   해당 pfn의 memblock_region을 찾고, 해당 memblock_regin이 mirror이면,
@@ -8822,10 +8849,6 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 		enum meminit_context context,
 		struct vmem_altmap *altmap, int migratetype)
 {
-/*
- * IAMROOT, 2021.12.11:
- * - end_pfn : clamp된 zone end_pfn
- */
 	unsigned long pfn, end_pfn = start_pfn + size;
 	struct page *page;
 
@@ -8840,17 +8863,16 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 	 * ZONE_DEVICE page initialization until after we have released
 	 * the hotplug lock.
 	 */
-/*
- * IAMROOT, 2021.12.11:
- * - ZONE_DEVICE(PMEM, persistant memory)의 경우 DRAM보다는 느리지만
- *   SSD같은 특징을 가지고 있다. 비휘발성이지만 해당 공간에서
- *   application을 동작할수있는 환경이고, DRAM처럼 kernel에서 관리하기 때문에
- *   memmap같은 자료구조가 필요하다.
- *
- * - ZONE_DEVICE같은 장비들은 DRAM같은 memory보다 용량이 많고
- *   여러 다른 점이 있을것이다. 그래서 기본적인것만 하고 나중에 초기화가
- *   이뤄질것이다.
- */
+	/* IAMROOT, 2021.12.11: TODO
+	 * - ZONE_DEVICE(PMEM, persistant memory)의 경우 DRAM보다는 느리지만
+	 *   SSD같은 특징을 가지고 있다. 비휘발성이지만 해당 공간에서
+	 *   application을 동작할수있는 환경이고, DRAM처럼 kernel에서 관리하기
+	 *   때문에 memmap같은 자료구조가 필요하다.
+	 *
+	 * - ZONE_DEVICE같은 장비들은 DRAM같은 memory보다 용량이 많고
+	 *   여러 다른 점이 있을것이다. 그래서 기본적인것만 하고 나중에 초기화가
+	 *   이뤄질것이다.
+	 */
 	if (zone == ZONE_DEVICE) {
 		if (!altmap)
 			return;
@@ -8866,25 +8888,39 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 		 * There can be holes in boot-time mem_map[]s handed to this
 		 * function.  They do not exist on hotplugged memory.
 		 */
+		/* IAMROOT, 2024.09.05:
+		 * - @context가 MEMINIT enum 이라면 수행.
+		 */
 		if (context == MEMINIT_EARLY) {
-/*
- * IAMROOT, 2021.12.11:
- * - zone이 movable일경우 pfn이 mirror이면 다음 memblock pfn으로 skip한다.
- */
+			/* IAMROOT, 2021.12.11:
+			 * - @zone movable 이면서 kernelcore=mirror 이면 overlap 확인하고
+			 *   범위가 overlap 되면 skip 한다.
+			 */
 			if (overlap_memmap_init(zone, &pfn))
 				continue;
+
+			/* IAMROOT, 2024.09.05:
+			 * - pfn에 대해 defer 여부 판단.
+			 */
 			if (defer_init(nid, pfn, zone_end_pfn))
 				break;
 		}
 
+		/* IAMROOT, 2024.09.05:
+		 * - pfn을 struct page로 초기화하는 작업 시작.
+		 */
+
+		/* IAMROOT, 2024.09.05:
+		 * - pfn에 해당하는 struct page를 가져온다.
+		 */
 		page = pfn_to_page(pfn);
 		__init_single_page(page, pfn, zone, nid);
-/*
- * IAMROOT, 2021.12.18:
- * - kernel boot가 완료된후 hotplug로 memory가 추가되면 context가
- *   MEMINIT_HOTPLUG이다. 일단 초기화만 하고 사용을 안하기 위해
- *   reserved로 표시를 해놓는다.
- */
+
+		/* IAMROOT, 2021.12.18: TODO
+		 * - kernel boot가 완료된후 hotplug로 memory가 추가되면 context가
+		 *   MEMINIT_HOTPLUG이다. 일단 초기화만 하고 사용을 안하기 위해
+		 *   reserved로 표시를 해놓는다.
+		 */
 		if (context == MEMINIT_HOTPLUG)
 			__SetPageReserved(page);
 
@@ -9043,14 +9079,12 @@ static void __init init_unavailable_range(unsigned long spfn,
 			node, zone_names[zone], pgcnt);
 }
 
-/*
- * IAMROOT, 2021.12.11:
- * @zone 현재 zone
- * @start_pfn memblock start_pfn
- * @end_pfn memblock end_pfn
- * @hole_pfn 
- * - memblock의 start_pfn, end_pfn과 zone의 zone_start_pfn, zone_end_pfn에서
- *   겹치는 영역을 초기화한다.
+/* IAMROOT, 2021.12.11:
+ * - @zone[@start_pfn .. @end_pfn] 범위의 memmap을 초기화한다.
+ *
+ *   @start_pfn: @zone이 소속된 node의 memblock memory region의 start pfn.
+ *   @end_pfn  : @zone이 소속된 node의 memblock memory region의 end pfn.
+ *   @hole_pfn :
  */
 static void __init memmap_init_zone_range(struct zone *zone,
 					  unsigned long start_pfn,
@@ -9061,12 +9095,21 @@ static void __init memmap_init_zone_range(struct zone *zone,
 	unsigned long zone_end_pfn = zone_start_pfn + zone->spanned_pages;
 	int nid = zone_to_nid(zone), zone_id = zone_idx(zone);
 
+	/* IAMROOT, 2024.09.05:
+	 * - @{start, end}_pfn에 대해 @zone 범위로 clamp 수행.
+	 */
 	start_pfn = clamp(start_pfn, zone_start_pfn, zone_end_pfn);
 	end_pfn = clamp(end_pfn, zone_start_pfn, zone_end_pfn);
 
+	/* IAMROOT, 2024.09.05:
+	 * - clamp 후 범위 검사.
+	 */
 	if (start_pfn >= end_pfn)
 		return;
 
+	/* IAMROOT, 2024.09.05:
+	 * - @zone[@start_pfn .. @end_pfn] 범위에서 memmap 초기화.
+	 */
 	memmap_init_range(end_pfn - start_pfn, nid, zone_id, start_pfn,
 			  zone_end_pfn, MEMINIT_EARLY, NULL, MIGRATE_MOVABLE);
 
@@ -9093,12 +9136,19 @@ static void __init memmap_init(void)
 	unsigned long hole_pfn = 0;
 	int i, j, zone_id = 0, nid;
 
+	/* IAMROOT, 2024.09.04:
+	 * - memblock memory region과 node(nid)의 모든 zone을 순회하며
+	 *   populated zone에 대해서만 memmap을 초기화한다.
+	 */
 	for_each_mem_pfn_range(i, MAX_NUMNODES, &start_pfn, &end_pfn, &nid) {
 		struct pglist_data *node = NODE_DATA(nid);
 
 		for (j = 0; j < MAX_NR_ZONES; j++) {
 			struct zone *zone = node->node_zones + j;
 
+			/* IAMROOT, 2024.09.05:
+			 * - present_pages가 0인 zone은 skip한다.
+			 */
 			if (!populated_zone(zone))
 				continue;
 
@@ -9424,8 +9474,10 @@ void __init setup_per_cpu_pageset(void)
 }
 
 /* IAMROOT, 2021.12.11:
- * - zone의 per-cpu와 관련된 member를 초기화한다.
- *   pcp: per-cpu page
+ * - @zone의 per-cpu와 관련된 struct fields를 초기화한다.
+ *
+ *   Note.
+ *   - pcp: per-cpu page
  */
 static __meminit void zone_pcp_init(struct zone *zone)
 {
@@ -9434,11 +9486,8 @@ static __meminit void zone_pcp_init(struct zone *zone)
 	 * relies on the ability of the linker to provide the
 	 * offset of a (static) per cpu variable into the per cpu area.
 	 */
-	/* IAMROOT, 2024.08.30: TODO
-	 * - per_cpu_pageset  :
-	 *   per_cpu_zonestats:
-	 *   pageset_high     :
-	 *   pageset_batch    :
+	/* IAMROOT, 2024.08.30:
+	 * - @zone의 per_cpu_{pageset,zonestats}, pageset_{high,batch} 초기화.
 	 */
 	zone->per_cpu_pageset = &boot_pageset;
 	zone->per_cpu_zonestats = &boot_zonestats;
@@ -9450,13 +9499,8 @@ static __meminit void zone_pcp_init(struct zone *zone)
 			 zone->present_pages, zone_batchsize(zone));
 }
 
-/*
- * IAMROOT, 2021.12.11:
- * - @zone_pgdata 의 nr_zones를 갱신해준다.
- *   @zone의 소속 node를 연결시켜준다.
- * - @zone의 migrate, order 별 free_list를 초기화한다.
- * - @zone의 buddy정보을 초기화한다.
- * - 이 함수가 끝남으로써 zone과 node의 정보가 연결되게 된다.
+/* IAMROOT, 2021.12.11:
+ * - 초기화되지 않은 zone fields를 초기화한다.
  */
 void __meminit init_currently_empty_zone(struct zone *zone,
 					unsigned long zone_start_pfn,
@@ -9465,9 +9509,15 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 	struct pglist_data *pgdat = zone->zone_pgdat;
 	int zone_idx = zone_idx(zone) + 1;
 
+	/* IAMROOT, 2024.09.03:
+	 * - zone_idx가 node의 nr zones 보다 크면 값 업데이트.
+	 */
 	if (zone_idx > pgdat->nr_zones)
 		pgdat->nr_zones = zone_idx;
 
+	/* IAMROOT, 2024.09.03:
+	 * - zone의 시작 pfn 저장.
+	 */
 	zone->zone_start_pfn = zone_start_pfn;
 
 	mminit_dprintk(MMINIT_TRACE, "memmap_init",
@@ -9477,7 +9527,7 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 			zone_start_pfn, (zone_start_pfn + size));
 
 	/* IAMROOT, 2024.08.30:
-	 * @zone의 free_area member 초기화 후 initialized 변수 set.
+	 * @zone의 free_area field 초기화 및 initialized 변수 setup.
 	 */
 	zone_init_free_lists(zone);
 	zone->initialized = 1;
@@ -9944,10 +9994,15 @@ static void __init calculate_node_totalpages(struct pglist_data *pgdat,
  * round what is now in bits to nearest long in bits, then return it in
  * bytes.
  */
+/* IAMROOT, 2024.09.03:
+ * - FLATMEM 구조에서 사용되는 zone의 usemap size를 구하는 함수.
+ */
 static unsigned long __init usemap_size(unsigned long zone_start_pfn, unsigned long zonesize)
 {
 	unsigned long usemapsize;
 
+	/* IAMROOT, 2024.09.03: TODO
+	 */
 	zonesize += zone_start_pfn & (pageblock_nr_pages-1);
 	usemapsize = roundup(zonesize, pageblock_nr_pages);
 	usemapsize = usemapsize >> pageblock_order;
@@ -9957,10 +10012,9 @@ static unsigned long __init usemap_size(unsigned long zone_start_pfn, unsigned l
 	return usemapsize / 8;
 }
 
-/*
- * IAMROOT, 2021.12.11:
- * - flatmem에 대한 usemem 초기화.
- *   sparse mem은 초기화하면서 usemem도 같이 초기화했었다.
+/* IAMROOT, 2021.12.11:
+ * - FLATMEM에 대한 usemap 초기화 함수.
+ *   SPARSEMEM은 section 초기화하면서 usemap도 같이 초기화함.
  */
 static void __ref setup_usemap(struct zone *zone)
 {
@@ -9968,6 +10022,9 @@ static void __ref setup_usemap(struct zone *zone)
 					       zone->spanned_pages);
 	zone->pageblock_flags = NULL;
 	if (usemapsize) {
+		/* IAMROOT, 2024.09.03:
+		 * - FLATMEM의 경우 pageblock_flags가 zone의 field로 되어 있다.
+		 */
 		zone->pageblock_flags =
 			memblock_alloc_node(usemapsize, SMP_CACHE_BYTES,
 					    zone_to_nid(zone));
@@ -9981,8 +10038,7 @@ static inline void setup_usemap(struct zone *zone) {}
 #endif /* CONFIG_SPARSEMEM */
 
 #ifdef CONFIG_HUGETLB_PAGE_SIZE_VARIABLE
-/*
- * IAMROOT, 2021.11.13:
+/* IAMROOT, 2021.11.13: TODO
  * - page 구조체를 모아놓는것을 memory map이라고 부른다.
  *   나중에 page를 free할때 일일히 순회를 하면 시간이 많이 걸려
  *   page block같은 개념을 만들어 해당 단위로 관리를 한다.
@@ -9993,14 +10049,25 @@ static inline void setup_usemap(struct zone *zone) {}
 void __init set_pageblock_order(void)
 {
 	unsigned int order;
-/*
- * IAMROOT, 2021.11.13:
- * - variable일땐 초기값은 0
- */
+
 	/* Check that pageblock_nr_pages has not already been setup */
+	/* IAMROOT, 2024.09.01:
+	 * - 이전에 설정된 적 있으면 skip.
+	 */
 	if (pageblock_order)
 		return;
 
+	/* IAMROOT, 2024.09.01:
+	 * - 48bits, 4kb page 시스템에서는 아래와 같다.
+	 *
+	 *   HPAGE_SHIFT: 21
+	 *   PAGE_SHIFT : 12
+	 *
+	 *   따라서 order는 HUGETLB_PAGE_ORDER가 되는데 계산식은 아래와 같다.
+	 *   HUGETLB_PAGE_ORDER = (HPAGE_SHIFT - PAGE_SHIFT)
+	 *
+	 *   따라서 order == 9 가 된다.
+	 */
 	if (HPAGE_SHIFT > PAGE_SHIFT)
 		order = HUGETLB_PAGE_ORDER;
 	else
@@ -10043,17 +10110,18 @@ static unsigned long __init calc_memmap_size(unsigned long spanned_pages,
 	 * populated regions may not be naturally aligned on page boundary.
 	 * So the (present_pages >> 4) heuristic is a tradeoff for that.
 	 */
-	/* IAMROOT, 2021.12.04: TODO
-	 * - hole에 의해서 정확한 계산은 안되지만 적당히 해도 무방해서 적당히 한다.
-	 *   arm64의 경우 왠간한 시스템에선 hole이 압도적으로 크기때문에
-	 *   spanned_pages가 훨신 클것이다. 하지만 경우에 따라 hole이 작을수있다.
-	 *   즉 hole이 충분히 크면 page를 그냥 present_pages로 쓴다.
+	/* IAMROOT, 2021.12.04:
+	 * - zone 영역의 memblock region에 hole이 있다면 hole 영역에서는
+	 *   phys-memory 할당이 불가능하므로 pages 변수값을 present_pages로
+	 *   보정한다.
 	 *
-	 * Note:
-	 * - spanned_pages > presnet_pages + @ 인 경우 pages = present_pages 인건
-	 *   이해가 어느정도 되는데 왜 SPARSEMEM 일떄만 하는거지?
-	 *   memmap pages 개수를 구하는 거면 hole을 제외한 pages만 구해야 하는거
-	 *   아닌가? 그러면 FLATMEM도 동일할텐데...
+	 *   Note.
+	 *   1) 'spanned < present + @'는 hole 없거나 아주 극소량이라는 의미.
+	 *   2) (present_pages >> 4)는 memmap page alignment를 위한 extra
+	 *      pages 할당 의미.
+	 *   3) FLATMEM은 전체 phys-memory addr-space가 연속적이므로
+	 *      sparse 구조와는 다르게 hole이 발생하지 않아 zone의
+	 *      spanned과 present이 동일하므로 pages 변수를 보정할 필요 없음.
 	 */
 	if (spanned_pages > present_pages + (present_pages >> 4) &&
 	    IS_ENABLED(CONFIG_SPARSEMEM))
@@ -10120,7 +10188,7 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
 	lruvec_init(&pgdat->__lruvec);
 }
 
-/* IAMROOT, 2021.12.11: TODO
+/* IAMROOT, 2021.12.11:
  * - @zone class의 member들 중에서 다음 아이템을 초기화한다.
  *   1) managed_pages
  *   2) nid
@@ -10128,7 +10196,7 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
  *   4) zone_pgdat
  *   5) lock
  *   6) span_eqlock
- *   7) per-cpu zone members
+ *   7) per-cpu zone fields
  */
 static void __meminit zone_init_internals(struct zone *zone, enum zone_type idx, int nid,
 							unsigned long remaining_pages)
@@ -10214,8 +10282,7 @@ static void __init free_area_init_core(struct pglist_data *pgdat)
 		if (!is_highmem_idx(j)) {
 			/* IAMROOT, 2021.12.04:
 			 * - zone highmem이 아니면서 freesize >= memmap_pages 라면
-			 *   freesize에서 mem_map에서 사용할 page 개수를 감소시켜
-			 *   freesize 변수를 업데이트한다.
+			 *   mem_map에서 사용할 page 개수를 freesize에서 감소시킨다.
 			 */
 			if (freesize >= memmap_pages) {
 				freesize -= memmap_pages;
@@ -10227,30 +10294,44 @@ static void __init free_area_init_core(struct pglist_data *pgdat)
 					zone_names[j], memmap_pages, freesize);
 		}
 
+		/* Account for reserved pages */
 		/* IAMROOT, 2021.12.04:
 		 * - ZONE_DMA/DMA32 순서이면서 'freesize > dma_reserve' 조건이라면
-		 *   freesize에서 dma_reserve에 사용할 page 개수를 감소시켜
-		 *   freesize 변수를 업데이트한다.
+		 *   dma_reserve에 사용할 page 개수를 freesize에서 감소시킨다.
 		 *
 		 *   Note. dma_reserve는 x86에서만 값이 변경되며 다른 arch는
-		 *         dma_reserve가 0 이므로 freesize 값이 변동되지는 않는다.
+		 *         0 이므로 freesize 값이 변동되지는 않는다.
 		 */
-		/* Account for reserved pages */
 		if (j == 0 && freesize > dma_reserve) {
 			freesize -= dma_reserve;
 			pr_debug("  %s zone: %lu pages reserved\n", zone_names[0], dma_reserve);
 		}
 
-		/* IAMROOT, 2021.12.04: TODO
-		 * - 32bit에서는 highmem을 바로 못쓰기때문에 mememap을 highmem에서 쓰면 보통
-		 *   안되지만 highmem에 memmap 을 만들 공간이 충분하면 highmem에 memmap을 생성
-		 *   한다
+		/* IAMROOT, 2024.09.01:
+		 * - 'zone != ZONE_HIGHMEM' 경우
+		 *   nr_kernel_pages에 reserved pages[1]를 제외한 pages 개수를
+		 *   누적시킨다.
+		 *
+		 * - 'zone == ZONE_HIGHMEM' 경우
+		 *   nr_kernel_pages가 memmap_pages 보다 2배 이상 큰 경우
+		 *   ZONE_HIGHMEM 용 memmap을 추가하기 위해 감소시킨다.
+		 *
+		 *   ---
+		 *   [1]: memmap_pages, dma_reserve pages를 의미함.
 		 */
 		if (!is_highmem_idx(j))
 			nr_kernel_pages += freesize;
 		/* Charge for highmem memmap if there are enough kernel pages */
 		else if (nr_kernel_pages > memmap_pages * 2)
 			nr_kernel_pages -= memmap_pages;
+
+		/* IAMROOT, 2024.09.01:
+		 * - reserved pages[1]를 제외한 pages 개수를 nr_all_pages에
+		 *   누적시킨다.
+		 *
+		 *   ---
+		 *   [1]: memmap_pages, dma_reserve pages를 의미함.
+		 */
 		nr_all_pages += freesize;
 
 		/*
@@ -10259,7 +10340,7 @@ static void __init free_area_init_core(struct pglist_data *pgdat)
 		 * And all highmem pages will be managed by the buddy system.
 		 */
 		/* IAMROOT, 2024.08.30:
-		 * - zone member 변수들을 초기화한다.
+		 * - struct zone fields를 초기화한다.
 		 */
 		zone_init_internals(zone, j, nid, freesize);
 
@@ -10345,10 +10426,8 @@ static inline void pgdat_set_deferred_range(pg_data_t *pgdat)
 static inline void pgdat_set_deferred_range(pg_data_t *pgdat) {}
 #endif
 
-/*
- * IAMROOT, 2021.12.11:
- * - @nid의 pgdate를 초기화한다.
- * - @nid의 zone을 초기화한다.
+/* IAMROOT, 2021.12.11:
+ * - node(@nid)의 pgdat와 zone을 초기화한다.
  */
 static void __init free_area_init_node(int nid)
 {
@@ -10931,15 +11010,18 @@ out:
 }
 
 /* Any regular or high memory on that node ? */
-/*
- * IAMROOT, 2021.12.11:
- * - 해당 nid가 ZONE_NORMAL이하의 zone을 가지고 있다면 N_NORMAL_MEMORY를 set한다.
- * - highmem이 있는 system일 경우 무조건 N_HIGH_MEMORY으로 일단 설정한다.
+/* IAMROOT, 2021.12.11:
+ * - node(@pgdat)의 present_pages에 따라 상태를 업데이트하는 함수.
  */
 static void check_for_memory(pg_data_t *pgdat, int nid)
 {
 	enum zone_type zone_type;
 
+	/* IAMROOT, 2024.09.03:
+	 * - node(@pgdat)의 zone을 순회하면서 해당 zone에 present_pages가
+	 *   존재하면 그에 맞게 'node_stats'의 상태를 N_NORMAL_MEMORY로
+	 *   업데이트한다.
+	 */
 	for (zone_type = 0; zone_type <= ZONE_MOVABLE - 1; zone_type++) {
 		struct zone *zone = &pgdat->node_zones[zone_type];
 		if (populated_zone(zone)) {
@@ -11084,7 +11166,7 @@ void __init free_area_init(unsigned long *max_zone_pfn)
 	 * subsection-map relative to active online memory ranges to
 	 * enable future "sub-section" extensions of the memory map.
 	 */
-	/* IAMROOT, 2021.12.04: TODO
+	/* IAMROOT, 2021.12.04:
 	 * - 모든 memblock.memory region을 순회하며 section마다
 	 *   subsection_map (bitmap)을 초기화한다.
 	 */

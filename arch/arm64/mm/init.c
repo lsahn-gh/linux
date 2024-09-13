@@ -654,7 +654,7 @@ void __init bootmem_init(void)
 	sparse_init();
 
 	/* IAMROOT, 2024.07.28:
-	 * - zone을 초기화한다.
+	 * - 모든 node의 zone을 초기화한다.
 	 */
 	zone_sizes_init(min, max);
 
