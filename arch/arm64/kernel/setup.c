@@ -459,7 +459,7 @@ u64 cpu_logical_map(unsigned int cpu)
 }
 
 /* IAMROOT, 2024.01.09:
- * - arch에 의존적인 부분 early setup 영역.
+ * - Arm64 arch에 의존적인 기능을 early setup 하는 영역.
  */
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
@@ -530,6 +530,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	if (!efi_enabled(EFI_BOOT) && ((u64)_text % MIN_KIMG_ALIGN) != 0)
 	     pr_warn(FW_BUG "Kernel image misaligned at boot, please fix your bootloader!");
 
+	/* IAMROOT, 2024.09.22:
+	 * - arm64 arch 용 memblock 초기화.
+	 */
 	arm64_memblock_init();
 
 	/* IAMROOT, 2021.10.31:

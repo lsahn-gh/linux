@@ -576,9 +576,25 @@ PAGEFLAG(Foreign, foreign, PF_NO_COMPOUND);
 PAGEFLAG(XenRemapped, xen_remapped, PF_NO_COMPOUND)
 	TESTCLEARFLAG(XenRemapped, xen_remapped, PF_NO_COMPOUND)
 
+/* IAMROOT, 2024.09.19:
+ * - PageReserved와 관련된 함수를 생성하는 매크로.
+ *
+ *   1) PageReserved(..)
+ *      PG_reserved bit가 set되어 있는지 확인한다.
+ *   2) SetPageReserved(..)
+ *      PG_reserved bit를 set한다.
+ *   3) ClearPageReserved(..)
+ *      PG_reserved bit를 clear한다.
+ *
+ *   4) __ClearPageReserved(..)
+ *      non-atomic으로 PG_reserved bit를 clear한다.
+ *   5) __SetPageReserved(..)
+ *      non-atomic으로 PG_reserved bit를 set한다.
+ */
 PAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
 	__CLEARPAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
 	__SETPAGEFLAG(Reserved, reserved, PF_NO_COMPOUND)
+
 /*
  * IAMROOT, 2022.06.04:
  * - anon page들은 일반적으로 만들어질때 SwapBacked가 set된다.

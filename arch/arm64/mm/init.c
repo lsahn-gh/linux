@@ -111,10 +111,9 @@ EXPORT_SYMBOL(memstart_addr);
  * In such case, ZONE_DMA32 covers the rest of the 32-bit addressable memory,
  * otherwise it is empty.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - arm64_memblock_init에서 ARM64_ZONE_DMA_BITS 와 ram 크기를
- *   비교해 작은 값으로 초기화 된다.
+/* IAMROOT, 2021.10.23: TODO
+ * - zone_sizes_init(..)에서 DMA/DMA32/NORMAL의 max pfn을 구하면서
+ *   설정한다.
  */
 phys_addr_t arm64_dma_phys_limit __ro_after_init;
 
@@ -246,16 +245,8 @@ static void __init zone_sizes_init(unsigned long min, unsigned long max)
 	free_area_init(max_zone_pfns);
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - 해당 pfn이 유효한지에 대해 검사한다.
- * 1. 너무 큰 pfn인지 검사한다. 
- *  > PHYS_PFN, PFN_PHYS이 제대로 동작하는지
- *  > pfn_to_section_nr이 제대로 동작하는지 검사한다. (section 범위 초과 여부)
- * 2. 해당 pfn의 mem_section을 가져와서 유효한지 검사한다.
- *  > 실제 전체 mem_secion범위가 hole인 pfn인 경우(아에 메모리에 존재하지 않는범위)
- * 3. early인 경우 memblock에서, 아닌 경우 subsection에서 해당 memory가 할당
- * 됬는지 검사한다.
+/* IAMROOT, 2021.12.18:
+ * - @pfn이 유효한지 validation을 수행한다.
  */
 int pfn_valid(unsigned long pfn)
 {
@@ -268,12 +259,21 @@ int pfn_valid(unsigned long pfn)
 	 * some of the upper bits are set, but the lower bits
 	 * match a valid pfn.
 	 */
+	/* IAMROOT, 2024.09.22: TODO
+	 */
 	if (PHYS_PFN(addr) != pfn)
 		return 0;
 
+	/* IAMROOT, 2024.09.22:
+	 * - section(@pfn) 값이 kernel이 가질 수 있는 max(nr sections)을
+	 *   넘기면 false.
+	 */
 	if (pfn_to_section_nr(pfn) >= NR_MEM_SECTIONS)
 		return 0;
 
+	/* IAMROOT, 2024.09.22:
+	 * - section(@pfn)이 유효한지 검사 후 invalid 라면 false.
+	 */
 	ms = __pfn_to_section(pfn);
 	if (!valid_section(ms))
 		return 0;
@@ -287,13 +287,16 @@ int pfn_valid(unsigned long pfn)
 	 * memory sections covering all of hotplug memory including
 	 * both normal and ZONE_DEVICE based.
 	 */
-/*
- * IAMROOT, 2021.12.18:
- * - early인경우 memblock을 통해서 확인한다.
- */
+	/* IAMROOT, 2021.12.18:
+	 * - early section이 아니라면 kernel config에 따라 VMEMMAP인 경우도
+	 *   있으므로 이를 고려해 validation을 수행한다.
+	 */
 	if (!early_section(ms))
 		return pfn_section_valid(ms, pfn);
 
+	/* IAMROOT, 2024.09.22:
+	 * - early section인 경우 memblock을 통해서 검사한다.
+	 */
 	return memblock_is_memory(addr);
 }
 EXPORT_SYMBOL(pfn_valid);
@@ -567,9 +570,9 @@ void __init arm64_memblock_init(void)
 			range /= ARM64_MEMSTART_ALIGN;
 			/* IAMROOT, 2021.10.27: TODO
 			 * - memstart_offset_seed는 seed 상위 16bit를 사용했었다.
-			 *   즉 memstart_offset_seed는 16bit 이하의 값인데 여기에 range를 곱해서
-			 *   memstart_offset_seed의 범위인 16 bit를 넘는 값만을 사용해서 마진을 구할려고
-			 *   다음과 같은 식들을 사용한거 같다.
+			 *   즉 memstart_offset_seed는 16bit 이하의 값인데 여기에 range를
+			 *   곱해서 memstart_offset_seed의 범위인 16 bit를 넘는 값만을
+			 *   사용해서 마진을 구할려고 다음과 같은 식들을 사용한거 같다.
 			 */
 			memstart_addr -= ARM64_MEMSTART_ALIGN *
 					 ((range * memstart_offset_seed) >> 16);
@@ -654,7 +657,7 @@ void __init bootmem_init(void)
 	sparse_init();
 
 	/* IAMROOT, 2024.07.28:
-	 * - 모든 node의 zone을 초기화한다.
+	 * - 모든 node, 모든 zone, 및 필요시 struct page를 초기화한다.
 	 */
 	zone_sizes_init(min, max);
 

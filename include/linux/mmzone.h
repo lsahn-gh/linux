@@ -2064,21 +2064,19 @@ static inline int present_section_nr(unsigned long nr)
 	return present_section(__nr_to_section(nr));
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - 해당 mem_section이 할당된 상태인지 검사하고, 할당되었으면 memmap을 가진지
- *   검사한다.
- * - static 일 경우 section은 항상 존재할테니 memmap이 있는지 flag를 검사해야된다.
- * - extreme일 경우 section이 null인 경우가 있을것이다.
+/* IAMROOT, 2021.12.18:
+ * - @section이 alloc 되었는지 확인한 뒤에 init 되었는지 검사.
+ *
+ *   1) static : section은 항상 존재하므로 init 된 적이 있는지 검사.
+ *   2) extreme: section이 dynamic하게 생성되므로 null 검사.
  */
 static inline int valid_section(struct mem_section *section)
 {
 	return (section && (section->section_mem_map & SECTION_HAS_MEM_MAP));
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - boot time때 sparse_init_nid에서 set됬었다.
+/* IAMROOT, 2021.12.18:
+ * - boot-up 타임에 생성된 section인지 확인한다.
  */
 static inline int early_section(struct mem_section *section)
 {
