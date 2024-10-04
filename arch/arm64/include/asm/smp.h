@@ -48,9 +48,12 @@ DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
 extern u64 __cpu_logical_map[NR_CPUS];
 extern u64 cpu_logical_map(unsigned int cpu);
 
-/*
- * IAMROOT, 2022.01.02:
- * - __cpu_logical_map에 hwid(mpidr)을 설정한다.
+/* IAMROOT, 2022.01.02:
+ * - __cpu_logical_map[@cpu]에 @hwid 값을 매핑하는 함수.
+ *   결국 cpu(pe) 마다 가지고 있는 고유한 hwid 값을 저장하는 것이다.
+ *
+ *   Arm64에서 @hwid는 MPIDR_EL1 reg에서 {aff3, aff2, aff1, aff0} 값을
+ *   의미하며 PE 마다 고유값이 존재한다.
  */
 static inline void set_cpu_logical_map(unsigned int cpu, u64 hwid)
 {

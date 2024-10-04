@@ -287,8 +287,7 @@ static void __init kasan_init_depth(void)
 	init_task.kasan_depth = 0;
 }
 
-/*
- * IAMROOT, 2021.12.18:
+/* IAMROOT, 2021.12.18: TODO
  * - PASS
  */
 void __init kasan_init(void)

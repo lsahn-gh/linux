@@ -1373,9 +1373,8 @@ static inline int of_property_read_s32(const struct device_node *np,
 	for (child = of_get_next_available_child(parent, NULL); child != NULL; \
 	     child = of_get_next_available_child(parent, child))
 
-/*
- * IAMROOT, 2021.11.06:
- * - cpu node들을 탐색한다.
+/* IAMROOT, 2021.11.06:
+ * - dt에서 cpu node들을 탐색한다.
  */
 #define for_each_of_cpu_node(cpu) \
 	for (cpu = of_get_next_cpu_node(NULL); cpu != NULL; \

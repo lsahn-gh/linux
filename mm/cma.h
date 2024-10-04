@@ -12,16 +12,17 @@ struct cma_kobject {
 
 struct cma {
 	unsigned long   base_pfn;
-/*
- * IAMROOT, 2022.07.09:
- * - page count
- */
+
+	/* IAMROOT, 2022.07.09: TODO
+	 * - page count
+	 */
 	unsigned long   count;
 	unsigned long   *bitmap;
-/*
- * IAMROOT, 2022.07.09:
- * - cma에서 관리할때는 0, huge_tlb에서 관리할때는 huge tlb order(9. 2MB)
- */
+
+	/* IAMROOT, 2022.07.09: TODO
+	 * - cma에서 관리할때는 0,
+	 *   huge_tlb에서 관리할때는 huge tlb order(9. 2MB)
+	 */
 	unsigned int order_per_bit; /* Order of pages represented by one bit */
 	spinlock_t	lock;
 #ifdef CONFIG_CMA_DEBUGFS

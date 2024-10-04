@@ -105,10 +105,11 @@ EXPORT_SYMBOL(mem_map);
  * highstart_pfn must be the same; there must be no gap between ZONE_NORMAL
  * and ZONE_HIGHMEM.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - high memory의 원래 개념은 물리주소 지만 여기서는 가상주소로 사용한다.
- * - arm64_memblock_init에서 DRAM 끝 다음 주소로 초기화된다.
+/* IAMROOT, 2021.10.23:
+ * - memblock_end_of_DRAM()에 대한 max vaddr을 저장해두고 있다.
+ *
+ *   (arm64_memblock_init(..)에서 초기화)
+ *
  */
 void *high_memory;
 EXPORT_SYMBOL(high_memory);

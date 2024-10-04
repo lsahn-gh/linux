@@ -91,12 +91,11 @@ u64 __cacheline_aligned boot_args[4];
 
 void __init smp_setup_processor_id(void)
 {
-/*
- * IAMROOT, 2021.09.11:
- * - cpu 0번이면 mpidr 0인경우가 많지만 아닌 경우도 있다.
- * - MPIDR_HWID_BITMASK: MPIDR_EL1에서 {Aff3, Aff2, Aff1, Aff0}만 빼온다.
- * - 각 PE의 {Aff3, Aff2, Aff1, Aff0} 값은 unique하다.
- */
+	/* IAMROOT, 2021.09.11:
+	 * - cpu 0번이면 mpidr 값이 0일 확률이 높지만 아닐 수도 있다.
+	 *   이를 대비하여 MPIDR reg에서 값을 읽어오며 이때 MPIDR_HWID_BITMASK를
+	 *   이용하여 MPIDR에서 {aff3, aff2, aff1, aff0} 값만 가져온다.
+	 */
 	u64 mpidr = read_cpuid_mpidr() & MPIDR_HWID_BITMASK;
 	set_cpu_logical_map(0, mpidr);
 
@@ -362,8 +361,7 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 	dump_stack_set_arch_desc("%s (DT)", name);
 }
 
-/*
- * IAMROOT, 2021.12.18:
+/* IAMROOT, 2021.12.18: TODO
  * - PASS
  */
 static void __init request_standard_resources(void)
@@ -441,25 +439,28 @@ static int __init reserve_memblock_reserved_regions(void)
 }
 arch_initcall(reserve_memblock_reserved_regions);
 
-/*
- * IAMROOT, 2021.09.11:
- * - logical cpu to mpdir mapping.
- *   kernel code는 전부 logical cpu를 쓴다.
+/* IAMROOT, 2021.09.11:
+ * - 모든 cpu(PE)는 고유한 PE id 값을 가지고 있지만 kernel code는
+ *   logical cpu id를 사용한다.
+ *   (0, 1, 2, ...)
  *
- * - smp_setup_processor_id 에서 boot cput(0번)에 대해서 미리
- *   mpidr을 읽어와 설정한다.
- * - of_parse_and_init_cpus 에서 나머지 cpu에 대해서 dt에서
- *   해당 cpu mpidr을 읽어서 해당 값으로 설정된다.
+ *   따라서 cpu 마다 매핑된 고유 PE id 값을 알기 위해서 @cpu 값을 통해
+ *   hwid를 가져와야 한다.
+ *
+ *   아래가 cpu : hwid 매핑을 위한 array 이다.
  */
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 
+/* IAMROOT, 2024.10.04:
+ * - @cpu 번호에 해당하는 hwid를 가져온다.
+ */
 u64 cpu_logical_map(unsigned int cpu)
 {
 	return __cpu_logical_map[cpu];
 }
 
 /* IAMROOT, 2024.01.09:
- * - Arm64 arch에 의존적인 기능을 early setup 하는 영역.
+ * - Arm64 arch에 의존적인 기능을 early setup 한다.
  */
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
@@ -560,6 +561,8 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	if (acpi_disabled)
 		unflatten_device_tree();
 
+	/* IAMROOT, 2024.10.03: TODO
+	 */
 	bootmem_init();
 
 	kasan_init();
@@ -573,6 +576,9 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	else
 		psci_acpi_init();
 
+	/* IAMROOT, 2024.10.04:
+	 * - boot cpu의 enable-method를 통해 cpu_ops를 설정한다.
+	 */
 	init_bootcpu_ops();
 	smp_init_cpus();
 	smp_build_mpidr_hash();

@@ -222,9 +222,8 @@ static int __init of_numa_parse_distance_map(void)
 	return ret;
 }
 
-/*
- * IAMROOT, 2022.01.02:
- * - 해당 device의 numa node id를 구해온다.
+/* IAMROOT, 2022.01.02:
+ * - @device의 'numa-node-id' property를 dt에서 파싱한다.
  */
 int of_node_to_nid(struct device_node *device)
 {

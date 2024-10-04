@@ -9,6 +9,13 @@
 
 #define MPIDR_UP_BITMASK	(0x1 << 30)
 #define MPIDR_MT_BITMASK	(0x1 << 24)
+/* IAMROOT, 2024.10.04:
+ * - MPIDR reg의 {aff3, aff2, aff1, aff0} 값을 읽기 위한 bitmask 이다.
+ *   MPIDR reg는 PE identification 정보를 가지고 있다.
+ *
+ *   Note.
+ *   1). PE 마다 고유한 {aff3, aff2, aff1, aff0} 값을 가지고 있다.
+ */
 #define MPIDR_HWID_BITMASK	UL(0xff00ffffff)
 
 #define MPIDR_LEVEL_BITS_SHIFT	3

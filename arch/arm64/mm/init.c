@@ -125,9 +125,8 @@ phys_addr_t arm64_dma_phys_limit __ro_after_init;
  * line parameter. The memory reserved is used by dump capture kernel when
  * primary kernel is crashing.
  */
-/*
- * IAMROOT, 2021.10.23:
- * - crash dump 용으로 작은 kernel을 올릴 영역을 reserve 한다.
+/* IAMROOT, 2021.10.23:
+ * - crash dump 용도로 작은 kernel을 올릴 영역을 reserve 한다.
  */
 static void __init reserve_crashkernel(void)
 {

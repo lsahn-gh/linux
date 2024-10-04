@@ -111,6 +111,9 @@ static inline void set_numa_node(int node)
 #endif
 
 #ifndef set_cpu_numa_node
+/* IAMROOT, 2024.10.04:
+ * - per-cpu로 구성된 @cpu 고유 변수에 @node 값을 저장한다.
+ */
 static inline void set_cpu_numa_node(int cpu, int node)
 {
 	per_cpu(numa_node, cpu) = node;

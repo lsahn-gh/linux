@@ -613,9 +613,8 @@ typedef int (*psci_initcall_t)(const struct device_node *);
  *
  * Probe based on PSCI PSCI_VERSION function
  */
-/*
- * IAMROOT, 2021.12.18:
- * - psci 0.2관련 초기화 수행
+/* IAMROOT, 2021.12.18:
+ * - psci 0.2 초기화 수행
  */
 static int __init psci_0_2_init(struct device_node *np)
 {
@@ -638,9 +637,8 @@ static int __init psci_0_2_init(struct device_node *np)
 /*
  * PSCI < v0.2 get PSCI Function IDs via DT.
  */
-/*
- * IAMROOT, 2021.12.18:
- * - method property를 가져와 해당 property의 callback을 등록하고, id를 설정한다.
+/* IAMROOT, 2021.12.18:
+ * - @np의 properties 값을 parsing 하여 저장하고 psci_ops을 초기화한다.
  */
 static int __init psci_0_1_init(struct device_node *np)
 {
@@ -678,9 +676,8 @@ static int __init psci_0_1_init(struct device_node *np)
 	return 0;
 }
 
-/*
- * IAMROOT, 2021.12.18:
- * - psci0.2 초기화 + psci_has_osi_suppoert
+/* IAMROOT, 2021.12.18:
+ * - psci 0.2 초기화 + psci_has_osi_suppoert
  */
 static int __init psci_1_0_init(struct device_node *np)
 {
@@ -707,19 +704,17 @@ static const struct of_device_id psci_of_match[] __initconst = {
 	{},
 };
 
-/*
- * IAMROOT, 2021.12.18:
- * - dt에서 psci_of_match의 compatible을 검색한다.
- * - ex) version 0.1
- *   psci {
- *	compatible = "arm,psci";
- *	method = "smc";
- *	cpu_off = <0x84000002>;
- *	cpu_on = <0xC4000003>;
- *	};
+/* IAMROOT, 2021.12.18:
+ * - dts에 작성된 compatible을 psci_of_match에서 탐색한다.
  *
- * - psci ops를 설정하고 version, feature정보를 가져와 조건을 확인하여 정보들을
- *   초기화한다.
+ *   예)
+ *      version 0.1
+ *      psci {
+ *          patible = "arm,psci";
+ *          method = "smc";
+ *          cpu_off = <0x84000002>;
+ *          cpu_on = <0xC4000003>;
+ *      };
  */
 int __init psci_dt_init(void)
 {
@@ -733,11 +728,10 @@ int __init psci_dt_init(void)
 	if (!np || !of_device_is_available(np))
 		return -ENODEV;
 
+	/* IAMROOT, 2021.12.18:
+	 * - dts compatible에 해당하는 psci_of_match의 data 함수를 호출한다.
+	 */
 	init_fn = (psci_initcall_t)matched_np->data;
-/*
- * IAMROOT, 2021.12.18:
- * - 해당하는 psci_of_match의 data 함수를 호출한다.
- */
 	ret = init_fn(np);
 
 	of_node_put(np);

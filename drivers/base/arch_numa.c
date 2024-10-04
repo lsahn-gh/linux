@@ -169,9 +169,8 @@ void numa_store_cpu_info(unsigned int cpu)
 	set_cpu_numa_node(cpu, cpu_to_node_map[cpu]);
 }
 
-/*
- * IAMROOT, 2022.01.02:
- * - numa node id를 cpu_to_node에 cpu를 index로해서 저장한다.
+/* IAMROOT, 2022.01.02:
+ * - @nid를 cpu_to_node_map[@cpu]에 매핑한다.
  */
 void __init early_map_cpu_to_node(unsigned int cpu, int nid)
 {
@@ -185,6 +184,11 @@ void __init early_map_cpu_to_node(unsigned int cpu, int nid)
 	 * We should set the numa node of cpu0 as soon as possible, because it
 	 * has already been set up online before. cpu_to_node(0) will soon be
 	 * called.
+	 */
+	/* IAMROOT, 2024.10.04:
+	 * - @cpu == 0 (bootcpu) 라면 set_cpu_numa_node(@cpu, @nid)를 호출한다.
+	 *
+	 *   per-cpu로 구성된 변수에 자신의 @nid 번호를 저장한다.
 	 */
 	if (!cpu)
 		set_cpu_numa_node(cpu, nid);

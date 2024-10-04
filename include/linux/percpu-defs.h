@@ -309,7 +309,7 @@ do {									\
  * - cpu를 고려 안한 일반 memory로 따지면 *(&var)랑 같은 의미.
  * - memory 접근으로 떠지면
  *   *((typeof(var) *)((uint8_t *)&var + per_cpu_offset((cpu))))
- *   
+ *
  */
 #define per_cpu(var, cpu)	(*per_cpu_ptr(&(var), cpu))
 

@@ -240,6 +240,9 @@ static unsigned long __init_memblock memblock_addrs_overlap(phys_addr_t base1, p
 	return ((base1 < (base2 + size2)) && (base2 < (base1 + size1)));
 }
 
+/* IAMROOT, 2024.10.01:
+ * - @base, @size가 @type의 region들과 겹치는 부분이 있는지 확인한다.
+ */
 bool __init_memblock memblock_overlaps_region(struct memblock_type *type,
 					phys_addr_t base, phys_addr_t size)
 {

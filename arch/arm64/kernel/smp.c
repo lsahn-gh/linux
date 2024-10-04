@@ -487,9 +487,8 @@ void __init smp_prepare_boot_cpu(void)
 	kasan_init_hw_tags();
 }
 
-/*
- * IAMROOT, 2022.01.02:
- * - dt에서 hwid를 읽어온다.
+/* IAMROOT, 2022.01.02:
+ * - dt(@dn)에서 hwid를 읽어온다.
  */
 static u64 __init of_get_cpu_mpidr(struct device_node *dn)
 {
@@ -562,11 +561,13 @@ static int __init smp_cpu_setup(int cpu)
 	return 0;
 }
 
-/*
- * IAMROOT, 2022.01.02:
- * - of_parse_and_init_cpus에서 true로 설정된다.
+/* IAMROOT, 2022.01.02:
+ * - of_parse_and_init_cpus(..)에서 true로 설정된다.
  */
 static bool bootcpu_valid __initdata;
+/* IAMROOT, 2024.10.04:
+ * - bootcpu (0번 cpu)에 대한 선처리를 위해 1로 초기화된다.
+ */
 static unsigned int cpu_count = 1;
 
 #ifdef CONFIG_ACPI
@@ -699,19 +700,30 @@ static void __init of_parse_and_init_cpus(void)
 {
 	struct device_node *dn;
 
-/*
- * IAMROOT, 2022.01.01: 
- * cpu@0 {
- *        compatible = ...
- *        reg = <mpidr>;
- *        ...
- */
+	/* IAMROOT, 2022.01.01:
+	 * - 다음이 cpu node이다.
+	 *
+	 *   cpu@0 {
+	 *       compatible = ...
+	 *       reg = <0x0 0x1>;
+	 *       ...
+	 *   };
+	 *   cpu@1 {
+	 *       compatible = ...
+	 *       reg = <0x0 0x2>;
+	 *       ...
+	 *   };
+	 */
 	for_each_of_cpu_node(dn) {
 		u64 hwid = of_get_cpu_mpidr(dn);
 
 		if (hwid == INVALID_HWID)
 			goto next;
 
+		/* IAMROOT, 2024.10.04:
+		 * - @hwid 값이 중복되는지 검사한다.
+		 *   PE id 값은 고유해야 하므로 중복되면 에러로 처리한다.
+		 */
 		if (is_mpidr_duplicate(cpu_count, hwid)) {
 			pr_err("%pOF: duplicate cpu reg properties in the DT\n",
 				dn);
@@ -724,13 +736,18 @@ static void __init of_parse_and_init_cpus(void)
 		 * the logical map built from DT is validated and can
 		 * be used.
 		 */
-/*
- * IAMROOT, 2022.01.02:
- * - smp_setup_processor_id에서 boot cput(0번)에 대한 mpidr은
- *   미리 설정되었었다. 0번 cpu에 대한 mpidr이면 nid만 설정하면되니
- *   nid만 설정한다.
- */
+		/* IAMROOT, 2022.01.02:
+		 * - hwid == 0인 경우 bootcpu 이다.
+		 *
+		 *   bootcpu(0번)은 이미 smp_setup_processor_id(..)에서 PE id 값을
+		 *   매핑하였으므로 이번에는 early_map_cpu_to_node(..)만 호출한다.
+		 *   (PE id 값은 MPIDR_EL1 reg에서 읽어왔음)
+		 */
 		if (hwid == cpu_logical_map(0)) {
+			/* IAMROOT, 2024.10.04:
+			 * - bootcpu는 0이며 한개만 존재해야 하므로 이미 설정된 경우
+			 *   넘어가도록 한다.
+			 */
 			if (bootcpu_valid) {
 				pr_err("%pOF: duplicate boot cpu reg property in DT\n",
 					dn);
@@ -752,11 +769,14 @@ static void __init of_parse_and_init_cpus(void)
 		if (cpu_count >= NR_CPUS)
 			goto next;
 
-/*
- * IAMROOT, 2022.01.02:
- * - 해당 cpu의 nid와 hwid를 설정한다.
- * - 설정된 순서대로 cpu번호가 부여됨이 확인된다.
- */
+		/* IAMROOT, 2024.10.04:
+		 * - bootcpu (0번 cpu)를 제외하고 아래 작업을 수행한다.
+		 *
+		 *   1). cpu에 대응되는 hwid(PE id) 값 저장.
+		 *   2). cpu에 대응되는 @nid 값 저장.
+		 *
+		 *   각 작업은 고유한 array에서 수행된다.
+		 */
 		pr_debug("cpu logical map 0x%llx\n", hwid);
 		set_cpu_logical_map(cpu_count, hwid);
 
@@ -780,6 +800,10 @@ void __init smp_init_cpus(void)
 {
 	int i;
 
+	/* IAMROOT, 2024.10.04:
+	 * - acpi_disabled == true : dt에서 cpu 정보를 읽어온다.
+	 *   acpi_disabled == false: acpi에서 cpu 정보를 읽어온다.
+	 */
 	if (acpi_disabled)
 		of_parse_and_init_cpus();
 	else

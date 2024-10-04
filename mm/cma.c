@@ -276,6 +276,9 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 	 * complain. Find the boundary by adding one to the last valid
 	 * address.
 	 */
+	/* IAMROOT, 2024.10.01:
+	 * - va(high_memory)를 pa로 변환하여 highmem_start에 저장한다.
+	 */
 	highmem_start = __pa(high_memory - 1) + 1;
 	pr_debug("%s(size %pa, base %pa, limit %pa alignment %pa)\n",
 		__func__, &size, &base, &limit, &alignment);
@@ -332,9 +335,15 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 	 * value will be the memblock end. Set it explicitly to simplify further
 	 * checks.
 	 */
+	/* IAMROOT, 2024.10.01:
+	 * - @limit의 값을 체크하여 범위를 벗어나면 memblock_end로 설정한다.
+	 */
 	if (limit == 0 || limit > memblock_end)
 		limit = memblock_end;
 
+	/* IAMROOT, 2024.10.01:
+	 * - base + size가 limit보다 크면 오류 처리.
+	 */
 	if (base + size > limit) {
 		ret = -EINVAL;
 		pr_err("Size (%pa) of region at %pa exceeds limit (%pa)\n",
@@ -344,12 +353,10 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 
 	/* Reserve memory */
 	if (fixed) {
-
-/*
- * IAMROOT, 2022.07.09:
- * - start가 0이 아니면 해당 주소를 시작으로 할당한다.
- * - 겹쳣거나 reserve 할당 실패면 error.
- */
+		/* IAMROOT, 2022.07.09:
+		 * - @base 주소를 기존에 추가된 reserved region 영역과 비교하여
+		 *   겹치거나, reserve region 할당에 실패하면 오류 처리한다.
+		 */
 		if (memblock_is_region_reserved(base, size) ||
 		    memblock_reserve(base, size) < 0) {
 			ret = -EBUSY;
@@ -357,11 +364,10 @@ int __init cma_declare_contiguous_nid(phys_addr_t base,
 		}
 	} else {
 		phys_addr_t addr = 0;
-
-/*
- * IAMROOT, 2022.07.09:
- * - start가 0이였으면 memblock의 lowmem 영역에서의 할당 정책을 따른다.
- */
+		/*
+		 * IAMROOT, 2022.07.09:
+		 * - start가 0이였으면 memblock의 lowmem 영역에서의 할당 정책을 따른다.
+		 */
 		/*
 		 * All pages in the reserved area must come from the same zone.
 		 * If the requested region crosses the low/high memory boundary,

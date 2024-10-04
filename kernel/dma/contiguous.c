@@ -34,6 +34,18 @@
  *   can use the memory for pagecache and when device driver requests
  *   it, allocated pages can be migrated.
  */
+/* IAMROOT, 2024.09.29:
+ * - CMA: Contiguous Memory Allocator
+ *   리눅스 커널에서 메모리 할당을 관리하는 기법 중 하나로, 주로
+ *   연속적인 물리 메모리 블록을 할당할 때 사용된다. 주로 장치 드라이버들이
+ *   H/W와 상호작용할 때, 큰 연속된 메모리 영역을 필요로 할 경우에 매우 유용.
+ *
+ *   1). 연속된 물리 메모리 할당
+ *   2). 메모리 단편화 방지
+ *   3). 주 사용 사례
+ *       DMA를 사용하는 장치나, 대용량 데이터를 빠르게 처리해야 하는 그래픽
+ *       카드 등에서 큰 연속된 물리 메모리 영역이 필요할 때 CMA 사용.
+ */
 
 #define pr_fmt(fmt) "cma: " fmt
 
@@ -57,8 +69,7 @@
 #define CMA_SIZE_MBYTES 0
 #endif
 
-/*
- * IAMROOT, 2022.07.09:
+/* IAMROOT, 2022.07.09: TODO
  * - dma 할당 api가 사용할 기본 cma
  */
 struct cma *dma_contiguous_default_area;
@@ -79,12 +90,12 @@ static phys_addr_t  size_cmdline __initdata = -1;
 static phys_addr_t base_cmdline __initdata;
 static phys_addr_t limit_cmdline __initdata;
 
-/*
- * IAMROOT, 2022.07.09:
- * - admin-guide/kernel-parameters.txt 참고
- *   cma=nn[MG]@[start[MG][-end[MG]]]
- *       ^size
- * - size는 무조건 있어야 된다.
+/* IAMROOT, 2022.07.09:
+ * - cma parameter를 파싱한다.
+ *
+ *   1). admin-guide/kernel-parameters.txt 참고
+ *   2). cma=nn[MG]@[start[MG][-end[MG]]]
+ *           ^--> size
  */
 static int __init early_cma(char *p)
 {
@@ -93,9 +104,15 @@ static int __init early_cma(char *p)
 		return -EINVAL;
 	}
 
+	/* IAMROOT, 2024.09.27:
+	 * - 'nn' 파트를 파싱한다.
+	 */
 	size_cmdline = memparse(p, &p);
 	if (*p != '@')
 		return 0;
+	/* IAMROOT, 2024.09.27:
+	 * - [MG] 파트를 파싱한다.
+	 */
 	base_cmdline = memparse(p + 1, &p);
 	if (*p != '-') {
 		limit_cmdline = base_cmdline + size_cmdline;
@@ -177,13 +194,8 @@ void __init dma_pernuma_cma_reserve(void)
  * has been activated and all other subsystems have already allocated/reserved
  * memory.
  */
-/*
- * IAMROOT, 2021.12.18:
- * - cmdline에 cma정보가 있다면 해당정보로, 아니면 kernel default or config정보로
- *   cma size를 정한후 초기화한다.
- *   1. cmdline or kernel config로 default cma 정보를 초기화.
- *   2. dt에 default cma가 있을시. 1번에서 초기화했다면 안하고,
- *   아니면 dt default cma로 수행.
+/* IAMROOT, 2021.12.18:
+ * - contiguous memory area를 reserve 하되 memblock을 사용한다.
  */
 void __init dma_contiguous_reserve(phys_addr_t limit)
 {
@@ -194,26 +206,20 @@ void __init dma_contiguous_reserve(phys_addr_t limit)
 
 	pr_debug("%s(limit %08lx)\n", __func__, (unsigned long)limit);
 
-/*
- * IAMROOT, 2021.10.23:
- * - arm64에서는 무조건 dt를 사용한다. dt등에 존재하면 그것을 사용하지만,
- *   지정이 안되면 CONFIG에 따라서 selected_size를 지정한다.
- */
 	if (size_cmdline != -1) {
-/*
- * IAMROOT, 2022.07.09:
- * - cmdline
- */
+		/* IAMROOT, 2021.10.23:
+		 * - kernel parameter의 'cma=nn...'로 초기화된 cma 정보가 있는 경우
+		 *   해당 정보 사용.
+		 */
 		selected_size = size_cmdline;
 		selected_base = base_cmdline;
 		selected_limit = min_not_zero(limit_cmdline, limit);
 		if (base_cmdline + size_cmdline == limit_cmdline)
 			fixed = true;
 	} else {
-/*
- * IAMROOT, 2022.07.09:
- * - kernel config
- */
+		/* IAMROOT, 2024.09.27:
+		 * - kernel config와 default 정보로 초기화.
+		 */
 #ifdef CONFIG_CMA_SIZE_SEL_MBYTES
 		selected_size = size_bytes;
 #elif defined(CONFIG_CMA_SIZE_SEL_PERCENTAGE)
@@ -225,10 +231,16 @@ void __init dma_contiguous_reserve(phys_addr_t limit)
 #endif
 	}
 
+	/* IAMROOT, 2024.10.03:
+	 * - TODO
+	 */
 	if (selected_size && !dma_contiguous_default_area) {
 		pr_debug("%s: reserving %ld MiB for global area\n", __func__,
 			 (unsigned long)selected_size / SZ_1M);
 
+		/* IAMROOT, 2024.10.03:
+		 * - TODO
+		 */
 		dma_contiguous_reserve_area(selected_size, selected_base,
 					    selected_limit,
 					    &dma_contiguous_default_area,
