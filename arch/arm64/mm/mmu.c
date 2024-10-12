@@ -1053,10 +1053,8 @@ static void __init map_kernel(pgd_t *pgdp)
 	kasan_copy_shadow(pgdp);
 }
 
-/*
- * IAMROOT, 2021.10.30:
- * - memory 전체에 대한 mapping을 swapper_pg_dir에 완료 및 교체후
- *   init_pg_dir을 삭제한다.
+/* IAMROOT, 2021.10.30:
+ * - memory 전체에 mapping을 swapper_pg_dir로 이동 후에 init_pg_dir 삭제.
  */
 void __init paging_init(void)
 {
@@ -1558,17 +1556,16 @@ static inline pud_t *fixmap_pud(unsigned long addr)
 	p4d_t *p4dp = p4d_offset(pgdp, addr);
 	p4d_t p4d = READ_ONCE(*p4dp);
 
-/* IAMROOT, 2023.11.18:
- * - 이 시점에 *p4dp에는 이미 pa(bm_pud)가 매핑되어 있어야 한다.
- */
+	/* IAMROOT, 2023.11.18:
+	 * - 이 시점에 *p4dp에는 이미 pa(bm_pud)가 매핑되어 있어야 한다.
+	 */
 	BUG_ON(p4d_none(p4d) || p4d_bad(p4d));
 
 	return pud_offset_kimg(p4dp, addr);
 }
 
-/*
- * IAMROOT, 2021.10.02:
- * - 가상주소인 addr에 해당하는 pmd entry주소를 반환한다.
+/* IAMROOT, 2021.10.02:
+ * - va(@addr)에 해당하는 pmd entry주소를 반환한다.
  *   fixmap은 kernel image안의 symbol 정의이므로 xxx_offset_kimg를 사용한다.
  */
 static inline pmd_t *fixmap_pmd(unsigned long addr)
@@ -1618,34 +1615,35 @@ void __init early_fixmap_init(void)
 	pgdp = pgd_offset_k(addr);
 	p4dp = p4d_offset(pgdp, addr);
 	p4d = READ_ONCE(*p4dp);
-/* IAMROOT, 2023.11.18:
- * - pgdp, p4dp는 init_pg_dir을 가리킨다.
- *   (kernel은 아직 p4dp를 사용하지 않으므로 pgdp == p4dp 이다.
- */
+
+	/* IAMROOT, 2023.11.18:
+	 * - pgdp, p4dp는 init_pg_dir을 가리킨다.
+	 *   (kernel은 아직 p4dp를 사용하지 않으므로 pgdp == p4dp 이다.
+	 */
 
 	if (CONFIG_PGTABLE_LEVELS > 3 &&
 	    !(p4d_none(p4d) || p4d_page_paddr(p4d) == __pa_symbol(bm_pud))) {
-/* IAMROOT, 2023.11.18:
- * - 1) CONFIG_PGTABLE_LEVELS >= 4 이고
- *   2) p4d가 가리키는 pud entry가 이미 세팅되어 있는데,
- *      pa(p4d) != pa(bm_pud)라면 진입한다.
- *
- *   +-----+------------+----------+----------+----------+-------------+
- *   | k/u | PGDIR bits | PUD bits | PMD bits | PTE bits | offset bits |
- *   | 16  | 1          | 11       | 11       | 11       | 14          |
- *   +-----+------------+----------+----------+----------+-------------+
- *
- * - fixmap의 특정 주소를 예로 했을때 산출되는 각 table별 masking 값.
- *   1 : ---
- *   111_1101_1111 : 0x7df
- *   111_1111_1111 : 0x7ff
- *   001_0111_1110 : 0x17e
- *
- * - 16k / 4 level일 경우 pgd는 2개 entry밖에 존재 하지 않는다.
- *
- * - p4d가 이미 kernel에 의해 mapping 되어 있으므로 있는걸 사용한다.
- *   bm_pud를 매핑하지 않고 va(pud table)만 구한다.
- */
+		/* IAMROOT, 2023.11.18:
+		 * - 1) CONFIG_PGTABLE_LEVELS >= 4 이고
+		 *   2) p4d가 가리키는 pud entry가 이미 세팅되어 있는데,
+		 *      pa(p4d) != pa(bm_pud)라면 진입한다.
+		 *
+		 *   +-----+------------+----------+----------+----------+-------------+
+		 *   | k/u | PGDIR bits | PUD bits | PMD bits | PTE bits | offset bits |
+		 *   | 16  | 1          | 11       | 11       | 11       | 14          |
+		 *   +-----+------------+----------+----------+----------+-------------+
+		 *
+		 * - fixmap의 특정 주소를 예로 했을때 산출되는 각 table별 masking 값.
+		 *   1 : ---
+		 *   111_1101_1111 : 0x7df
+		 *   111_1111_1111 : 0x7ff
+		 *   001_0111_1110 : 0x17e
+		 *
+		 * - 16k / 4 level일 경우 pgd는 2개 entry밖에 존재 하지 않는다.
+		 *
+		 * - p4d가 이미 kernel에 의해 mapping 되어 있으므로 있는걸 사용한다.
+		 *   bm_pud를 매핑하지 않고 va(pud table)만 구한다.
+		 */
 		/*
 		 * We only end up here if the kernel mapping and the fixmap
 		 * share the top level pgd entry, which should only happen on
@@ -1654,53 +1652,52 @@ void __init early_fixmap_init(void)
 		BUG_ON(!IS_ENABLED(CONFIG_ARM64_16K_PAGES));
 		pudp = pud_offset_kimg(p4dp, addr);
 	} else {
-/* IAMROOT, 2021.10.02:
- * - 1) p4d가 가리키는 pud entry가 세팅되어 있지 않거나,
- *   2) pa(p4d) == pa(bm_pud)라면 진입한다.
- *
- *   만약 p4d에 pud가 매핑되어 있지 않다면 p4d에 bm_pud를 매핑하고 fixmap_pud를
- *   통해 va(pud table)을 구한다.
- *
- * - C 코드 해석
- *   if (p4d == 0)
- *      *p4dp = __pa(bm_pud);
- *   pudp = __va(*p4dp + pud_index(addr) * 8);
- *   pudp == va(bm_pud table);
- */
+		/* IAMROOT, 2021.10.02:
+		 * - 1) p4d가 가리키는 pud entry가 세팅되어 있지 않거나,
+		 *   2) pa(p4d) == pa(bm_pud)라면 진입한다.
+		 *
+		 *   만약 p4d에 pud가 매핑되어 있지 않다면 p4d에 bm_pud를 매핑하고
+		 *   fixmap_pud를 통해 va(pud table)을 구한다.
+		 *
+		 * - C 코드 해석
+		 *   if (p4d == 0)
+		 *      *p4dp = __pa(bm_pud);
+		 *   pudp = __va(*p4dp + pud_index(addr) * 8);
+		 *   pudp == va(bm_pud table);
+		 */
 		if (p4d_none(p4d))
 			__p4d_populate(p4dp, __pa_symbol(bm_pud), P4D_TYPE_TABLE);
 		pudp = fixmap_pud(addr);
 	}
 
-/* IAMROOT, 2021.10.02:
- * - 만약 pud에 pmd가 매핑되어 있지 않다면 pud에 bm_pmd를 매핑하고 fixmap_pmd를
- *   통해 va(pmd table)을 구한다.
- *
- * - C 코드 해석
- *   if (*pudp == 0)
- *      *pudp = __pa(bm_pmd);
- *   pmdp == va(bm_pmd table);
- */
+	/* IAMROOT, 2021.10.02:
+	 * - 만약 pud에 pmd가 매핑되어 있지 않다면 pud에 bm_pmd를 매핑하고
+	 *   fixmap_pmd를 통해 va(pmd table)을 구한다.
+	 *
+	 * - C 코드 해석
+	 *   if (*pudp == 0)
+	 *      *pudp = __pa(bm_pmd);
+	 *   pmdp == va(bm_pmd table);
+	 */
 	if (pud_none(READ_ONCE(*pudp)))
 		__pud_populate(pudp, __pa_symbol(bm_pmd), PUD_TYPE_TABLE);
 	pmdp = fixmap_pmd(addr);
 
-/*
- * IAMROOT, 2021.10.02:
- * - pmd table entry에 pa(bm_pte)를 매핑한다.
- *   pte는 최종 4KB page entries 가리키므로 fixmap에서 사용할 table을 더이상
- *   매핑하지 않는다.
- *
- * - C 코드 해석
- *   *pmdp = __pa(bm_pte);
- */
+	/* IAMROOT, 2021.10.02:
+	 * - pmd table entry에 pa(bm_pte)를 매핑한다.
+	 *   pte는 최종 4KB page entries 가리키므로 fixmap에서 사용할 table을
+	 *   더이상 매핑하지 않는다.
+	 *
+	 * - C 코드 해석
+	 *   *pmdp = __pa(bm_pte);
+	 */
 	__pmd_populate(pmdp, __pa_symbol(bm_pte), PMD_TYPE_TABLE);
 
-/* IAMROOT, 2021.10.18:
- * - 일반적인 상황에서는 early fixmap이 다음과 같은 메모리 공간을 커버한다.
- *   pgd (1 table) >> bm_pud (1 table) >> bm_pmd (1 table) >> bm_pte (512 pages)
- *   == 512 * 4KB == 2MB
- */
+	/* IAMROOT, 2021.10.18:
+	 * - 일반적인 상황에서는 early fixmap이 다음과 같은 메모리 공간을 커버한다.
+	 *   pgd (1 table) >> bm_pud (1 table) >> bm_pmd (1 table) >> bm_pte (512 pages)
+	 *   == 512 * 4KB == 2MB
+	 */
 
 	/*
 	 * The boot-ioremap range spans multiple pmds, for which
@@ -1709,10 +1706,11 @@ void __init early_fixmap_init(void)
 	BUILD_BUG_ON((__fix_to_virt(FIX_BTMAP_BEGIN) >> PMD_SHIFT)
 		     != (__fix_to_virt(FIX_BTMAP_END) >> PMD_SHIFT));
 
-/* IAMROOT, 2021.10.09:
- * - bm_pmd table로 FIX_BTMAP_* 영역을 커버할 수 있는지 확인한다.
- *   BTMAP 영역은 early_ioremap() 용도로 사용되며 부팅 후 unmapping 될 수 있다.
- */
+	/* IAMROOT, 2021.10.09:
+	 * - bm_pmd table로 FIX_BTMAP_* 영역을 커버할 수 있는지 확인한다.
+	 *   BTMAP 영역은 early_ioremap() 용도로 사용되며 부팅 후
+	 *   unmapping 될 수 있다.
+	 */
 	if ((pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_BEGIN)))
 	     || pmdp != fixmap_pmd(fix_to_virt(FIX_BTMAP_END))) {
 		WARN_ON(1);

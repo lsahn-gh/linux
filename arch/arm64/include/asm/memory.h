@@ -506,7 +506,7 @@ static inline void *phys_to_virt(phys_addr_t x)
 /*
  * Drivers should NOT use these either.
  */
-/* IAMROOT, 2021.10.02:
+/* IAMROOT, 2021.10.02: TODO
  * - __pa(x): lm vaddr를 paddr로 변환.
  *   (kernel memory 전용)
  *

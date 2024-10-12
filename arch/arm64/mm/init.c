@@ -412,7 +412,7 @@ void __init arm64_memblock_init(void)
 		pr_warn("Memory doesn't fit in the linear mapping, VA_BITS too small\n");
 
 	/* IAMROOT, 2021.10.23:
-	 * - linear region 또는 symbol(_end) 중에 addr가 높은 쪽을 선택하고
+	 * - linear region 또는 pa_symbol(_end) 중에 addr가 높은 쪽을 선택하고
 	 *   해당 addr가 커버할 수 있는 범위 이상인 region을 memblock에서
 	 *   제거한다.
 	 */

@@ -41,7 +41,8 @@ static void __init sort_memblock_regions(void)
 }
 
 /* IAMROOT, 2021.11.13:
- * - memory region에 저장된 모든 block을 hyp_memory region으로 복사한다.
+ * - memblock memory region에 저장된 모든 region을 hyp가 사용하는 (hyp_memory)
+ *   region으로 복사한다.
  */
 static int __init register_memblock_regions(void)
 {
@@ -59,10 +60,9 @@ static int __init register_memblock_regions(void)
 	return 0;
 }
 
-/*
- * IAMROOT, 2021.11.13:
- * - kvm nvhe로 진입시(EL2부팅, EL1 동작) hyp_memory에 대해서 stage 1,
- *   stage 2에 필요한 page 개수를 구하고 memory를 할당한다.
+/* IAMROOT, 2021.11.13:
+ * - kvm nVHE로 진입시(EL2로 부팅하고 EL1에서 동작중) hyp의 stage 1/2에
+ *   필요한 page 개수를 구하고 memory alloc 수행.
  */
 void __init kvm_hyp_reserve(void)
 {
@@ -70,8 +70,7 @@ void __init kvm_hyp_reserve(void)
 	int ret;
 
 	/* IAMROOT, 2021.11.13:
-	 * - hyp mode를 사용할 수 없거나 현재 mode가 이미 el2면 아무것도
-	 *   하지 않고 바로 return 한다.
+	 * - hyp mode를 사용할 수 없거나 현재 mode가 이미 el2면바로 return.
 	 */
 	if (!is_hyp_mode_available() || is_kernel_in_hyp_mode())
 		return;
@@ -90,7 +89,7 @@ void __init kvm_hyp_reserve(void)
 	}
 
 	/* IAMROOT, 2021.11.13:
-	 * - stage1, stage2에서 필요한 page table 개수를 구해온다.
+	 * - stage1/2에서 필요한 page table 개수를 구해온다.
 	 */
 	hyp_mem_pages += hyp_s1_pgtable_pages();
 	hyp_mem_pages += host_s2_pgtable_pages();

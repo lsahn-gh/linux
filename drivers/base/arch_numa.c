@@ -22,10 +22,9 @@ EXPORT_SYMBOL(node_data);
  * - 일단 parsing이 된 node들을 저장해놓는 용도.
  */
 nodemask_t numa_nodes_parsed __initdata;
-/*
- * IAMROOT, 2022.01.02:
- * - of_parse_and_init_cpus에서 초기화된다.
- *   cpu의 numa node id가 저장된다.
+
+/* IAMROOT, 2022.01.02:
+ * - cpu에 대응되는 nid 값을 저장하기 위한 용도.
  */
 static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
 

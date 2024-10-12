@@ -1060,11 +1060,10 @@ void __init parse_early_param(void)
 	static int done __initdata;
 	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
 
-/*
- * IAMROOT, 2021.10.16:
- * - setup_arch에서 호출될수도있고, start_kernel에서 호출될수있어 두번호출을
- *   막기위해 done이 있다.
- */
+	/* IAMROOT, 2021.10.16:
+	 * - setup_arch(..) OR start_kernel(..) 등의 함수에서 여러번
+	 *   호출될 수 있으므로 한번만 실행되도록 flag를 사용한다.
+	 */
 	if (done)
 		return;
 

@@ -5,6 +5,25 @@
 #ifndef __ASM_CPUTYPE_H
 #define __ASM_CPUTYPE_H
 
+/* IAMROOT, 2024.10.06:
+ * - MPIDR: Multiprocessor Affinity Register
+ *   각 cpu core의 id를 저장하고 있는 reg 이다.
+ *
+ *   arm64: 4-level id, a.b.c.d
+ *   arm32: 3-level id, 0.b.c.d
+ *
+ *   예) 0.255.0.15
+ *
+ *   mpidr_el1 reg에는 총 4개의 affinity level이 다음과 같이 정의되어 있으며,
+ *   (aff3, aff2, aff1, aff0) 각 level은 8bit로 구성되어 있고 다음의 의미를
+ *   가진다.
+ *
+ *   - aff3: ??? (above level)
+ *   - aff2: cluster (or socket if MT is on) id (in above level/cluster)
+ *   - aff1: socket (or core if MT is on) id (in cluster/socket)
+ *   - aff0: core (or thread if MT is on) id (in socket/core)
+ */
+
 #define INVALID_HWID		ULONG_MAX
 
 #define MPIDR_UP_BITMASK	(0x1 << 30)
@@ -19,36 +38,53 @@
 #define MPIDR_HWID_BITMASK	UL(0xff00ffffff)
 
 #define MPIDR_LEVEL_BITS_SHIFT	3
-/*
- * IAMROOT, 2022.01.02:
- * - 1 << 3 = 8
+/* IAMROOT, 2022.01.02:
+ * - 8 == 1 << 3
  */
 #define MPIDR_LEVEL_BITS	(1 << MPIDR_LEVEL_BITS_SHIFT)
-/*
- * IAMROOT, 2022.01.02:
- * - 0x7 = 0b111
+/* IAMROOT, 2022.01.02:
+ * - 0b100000000 == 1 << 8
+ *   0xff == 0b011111111 == (1 << 8) - 1
  */
 #define MPIDR_LEVEL_MASK	((1 << MPIDR_LEVEL_BITS) - 1)
 
-/*
- * IAMROOT, 2022.01.02:
- * level                     | 0 | 1 | 2  | 3  |
- * --------------------------+---+---+----+----+
- * 1 << level                | 1 | 2 | 4  | 8  |
- * >> 1                      | 0 | 1 | 2  | 4  |
- * << MPIDR_LEVEL_BITS_SHIFT | 0 | 8 | 16 | 32 |
+/* IAMROOT, 2022.01.02:
+ * - aff3, aff2, aff1, aff0 값을 가져오기 위한 shift 연산 값
+ *   @level을 입력받아 shift 값을 결정한다.
+ *
+ *   ---------------------------+---+---+----+----+
+ *   @level                     | 0 | 1 | 2  | 3  |
+ *   ---------------------------+---+---+----+----+
+ *   shift                      | 0 | 8 | 16 | 32 |
+ *   ---------------------------+---+---+----+----+
+ *
+ *                                         결과
+ *   - @level == 0 -----------------------+----+
+ *     1 << 0: 1 --> 1 >> 1: 0 --> 0 << 3 |  0 |
+ *   - @level == 1 -----------------------+----+
+ *     1 << 1: 2 --> 2 >> 1: 1 --> 1 << 3 |  8 |
+ *   - @level == 2 -----------------------+----+
+ *     1 << 2: 4 --> 4 >> 1: 2 --> 2 << 3 | 16 |
+ *   - @level == 3 -----------------------+----+
+ *     1 << 3: 8 --> 8 >> 1: 4 --> 4 << 3 | 32 |
+ *                                        +----+
  */
 #define MPIDR_LEVEL_SHIFT(level) \
 	(((1 << level) >> 1) << MPIDR_LEVEL_BITS_SHIFT)
 
-/*
- * IAMROOT, 2022.01.02:
- * 각 level별로 1로 masking 되있는 영역을 0번지로 해서 가져온다
- * mpidr = 0b....0111_0000_0000_0000_0111_0000_0111_0000_0111
- *           level 3 |           level 2 |  level2 | level 0 | 
- * 즉
- * level | 0     | 1      | 2       | 3       |
- * bits  | 0 ~ 2 | 8 ~ 10 | 16 ~ 18 | 32 ~ 35 |
+/* IAMROOT, 2022.01.02:
+ * - @mpidr을 NR rshift 하여 aff(@level) 값을 가져오는 매크로.
+ *
+ *   예) @mpidr == 0.255.0.15
+ *
+ *      - @level: 0
+ *        15 == (@mpidr >> 0) & 0xff
+ *      - @level: 1
+ *         0 == (@mpidr >> 8) & 0xff
+ *      - @level: 2
+ *       255 == (@mpidr >> 16) & 0xff
+ *      - @level: 3
+ *         0 == (@mpidr >> 32) & 0xff
  */
 #define MPIDR_AFFINITY_LEVEL(mpidr, level) \
 	((mpidr >> MPIDR_LEVEL_SHIFT(level)) & MPIDR_LEVEL_MASK)

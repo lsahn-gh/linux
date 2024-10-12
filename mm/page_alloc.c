@@ -11109,8 +11109,7 @@ bool __weak arch_has_descending_max_zone_pfns(void)
  * starts where the previous one ended. For example, ZONE_DMA32 starts
  * at arch_max_dma_pfn.
  */
-/*
- * IAMROOT, 2021.12.01:
+/* IAMROOT, 2021.12.01: TODO
  * - zone_sizes_init 에서 불러와 졌을때 max_zone_pfn의 설정사항
  *   [ZONE_DMA] = dt에서 읽은 DMA PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.
  *   [ZONE_DMA32] = U32_MAX PFN. DRAM 주소에 따라서 고쳐져서 세팅된다.

@@ -1025,7 +1025,7 @@ int __init_memblock memblock_add(phys_addr_t base, phys_addr_t size)
  * 0 on success, -errno on failure.
  */
 /* IAMROOT, 2022.03.22:
- * - region[@base .. @size]을 후처리하기 기존 @type region에서 조각낸다.
+ * - region[@base .. @size]을 후처리하기 위해 기존 @type region에서 조각낸다.
  *   기존 nr개 보다 더 많은 nr block들이 @type region에 생성된다.
  *
  *   out vars: @start_rgn, @end_rgn
@@ -1059,7 +1059,7 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 		/* IAMROOT, 2021.10.23:
 		 * 1). rbase >= @end 조건.
 		 *     이 경우 rgn과 iso(lated) region이 겹치지 않으므로 loop에서
-         *     나와 return 한다.
+		 *     나와 return 한다.
 		 *
 		 *    rend +-------+
 		 *         |       |
@@ -1072,10 +1072,15 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 		 *                   |      |
 		 *                   +------+ base
 		 *
+		 */
+		if (rbase >= end)
+			break;
+
+		/* IAMROOT, 2024.10.11:
 		 * 2). rend <= @base 조건.
 		 *     이 경우도 rgn과 iso region이 겹치지 않으나 rgn 보다 lower addr
-		 *     범위에 존재하므로 그보다 큰 rgn + 1과 비교하기 위해 loop를
-		 *     멈추고 다음 rgn을 구한다.
+		 *     범위에 존재하므로 그보다 큰 rgn + 1과 비교하기 위해 다음 loop로
+		 *     넘어간다.
 		 *
 		 *                   +------+ end
 		 *                   |      |
@@ -1088,9 +1093,6 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 		 *         |       |
 		 *   rbase +-------+
 		 */
-		if (rbase >= end)
-			break;
-
 		if (rend <= base)
 			continue;
 
@@ -1129,7 +1131,7 @@ static int __init_memblock memblock_isolate_range(struct memblock_type *type,
 			 *         |       |
 			 *    base +-------+ +--- size - (base - rbase)
 			 *         | iso   | | insert rgn
-			 *         +-------+ +--- rbase
+			 *   rbase +-------+ +---
 			 */
 			/*
 			 * @rgn intersects from below.  Split and continue

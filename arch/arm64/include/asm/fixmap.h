@@ -76,12 +76,12 @@ enum fixed_addresses {
 	 */
 #define FIX_FDT_SIZE		(MAX_FDT_SIZE + SZ_2M)
 	FIX_FDT_END,
-/* IAMROOT, 2021.10.14:
- * - FIX_FDT == 1024 by the following values ...
- *     FIX_FDT_SIZE == 4MB
- *     PAGE_SIZE    == 4KB
- *     FIX_FDT_END  == 1
- */
+	/* IAMROOT, 2021.10.14:
+	 * - FIX_FDT == 1024 by the following values ...
+	 *     FIX_FDT_SIZE == 4MB
+	 *     PAGE_SIZE    == 4KB
+	 *     FIX_FDT_END  == 1
+	 */
 	FIX_FDT = FIX_FDT_END + FIX_FDT_SIZE / PAGE_SIZE - 1,
 
 	FIX_EARLYCON_MEM_BASE,
@@ -103,12 +103,12 @@ enum fixed_addresses {
 #define TRAMP_VALIAS		(__fix_to_virt(FIX_ENTRY_TRAMP_TEXT))
 #endif /* CONFIG_UNMAP_KERNEL_AT_EL0 */
 
-/* IAMROOT, 2021.09.04:
- * - 크기를 대략 계산하면 FIX_FDT_SIZE == 4MB 이고
- *    - FIX_EARLYCON_MEM_BASE (4KB)
- *    - FIX_TEXT_POKE0 (4KB)
- *   위 items가 enable 된다면 4MB + 8KB 크기를 가진다.
- */
+	/* IAMROOT, 2021.09.04:
+	 * - 크기를 대략 계산하면 FIX_FDT_SIZE == 4MB 이고
+	 *    - FIX_EARLYCON_MEM_BASE (4KB)
+	 *    - FIX_TEXT_POKE0 (4KB)
+	 *   위 items가 enable 된다면 4MB + 8KB 크기를 가진다.
+	 */
 	__end_of_permanent_fixed_addresses,
 
 	/*
@@ -143,9 +143,9 @@ enum fixed_addresses {
 	FIX_PUD,
 	FIX_PGD,
 
-/* IAMROOT, 2023.11.12:
- * - 여기까지 크기는 5.8MB + 24KB (4MB + 8KB + 1.8MB + 16KB).
- */
+	/* IAMROOT, 2023.11.12:
+	 * - 여기까지 크기는 5.8MB + 24KB (4MB + 8KB + 1.8MB + 16KB).
+	 */
 
 	__end_of_fixed_addresses
 };

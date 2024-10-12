@@ -13,16 +13,11 @@
 #include <asm/smp.h>
 #include <asm/types.h>
 
-/*
- * IAMROOT, 2022.01.01: 
- * - smp_build_mpidr_hash 에서 초기화된다.
+/* IAMROOT, 2022.01.01:
+ * - 수많은 cpu core(PE)들을 구분하기 위한 hash table
+ *   (smp_build_mpidr_hash 에서 초기화한다.)
  *
- * 예) big/little: 4 core + 4 core
- *     mask: 0x0000_0303;
- *     shift_aff[] = { 0, 6, 12, * };
- *     bits = 4;
- *
- * 추후 cpu_suspend() 및 cpu_resume() 내부의 어셈블리 코드에서 사용한다.
+ *   cpu_suspend(), cpu_resume() 함수에서 사용한다.
  */
 struct mpidr_hash {
 	u64	mask;

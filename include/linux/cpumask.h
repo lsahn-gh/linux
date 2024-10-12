@@ -345,8 +345,7 @@ extern int cpumask_next_wrap(int n, const struct cpumask *mask, int start, bool 
  * @cpu: cpu number (< nr_cpu_ids)
  * @dstp: the cpumask pointer
  */
-/*
- * IAMROOT, 2023.01.03:
+/* IAMROOT, 2023.01.03:
  * - @dstp에 @cpu bit를 추가한다.
  */
 static inline void cpumask_set_cpu(unsigned int cpu, struct cpumask *dstp)
@@ -903,6 +902,12 @@ static inline void reset_cpu_possible_mask(void)
 	bitmap_zero(cpumask_bits(&__cpu_possible_mask), NR_CPUS);
 }
 
+/* IAMROOT, 2024.10.05:
+ * - __cpu_possible_mask에 @cpu에 대응하는 bit를 추가한다.
+ *
+ *   @possible == true : bit set
+ *   @possible == false: bit clear
+ */
 static inline void
 set_cpu_possible(unsigned int cpu, bool possible)
 {

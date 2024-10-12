@@ -552,10 +552,16 @@ static int __init smp_cpu_setup(int cpu)
 	if (init_cpu_ops(cpu))
 		return -ENODEV;
 
+	/* IAMROOT, 2024.10.05:
+	 * - cpu_ops의 cpu_init(..) 함수를 호출한다.
+	 */
 	ops = get_cpu_ops(cpu);
 	if (ops->cpu_init(cpu))
 		return -ENODEV;
 
+	/* IAMROOT, 2024.10.05:
+	 * - __cpu_possible_mask에 @cpu bit를 set 한다.
+	 */
 	set_cpu_possible(cpu, true);
 
 	return 0;
@@ -689,12 +695,10 @@ static void __init acpi_parse_and_init_cpus(void)
  * cpu logical map array containing MPIDR values related to logical
  * cpus. Assumes that cpu_logical_map(0) has already been initialized.
  */
-/*
- * IAMROOT, 2022.01.02:
- * - boot cpu(cpu 0번)은 smp_setup_processor_id에서 __cpu_logical_map에
- *   mpidr이 설정되잇다.
- * - dt에서 각 cpu들의 mpidr, numa node id를 읽어
- *   __cpu_logical_map, cpu_to_node_map에 설정한다.
+/* IAMROOT, 2022.01.02:
+ * - dt에서 각 cpu들의 mpidr, nid를 읽어 아래 array에 매핑힌다.
+ *   1). __cpu_logical_map: cpu에 대응되는 hwid(PE id) 값 저장.
+ *   2). cpu_to_node_map  : cpu에 대응되는 @nid 값 저장.
  */
 static void __init of_parse_and_init_cpus(void)
 {
@@ -791,10 +795,9 @@ next:
  * cpu logical map array containing MPIDR values related to logical
  * cpus. Assumes that cpu_logical_map(0) has already been initialized.
  */
-/*
- * IAMROOT, 2022.01.02:
- * -dt에서 각각의 cpu에 대하여 mpdir, numa node id, enable-method를
- *  읽어서 저장하고 cpu를 possible한다.
+/* IAMROOT, 2022.01.02:
+ * - dt에서 각각의 cpu에 대하여 PE id, nid, enable-method를 읽어서 저장하고
+ *   초기화가 완료된 cpu 번호를 possible에 bit set 한다.
  */
 void __init smp_init_cpus(void)
 {
@@ -813,11 +816,9 @@ void __init smp_init_cpus(void)
 		pr_warn("Number of cores (%d) exceeds configured maximum of %u - clipping\n",
 			cpu_count, nr_cpu_ids);
 
-/*
- * IAMROOT, 2022.01.02:
- * - of_parse_and_init_cpus에서 boot cpu에 대한 mpdir 정보를 못 찾을 경우
- *   에러로 처리한다.
- */
+	/* IAMROOT, 2022.01.02:
+	 * - dt나 acpi에서 bootcpu (0번) 정보를 읽는데 실패하면 바로 리턴한다.
+	 */
 	if (!bootcpu_valid) {
 		pr_err("missing boot CPU MPIDR, not enabling secondaries\n");
 		return;
@@ -830,13 +831,16 @@ void __init smp_init_cpus(void)
 	 * with entries in cpu_logical_map while initializing the cpus.
 	 * If the cpu set-up fails, invalidate the cpu_logical_map entry.
 	 */
-/*
- * IAMROOT, 2022.01.02:
- * - cpu 1번부터 enable-method를 찾고 possible 한다.
- *   dt에서 enable-method를 못찾았다면 invalid로 변경해버린다.
- */
+	/* IAMROOT, 2024.10.05:
+	 * - cpu_logical_map이 완료된 cpu 번호에 대해 smp_cpu_setup(..)을
+	 *   호출한다.
+	 */
 	for (i = 1; i < nr_cpu_ids; i++) {
 		if (cpu_logical_map(i) != INVALID_HWID) {
+			/* IAMROOT, 2024.10.05:
+			 * - smp_cpu_setup(..)에 실패하면 해당 cpu의 logical map 값을
+			 *   INVALID_HWID로 설정한다.
+			 */
 			if (smp_cpu_setup(i))
 				set_cpu_logical_map(i, INVALID_HWID);
 		}
