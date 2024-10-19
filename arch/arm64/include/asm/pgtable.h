@@ -983,7 +983,7 @@ static inline pud_t *p4d_pgtable(p4d_t p4d)
 
 /* IAMROOT, 2021.10.30:
  * - pgd_set_fixmap(addr):
- *   pa(@addr) 받은 pgd table을 FIX_PGD에 매핑한다.
+ *   pa(@addr) argument로 받은 pgd table을 FIX_PGD에 매핑한다.
  */
 #define pgd_set_fixmap(addr)	((pgd_t *)set_fixmap_offset(FIX_PGD, addr))
 #define pgd_clear_fixmap()	clear_fixmap(FIX_PGD)

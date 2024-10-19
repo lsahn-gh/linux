@@ -49,7 +49,8 @@ u64 __section(".mmuoff.data.write") vabits_actual;
 EXPORT_SYMBOL(vabits_actual);
 
 /* IAMROOT, 2021.10.02:
- * - randomize 결과로 나온 offset을 저장하는 변수
+ * - VA <-> PA 주소 변환시 사용하는 voffset 값.
+ *   __primary_switched(..):head.S 에서 초기화된다.
  */
 u64 kimage_voffset __ro_after_init;
 EXPORT_SYMBOL(kimage_voffset);
@@ -1061,8 +1062,8 @@ void __init paging_init(void)
 	/* IAMROOT, 2021.10.30:
 	 * - mapping을 위해 잠시 FIX_PGD를 사용한다.
 	 *
-	 *   보안상의 이유로 FIXMAP을 사용하며 va(swapper_pg_dir)을 사용해도 의도한
-	 *   정규 매핑 작업에는 지장이 없다.
+	 *   보안상의 이유로 FIXMAP을 사용하며 va(swapper_pg_dir)을 사용해도
+	 *   의도한 정규 매핑 작업에는 지장이 없다.
 	 */
 	pgd_t *pgdp = pgd_set_fixmap(__pa_symbol(swapper_pg_dir));
 

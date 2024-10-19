@@ -25,9 +25,9 @@
  * The checksum will be used with the BOOTCONFIG_MAGIC and the size for
  * embedding the bootconfig in the initrd image.
  */
-/*
- * IAMROOT, 2022.01.04:
- * - 대충 1byte씩 더한것을 checksum으로 쓴다.
+/* IAMROOT, 2022.01.04:
+ * - @data, @size를 이용하여 checksum을 계산한다.
+ *   (계산은 단순하게 1byte씩 더한다.)
  */
 static inline __init u32 xbc_calc_checksum(void *data, u32 size)
 {

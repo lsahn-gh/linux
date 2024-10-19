@@ -232,24 +232,27 @@ bool parse_option_str(const char *str, const char *option)
  * You can use " around spaces, but can't escape ".
  * Hyphens and underscores equivalent in parameter names.
  */
-/*
- * IAMROOT, 2022.01.05:
- * @args parse 시작 postion
- * @param parse된 arg
- * @val param의 value
- * @return next pos
+/* IAMROOT, 2022.01.05:
+ * - @args에서 'key=value' 형태의 arguments를 입력받아 parsing 한 뒤
+ *   @param에 key, @val에 value를 저장한다.
  */
 char *next_arg(char *args, char **param, char **val)
 {
 	unsigned int i, equals = 0;
 	int in_quote = 0, quoted = 0;
 
+	/* IAMROOT, 2024.10.15:
+	 * - @args가 '"'라면 quote 안에 있는 것을 알리기 위해 flag를 설정한다.
+	 */
 	if (*args == '"') {
 		args++;
 		in_quote = 1;
 		quoted = 1;
 	}
 
+	/* IAMROOT, 2024.10.15:
+	 * - loop를 수행하여 '=' 문자를 찾아 해당 index를 equals에 저장한다.
+	 */
 	for (i = 0; args[i]; i++) {
 		if (isspace(args[i]) && !in_quote)
 			break;
@@ -261,14 +264,29 @@ char *next_arg(char *args, char **param, char **val)
 			in_quote = !in_quote;
 	}
 
+	/* IAMROOT, 2024.10.15:
+	 * - 'key=value' 구조에서 'key' 부분을 @param에 저장한다.
+	 */
 	*param = args;
+	/* IAMROOT, 2024.10.15:
+	 * - '=' 문자가 없다면 value가 없는 것이므로 @val에 NULL을 저장한다.
+	 */
 	if (!equals)
 		*val = NULL;
 	else {
+		/* IAMROOT, 2024.10.15:
+		 * - '=' 문자를 찾았고 @param 처리를 위해 '='을 NULL로 변경한다.
+		 */
 		args[equals] = '\0';
+		/* IAMROOT, 2024.10.15:
+		 * - '=' 문자 index의 다음은 value이므로 @val에 저장한다.
+		 */
 		*val = args + equals + 1;
 
 		/* Don't include quotes in value. */
+		/* IAMROOT, 2024.10.15:
+		 * - '"' 문자 및 empty string 예외 처리.
+		 */
 		if (**val == '"') {
 			(*val)++;
 			if (args[i-1] == '"')

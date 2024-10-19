@@ -99,10 +99,16 @@ bool parameq(const char *a, const char *b)
 
 static bool param_check_unsafe(const struct kernel_param *kp)
 {
+	/* IAMROOT, 2024.10.16:
+	 * - lockdown 모드 flag가 활성화되어 있다면 false를 반환한다.
+	 */
 	if (kp->flags & KERNEL_PARAM_FL_HWPARAM &&
 	    security_locked_down(LOCKDOWN_MODULE_PARAMETERS))
 		return false;
 
+	/* IAMROOT, 2024.10.16:
+	 * - unsafe parameter flag가 설정되어 있다면 add_taint(..)를 호출한다.
+	 */
 	if (kp->flags & KERNEL_PARAM_FL_UNSAFE) {
 		pr_notice("Setting dangerous option %s - tainting kernel\n",
 			  kp->name);
@@ -112,16 +118,10 @@ static bool param_check_unsafe(const struct kernel_param *kp)
 	return true;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - early에서 진입한경우 num_params는 전부 0이되어 무조건 handle_unknown을 호출한다.
- *   (do_early_param)
- * @param commandline에서 parse된 param
- * @val @param의 value값 (commandline : param1=value1, param2=value2 ..)
- *			 (이런 형식을 key value pair라고 부른다.)
- * @params struct kernel_param block들. __setup_param으로 등록된다.
- *
- * @params에서 @param이 있는지 검색한다.
+/* IAMROOT, 2021.10.16:
+ * - 아래 2가지 경우로 나뉘어 처리된다.
+ *   1) @param이 @params에 있는 경우 @params.ops->set(..) 호출.
+ *   2) @param이 @params에 없는 경우 @handle_unknown(..) 호출.
  */
 static int parse_one(char *param,
 		     char *val,
@@ -137,32 +137,46 @@ static int parse_one(char *param,
 	unsigned int i;
 	int err;
 
+	/* IAMROOT, 2024.10.16:
+	 * - @num_params가 0이면 params에서 탐색하지 않고 바로
+	 *   @handle_unknown(..)을 호출한다.
+	 */
+
 	/* Find parameter */
 	for (i = 0; i < num_params; i++) {
-/*
- * IAMROOT, 2022.02.19:
- * - @param이 @params[i].name에 있는지 확인한다.
- */
+		/* IAMROOT, 2022.02.19:
+		 * - @param이 @params[i].name에 있는지 확인한다.
+		 *
+		 *   Note. @num_params가 0이면 loop가 동작하지 않으므로
+		 *   null check 하지 않아도 상관없다.
+		 */
 		if (parameq(param, params[i].name)) {
-
-/*
- * IAMROOT, 2022.02.19:
- * - 요청범위(@min_level, @max_level)을 벗어나면 skip
- */
+			/* IAMROOT, 2022.02.19:
+			 * - 요청범위(@min_level, @max_level)를 벗어나면 0 반환.
+			 */
 			if (params[i].level < min_level
 			    || params[i].level > max_level)
 				return 0;
 			/* No one handled NULL, so do it here. */
+			/* IAMROOT, 2024.10.16:
+			 * - @val이 null인데 @params.ops가 NOARG를 허용하지 않는 경우
+			 *   오류 -EINVAL을 반환한다.
+			 */
 			if (!val &&
 			    !(params[i].ops->flags & KERNEL_PARAM_OPS_FL_NOARG))
 				return -EINVAL;
+
+			/* IAMROOT, 2024.10.16:
+			 * - arguments 예외처리는 끝.
+			 */
+
 			pr_debug("handling %s with %p\n", param,
 				params[i].ops->set);
 			kernel_param_lock(params[i].mod);
-/*
- * IAMROOT, 2022.02.19:
- * - @param이 @params에서 발견된경우 @params에 등록된 set 함수가 호출된다.
- */
+			/* IAMROOT, 2022.02.19:
+			 * - @param이 @params의 부분 집합인 경우 @params.ops->set(..)을
+			 *   호출한다.
+			 */
 			if (param_check_unsafe(&params[i]))
 				err = params[i].ops->set(val, &params[i]);
 			else
@@ -172,11 +186,10 @@ static int parse_one(char *param,
 		}
 	}
 
-
-/*
- * IAMROOT, 2022.02.19:
- * - @param을 @params에서 발견을 못한 경우 handle_unknown으로 실행한다.
- */
+	/* IAMROOT, 2024.10.16:
+	 * - @num_params가 0이거나 @param을 @params 에서 찾지 못한 경우
+	 *   @handle_unknown(..)을 호출한다.
+	 */
 	if (handle_unknown) {
 		pr_debug("doing %s: %s='%s'\n", doing, param, val);
 		return handle_unknown(param, val, doing, arg);
@@ -187,40 +200,47 @@ static int parse_one(char *param,
 }
 
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
-/*
- * IAMROOT, 2022.01.04:
- * 1) parse_early_options (early)
- * parse_args("early options", cmdline, NULL, 0, 0, 0, NULL, do_early_param);
+/* IAMROOT, 2022.01.04: TODO
+ * -
  *
- * - obs_kernel_param을 처리하기 위해 진입한다. kernel_param은 여기서 처리안할
- *   것이므로 관련 인자를 null로 처리하고, cmdline에서 parse한 param은 전부
- *   do_early_param으로 넘겨 __setup_start에서 ealry로 등록된 param이 있는지 찾는다.
+ *   1) parse_early_options (early)
+ *      parse_args("early options", cmdline,
+ *                 NULL, 0, 0, 0, NULL, do_early_param);
  *
- * 2) setup_boot_config (boot config)
- * parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL, bootconfig_params);
+ *      obs_kernel_param을 처리하기 위해 진입한다. kernel_param은 여기서
+ *      처리안할 것이므로 관련 인자를 null로 처리하고, cmdline에서 parse한
+ *      param은 전부 do_early_param으로 넘겨 __setup_start에서 early로
+ *      등록된 param이 있는지 찾는다.
  *
- * - bootconfig라는 parameter가 있는지 없는지에 대해서만 tmp_cmdline에서 검색한다.
+ *   2) setup_boot_config (boot config)
+ *      parse_args("bootconfig", tmp_cmdline,
+ *                 NULL, 0, 0, 0, NULL, bootconfig_params);
  *
- * 3) normal
- * parse_args("Booting kernel", static_command_line, __start___param,
- * __stop___param - __start___param, -1, -1, NULL, &unknown_bootoption);
+ *      bootconfig라는 parameter가 있는지 없는지에 대해서만 tmp_cmdline에서
+ *      검색한다.
  *
- * - __start__param은 module_param, core_param등의 macro로 만들어진
- *   __param(kernel_param)으로 정의된 parameter block.
- * - static_command_line에서 param을 추출해 __start___param에서 param을 검색한다.
- *   param이 존재하면 __start___param에서 찾은 것들 중에
- *   -1 level로 등록된(core_param, module_param_cb등)것들은 set함수 호출, 아니면
- *   무시가 되며 만약 param을 아에 못찾았다면 unknown_bootoption을 호출한다.
- *   unknown_options에서는 old param으로 등록됬는지 한번 더 검사하고 아닌 경우
+ *   3) normal
+ *      parse_args("Booting kernel", static_command_line,
+ *                 __start___param, __stop___param - __start___param,
+ *                 -1, -1, NULL, &unknown_bootoption);
  *
- * 4) set_init_arg(init argument)
- * parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
- * NULL, set_init_arg);
- * - 
+ *      __start__param은 module_param, core_param등의 macro로 만들어진
+ *      __param(kernel_param)으로 정의된 parameter block.
  *
- * 5) set_init_arg(extra init argument)
- * parse_args("Setting extra init args", extra_init_args,
- * NULL, 0, -1, -1, NULL, set_init_arg);
+ *      static_command_line에서 param을 추출해 __start___param에서 param을
+ *      검색한다. param이 존재하면 __start___param에서 찾은 것들 중에
+ *      -1 level로 등록된(core_param, module_param_cb등)것들은 set함수 호출,
+ *      아니면 무시가 되며 만약 param을 아에 못찾았다면 unknown_bootoption을
+ *      호출한다. unknown_options에서는 old param으로 등록됬는지
+ *      한번 더 검사하고 아닌 경우
+ *
+ *   4) set_init_arg(init argument)
+ *      parse_args("Setting init args", after_dashes,
+ *                 NULL, 0, -1, -1, NULL, set_init_arg);
+ *
+ *   5) set_init_arg(extra init argument)
+ *      parse_args("Setting extra init args", extra_init_args,
+ *                 NULL, 0, -1, -1, NULL, set_init_arg);
  *
  * --- macro, struct, level 정리
  * - module_param : kernel_param, -1
@@ -271,28 +291,33 @@ char *parse_args(const char *doing,
 		int ret;
 		int irq_was_disabled;
 
+		/* IAMROOT, 2024.10.15:
+		 * - 'key=value' 형식의 @args에서 key와 value를 @param, @val에
+		 *   저장한다.
+		 */
 		args = next_arg(args, &param, &val);
-/*
- * IAMROOT, 2021.10.16:
- * - value가 없고 param이 "--" 이면 종료한다.
- *   args는 " -- "뒤의 postion일 것이다.
- */
+
+		/* IAMROOT, 2021.10.16:
+		 * - @val이 null이고 @param 값이 "--" 이면 종료한다.
+		 *
+		 *   여기서 리턴 값은 err(null)이거나 다음 args 값이다.
+		 */
 		/* Stop at -- */
 		if (!val && strcmp(param, "--") == 0)
 			return err ?: args;
+
 		irq_was_disabled = irqs_disabled();
-/*
- * IAMROOT, 2021.10.16:
- * -parse_early_options parse_args를 불러왔을때 unknown은 do_early_param.
- * - setup_boot_config 에서는 bootconfig_params
- */
+
+		/* IAMROOT, 2021.10.16:
+		 * - @param, @val을 @params에서 찾아 처리하거나 @unknown을 호출한다.
+		 */
 		ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, arg, unknown);
-/*
- * IAMROOT, 2021.10.16:
- * - parse_one을 통해 실행되는 early param code에서 irq를 키는등의 행위를 했다면
- *   여기서 warring을 띄워준다.
- */
+
+		/* IAMROOT, 2021.10.16:
+		 * - parse_one(..)에서 params.ops->set(..) 또는 unknown(..)에서
+		 *   irq을 enable 했다면 warn log를 출력하여 경고한다.
+		 */
 		if (irq_was_disabled && !irqs_disabled())
 			pr_warn("%s: option '%s' enabled irq's!\n",
 				doing, param);

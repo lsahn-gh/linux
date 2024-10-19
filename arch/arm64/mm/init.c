@@ -337,6 +337,10 @@ static int __init early_mem(char *p)
 }
 early_param("mem", early_mem);
 
+/* IAMROOT, 2024.10.12:
+ * - arm64 전용 memblock 초기화 함수.
+ *   1).
+ */
 void __init arm64_memblock_init(void)
 {
 	/* IAMROOT, 2021.10.23:
@@ -387,7 +391,7 @@ void __init arm64_memblock_init(void)
 	}
 
 	/* IAMROOT, 2021.10.23:
-	 * - 지원되는 paddr 범위를 벗어나는 region을 memblock에서 제거한다.
+	 * - 지원되는 paddr space 범위를 벗어나는 region을 memblock에서 제거한다.
 	 *
 	 *   예) pa 48bits 시스템에서 PHYS_MASK_SHIFT 값은 48.
 	 *       0x0001_0000_0000_0000 == 1ULL << 48
@@ -408,6 +412,11 @@ void __init arm64_memblock_init(void)
 	memstart_addr = round_down(memblock_start_of_DRAM(),
 				   ARM64_MEMSTART_ALIGN);
 
+	/* IAMROOT, 2024.10.12:
+	 * - DRAM의 크기가 엄청나게 커서 lm region 보다 큰 상황이다.
+	 *   이 경우 VA_BITS를 늘려서 커버할 수 있도록 해야하며 이를 위해
+	 *   warning 메세지를 출력하도록 한다.
+	 */
 	if ((memblock_end_of_DRAM() - memstart_addr) > linear_region_size)
 		pr_warn("Memory doesn't fit in the linear mapping, VA_BITS too small\n");
 
@@ -415,6 +424,12 @@ void __init arm64_memblock_init(void)
 	 * - linear region 또는 pa_symbol(_end) 중에 addr가 높은 쪽을 선택하고
 	 *   해당 addr가 커버할 수 있는 범위 이상인 region을 memblock에서
 	 *   제거한다.
+	 *
+	 *   arm64에서는 대부분 lm이 높다. lm은 128TB이고 pa(_end)는
+	 *   pa(_end) = va(_end) - voffset 이기 때문이다. 다만 pa(_end)가
+	 *   높은 경우는 phys-mem 크기가 엄청나게 커 lm 크기보다 크며
+	 *   이때 lm 크기를 기준으로 memblock remove를 호출하면 phys-mem 영역에
+	 *   손실이 발생하게 된다.
 	 */
 	/*
 	 * Remove the memory that we will not be able to cover with the

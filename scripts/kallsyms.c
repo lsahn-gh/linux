@@ -42,6 +42,9 @@ struct addr_range {
 	unsigned long long start, end;
 };
 
+/* IAMROOT, 2024.10.12:
+ * - _text 변수는 vmlinux.lds.S에 의해 KIMAGE_VADDR 값이 저장된다.
+ */
 static unsigned long long _text;
 static unsigned long long relative_base;
 static struct addr_range text_ranges[] = {

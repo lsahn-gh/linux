@@ -71,8 +71,7 @@
 OUTPUT_ARCH(aarch64)
 ENTRY(_text)
 
-/*
- * IAMROOT, 2022.08.27:
+/* IAMROOT, 2022.08.27:
  * - jiffes 정의.
  */
 jiffies = jiffies_64;
@@ -147,13 +146,13 @@ SECTIONS
 
 	. = KIMAGE_VADDR;
 
-/* IAMROOT, 2024.02.17:
- * - .head.text: early stage에서 동작하는 code가 존재하는 영역.
- *               kernel의 주요 기능들이 초기화되기 전에 짧게 수행되어야 하는
- *               초기화 code가 존재한다.
- * - .text: kernel의 주요 기능들이 초기화되고 난 뒤에 수행되는 여러가지
- *          기능들이 존재하는 영역.
- */
+	/* IAMROOT, 2024.02.17:
+	 * - .head.text: early stage에서 동작하는 code가 존재하는 영역.
+	 *               kernel의 주요 기능들이 초기화되기 전에 짧게 수행되어야
+	 *               하는 초기화 code가 존재한다.
+	 * - .text: kernel의 주요 기능들이 초기화되고 난 뒤에 수행되는 여러가지
+	 *          기능들이 존재하는 영역.
+	 */
 	.head.text : {
 		_text = .;
 		HEAD_TEXT
@@ -194,16 +193,16 @@ SECTIONS
 
 	HYPERVISOR_DATA_SECTIONS
 
-/* IAMROOT, 2021.11.16:
- * - idmap_pg_dir 목적
- *   1). head.S에서 mmu disable -> enable로 상태가 변경될 때 kernel code를
- *       계속 실행할 수 있도록 돕는 임시 page table. pc + 1은 여전히 paddr
- *       이므로 idmap_pg_dir을 통해 수행하지 않는다면 page fault가 발생한다.
- *   2). TODO
- *
- * - HYPERVISOR_DATA_SECTIONS의 마지막에서 PAGE_SIZE로 align 되어 있으므로
- *   idmap_pg_dir는 page size에 맞춰 align된다.
- */
+	/* IAMROOT, 2021.11.16: TODO
+	 * - idmap_pg_dir 목적
+	 *   1). head.S에서 mmu disable -> enable로 상태가 변경될 때 kernel code를
+	 *       계속 실행할 수 있도록 돕는 임시 page table. pc + 1은 여전히 paddr
+	 *       이므로 idmap_pg_dir을 통해 수행하지 않는다면 page fault가 발생한다.
+	 *   2). TODO
+	 *
+	 * - HYPERVISOR_DATA_SECTIONS의 마지막에서 PAGE_SIZE로 align 되어 있으므로
+	 *   idmap_pg_dir는 page size에 맞춰 align된다.
+	 */
 	idmap_pg_dir = .;
 	. += IDMAP_DIR_SIZE;
 	idmap_pg_end = .;
@@ -212,10 +211,15 @@ SECTIONS
 	tramp_pg_dir = .;
 	. += PAGE_SIZE;
 #endif
-
+	/* IAMROOT, 2024.10.12:
+	 * - page size가 4k라면 4k 크기를 가짐.
+	 */
 	reserved_pg_dir = .;
 	. += PAGE_SIZE;
 
+	/* IAMROOT, 2024.10.12:
+	 * - page size가 4k라면 4k 크기를 가짐.
+	 */
 	swapper_pg_dir = .;
 	. += PAGE_SIZE;
 
@@ -244,10 +248,10 @@ SECTIONS
 
 	.init.data : {
 		INIT_DATA
-/*
- * IAMROOT, 2021.10.16:
- * - .init.section에 사용하는 구조체 struct obs_kernel_param 가 16byte를 가지고있다.
- */
+		/* IAMROOT, 2021.10.16:
+		 * - .init.section에 사용하는 구조체 struct obs_kernel_param 가
+		 *   16bytes를 가진다.
+		 */
 		INIT_SETUP(16)
 		INIT_CALLS
 		CON_INITCALL
@@ -267,21 +271,19 @@ SECTIONS
 		*(.rela .rela*)
 	}
 
-/*
- * IAMROOT, 2021.08.28:
- * - KIMAGE_VADDR으로부터 .rela.dyn까지의 offset
- *   ADDR : linker scriptor 명령어. 절대주소를 return한다.
- *   ABSOLUTE : linker scriptor 명령어. None relocate address
- *   SIZEOF : linker scriptor 명령어. 해당 section의 사이즈를
- *	byte단위로 가져온다.
- */
+	/* IAMROOT, 2021.08.28:
+	 * - KIMAGE_VADDR으로부터 .rela.dyn까지의 offset
+	 *   ADDR : linker scriptor 명령어. 절대주소를 return한다.
+	 *   ABSOLUTE : linker scriptor 명령어. None relocate address
+	 *   SIZEOF : linker scriptor 명령어. 해당 section의 사이즈를
+	 *   byte단위로 가져온다.
+	 */
 	__rela_offset	= ABSOLUTE(ADDR(.rela.dyn) - KIMAGE_VADDR);
 	__rela_size	= SIZEOF(.rela.dyn);
 
-/*
- * IAMROOT, 2021.08.28:
- * - section이름만 틀리고 바로위와 비슷한다는것을 짚고넘어가자.
- */
+	/* IAMROOT, 2021.08.28:
+	 * - section이름만 틀리고 바로위와 비슷한다는것을 짚고넘어가자.
+	 */
 #ifdef CONFIG_RELR
 	.relr.dyn : ALIGN(8) {
 		*(.relr.dyn)
@@ -323,11 +325,12 @@ SECTIONS
 
 	BSS_SECTION(SBSS_ALIGN, 0, 0)
 
-/* IAMROOT, 2021.11.16:
- * - init_pg_dir 목적
- *   head.S에서 mmu가 enable되고 나서 처리되는 모든 va(kernel code)가 매핑된
- *   임시 page table. setup_arch() -> paging_init() 이후에 사용되지 않는다.
- */
+	/* IAMROOT, 2021.11.16:
+	 * - init_pg_dir 목적
+	 *   head.S에서 mmu가 enable되고 나서 처리되는 모든 va(kernel code)가
+	 *   매핑된 임시 page table. setup_arch() -> paging_init() 이후에
+	 *   사용되지 않는다.
+	 */
 	. = ALIGN(PAGE_SIZE);
 	init_pg_dir = .;
 	. += INIT_DIR_SIZE;

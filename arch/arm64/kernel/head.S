@@ -964,89 +964,90 @@ SYM_FUNC_END(__create_page_tables)
  *   x0 = __PHYS_OFFSET
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
-/* IAMROOT, 2021.09.04:
- * - el1 sp(stack pointer)를 통해 init_stack에 존재하는 struct pt_regs 구조체를
- *   0으로 초기화하고 sp_el0을 init_thread_union(init_task)를 바라보도록
- *   설정한다. 또한 @x29 레지스터는 struct pt_regs의 stackframe을 바라본다.
- *
- *   init_thread_union >> INIT_TASK_DATA >> RW_DATA >> vmlinux.lds.S
- */
+	/* IAMROOT, 2021.09.04:
+	 * - el1 sp(stack pointer)를 통해 init_stack에 존재하는
+	 *   struct pt_regs 구조체를 0으로 초기화하고 sp_el0을
+	 *   init_thread_union(init_task)를 바라보도록 설정한다.
+	 *   또한 @x29 레지스터는 struct pt_regs의 stackframe을 바라본다.
+	 *
+	 *   init_thread_union >> INIT_TASK_DATA >> RW_DATA >> vmlinux.lds.S
+	 */
 	adr_l	x4, init_task
 	init_cpu_task x4, x5, x6
 
-/* IAMROOT, 2023.11.08:
- * - 현재 init_stack의 memory layout 다이어그램 (CONFIG에 따라 달라짐)
- *
- *           .           . --> 0xffff ... higher addr
- *           | ...       |
- *           | ...       |
- *   +-------+-----------+ !!- end: init_stack
- *           | 0000 .... |          stack size: THREAD_SIZE (16KB: kasan off)
- *           | 0000 0000 |
- *           |-----------| <-- struct pt_regs object의 offset
- *    STACK  | xxxx .... |
- *    RANGE  |           | <-- sp (el1 stack pointer, grow down)
- *           |           |     pt_regs offset을 넘어서 사용할 수 없음
- *           |           |
- *           |           |
- *   +-------+-----------+ !!- start: init_stack == init_thread_union
- *           | ...       |
- *           | ...       |
- *           '           ' --> 0xffff ... lower addr
- */
+	/* IAMROOT, 2023.11.08:
+	 * - 현재 init_stack의 memory layout 다이어그램 (CONFIG에 따라 달라짐)
+	 *
+	 *           .           . --> 0xffff ... higher addr
+	 *           | ...       |
+	 *           | ...       |
+	 *   +-------+-----------+ !!- end: init_stack
+	 *           | 0000 .... |          stack size: THREAD_SIZE (16KB: kasan off)
+	 *           | 0000 0000 |
+	 *           |-----------| <-- struct pt_regs object의 offset
+	 *    STACK  | xxxx .... |
+	 *    RANGE  |           | <-- sp (el1 stack pointer, grow down)
+	 *           |           |     pt_regs offset을 넘어서 사용할 수 없음
+	 *           |           |
+	 *           |           |
+	 *   +-------+-----------+ !!- start: init_stack == init_thread_union
+	 *           | ...       |
+	 *           | ...       |
+	 *           '           ' --> 0xffff ... lower addr
+	 */
 
-/* IAMROOT, 2021.09.04:
- * - el1 vector table 주소 설정 ('vectors' in kernel/entry.S).
- */
+	/* IAMROOT, 2021.09.04:
+	 * - el1 vector table 주소 설정 ('vectors' in kernel/entry.S).
+	 */
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
 	msr	vbar_el1, x8			// vector table address
 	isb
 
-/* IAMROOT, 2021.09.04:
- * - init_stack을 초기화하였으니 previous stack frame 정보(fp, lr)를 kernel의
- *   swapper stack에 저장한다. 이유는 현재 __primary_switched 함수를 호출한
- *   상태이기 때문이다.
- *   이제 nested procedure call이 가능하고 현재 stack frame을 가리키도록
- *   fp(@x29)를 보정한다.
- *
- * - FYI, 현재 stack frame에는 fp', lr'의 정보가 저장되어 있으며 위 내용은
- *   AAPCS64 std를 확인하면 더 자세하게 알 수 있다.
- *
- * - 만약 fp, lr을 저장하지 않으면 아래 bl을 실행할 때 해당 정보가 손실된다.
- *
- *   @fp: frame pointer
- *        이전 fp 정보를 가리키는 pointer.
- *   @lr: link register
- *        caller의 주소를 가지고 있는 reg.
- */
+	/* IAMROOT, 2021.09.04:
+	 * - init_stack을 초기화하였으니 previous stack frame 정보(fp, lr)를
+	 *   kernel의 swapper stack에 저장한다. 현재 __primary_switched 함수를
+	 *   호출한 상태이기 때문이다.
+	 *   이제 nested procedure call이 가능하고 현재 stack frame을 가리키도록
+	 *   fp(@x29)를 보정한다.
+	 *
+	 * - FYI, 현재 stack frame에는 fp', lr'의 정보가 저장되어 있으며 위 내용은
+	 *   AAPCS64 std를 확인하면 더 자세하게 알 수 있다.
+	 *
+	 * - 만약 fp, lr을 저장하지 않으면 아래 bl을 실행할 때 해당 정보가 손실된다.
+	 *
+	 *   @fp: frame pointer
+	 *        이전 fp 정보를 가리키는 pointer.
+	 *   @lr: link register
+	 *        caller의 주소를 가지고 있는 reg.
+	 */
 	stp	x29, x30, [sp, #-16]!
 	mov	x29, sp
 
-/* IAMROOT, 2021.09.04:
- * - 부팅시 부트로더에서 넘겨받은 pa(fdt)를 __fdt_pointer 변수에 저장한다.
- *   @x5는 temp로 사용한다.
- *
- *   mmu enable 되어 먼거리로 branch가 가능하니 지금 변수에 저장한다.
- */
+	/* IAMROOT, 2021.09.04:
+	 * - 부팅시 부트로더에서 넘겨받은 pa(fdt)를 __fdt_pointer 변수에 저장한다.
+	 *   @x5는 temp로 사용한다.
+	 *
+	 *   mmu enable 되어 먼거리로 branch가 가능하니 지금 변수에 저장한다.
+	 */
 	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
 
-/* IAMROOT, 2021.09.04:
- * - va(_text)와 pa(_text) 간의 offset을 구해서 kimage_voffset에 저장한다.
- *   voffset은 va와 pa간 주소변환에 사용된다.
- *
- * - kimage_voffset = kimage_vaddr - __PHYS_OFFSET
- *   kimage_vaddr  == va(_text)
- *   __PHYS_OFFSET == pa(_text)
- */
+	/* IAMROOT, 2021.09.04:
+	 * - va(_text)와 pa(_text) 간의 offset을 구해서 kimage_voffset에
+	 *   저장한다. voffset은 VA와 PA간 주소변환에 사용된다.
+	 *
+	 *   kimage_vaddr  : va(_text)
+	 *   __PHYS_OFFSET : pa(_text)
+	 *   kimage_voffset: kimage_vaddr - __PHYS_OFFSET
+	 */
 	ldr_l	x4, kimage_vaddr		// Save the offset between
 	sub	x4, x4, x0			// the kernel virtual and
 	str_l	x4, kimage_voffset, x5		// physical mappings
 
-/* IAMROOT, 2021.09.04:
- * - el0 app을 동작시킬때는 loader가 bss를 초기화하지만 kernel은 자신이
- *   해야한다. AAPCS64 std에 따라 @x0, @x1, @x2 args를 세팅하고 memset을
- *   호출한다.
- */
+	/* IAMROOT, 2021.09.04:
+	 * - el0 app을 동작시킬때는 loader가 bss를 초기화하지만 kernel은 자신이
+	 *   해야한다. AAPCS64 std에 따라 @x0, @x1, @x2 args를 세팅하고 memset을
+	 *   호출한다.
+	 */
 	// Clear BSS
 	adr_l	x0, __bss_start
 	mov	x1, xzr
@@ -1059,44 +1060,44 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	bl	kasan_early_init
 #endif
 
-/* IAMROOT, 2023.11.11:
- * - early_fdt_map, init_feature_override는 c로 작성된 procedure 이므로
- *   stack frame 생성, sp 보정은 compiler가 처리한다.
- */
+	/* IAMROOT, 2023.11.11:
+	 * - early_fdt_map, init_feature_override는 c로 작성된 procedure 이므로
+	 *   stack frame 생성, sp 보정은 compiler가 처리한다.
+	 */
 	mov	x0, x21				// pass FDT address in x0
 	bl	early_fdt_map			// Try mapping the FDT early
 	bl	init_feature_override		// Parse cpu feature overrides
 
 #ifdef CONFIG_RANDOMIZE_BASE
-/* IAMROOT, 2021.09.04:
- * - CONFIG_RANDOMIZE_BASE == on이면 __primary_switch에서 __primary_switched를
- *   2번 호출하고, 처음에는 ret을 실행하며 두번째에는 tst를 통해 0번 label로
- *   이동하여 start_kernel을 실행하는 구조이다.
- *
- * - CONFIG_RELOCATABLE == on, CONFIG_RANDOMIZE_BASE == on시
- *   __primary_switch ~ start_kernel 사이의
- *   kimage_vaddr, kimage_voffset, init_pg_dir 변화 과정
- *
- *                         kimage_vaddr  | kimage_voffset | init_pg_dir
- * ----------------------+---------------+----------------+-------------
- * __primary_switch      | va(_text)     | 계산전         | 
- * ----------------------+---------------+----------------+-------------
- * __relocate_kernel(1)  | rel va(_text) | 계산전         | 
- * ----------------------+---------------+----------------+-------------
- * __primary_switched(1) | rel va(_text) | rel va(_text)  | 
- *                       |               | -   pa(_text)  |
- * ----------------------+---------------+----------------+-------------
- * __create_page_tables  | rel va(_text) | rel va(_text)  | + offset
- *                       |               | -   pa(_text)  |
- * ----------------------+---------------+----------------+-------------
- * __relocate_kernel(2)  | rel, offset   | rel va(_text)  | + offset
- *                       | va(_text)     | -   pa(_text)  |
- * ----------------------+---------------+----------------+-------------
- * __primary_switched(2) | rel, offset   | rel, offset    | + offset
- *                       | va(_text)     | va(_text)      | 
- *                       |               | -   pa(_text)  |
- * ----------------------+---------------+----------------+-------------
- */
+	/* IAMROOT, 2021.09.04: TODO
+	 * - CONFIG_RANDOMIZE_BASE == on이면 __primary_switch에서 __primary_switched를
+	 *   2번 호출하고, 처음에는 ret을 실행하며 두번째에는 tst를 통해 0번 label로
+	 *   이동하여 start_kernel을 실행하는 구조이다.
+	 *
+	 * - CONFIG_RELOCATABLE == on, CONFIG_RANDOMIZE_BASE == on시
+	 *   __primary_switch ~ start_kernel 사이의
+	 *   kimage_vaddr, kimage_voffset, init_pg_dir 변화 과정
+	 *
+	 *                         kimage_vaddr  | kimage_voffset | init_pg_dir
+	 * ----------------------+---------------+----------------+-------------
+	 * __primary_switch      | va(_text)     | 계산전         | 
+	 * ----------------------+---------------+----------------+-------------
+	 * __relocate_kernel(1)  | rel va(_text) | 계산전         | 
+	 * ----------------------+---------------+----------------+-------------
+	 * __primary_switched(1) | rel va(_text) | rel va(_text)  | 
+	 *                       |               | -   pa(_text)  |
+	 * ----------------------+---------------+----------------+-------------
+	 * __create_page_tables  | rel va(_text) | rel va(_text)  | + offset
+	 *                       |               | -   pa(_text)  |
+	 * ----------------------+---------------+----------------+-------------
+	 * __relocate_kernel(2)  | rel, offset   | rel va(_text)  | + offset
+	 *                       | va(_text)     | -   pa(_text)  |
+	 * ----------------------+---------------+----------------+-------------
+	 * __primary_switched(2) | rel, offset   | rel, offset    | + offset
+	 *                       | va(_text)     | va(_text)      | 
+	 *                       |               | -   pa(_text)  |
+	 * ----------------------+---------------+----------------+-------------
+	 */
 	tst	x23, ~(MIN_KIMG_ALIGN - 1)	// already running randomized?
 	b.ne	0f
 	bl	kaslr_early_init		// parse FDT for KASLR options
@@ -1107,27 +1108,32 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 0:
 #endif
 
-/* IAMROOT, 2021.09.04: TODO
- * - VHE로 동작할 수 있는 환경이면 hvc-call을 호출하여 host-OS를 el2에서
- *   동작시킬 수 있도록 mode를 변경한다.
- */
+	/* IAMROOT, 2021.09.04: TODO
+	 * - VHE로 동작할 수 있는 환경이면 hvc-call을 호출하여 host-OS를 el2에서
+	 *   동작시킬 수 있도록 mode를 변경한다.
+	 */
 	bl	switch_to_vhe			// Prefer VHE if possible
 
-/* IAMROOT, 2023.11.11:
- * - start_kernel(..)을 호출할 준비를 한다.
- *   start_kernel가 호출되면 저장해둔 stack frame 정보(fp', lr')는
- *   불필요하므로 stack에서 pop하여 버린다.
- *
- * - 현재 kernel은 다음 중 하나의 exception level에서 동작중이다.
- *   el1        : bootmode == el1 && CurrentEL == el1
- *   el1 w/ nVHE: bootmode == el2 && CurrentEL == el1 (hypervisor 환경)
- *   el2 w/ VHE : bootmode == el2 && CurrentEL == el2 (kvm 환경)
- */
+	/* IAMROOT, 2023.11.11:
+	 * - start_kernel(..)을 호출할 준비를 한다.
+	 *   start_kernel가 호출되면 저장해둔 stack frame 정보(fp', lr')는
+	 *   불필요하므로 stack에서 pop하여 버린다.
+	 *
+	 * - 현재 kernel은 다음 중 하나의 exception level에서 동작중이다.
+	 *   el1        : bootmode == el1 && CurrentEL == el1
+	 *   el1 w/ nVHE: bootmode == el2 && CurrentEL == el1 (hypervisor 환경)
+	 *   el2 w/ VHE : bootmode == el2 && CurrentEL == el2 (kvm 환경)
+	 */
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
 	ASM_BUG()
 SYM_FUNC_END(__primary_switched)
 
+	/* IAMROOT, 2024.10.12:
+	 * - '.rodata' section에 u64 크기의 공간을 지정하고 해당 공간의 alias를
+	 *.  kimage_vaddr로 지정한다 (변수 생성 개념).
+	 *   해당 변수는 _text 변수의 값을 가지고 있으며 ro 속성이라서 수정 불가.
+	 */
 	.pushsection ".rodata", "a"
 SYM_DATA_START(kimage_vaddr)
 	.quad		_text

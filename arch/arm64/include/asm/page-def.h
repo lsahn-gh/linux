@@ -12,6 +12,9 @@
 
 /* PAGE_SHIFT determines the page size */
 #define PAGE_SHIFT		CONFIG_ARM64_PAGE_SHIFT
+/* IAMROOT, 2024.10.12:
+ * - 4k인 경우 : 12
+ */
 #define PAGE_SIZE		(_AC(1, UL) << PAGE_SHIFT)
 
 /* IAMROOT, 2021.10.13:

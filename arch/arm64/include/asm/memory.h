@@ -117,6 +117,14 @@
  *   PAGE_OFFSET: 0xffff_0000_0000_0000
  *   PAGE_END   : 0xffff_8000_0000_0000
  *
+ *   Linear Mapping 이란?
+ *   - system의 vaddr와 paddr가 1:1로 매핑되는 영역을 의미한다.
+ *   - system이 물리 메모리에 직접 접근하기 위해 사용되는 영역이다.
+ *     > 이는 linear mapping에 접근하는 크기는 물리 메모리 제한된다는
+ *       의미지만 접근 허용 가능한 크기는 vaddr 크기일 것이다.
+ *   - 1:1 매핑이므로 page table 없이 offset 으로만 VA <-> PA 변환 가능.
+ *   - 디바이스 드라이버나 커널 데이터 구조, 버퍼 캐시등 메모리 관리 수행.
+ *
  *   2) KASAN CONFIG가 없으면 KASAN_SHADOW_END define 자체가 없어짐.
  *   KASAN이 적용안됬는데 define은 남아있는게 맞지 않다고 생각한거같고
  *   어짜피 BPF_JIT_REGION_START == KASAN_SHADOW_END == PAGE_END가 되서
@@ -207,8 +215,7 @@
  */
 #define MIN_THREAD_SHIFT	(14 + KASAN_THREAD_SHIFT)
 
-/*
- * IAMROOT, 2021.09.04:
+/* IAMROOT, 2021.09.04:
  * - CONFIG_VMAP_STACK : stack이란게 연속된 주소가 필요한데, VMAP_STACK을 사용하면
  *   연속된 가상주소를 이용해서 할당함으로 fragment를 회피하기 위한설정.
  *   64bit 시스템에서는 VA 48bit(PAGE_SIZE = 4kb)인 경우 16kb가 보통이다.
@@ -243,8 +250,7 @@
 #define THREAD_ALIGN		THREAD_SIZE
 #endif
 
-/*
- * IAMROOT, 2022.11.08:
+/* IAMROOT, 2022.11.08:
  * - THREAD_SIZE == page size
  */
 #define IRQ_STACK_SIZE		THREAD_SIZE
@@ -352,10 +358,8 @@ static inline unsigned long kaslr_offset(void)
 	return kimage_vaddr - KIMAGE_VADDR;
 }
 
-/*
- * IAMROOT, 2021.10.16:
- * - arm64는 일단은 memory min,max를 아래 define과 같이 적당히 잡고 나중에 초기화
- *   를한다
+/* IAMROOT, 2021.10.16:
+ * - arm64는 우선 memory min,max를 아래와 같이 적당히 잡고 나중에 초기화한다
  */
 /*
  * Allow all memory at the discovery stage. We will clip it later.

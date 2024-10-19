@@ -348,9 +348,13 @@ static int __init loglevel(char *str)
 early_param("loglevel", loglevel);
 
 #ifdef CONFIG_BLK_DEV_INITRD
-/*
- * IAMROOT, 2022.01.01: 
- * initrd 헤더에서 size와 csum 값을 읽어 반환한다. 
+/* IAMROOT, 2022.01.01:
+ * - 함수 호출시에 전역 변수 initrd_start, initrd_end 값은 아래와 같다.
+ *
+ *   1). initrd_start: va(phys_initrd_start)
+ *   2). initrd_end  : initrd_start + phys_initrd_size
+ *
+ *   함수 리턴 전에 @_size, @_csum 값을 설정한다.
  */
 static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 {
@@ -359,15 +363,16 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 	u32 *hdr;
 	int i;
 
+	/* IAMROOT, 2024.10.14:
+	 * - @initrd_end 변수가 초기화되지 않았다면 skip한다.
+	 */
 	if (!initrd_end)
 		return NULL;
 
-/*
- * IAMROOT, 2022.01.01: 
- * initrd 영역의 가장 마지막에서 "#BOOTCONFIG\n" 문자열을 찾는다.
- * align 관계로 1바이트씩 최대 4번 이동하여 비교 검색한다.
- */
-
+	/* IAMROOT, 2022.01.01:
+	 * - BOOTCONFIG의 MAGIC 문자열을 제외한 실제 payload의 시작주소를
+	 *   저장한다.
+	 */
 	data = (char *)initrd_end - BOOTCONFIG_MAGIC_LEN;
 	/*
 	 * Since Grub may align the size of initrd to 4, we must
@@ -380,21 +385,28 @@ static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 	}
 	return NULL;
 
-/*
- * IAMROOT, 2022.01.01: 
- * <----------------initrd-------------------------------------->
- *                           | header            | #BOOTCONFIG\n
- *                           | size + csum + ... |
- * - Documentation/admin-guide/bootconfig.rst 참고
- *   Since the boot configuration file is loaded with initrd,
- *   it will be added to the end of the initrd (initramfs)
- *   image file with padding, size, checksum and 12-byte magic word
- *   as below.
- *
- *   [initrd][bootconfig][padding][size(le32)][checksum(le32)][#BOOTCONFIGn]
- */
-
 found:
+	/* IAMROOT, 2022.01.01:
+	 * - 아래 layout으로 payload를 파싱한다.
+	 *
+	 *   [initrd][bootconfig][padding][size(le32)][checksum(le32)][#BOOTCONFIG\n]
+	 *
+	 *   :   ...   :
+	 *   |         |
+	 *   +---------+  <!-- hdr
+	 *   |         |   .
+	 *   |  size   |   |  hdr[0]
+	 *   |         |   '
+	 *   +---------+  <!-- csum
+	 *   |         |   .
+	 *   |  csum   |   |  hdr[1]
+	 *   |         |   '
+	 *   +---------+  <!-- data
+	 *   |         |   .
+	 *   |  MAGIC  |   |  '#BOOTCONFIG\n'
+	 *   |         |   '
+	 *   +---------+  <!-- initrd_end
+	 */
 	hdr = (u32 *)(data - 8);
 	size = le32_to_cpu(hdr[0]);
 	csum = le32_to_cpu(hdr[1]);
@@ -405,6 +417,26 @@ found:
 			size, initrd_end - initrd_start);
 		return NULL;
 	}
+
+	/* IAMROOT, 2024.10.15:
+	 * - 'data' 변수를 보정하면 아래와 같이 변경된다.
+	 *
+	 *   +---------+  <!-- initrd_start
+	 *   |         |
+	 *   | initrd  |
+	 *   |         |
+	 *   +---------+  <!-- data (initrd_end)
+	 *   |         |
+	 *   | bootcnf |   .
+	 *   |         |   |
+	 *   +---------+   |  size
+	 *   |         |   |
+	 *   | padding |   '
+	 *   |         |
+	 *   +---------+  <!-- hdr
+	 *   |         |
+	 *   :   ...   :
+	 */
 
 	/* Remove bootconfig from initramfs/initrd */
 	initrd_end = (unsigned long)data;
@@ -545,8 +577,10 @@ static int __init warn_bootconfig(char *str)
 	return 0;
 }
 
-/*
- * IAMROOT, 2022.01.05:
+/* IAMROOT, 2022.01.05: TODO
+ * - initrd에서 bootconfig data를 파싱한다.
+ *
+ *
  * - initrd_end 에서 boot_config size와 data를 찾는다.
  * - boot_command_line 에서 bootconfig arg를 찾는다.
  * - bootconfig checksum 검사를 수행한다.
@@ -565,11 +599,25 @@ static void __init setup_boot_config(void)
 	/* Cut out the bootconfig data even if we have no bootconfig option */
 	data = get_boot_config_from_initrd(&size, &csum);
 
-/*
- * IAMROOT, 2022.01.01: 
- * cmdline 문자열에서 "bootconfig"를 찾는다. 
- * 못찾은 경우 곧바로 빠져나간다.
- */
+	/* IAMROOT, 2022.01.01: TODO
+	 * - boot_command_line에서 bootconfig 문자열을 찾는다.
+	 *   실패시 그 자리에서 바로 반환.
+	 *
+	 * - boot_command_line에서 "--"기준으로 뒷부분은 init args가 된다.
+	 *   boot_command_line = [일반 bootcmds][--][bootcmd init args]
+	 *
+	 * - 그래서 "--" 이없다면 init args가 없다는 개념이 된다.
+	 *
+	 * - param이 "--"로 종료되면 err이 해당 지점의 "--"이후의 postion이다.
+	 *   initargs_offs 는 cmdline ~ bootconfg ~ "--" string 종료지점까지의
+	 *   길이가 될것이다.
+	 * - 즉 init args전까지의 길이를 구해옿고 후에 saved_command_line
+	 *   설정할때 init args를 맨뒤에 복사해 놓을때 사용한다.
+	 *
+	 *   Note. 참고
+	 *   - bootconfig: Documentation/admin-guide/bootconfig.rst
+	 *   - xbc (extra boot config)
+	 */
 	strlcpy(tmp_cmdline, boot_command_line, COMMAND_LINE_SIZE);
 	err = parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL,
 			 bootconfig_params);
@@ -577,28 +625,7 @@ static void __init setup_boot_config(void)
 	if (IS_ERR(err) || !bootconfig_found)
 		return;
 
-/*
- * IAMROOT, 2022.01.01: 
- * TODO: bootconfig 용법에 대해, 또한 XBC file에 대해 추후 더 알아보자.
- * -bootconfig
- *  Documentation/admin-guide/bootconfig.rst
- * -XBC(extra boot config)
- */
-
 	/* parse_args() stops at the next param of '--' and returns an address */
-/*
- * IAMROOT, 2022.01.04:
- * - boot_command_line에서 "--"기준으로 뒷부분은 init args가 된다.
- *   boot_command_line = [일반 bootcmds][--][bootcmd init args]
- *
- * - 그래서 "--" 이없다면 init args가 없다는 개념이 된다.
- *
- * - param이 "--"로 종료되면 err이 해당 지점의 "--"이후의 postion이다.
- *   initargs_offs 는 cmdline ~ bootconfg ~ "--" string 종료지점까지의
- *   길이가 될것이다.
- * - 즉 init args전까지의 길이를 구해옿고 후에 saved_command_line
- *   설정할때 init args를 맨뒤에 복사해 놓을때 사용한다.
- */
 	if (err)
 		initargs_offs = err - tmp_cmdline;
 
