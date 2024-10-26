@@ -201,7 +201,9 @@ static int parse_one(char *param,
 
 /* Args looks like "foo=bar,bar2 baz=fuz wiz". */
 /* IAMROOT, 2022.01.04: TODO
- * -
+ * - @args 문자열에서 @doing을 기준으로 arguments를 파싱한다.
+ *   단, @unknown handler는 아래 아이템중에 하나이며 @num이 0일때만
+ *   동작한다.
  *
  *   1) parse_early_options (early)
  *      parse_args("early options", cmdline,
@@ -242,32 +244,10 @@ static int parse_one(char *param,
  *      parse_args("Setting extra init args", extra_init_args,
  *                 NULL, 0, -1, -1, NULL, set_init_arg);
  *
- * --- macro, struct, level 정리
- * - module_param : kernel_param, -1
- *   ex) module_param(debug, ushort, 0644);
- * - early_param : obs_kernel_param -> old parameter
- *   ex)
- * - core_param : kernel_param, -1 -> new parameter
- *   ex)
- * - __setup : obs_kernel_param
- * - module level 별 macro : kernel_param
- *   level marco
- *   1     core_param_cb
- *   2     postcore_param_cb
- *   3     arch_param_cb
- *   4     subsys_param_cb
- *   5     fs_param_cb
- *   6     device_param_cb
- *   7     late_param_cb
- *
- * --- struct, section 정리
- * - obs_kernel_param : .init.setup
- * - kernel_param : __param
- *
- * --- @return
- *  NULL : 성공
- *  err : error string
- *  args : args에서 "--"뒤의 parameters. 즉 init args
+ *   - @return
+ *     NULL : 성공
+ *     err  : errno (in pointer type)
+ *     args : '--' 파싱 이후의 init args
  */
 char *parse_args(const char *doing,
 		 char *args,
@@ -300,7 +280,7 @@ char *parse_args(const char *doing,
 		/* IAMROOT, 2021.10.16:
 		 * - @val이 null이고 @param 값이 "--" 이면 종료한다.
 		 *
-		 *   여기서 리턴 값은 err(null)이거나 다음 args 값이다.
+		 *   단, 리턴 값은 err이거나 다음 init args을 가리킨다.
 		 */
 		/* Stop at -- */
 		if (!val && strcmp(param, "--") == 0)
@@ -309,7 +289,8 @@ char *parse_args(const char *doing,
 		irq_was_disabled = irqs_disabled();
 
 		/* IAMROOT, 2021.10.16:
-		 * - @param, @val을 @params에서 찾아 처리하거나 @unknown을 호출한다.
+		 * - @param을 @params에서 찾아 @val에서 처리하거나
+		 *   @unknown handler를 호출한다.
 		 */
 		ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, arg, unknown);

@@ -354,7 +354,8 @@ early_param("loglevel", loglevel);
  *   1). initrd_start: va(phys_initrd_start)
  *   2). initrd_end  : initrd_start + phys_initrd_size
  *
- *   함수 리턴 전에 @_size, @_csum 값을 설정한다.
+ *   함수 리턴 전에 @_size, @_csum 값을 설정하고 반환되는 데이터는
+ *   bootconfig 이다.
  */
 static void * __init get_boot_config_from_initrd(u32 *_size, u32 *_csum)
 {
@@ -597,31 +598,34 @@ static void __init setup_boot_config(void)
 	int ret;
 
 	/* Cut out the bootconfig data even if we have no bootconfig option */
+	/* IAMROOT, 2024.10.21:
+	 * - data: bootconfig data
+	 */
 	data = get_boot_config_from_initrd(&size, &csum);
 
-	/* IAMROOT, 2022.01.01: TODO
-	 * - boot_command_line에서 bootconfig 문자열을 찾는다.
-	 *   실패시 그 자리에서 바로 반환.
+	/* IAMROOT, 2022.01.01:
+	 * - boot_command_line에서 "bootconfig" 문자열을 찾는다.
+	 *   오류가 발생하거나 해당 문자열을 찾을 수 없다면 바로 반환한다.
 	 *
-	 * - boot_command_line에서 "--"기준으로 뒷부분은 init args가 된다.
-	 *   boot_command_line = [일반 bootcmds][--][bootcmd init args]
+	 *   @num 값이 0이므로 @bootconfig_params(..)가 호출된다.
 	 *
-	 * - 그래서 "--" 이없다면 init args가 없다는 개념이 된다.
+	 * - 아래 기준에 따라 '--'을 기준으로 init args가 따라오며 만약
+	 *   '--'이 없다면 init args가 없다는 의미이다.
 	 *
-	 * - param이 "--"로 종료되면 err이 해당 지점의 "--"이후의 postion이다.
-	 *   initargs_offs 는 cmdline ~ bootconfg ~ "--" string 종료지점까지의
-	 *   길이가 될것이다.
-	 * - 즉 init args전까지의 길이를 구해옿고 후에 saved_command_line
-	 *   설정할때 init args를 맨뒤에 복사해 놓을때 사용한다.
+	 *   [bootconfig params][cmdline params] -- [bootconfig init params][cmdline init params]
 	 *
 	 *   Note. 참고
-	 *   - bootconfig: Documentation/admin-guide/bootconfig.rst
-	 *   - xbc (extra boot config)
+	 *   1). bootconfig: Documentation/admin-guide/bootconfig.rst
+	 *   2). xbc (extra boot config)
 	 */
 	strlcpy(tmp_cmdline, boot_command_line, COMMAND_LINE_SIZE);
 	err = parse_args("bootconfig", tmp_cmdline, NULL, 0, 0, 0, NULL,
 			 bootconfig_params);
 
+	/* IAMROOT, 2024.10.20:
+	 * - parsing 도중 오류가 발생했거나 끝났음에도 불구하고 "bootconfig"을
+	 *   찾지 못했다면 바로 반환한다.
+	 */
 	if (IS_ERR(err) || !bootconfig_found)
 		return;
 

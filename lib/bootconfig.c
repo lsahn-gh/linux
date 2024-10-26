@@ -411,12 +411,8 @@ const char * __init xbc_node_find_next_key_value(struct xbc_node *root,
 }
 
 /* XBC parse and tree build */
-/*
- * IAMROOT, 2022.01.04:
- * @node output
- * @data param(key)가 되는 string. alpha, num, -, _으로 이뤄져있으며 '\0'로 종료.
- *		 memblock에 복사된 commandline에 존재한다.
- * @flag data가 XBC_VALUE인지 XBC_KEY인지 등의 flag. offset과 or되어 보관된다.
+/* IAMROOT, 2024.10.20:
+ * - @node에 @data, @flag를 저장한다.
  */
 static int __init xbc_init_node(struct xbc_node *node, char *data, u32 flag)
 {
@@ -432,18 +428,23 @@ static int __init xbc_init_node(struct xbc_node *node, char *data, u32 flag)
 	return 0;
 }
 
-/*
- * IAMROOT, 2022.01.04:
- * memblock으로 할당되었던 xbc_nods에서 xbc_node_num을 idx로 하여
- * 해당 member로 초기화한다.
+/* IAMROOT, 2022.01.04:
+ * - struct xbc_node를 하나 할당하고 @data, @flag로 초기화한다.
  */
 static struct xbc_node * __init xbc_add_node(char *data, u32 flag)
 {
 	struct xbc_node *node;
 
+	/* IAMROOT, 2024.10.20:
+	 * - xbc_nodes가 꽉 찼다면 더 이상 추가할 수 없으므로 null을 반환한다.
+	 */
 	if (xbc_node_num == XBC_NODE_MAX)
 		return NULL;
 
+	/* IAMROOT, 2024.10.20:
+	 * - node는 xbc_nodes에서 가져오며 해당 array는 build time에 크기가
+	 *   결정된다.
+	 */
 	node = &xbc_nodes[xbc_node_num++];
 	if (xbc_init_node(node, data, flag) < 0)
 		return NULL;
@@ -510,6 +511,9 @@ static struct xbc_node * __init __xbc_add_sibling(char *data, u32 flag, bool hea
 {
 	struct xbc_node *sib, *node = xbc_add_node(data, flag);
 
+	/* IAMROOT, 2024.10.20:
+	 * - struct xbc_node 할당 성공시 처리.
+	 */
 	if (node) {
 		if (!last_parent) {
 			/* Ignore @head in this case */
@@ -566,9 +570,8 @@ static inline __init struct xbc_node *xbc_add_child(char *data, u32 flag)
 	return node;
 }
 
-/*
- * IAMROOT, 2022.01.04:
- * - alpha, num, -, _ 인 char만 pass, 아닌경우 \0이면 정상, 아니면 실패
+/* IAMROOT, 2022.01.04:
+ * - alpha/num, '-', '_'만 허용하고 나머지는 허용하지 않음.
  */
 static inline __init bool xbc_valid_keyword(char *key)
 {
@@ -774,9 +777,15 @@ static int __init __xbc_add_key(char *k)
 {
 	struct xbc_node *node, *child;
 
+	/* IAMROOT, 2024.10.20:
+	 * - @k(ey) validation 확인.
+	 */
 	if (!xbc_valid_keyword(k))
 		return xbc_parse_error("Invalid keyword", k);
 
+	/* IAMROOT, 2024.10.20:
+	 * - xbc_node가 하나도 없는 경우 parent 탐색없이 바로 add로 넘어간다.
+	 */
 	if (unlikely(xbc_node_num == 0))
 		goto add_node;
 
@@ -807,9 +816,8 @@ add_node:
 	return 0;
 }
 
-/*
- * IAMROOT, 2022.01.04:
- * - '.'을 parse하여 param을 나눠 key를 추가한다.
+/* IAMROOT, 2022.01.04:
+ * - @k(ey)를 포맷에 맞춰 tokenizing하고 추가한다.
  */
 static int __init __xbc_parse_keys(char *k)
 {
@@ -818,10 +826,11 @@ static int __init __xbc_parse_keys(char *k)
 
 	k = strim(k);
 
-/*
- * IAMROOT, 2022.01.04:
- * param이 ab.bc.cd 와 같은 형식일 경우 ab, bc, cd로 한번씩 __xbc_add_key한다.
- */
+	/* IAMROOT, 2024.10.24:
+	 * - @k(ey)를 '.' delim에 따라 tokenizing하고 add_key(..)를 호출한다.
+	 *
+	 *   예) @k: ab.bc.cd
+	 */
 	while ((p = strchr(k, '.'))) {
 		*p++ = '\0';
 		ret = __xbc_add_key(k);
@@ -830,7 +839,9 @@ static int __init __xbc_parse_keys(char *k)
 		k = p;
 	}
 
-
+	/* IAMROOT, 2024.10.24:
+	 * - 마지막 key 추가.
+	 */
 	return __xbc_add_key(k);
 }
 
@@ -848,15 +859,16 @@ static int __init xbc_parse_kv(char **k, char *v, int op)
 	char *next;
 	int c, ret;
 
-/*
- * IAMROOT, 2022.01.04:
- * - 일단 key를 찾는다. 못찾으면 생성될것이다. lpnode는 key node로
- *   갱신되었을 것이다.
- */
+	/* IAMROOT, 2024.10.24:
+	 * - @k(ey)를 parsing 한다.
+	 */
 	ret = __xbc_parse_keys(*k);
 	if (ret)
 		return ret;
 
+	/* IAMROOT, 2024.10.24:
+	 * - @v(alue)를 parsing 한다.
+	 */
 	c = __xbc_parse_value(&v, &next);
 	if (c < 0)
 		return c;
@@ -1177,6 +1189,10 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 		return -ERANGE;
 	}
 
+	/* IAMROOT, 2024.10.21:
+	 * - XBC_NODE_MAX만큼의 struct xbc_node를 저장할 수 있는 메모리를
+	 *   할당한다.
+	 */
 	xbc_nodes = memblock_alloc(sizeof(struct xbc_node) * XBC_NODE_MAX,
 				   SMP_CACHE_BYTES);
 	if (!xbc_nodes) {
@@ -1189,39 +1205,47 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 	xbc_data_size = ret + 1;
 	last_parent = NULL;
 
-/*
- * IAMROOT, 2022.01.04:
- * - p : next pos
- *   q : {}=+;:'\n'#을 찾은 위치
- *   ex) char *p = "123{456";
- *   q = strpbrk(p, "{");
- *   printf("%s", q); -> {456
- */
+	/* IAMROOT, 2024.10.21:
+	 * - @buf(bootconfig data)를 tokenizing 하여 parsing 한다.
+	 */
 	p = buf;
 	do {
+		/* IAMROOT, 2024.10.21:
+		 * - delimiter("{}=+;:\n#")를 기준으로 token를 분리한다.
+		 */
 		q = strpbrk(p, "{}=+;:\n#");
 		if (!q) {
+			/* IAMROOT, 2024.10.21:
+			 * - 마지막 token이므로 parsing을 끝낸다.
+			 */
 			p = skip_spaces(p);
 			if (*p != '\0')
 				ret = xbc_parse_error("No delimiter", p);
 			break;
 		}
 
+		/* IAMROOT, 2022.01.04:
+		 * - delimiter를 '\0'로 교체한다.
+		 *
+		 *   예) p = "123{456"
+		 *       c = q = '{'
+		 *       -------------
+		 *       p = "123'\0'456"
+		 */
 		c = *q;
-/*
- * IAMROOT, 2022.01.04:
- * - ex) str = "123{456";
- *   c = {;
- *   123{456 -> 123'\0'456
- */
 		*q++ = '\0';
+
+		/* IAMROOT, 2024.10.21:
+		 * - delimiter에 따라 다르게 처리한다.
+		 */
 		switch (c) {
-/*
- * IAMROOT, 2022.01.04:
- * - := or +=
- */
 		case ':':
 		case '+':
+			/* IAMROOT, 2022.01.04:
+			 * - 아래 2개의 token에 대해 처리.
+			 *   1). ':='
+			 *   2). '+='
+			 */
 			if (*q++ != '=') {
 				ret = xbc_parse_error(c == '+' ?
 						"Wrong '+' operator" :
@@ -1231,12 +1255,14 @@ int __init xbc_init(char *buf, const char **emsg, int *epos)
 			}
 			fallthrough;
 		case '=':
-/*
- * IAMROOT, 2022.01.04:
- * - q : value
- *   p : param
- *   ex) abc=123 -> p = abc, q = 123, c = '='
- */
+			/* IAMROOT, 2022.01.04:
+			 * - kv를 parsing한다.
+			 *
+			 *   입력값 예) abc=123
+			 *   ------------------
+			 *              p = abc
+			 *              q = 123
+			 */
 			ret = xbc_parse_kv(&p, q, c);
 			break;
 		case '{':
