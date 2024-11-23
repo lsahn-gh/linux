@@ -1106,12 +1106,11 @@ static inline bool zone_intersects(struct zone *zone,
  */
 #define DEF_PRIORITY 12
 
-/*
- * IAMROOT, 2022.02.12: 
- * ARM64 디폴트 설정 시: 16개 노드 * 4개 존 사용(dma, dma32, normal, movable)
- */
-
 /* Maximum number of zones on a zonelist */
+/* IAMROOT, 2022.02.12:
+ * - Arm64 default: 16개 node * 4개 zone
+ *                              (DMA, DMA32, NORMAL, MOVABLE)
+ */
 #define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
 
 /*

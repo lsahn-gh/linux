@@ -5944,16 +5944,9 @@ __alloc_pages_may_oom(gfp_t gfp_mask, unsigned int order,
 	 */
 
 	/* Exhausted what can be done so it's blame time */
-/*
- * IAMROOT, 2022.05.13:
- * - papgo
- *   XXX:GFP_NOFS 할당은 앞으로 진행하기 위해 다른 요청에 의존하기 보다는
- *   실패해야 한다. 
- *   우리는 out_of_memory가 이 컨텍스트에 대해 많은 것을 할 수 없는 불행한
- *   상황에 처해 있지만, 현재 작업이 중단될 경우 최소한 예약된 메모리에
- *   액세스하도록 시도해보자(out_of_memory 참조). 파일 시스템이 할당 실패를
- *   보다 적절하게 처리할 준비가 되면 우리는 여기서 벗어나야 한다:
- */
+	/* IAMROOT, 2024.11.18:
+	 * - 여러 allocation 시도에도 불구하고 실패하면 oom 수행.
+	 */
 	if (out_of_memory(&oc) || WARN_ON_ONCE(gfp_mask & __GFP_NOFAIL)) {
 		*did_some_progress = 1;
 
@@ -8201,9 +8194,8 @@ void show_free_areas(unsigned int filter, nodemask_t *nodemask)
 }
 
 
-/*
- * IAMROOT, 2022.02.12:
- * - zone pointer와 idx를 저장한다.
+/* IAMROOT, 2022.02.12:
+ * - @zone과 index(@zone)을 @zoneref에 저장한다.
  */
 static void zoneref_set_zone(struct zone *zone, struct zoneref *zoneref)
 {
@@ -8311,14 +8303,14 @@ static int node_load[MAX_NUMNODES];
  *
  * Return: node id of the found node or %NUMA_NO_NODE if no node is found.
  */
-/*
- * IAMROOT, 2022.02.18:
+/* IAMROOT, 2022.02.18:
  * - @node에 대한 best node를 찾고 @used_node_mask에 기록한다.
- * - best node 조건
- *   1. distance가 낮은것
- *   2. node 번호가 낮은것.
- *   3. 사용중인 node인것.
- *   4. node의 load숫자가 적은것.
+ *
+ *   best node 조건:
+ *   1). node간 distance가 짧음.
+ *   2). node 번호가 상대적으로 낮음.
+ *   3). cpu에서 사용중인 node.
+ *   4). node_load 숫자가 낮음.
  */
 int find_next_best_node(int node, nodemask_t *used_node_mask)
 {
@@ -8326,68 +8318,63 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
 	int min_val = INT_MAX;
 	int best_node = NUMA_NO_NODE;
 
-/*
- * IAMROOT, 2022.02.18:
- * - @node를 사용한 적이 없다면 @node를 @used_node_mask에 기록하고 best node로
- *   사용한다.
- */
 	/* Use the local node if we haven't already */
+	/* IAMROOT, 2024.11.19:
+	 * - @node가 사용되지 않았다면 해당 node를 기록하고 반환한다.
+	 */
 	if (!node_isset(node, *used_node_mask)) {
 		node_set(node, *used_node_mask);
 		return node;
 	}
 
-/*
- * IAMROOT, 2022.02.18:
- * - @node 스스로(bestest node)에 대해서는 이미 @used_node_mask에 추가했으므로
- *   자기자신이 아닌 next best neighbour node를 찾는다.
- *
- * - memory가 존재(N_MEMORY 타입)하는 node 순회
- */
+	/* IAMROOT, 2022.02.18:
+	 * - @node와 근접한 best node를 찾기 위해 memory가 존재하는(N_MEMORY)
+	 *   node만을 순회하며 distance 가중치를 계산한다.
+	 */
 	for_each_node_state(n, N_MEMORY) {
-
 		/* Don't want a node to appear more than once */
-/*
- * IAMROOT, 2022.02.18:
- * - 이미 처리된 노드 n 제외.
- */
 		if (node_isset(n, *used_node_mask))
 			continue;
 
 		/* Use the distance array to find the distance */
+		/* IAMROOT, 2024.11.19:
+		 * - '@node -> n' 까지의 distance 값을 val에 저장한다.
+		 */
 		val = node_distance(node, n);
 
-/*
- * IAMROOT, 2022.02.18:
- * - 노드 n의 id가 @node 보다 작다면 +1 하여 패널티 부여.
- */
 		/* Penalize nodes under us ("prefer the next node") */
+		/* IAMROOT, 2022.02.18:
+		 * - node(n)의 id가 @node 보다 작다면 패널티 +1 부여.
+		 */
 		val += (n < node);
 
-/*
- * IAMROOT, 2022.03.13: 
- * - 노드 n의 cpumask가 설정되어 있다면 (해당 노드에 cpu 존재) 패널티 부여.
- *   PENALTY_FOR_NODE_WITH_CPUS: 1 (default)
- */
 		/* Give preference to headless and unused nodes */
+		/* IAMROOT, 2024.11.19:
+		 * - node(n)에 cpu가 존재한다면 패널티 부여.
+		 */
 		if (!cpumask_empty(cpumask_of_node(n)))
 			val += PENALTY_FOR_NODE_WITH_CPUS;
 
-/*
- * IAMROOT, 2022.02.18:
- * - 1) 적당한 N배를 곱하고 (이전 값들이 더 영향을 많이 받게)
- *   2) distance(val)에 노드 n의 node_load에 대한 가중치를 더한다.
- */
+		/* IAMROOT, 2022.02.18:
+		 * - 1). 가중치들이 영향을 더 받도록 적당히 N을 곱한다.
+		 *   2). node(n)의 node_load 가중치를 더한다.
+		 */
 		/* Slight preference for less loaded node */
 		val *= (MAX_NODE_LOAD*MAX_NUMNODES);
 		val += node_load[n];
 
+		/* IAMROOT, 2024.11.19:
+		 * - distance 값이 작아 best node로 판정되면 해당 node를 기록한다.
+		 */
 		if (val < min_val) {
 			min_val = val;
 			best_node = n;
 		}
 	}
 
+	/* IAMROOT, 2024.11.19:
+	 * - best node를 찾으면 해당 node의 bit를 @used_node_mask에 기록한다.
+	 */
 	if (best_node >= 0)
 		node_set(best_node, *used_node_mask);
 
@@ -8438,25 +8425,27 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 		nr_zones = build_zonerefs_node(node, zonerefs);
 		zonerefs += nr_zones;
 	}
-/*
- * IAMROOT, 2022.02.12: 
- * 가장 마지막은 0으로 끝낸다.
- */
+
+	/* IAMROOT, 2022.02.12:
+	 * - 끝을 표현하기 위해 null을 추가한다.
+	 */
 	zonerefs->zone = NULL;
 	zonerefs->zone_idx = 0;
-/*
- * IAMROOT, 2022.03.15: 
- * - @pgdat node의 node_zonelists에는 버디 시스템이 관리하는 페이지가 포함된
- *   zone만이(local과 remote 모두) 추가되어 있는 상태이다.
- */
+
+	/* IAMROOT, 2022.03.15:
+	 * - node(@pgdat)의 node_zonelists에는 buddy allocator가 관리하는
+	 *   페이지가 포함된 zone(local + remote)만 추가된 상태이다.
+	 */
 }
 
 /*
  * Build gfp_thisnode zonelists
  */
-/*
- * IAMROOT, 2022.02.12:
- * - 호출한 node에 대해서만 zonelist를 만든다.
+/* IAMROOT, 2022.02.12:
+ * - node(@pgdat)의 local memory에 대해서만 zonelists를 생성한다.
+ *
+ *   local memory의 경우 ZONELIST_NOFALLBACK을 사용하여 zonrefs를
+ *   가져온다.
  */
 static void build_thisnode_zonelists(pg_data_t *pgdat)
 {
@@ -8476,61 +8465,8 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
  * exhausted, but results in overflowing to remote node while memory
  * may still exist in local DMA zone.
  */
-
-/*
- * IAMROOT, 2022.02.12: 
- * 
- *  +--------+           +--------+
- *  | node 0 |-----20----| node 2 |
- *  +--------+           +--------+
- *      |       \      /     |
- *      30         40        30
- *      |       /      \     | 
- *  +--------+           +--------+
- *  | node 1 |-----20----| node 3 |
- *  +--------+           +--------+
- *
- * 예) 요청 노드: 0번
- * 
- * best 노드 이터레이션 순서
- * - 현재 노드 0번 노드에서 출발
- *   -> best 0번 노드 -> best 2번 노드 -> best 1번 노드 -> best 3번 노드
- *
- * 다음과 같이 로컬 노드를 포함하지 않고 가장 가까운 노드인덱스부터 로드 값이 
- * 1씩 감소된다. (전역 배열)
- * node_load[0] = 0 <- skip
- * node_load[2] = 3
- * node_load[1] = 2
- * node_load[3] = 1
- *
- * 다음과 같이 로컬 노드를 포함하여 가장 가까운 노드순으로 값이 대입된다.
- * node_order[0] = 0
- * node_order[1] = 2
- * node_order[2] = 1
- * node_order[3] = 3
- *
- * ex) bset node 0 -> 2 -> 1 -> 3
- * 1) best node 0, load = 4.
- * idx        0 1 2 3
- * node_load  0 0 0 0
- * node_order 0 0 0 0
- *
- * 2) best node 2, load = 3
- * idx        0 1 2 3
- * node_load  0 0 3 0
- * node_order 0 2 0 0
- *
- * 3) best node 1, load = 2
- * idx        0 1 2 3
- * node_load  0 2 3 0
- * node_order 0 2 1 0
- *
- * 4) best node 3, load = 1
- * idx        0 1 2 3
- * node_load  0 2 3 1
- * node_order 0 2 1 3
- *
- * ---
+/* IAMROOT, 2022.02.12:
+ * - @pgdata에 대한 zonelists를 생성한다.
  */
 static void build_zonelists(pg_data_t *pgdat)
 {
@@ -8545,11 +8481,35 @@ static void build_zonelists(pg_data_t *pgdat)
 	prev_node = local_node;
 
 	memset(node_order, 0, sizeof(node_order));
-/*
- * IAMROOT, 2022.02.18:
- * - best node는 used_mask에 계속 기록되고, 기록된 node를 제외한 node를 가지고
- *   best node를 계속 찾아갈 것이다.
- */
+
+	/* IAMROOT, 2024.11.21:
+	 * - local node를 기준으로 best_node를 찾아가면서 아래 데이터를 초기화한다.
+	 *
+	 *   1). node_order[]: best node 순서
+	 *   2). node_load[] : best node의 load 순서
+	 *   3). nr_nodes    : best node의 개수
+	 *   4). used_mask   : best node를 찾은 node를 기록
+	 *
+	 * - 예) @pgdat->node_id == 0 이고 node가 아래와 같이 구성되어 있을 때.
+	 *
+	 *   +--------+            +--------+
+	 *   | node 0 |-----20-----| node 2 |
+	 *   +--------+_          _+--------+
+	 *      |       \__    __/     |
+	 *      30       __ 40 __      30
+	 *      |      _/        \_    |
+	 *   +--------+            +--------+
+	 *   | node 1 |-----20-----| node 3 |
+	 *   +--------+            +--------+
+	 *
+	 *   while loop를 수행하고 나면 다음과 같이 best node 순서가 설정된다.
+	 *
+	 *   - node_order[]: 0 -> 2 -> 1 -> 3
+	 *   - node_load[] : 0 -> 2 -> 3 -> 1
+	 *                   ^.. skip 이라서 0 임.
+	 *   - nr_nodes    : 4
+	 *   - used_mask   : 0b1111
+	 */
 	while ((node = find_next_best_node(local_node, &used_mask)) >= 0) {
 		/*
 		 * We don't want to pressure a particular node.
@@ -8677,10 +8637,9 @@ static DEFINE_PER_CPU(struct per_cpu_zonestat, boot_zonestats);
  */
 static DEFINE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
 
-/*
- * IAMROOT, 2022.02.12:
- * - @data == NULL일 경우 모든 node에 대해서 zonelist를 초기화하고
- *   pcpu 변수(_numa_mem_)에 local memory를 기록한다.
+/* IAMROOT, 2024.11.19:
+ * - @data에 대해 zonelist를 구성한다. 여기서 @data는 pg_data_t (node) 이다.
+ *   @data == null 이면 모든 node에 대해 zonelist를 구성한다.
  */
 static void __build_all_zonelists(void *data)
 {
@@ -8699,18 +8658,16 @@ static void __build_all_zonelists(void *data)
 	 * This node is hotadded and no memory is yet present.   So just
 	 * building zonelists is fine - no need to touch other nodes.
 	 */
-/*
- * IAMROOT, 2022.03.15: 
- * - 요청한 노드만 존리스트 구성.
- */
 	if (self && !node_online(self->node_id)) {
+		/* IAMROOT, 2022.03.15:
+		 * - @data(self) node만 zonelist 구성.
+		 */
 		build_zonelists(self);
 	} else {
-/*
- * IAMROOT, 2022.03.15: 
- * - 처음 부팅시 진입(@data가 NULL)하며 모든 노드의 존리스트 구성.
- *   -> ZONELIST_FALLBACK, ZONELIST_NOFALLBACK
- */
+		/* IAMROOT, 2022.03.15:
+		 * - 모든 online node에 대해 zonelist 구성.
+		 *   (kernel booting 시에 진입)
+		 */
 		for_each_online_node(nid) {
 			pg_data_t *pgdat = NODE_DATA(nid);
 
@@ -8740,12 +8697,8 @@ static void __build_all_zonelists(void *data)
 	spin_unlock(&lock);
 }
 
-/*
- * IAMROOT, 2022.02.12:
- * - in node order 방식으로 모든 node에 대해 zonelist를 초기화하고
- *   pcpu의 boot_pageset을 초기화한다.
- * ---
- *  in zone order도 존재했지만 kernel 4.14부터 아에 삭제가 됬다.
+/* IAMROOT, 2022.02.12:
+ * - 모든 node의 zonelist를 구성한다.
  */
 static noinline void __init
 build_all_zonelists_init(void)
@@ -8780,20 +8733,25 @@ build_all_zonelists_init(void)
  * __ref due to call of __init annotated helper build_all_zonelists_init
  * [protected by SYSTEM_BOOTING].
  */
-/*
- * IAMROOT, 2022.02.18:
- * - 메모리가 추가되고 삭제될때마다 존에 대한 영역이 바뀌는데, 그때마다
- *   이 함수가 호출된다.
- *   이러한 기능을 memory-hotplug라 칭하며 machine runtime에 resizing이
- *   가능하다. (일반적으로 virtual machines에서 사용한다)
+/* IAMROOT, 2022.02.18:
+ * - memory-hotplug 시에 zonelists를 갱신하기 위한 함수이며 @pgdat에 따라
+ *   모든 node의 zonelist를 갱신하거나 해당 node(@pgdat)의 zonelist만 갱신한다.
  */
 void __ref build_all_zonelists(pg_data_t *pgdat)
 {
 	unsigned long vm_total_pages;
 
 	if (system_state == SYSTEM_BOOTING) {
+		/* IAMROOT, 2024.11.18:
+		 * - system boot 단계에서는 @pgdat == null 이므로 아래 함수를
+		 *   호출하고 이때는 모든 node의 zonelist를 구성한다.
+		 */
 		build_all_zonelists_init();
 	} else {
+		/* IAMROOT, 2024.11.19:
+		 * - memory-hotplug 시에는 @pgdat != null 이므로 해당 node(@pgdat)만
+		 *   zonelist를 갱신한다.
+		 */
 		__build_all_zonelists(pgdat);
 		/* cpuset refresh routine should be here */
 	}

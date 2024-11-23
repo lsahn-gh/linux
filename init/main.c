@@ -658,6 +658,9 @@ static void __init setup_boot_config(void)
 	memcpy(copy, data, size);
 	copy[size] = '\0';
 
+	/* IAMROOT, 2024.11.17:
+	 * - @copy buf를 parsing 하여 xbc tree를 생성한다.
+	 */
 	ret = xbc_init(copy, &msg, &pos);
 	if (ret < 0) {
 		if (pos < 0)

@@ -28,34 +28,31 @@ nodemask_t numa_nodes_parsed __initdata;
  */
 static int cpu_to_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
 
-/*
- * IAMROOT, 2021.11.06:
- * - numa_alloc_distance에서 memblock으로 할당되고,
- *   초기값으로 from, to가 같은, 즉 자기자신만을
- *   LOCAL_DISTANCE로, 나머지를 REMOTE_DISTANCE로 초기화한다.
- * - of_numa_parse_distance_map_v1에서 dt에서 읽은 값으로 재설정을 한다.
- * - numa_distance[from * numa_distance_cnt + to] 의 방식으로 접근한다.
- * IAMROOT, 2023.04.08:
- * - hip07-d05.dts
- *   distance-map {
- *		compatible = "numa-distance-map-v1";
- *		distance-matrix = <0 0 10>,
- *				  <0 1 15>,
- *				  <0 2 20>,
- *				  <0 3 25>,
- *				  <1 0 15>,
- *				  <1 1 10>,
- *				  <1 2 25>,
- *				  <1 3 30>,
- *				  <2 0 20>,
- *				  <2 1 25>,
- *				  <2 2 10>,
- *				  <2 3 15>,
- *				  <3 0 25>,
- *				  <3 1 30>,
- *				  <3 2 15>,
- *				  <3 3 10>;
- *	};
+/* IAMROOT, 2023.04.08:
+ * - NUMA distance 값은 아래와 같이 dt에 matrix가 저장되어 있어서
+ *   해당 값을 읽어 설정하는 방식을 사용한다.
+ *
+ *   예) hip07-d05.dts
+ *       distance-map {
+ *          compatible = "numa-distance-map-v1";
+ *          // < from , to, distance > 순으로 정의되어 있다.
+ *          distance-matrix = <0 0 10>,
+ *                            <0 1 15>,
+ *                            <0 2 20>,
+ *                            <0 3 25>,
+ *                            <1 0 15>,
+ *                            <1 1 10>,
+ *                            <1 2 25>,
+ *                            <1 3 30>,
+ *                            <2 0 20>,
+ *                            <2 1 25>,
+ *                            <2 2 10>,
+ *                            <2 3 15>,
+ *                            <3 0 25>,
+ *                            <3 1 30>,
+ *                            <3 2 15>,
+ *                            <3 3 10>;
+ *       };
  */
 static int numa_distance_cnt;
 static u8 *numa_distance;
@@ -436,9 +433,8 @@ static int __init numa_alloc_distance(void)
  * If @from or @to is higher than the highest known node or lower than zero
  * or @distance doesn't make sense, the call is ignored.
  */
-/*
- * IAMROOT, 2021.11.13:
- * - from, to 값으로 배열 인덱스를 만들고 해당 위치에 distacne값을 넣는다.
+/* IAMROOT, 2021.11.13:
+ * - @from, @to를 조합하여 index를 생성한 뒤 @distance 값을 저장한다.
  */
 void __init numa_set_distance(int from, int to, int distance)
 {
@@ -467,11 +463,9 @@ void __init numa_set_distance(int from, int to, int distance)
 /*
  * Return NUMA distance @from to @to
  */
-/*
- * IAMROOT. 2023.04.08:
- * - google-translate
- * NUMA 거리 @from을 @to로 반환
- * - from 에서 to 까지 거리를 가져온다
+/* IAMROOT. 2023.04.08:
+ * - @from, @to의 조합으로 index를 생성한 뒤 distance 값을 가져온다.
+ *   해당 distance 값은 dt에 정의되어 있는 값이다.
  */
 int __node_distance(int from, int to)
 {

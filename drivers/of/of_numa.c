@@ -102,11 +102,10 @@ static int __init of_numa_parse_memory_nodes(void)
 
 	return 0;
 }
-/*
- * IAMROOT, 2021.11.13:
- * - distance-map의 distance-matrix의 크기를 읽고
- *   from, to, distance값을 각각 읽어 에러검사를 수행하여
- *   numa_distance 배열을 초기화한다.
+
+/* IAMROOT, 2021.11.13:
+ * - dt의 distance-map, distance-matrix property를 읽어
+ *   from, to, distance 값을 가져오고 numa_distance 배열을 초기화한다.
  */
 static int __init of_numa_parse_distance_map_v1(struct device_node *map)
 {

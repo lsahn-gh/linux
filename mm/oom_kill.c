@@ -1405,11 +1405,10 @@ EXPORT_SYMBOL_GPL(unregister_oom_notifier);
  * OR try to be smart about which process to kill. Note that we
  * don't have to be perfect here, we just have to be good.
  */
-/*
- * IAMROOT, 2022.05.14:
- * @return kill등의 이유로 memory가 확보됬다고 예상되면 true. 아니면 false
+/* IAMROOT, 2022.05.14:
+ * - oom 로직을 수행한다.
  *
- * - oom 대상 process를 찾고 oom kill을 수행한다.
+ *   kill 대상을 탐색하고 kill을 수행하여 memroy가 확보되는지 확인한다.
  */
 bool out_of_memory(struct oom_control *oc)
 {
@@ -1418,17 +1417,12 @@ bool out_of_memory(struct oom_control *oc)
 	if (oom_killer_disabled)
 		return false;
 
-/*
- * IAMROOT, 2022.05.13:
- * - oom notify를 알린다. 만약 이미 oom으로 등록되있다면 notify를 한번 날렸을것
- *   이므로 수행안한다.
- */
 	if (!is_memcg_oom(oc)) {
-/*
- * IAMROOT, 2022.05.07:
- * - oom_notify_list에 등록되있는 함수들을 호출한다. 해당 함수에서 free된게
- *   있다면 return true.
- */
+		/* IAMROOT, 2024.11.18:
+		 * - oom notify list에 등록된 callback을 호출하여 reclaim을 시도한다.
+		 *   주로 driver에서 cb을 등록하며 호출 후 'freed > 0' 이면 반환된
+		 *   page가 존재하므로 oom 수행없이 바로 return 한다.
+		 */
 		blocking_notifier_call_chain(&oom_notify_list, 0, &freed);
 		if (freed > 0)
 			/* Got some memory back in the last second. */
