@@ -560,7 +560,9 @@ enum zone_watermarks {
  *                소진되면 batch 값 만큼 buddy system에 요청한다.
  *   high       : 최대로 보유가능한 cache pages 개수.
  *   batch      : buddy system에 요청 후 한번에 add/remove 되는 양.
- *   free_factor:
+ *   free_factor: batch시 양을 dynamic scaling하기 위한 factor 값.
+ *   expire     :
+ *   lists      : migrate type별로 pages list를 가지게 된다.
  */
 struct per_cpu_pages {
 	int count;		/* number of pages in the list */
@@ -575,8 +577,7 @@ struct per_cpu_pages {
 	struct list_head lists[NR_PCP_LISTS];
 };
 
-/*
- * IAMROOT, 2022.03.05:
+/* IAMROOT, 2022.03.05: TODO
  * - vm_stat에 합산전인 값들이 들어가있다.
  */
 struct per_cpu_zonestat {
@@ -617,12 +618,13 @@ enum zone_type {
 	 * different DMA addressing limitations.
 	 */
 	/* IAMROOT, 2021.11.27: TODO
-	 * - ZONE_DMA: 현재 kernel에서 사용하는 addr space를 지원하지 않는
+	 * - ZONE_DMA: 32bits address layout 보다 낮은 범위에서 동작하는
 	 *             legacy peripheral을 사용하기 위한 zone.
 	 *             kernel에서 memory를 할당할때 가능한 ZONE_DMA에 할당하지
 	 *             않도록 한다.
-	 *   ZONE_DMA32:
-	 *   ZONE_NORMAL:
+	 *   ZONE_DMA32: 32bits adddress layout에서 동작하는 peripheral을
+	 *               사용하기 위한 zone.
+	 *   ZONE_NORMAL: buddy system을 통해 page alloc이 수행되는 zone.
 	 *   ZONE_HIGHMEM:
 	 *   ZONE_MOVABLE:
 	 */
@@ -1113,15 +1115,18 @@ static inline bool zone_intersects(struct zone *zone,
  */
 #define MAX_ZONES_PER_ZONELIST (MAX_NUMNODES * MAX_NR_ZONES)
 
-/*
- * IAMROOT, 2022.02.12: 
- * 메모리 할당 시 빠른 fallback 선택을 위해 미리 구성하는 존리스트이며, 
- * 다음과 같이 2개의 fallback용 zonelist를 만들어서 사용한다.
+/* IAMROOT, 2022.02.12:
+ * - 다음과 같이 2개의 zonelist를 만들어 하나는 page alloc 실패시 fallback
+ *   하도록 구성하며, 다른 하나는 no-fallback으로 자기자신의 zone에서만
+ *   할당하도록 구성된다.
  *
- * - 1) ZONELIST_FALLBACK은 모든 노드와 존을 포함한 존리스트이다. (default)
- *   가장가까운 node 순으로 만들어진다.
- * - 2) ZONELIST_NOFALLBACK은 현재 노드의 존에서만 fallback 존을 찾아 
- *      사용하도록 구성한 존리스트이다. (메모리 할당 요구시 __GFP_THISNODE)
+ *   ZONELIST_FALLBACK  : 모든 노드와 zone을 포함한 zonelist 이다.
+ *                        가장 가까운 node 순으로 만들어진다.
+ *                        (default)
+ *   ZONELIST_NOFALLBACK: 자기자신 노드의 zone만 포함한 zonelist 이다.
+ *                        (page alloc 시 __GFP_THISNODE flag 사용)
+ *
+ *   Note: fallback 단어의 의미는 plan b를 의미한다.
  */
 enum {
 	ZONELIST_FALLBACK,	/* zonelist with fallback */
@@ -1208,22 +1213,27 @@ typedef struct pglist_data {
 	 * Generally the first zones will be references to this node's
 	 * node_zones.
 	 */
-/*
- * IAMROOT, 2022.02.18:
- * - build_zonelists_in_node_order 에서 초기화된다.
- * - ZONELIST_FALLBACK : node in order로 zone의 역순으로 구성된다.
- * - ZONELIST_NOFALLBACK : 해당 node에 대해서만 zone의 역순으로 구성된다.
- *
- * - Node 기반 order 방법
- *   (Node 0 -> Node 2 -> Node 1 ...)
- *
- * - 해당 node가 memoryless라면 위 order 방법에 기반해 가장 근접한 node의
- *   zone들을 가지며 각 zone은 버디 시스템이 관리하는 페이지가 포함된 zone으로
- *   구성된다.
- *
- * - node_zonelist등의 함수로 node_zonelist를 선택한다. __GFP_THISNODE등의
- *   flag의 set여부에 따라 zonelist가 선택될것이다.
- */
+	/*
+	 * IAMROOT, 2022.02.18:
+	 * - build_zonelists_in_node_order 에서 초기화된다.
+	 * - ZONELIST_FALLBACK : node in order로 zone의 역순으로 구성된다.
+	 * - ZONELIST_NOFALLBACK : 해당 node에 대해서만 zone의 역순으로 구성된다.
+	 *
+	 * - Node 기반 order 방법
+	 *   (Node 0 -> Node 2 -> Node 1 ...)
+	 *
+	 * - 해당 node가 memoryless라면 위 order 방법에 기반해 가장 근접한 node의
+	 *   zone들을 가지며 각 zone은 버디 시스템이 관리하는 페이지가 포함된 zone으로
+	 *   구성된다.
+	 *
+	 * - node_zonelist등의 함수로 node_zonelist를 선택한다. __GFP_THISNODE등의
+	 *   flag의 set여부에 따라 zonelist가 선택될것이다.
+	 *
+	 *   아래와 같이 구성되어 있다.
+	 *   
+	 *   - zonelist.FALLBACK  : zonerefs[16 * 4]
+	 *   - zonelist.NOFALLBACK: zonerefs[16 * 4]
+	 */
 	struct zonelist node_zonelists[MAX_ZONELISTS];
 
 	int nr_zones; /* number of populated zones in this node */
@@ -1639,22 +1649,28 @@ struct zoneref *__next_zones_zonelist(struct zoneref *z,
  * Return: the next zone at or below highest_zoneidx within the allowed
  * nodemask using a cursor within a zonelist as a starting point
  */
-/*
- * IAMROOT, 2022.02.12:
- * @z 시작 zoneref
- * @highest_zoneidx zoneidx 검색범위
- * @nodes 요청 node의 bitmap 예를들어 0b1100 인경우 2, 3node에 대해서만 검색을
- * 수행한다. null일 경우 모든 node에 대해 검색을 수행한다.
+/* IAMROOT, 2022.02.12:
+ * - @z, @highest_zoneidx, @nodes arguments를 통해서 allocation 가능한
+ *   memory zoneref를 찾는다.
+ *   (fastpath + slowpath)
  *
- * - 모든 node에 대한 검색일 경우 zone idx만을 먼저 검사해 first zoneref을
- *   return 하거나(fast path) 조건에 맞는 zone을 찾는다.
+ *   @nodes: online nodes의 정보가 저장된 bitmap.
+ *           0b1100 값이 저장되어 있다면 {3, 2} node가 online 상태이다.
  */
 static __always_inline struct zoneref *next_zones_zonelist(struct zoneref *z,
 					enum zone_type highest_zoneidx,
 					nodemask_t *nodes)
 {
+	/* IAMROOT, 2024.12.12:
+	 * - fastpath 구간, @nodes == null 이면 zone index만 검사하며
+	 *   highest_zoneidx 보다 작거나 같으면 바로 반환한다.
+	 */
 	if (likely(!nodes && zonelist_zone_idx(z) <= highest_zoneidx))
 		return z;
+
+	/* IAMROOT, 2024.12.12:
+	 * - slowpath 구간, online @nodes를 모두 탐색한다.
+	 */
 	return __next_zones_zonelist(z, highest_zoneidx, nodes);
 }
 
@@ -1675,9 +1691,9 @@ static __always_inline struct zoneref *next_zones_zonelist(struct zoneref *z,
  *
  * Return: Zoneref pointer for the first suitable zone found
  */
-/*
- * IAMROOT, 2022.02.12:
- * - zonelist에서 highest_zoneidx, nodes에 맞는 가장 처음의 zoneref를 검색한다.
+/* IAMROOT, 2022.02.12:
+ * - @z, @highest_zoneidx, @nodes arguments를 통해서 allocation 가능한
+ *   first memory zoneref를 찾는다.
  */
 static inline struct zoneref *first_zones_zonelist(struct zonelist *zonelist,
 					enum zone_type highest_zoneidx,

@@ -43,6 +43,9 @@ struct zone *next_zone(struct zone *zone)
 	return zone;
 }
 
+/* IAMROOT, 2024.12.12:
+ * - node(@zref)가 @nodes에 bitmask 되어 있는지 확인한다.
+ */
 static inline int zref_in_nodemask(struct zoneref *zref, nodemask_t *nodes)
 {
 #ifdef CONFIG_NUMA
@@ -53,10 +56,10 @@ static inline int zref_in_nodemask(struct zoneref *zref, nodemask_t *nodes)
 }
 
 /* Returns the next zone at or below highest_zoneidx in a zonelist */
-/*
- * IAMROOT, 2022.02.12:
- * - 현재 zone을 포함하여 highest_zoneidx 범위 이내인지,
- *   nodes에 속한 zone중 최초의 zoneref를 return한다.
+/* IAMROOT, 2024.12.12:
+ * - @z, @highest_zoneidx, @nodes arguments를 통해서 allocation 가능한
+ *   memory zoneref를 찾는다.
+ *   (slowpath)
  */
 struct zoneref *__next_zones_zonelist(struct zoneref *z,
 					enum zone_type highest_zoneidx,
@@ -66,15 +69,20 @@ struct zoneref *__next_zones_zonelist(struct zoneref *z,
 	 * Find the next suitable zone to use for the allocation.
 	 * Only filter based on nodemask if it's set
 	 */
-/*
- * IAMROOT, 2022.02.12:
- * - 모든 nodes에 대한 요청(nodes == NULL)일 경우 highest_zoneidx 범위내인것을
- *   찾아 return 한다.
- * - 그게 아니면 요청 nodes에 속한 zone인지까지 검사한다.
- */
+	/* IAMROOT, 2024.12.12:
+	 * - @nodes == null 이면서 fastpath 구간을 지나치게 되면
+	 *   'index(@z) > highest_zoneidx' 이므로 local node(@z)를 지나
+	 *   'index(remote node(@z)) < highest_zoneidx' 조건의 zoneref를 찾는다.
+	 */
 	if (unlikely(nodes == NULL))
 		while (zonelist_zone_idx(z) > highest_zoneidx)
 			z++;
+	/* IAMROOT, 2024.12.12:
+	 * - 'zone_index(@z) < highest_zoneidx' 조건이거나,
+	 *   'node(@z)가 @nodes에 속한 zone을 찾을 때까지 반복한다.
+	 *
+	 *   결국 allocation 가능한 zone을 local + remote 에서 찾는다.
+	 */
 	else
 		while (zonelist_zone_idx(z) > highest_zoneidx ||
 				(z->zone && !zref_in_nodemask(z, nodes)))

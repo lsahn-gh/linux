@@ -12,9 +12,8 @@
  * are used to select a priority ordered list of memory zones which
  * match the requested limits. See gfp_zone() in include/linux/gfp.h
  */
-/*
- * IAMROOT, 2021.12.11:
- * - ZONE의 최대 사용개수에 따라 SHIFT값이 결정된다.
+/* IAMROOT, 2021.12.11:
+ * - MAX_NR_ZONES(zone 최대 개수)에 따라 SHIFT 값 결정.
  */
 #if MAX_NR_ZONES < 2
 #define ZONES_SHIFT 0

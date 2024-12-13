@@ -8231,12 +8231,13 @@ static int build_zonerefs_node(pg_data_t *pgdat, struct zoneref *zonerefs)
 	int nr_zones = 0;
 
 	do {
+		/* IAMROOT, 2024.11.27:
+		 * - @pgdat의 모든 zone을 순회하면서 managed zone이 존재하는
+		 *   영역만 @zonerefs에 추가한다.
+		 */
 		zone_type--;
 		zone = pgdat->node_zones + zone_type;
-/*
- * IAMROOT, 2022.03.15: 
- * - 버디 시스템이 관리하는 페이지 영역이 포함된 zone만 @zonerefs에 추가.
- */
+
 		if (managed_zone(zone)) {
 			zoneref_set_zone(zone, &zonerefs[nr_zones++]);
 			check_highest_zone(zone_type);
@@ -8387,27 +8388,8 @@ int find_next_best_node(int node, nodemask_t *used_node_mask)
  * This results in maximum locality--normal zone overflows into local
  * DMA zone, if any--but risks exhausting DMA zone.
  */
-/*
- * IAMROOT, 2022.02.12: 
- * node_order[]는 현재 노드를 포함한 가장 가까운 노드 번호가 담겨 있으므로
- * 현재 노드부터 시작한다.
- *
- * - 각 node마다 해당 함수가 호출되며, 해당 함수에서는 best node순으로 순회를 한다.
- * - 시작은 this node가 된다.
- * - nr_nodes가 0인 this node를 기준으로 가장 가까운순으로 node_order에 지정되있다.
- *   그러므로 zonrefs가 멀수록 먼 node가 될것이다.
- *
- * - ex) nr_nodes는 3개, 내부에서 nr_zones가 3개씩 초기화된다고 가정할때
- *   zonerefs[0] : nr_nodes 0의 시작 zonerefs
- *   zonerefs[1]
- *   zonerefs[2]
- *   zonerefs[3] : nr_nodes 1의 시작 zonerefs
- *   zonerefs[4]
- *   zonerefs[5]
- *   zonerefs[6] : nr_nodes 2의 시작 zonerefs
- *   zonerefs[7]
- *   zonerefs[8]
- *   zonerefs[9] : 마지막은 NULL이 들어간다.
+/* IAMROOT, 2024.11.27:
+ * - @node_order를 기준으로 @pgdat의 fallback zonelists를 생성한다.
  */
 static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 		unsigned nr_nodes)
@@ -8415,13 +8397,42 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 	struct zoneref *zonerefs;
 	int i;
 
+	/* IAMROOT, 2024.11.27:
+	 * - @pgdat의 fallback zonelists 준비.
+	 */
 	zonerefs = pgdat->node_zonelists[ZONELIST_FALLBACK]._zonerefs;
 
+	/* IAMROOT, 2024.11.27:
+	 * - @node_order 값 순서대로 zonerefs에 node를 저장한다.
+	 *   예) 0 -> 2 -> 1 -> 3
+	 */
 	for (i = 0; i < nr_nodes; i++) {
 		int nr_zones;
 
 		pg_data_t *node = NODE_DATA(node_order[i]);
 
+		/* IAMROOT, 2024.11.27:
+		 * - nr_zones 간격만큼 떨어진 zonerefs에 추가된다.
+		 *   buddy system이 관리하는 zone만 추가되므로 아래와 같이
+		 *   dma zone은 skip된다.
+		 *
+		 *   zonerefs[0] : node 0 - movable
+		 *   zonerefs[1]          - normal
+		 *   zonerefs[2]           [dma 32] skip
+		 *   zonerefs[3]           [dma   ] skip
+		 *   zonerefs[4] : node 2 - movable
+		 *   zonerefs[5]          - normal
+		 *   zonerefs[6]           [dma 32] skip
+		 *   zonerefs[7]           [dma   ] skip
+		 *   zonerefs[8] : node 1 - movable
+		 *   zonerefs[9]          - normal
+		 *   zonerefs[10]          [dma 32] skip
+		 *   zonerefs[11]          [dma   ] skip
+		 *   zonerefs[12]: node 3 - movable
+		 *   zonerefs[13]         - normal
+		 *   zonerefs[14]          [dma 32] skip
+		 *   zonerefs[15]          [dma   ] skip
+		 */
 		nr_zones = build_zonerefs_node(node, zonerefs);
 		zonerefs += nr_zones;
 	}
@@ -8433,8 +8444,8 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
 	zonerefs->zone_idx = 0;
 
 	/* IAMROOT, 2022.03.15:
-	 * - node(@pgdat)의 node_zonelists에는 buddy allocator가 관리하는
-	 *   페이지가 포함된 zone(local + remote)만 추가된 상태이다.
+	 * - node(@pgdat)의 fallback.zonelists에는 buddy allocator가 관리하는
+	 *   page가 포함된 zone(local + remote)만 추가된 상태이다.
 	 */
 }
 
@@ -8442,10 +8453,7 @@ static void build_zonelists_in_node_order(pg_data_t *pgdat, int *node_order,
  * Build gfp_thisnode zonelists
  */
 /* IAMROOT, 2022.02.12:
- * - node(@pgdat)의 local memory에 대해서만 zonelists를 생성한다.
- *
- *   local memory의 경우 ZONELIST_NOFALLBACK을 사용하여 zonrefs를
- *   가져온다.
+ * - node(@pgdat)의 local memory(no-fallback) zonelists를 생성한다.
  */
 static void build_thisnode_zonelists(pg_data_t *pgdat)
 {
@@ -8453,6 +8461,14 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
 	int nr_zones;
 
 	zonerefs = pgdat->node_zonelists[ZONELIST_NOFALLBACK]._zonerefs;
+	/* IAMROOT, 2024.11.27:
+	 * - node(@pgdat)의 no-fallback zonelists 구성은 아래와 같다.
+	 *
+	 *   zonerefs[0] : @pgdat - movable
+	 *   zonerefs[1]          - normal
+	 *   zonerefs[2]           [dma 32] skip
+	 *   zonerefs[3]           [dma   ] skip
+	 */
 	nr_zones = build_zonerefs_node(pgdat, zonerefs);
 	zonerefs += nr_zones;
 	zonerefs->zone = NULL;
@@ -8466,7 +8482,7 @@ static void build_thisnode_zonelists(pg_data_t *pgdat)
  * may still exist in local DMA zone.
  */
 /* IAMROOT, 2022.02.12:
- * - @pgdata에 대한 zonelists를 생성한다.
+ * - node(@pgdat)의 zonelists를 생성한다.
  */
 static void build_zonelists(pg_data_t *pgdat)
 {
@@ -8483,7 +8499,8 @@ static void build_zonelists(pg_data_t *pgdat)
 	memset(node_order, 0, sizeof(node_order));
 
 	/* IAMROOT, 2024.11.21:
-	 * - local node를 기준으로 best_node를 찾아가면서 아래 데이터를 초기화한다.
+	 * - node(@pgdat)의 zonelists를 구성하기 위해 주변 node와의 거리를
+	 *   우선 계산하여 best node 순으로 node_order를 계산한다.
 	 *
 	 *   1). node_order[]: best node 순서
 	 *   2). node_load[] : best node의 load 순서
@@ -8525,13 +8542,13 @@ static void build_zonelists(pg_data_t *pgdat)
 		load--;
 	}
 
-/*
- * IAMROOT, 2022.03.15: 
- * - 위 while loop는 각 node의 memoryless 여부 상관없이 distance weight에 따라
- *   'node_order'를 구해내는 것이 목적이며 이를 이용해 각 node별 zonelists 초기화는
- *   아래 함수에서 수행한다.
- */
+	/* IAMROOT, 2024.11.27:
+	 * - node_order를 기준 삼아 node(@pgdat)의 fallback zonelists를 구성한다.
+	 */
 	build_zonelists_in_node_order(pgdat, node_order, nr_nodes);
+	/* IAMROOT, 2024.11.27:
+	 * - node(@pgdat)의 no-fallback zonelists를 구성한다.
+	 */
 	build_thisnode_zonelists(pgdat);
 }
 
@@ -8542,16 +8559,25 @@ static void build_zonelists(pg_data_t *pgdat)
  * Used for initializing percpu 'numa_mem', which is used primarily
  * for kernel allocations, so use GFP_KERNEL flags to locate zonelist.
  */
-/*
- * IAMROOT, 2022.02.12:
- * - 해당 @node이 속한 zonelist의 first zoneref를 찾는다.
- * - 만약 @node가 memoryless인 경우 zonelist에 해당 node로 설정이 안되있을것이다.
- *   그럴 경우 가장 인접한 node를 알아온다.
+/* IAMROOT, 2022.02.12:
+ * - node(@node)와 인접한 zonelist에서 first zoneref를 탐색하고
+ *   해당 zone이 속한 node id를 반환한다. memory-less node가 아니라면
+ *   대부분 local node의 zoneref가 반환된다.
+ *
+ *   memory-less node는 인접한 node로 대체된다.
  */
 int local_memory_node(int node)
 {
 	struct zoneref *z;
 
+	/* IAMROOT, 2024.12.12:
+	 * - memory allocation이 가능한 first node(@node)의 zoneref를 반환한다.
+	 *   node X에게 가장 가까운 node는 자신이다.
+	 *
+	 *   return 값:
+	 *   - node_zonelist(..) -> fallback zonelist
+	 *   - gfp_zone(..)      -> ZONE_NORMAL
+	 */
 	z = first_zones_zonelist(node_zonelist(node, GFP_KERNEL),
 				   gfp_zone(GFP_KERNEL),
 				   NULL);
@@ -8619,15 +8645,17 @@ static void build_zonelists(pg_data_t *pgdat)
  */
 static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonestat *pzstats);
 /* These effectively disable the pcplists in the boot pageset completely */
-/*
- * IAMROOT, 2022.02.12:
- * - boot 시점에서는 사용안하게 막아두는 개념
+/* IAMROOT, 2022.02.12:
+ * - boot-time에서는 사용하지 않도록 막기 위해 0 값을 사용한다.
  */
 #define BOOT_PAGESET_HIGH	0
 #define BOOT_PAGESET_BATCH	1
-/*
- * IAMROOT, 2022.02.12:
- * - per_cpu_pages_init에서 초기화된다.
+
+/* IAMROOT, 2022.02.12:
+ * - per_cpu_pages_init(..)에서 초기화되며 각 변수의 용도는 다음과 같다.
+ *
+ *   1). @boot_pageset: per-cpu 용도로 pages list를 관리한다.
+ *   2). @boot_zonestats: per-cpu 용도로 zone statistics 정보가 저장된다.
  */
 static DEFINE_PER_CPU(struct per_cpu_pages, boot_pageset);
 static DEFINE_PER_CPU(struct per_cpu_zonestat, boot_zonestats);
@@ -8638,8 +8666,8 @@ static DEFINE_PER_CPU(struct per_cpu_zonestat, boot_zonestats);
 static DEFINE_PER_CPU(struct per_cpu_nodestat, boot_nodestats);
 
 /* IAMROOT, 2024.11.19:
- * - @data에 대해 zonelist를 구성한다. 여기서 @data는 pg_data_t (node) 이다.
- *   @data == null 이면 모든 node에 대해 zonelist를 구성한다.
+ * - node(pg_data_t)의 zonelists를 구성한다.
+ *   만약 @data == null 이면 모든 node의 zonelists를 구성한다.
  */
 static void __build_all_zonelists(void *data)
 {
@@ -8660,12 +8688,12 @@ static void __build_all_zonelists(void *data)
 	 */
 	if (self && !node_online(self->node_id)) {
 		/* IAMROOT, 2022.03.15:
-		 * - @data(self) node만 zonelist 구성.
+		 * - @data(self) node의 zonelists 구성.
 		 */
 		build_zonelists(self);
 	} else {
 		/* IAMROOT, 2022.03.15:
-		 * - 모든 online node에 대해 zonelist 구성.
+		 * - 모든 online node에 대해 zonelists 구성.
 		 *   (kernel booting 시에 진입)
 		 */
 		for_each_online_node(nid) {
@@ -8683,12 +8711,13 @@ static void __build_all_zonelists(void *data)
 		 * secondary cpus' numa_mem as they come on-line.  During
 		 * node/memory hotplug, we'll fixup all on-line cpus.
 		 */
-
-/*
- * IAMROOT, 2022.02.12:
- * - memory가 있는 node인 경우 자신의 memory, 없는 경우 가장 인접한 memory의
- *   node를 가지고 set_cpu_numa_mem이 수행된다.
- */
+		/* IAMROOT, 2022.02.12:
+		 * - @cpu에 가장 가까운 node를 찾아 per-cpu(@cpu)에 node 정보를
+		 *   저장한다.
+		 *
+		 *   node가 존재하는 cpu는 local node를 가지고, memory-less cpu는
+		 *   가장 인접한 remote node의 정보를 가진다.
+		 */
 		for_each_online_cpu(cpu)
 			set_cpu_numa_mem(cpu, local_memory_node(cpu_to_node(cpu)));
 #endif
@@ -8698,7 +8727,8 @@ static void __build_all_zonelists(void *data)
 }
 
 /* IAMROOT, 2022.02.12:
- * - 모든 node의 zonelist를 구성한다.
+ * - 모든 node의 zonelist를 초기화하고 cpu X에게 가장 근접한 node 정보를
+ *   per-cpu(cpu X) 변수에 저장한다.
  */
 static noinline void __init
 build_all_zonelists_init(void)
@@ -8706,6 +8736,10 @@ build_all_zonelists_init(void)
 	int cpu;
 
 	__build_all_zonelists(NULL);
+	/* IAMROOT, 2024.12.12:
+	 * - node 마다 zonelists, zoneref 초기화 및 cpu 별 근접 node 정보
+	 *   저장 완료됨.
+	 */
 
 	/*
 	 * Initialize the boot_pagesets that are going to be used
@@ -8723,6 +8757,9 @@ build_all_zonelists_init(void)
 	for_each_possible_cpu(cpu)
 		per_cpu_pages_init(&per_cpu(boot_pageset, cpu), &per_cpu(boot_zonestats, cpu));
 
+	/* IAMROOT, 2024.12.12:
+	 * - 모든 node의 zonelists 정보 출력.
+	 */
 	mminit_verify_zonelist();
 	cpuset_init_current_mems_allowed();
 }
@@ -8735,7 +8772,8 @@ build_all_zonelists_init(void)
  */
 /* IAMROOT, 2022.02.18:
  * - memory-hotplug 시에 zonelists를 갱신하기 위한 함수이며 @pgdat에 따라
- *   모든 node의 zonelist를 갱신하거나 해당 node(@pgdat)의 zonelist만 갱신한다.
+ *   모든 node의 zonelists를 갱신하거나 해당 node(@pgdat)의 zonelists만
+ *   갱신한다.
  */
 void __ref build_all_zonelists(pg_data_t *pgdat)
 {
@@ -8744,13 +8782,13 @@ void __ref build_all_zonelists(pg_data_t *pgdat)
 	if (system_state == SYSTEM_BOOTING) {
 		/* IAMROOT, 2024.11.18:
 		 * - system boot 단계에서는 @pgdat == null 이므로 아래 함수를
-		 *   호출하고 이때는 모든 node의 zonelist를 구성한다.
+		 *   호출하고 이때는 모든 node의 zonelists를 구성한다.
 		 */
 		build_all_zonelists_init();
 	} else {
 		/* IAMROOT, 2024.11.19:
 		 * - memory-hotplug 시에는 @pgdat != null 이므로 해당 node(@pgdat)만
-		 *   zonelist를 갱신한다.
+		 *   zonelists를 갱신한다.
 		 */
 		__build_all_zonelists(pgdat);
 		/* cpuset refresh routine should be here */
@@ -9352,9 +9390,8 @@ static int zone_highsize(struct zone *zone, int batch, int cpu_online)
  * outside of boot time (or some other assurance that no concurrent updaters
  * exist).
  */
-/*
- * IAMROOT, 2022.02.19:
- * - pcp에 batch, high를 update한다.
+/* IAMROOT, 2022.02.19:
+ * - @pcp의 batch, high 값을 @batch, @high로 갱신한다.
  */
 static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
 		unsigned long batch)
@@ -9363,9 +9400,8 @@ static void pageset_update(struct per_cpu_pages *pcp, unsigned long high,
 	WRITE_ONCE(pcp->high, high);
 }
 
-/*
- * IAMROOT, 2022.02.12:
- * - per_cpu_pages를 초기화한다. boot 시점에는 일단 disable한다.
+/* IAMROOT, 2022.02.12:
+ * - @pcp(struct per_cpu_pages), @pcz(struct per_cpu_zonestat)를 초기화한다.
  */
 static void per_cpu_pages_init(struct per_cpu_pages *pcp, struct per_cpu_zonestat *pzstats)
 {
