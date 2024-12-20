@@ -20,13 +20,14 @@ extern struct vm_area_struct *vmacache_find_exact(struct mm_struct *mm,
 						  unsigned long end);
 #endif
 
-/*
- * IAMROOT, 2022.05.28:
- * - vma가 변경됬을때 ++함으로써 변경됬음을 표시한다.
- *   후에 무효화시킬것.
+/* IAMROOT, 2024.12.19:
+ * - @mm의 vmacache가 invalidate 되었음을 표시하는 함수.
  */
 static inline void vmacache_invalidate(struct mm_struct *mm)
 {
+	/* IAMROOT, 2024.12.19:
+	 * - seqnum을 증가시킴으로써 invalidate 되었음을 표시한다.
+	 */
 	mm->vmacache_seqnum++;
 }
 

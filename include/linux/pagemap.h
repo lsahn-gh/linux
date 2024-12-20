@@ -602,19 +602,19 @@ static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
  * - ex) file 기준 설명
  *
  *               FILE                           VMA
- *             +-----+ 
+ *             +-----+
  *             |     |
  *             |=====| ------ mapping ------> +=====+ vm_end
  *             |     |                        |     |
  *             |     |                        |-----| <-- address
- *             |     |                        |     | ^         
+ *             |     |                        |     | ^
  *             |     |                        |     | | address - vm_start
  *             |     |                        |     | v
  *             |=====| ------ mapping ------> +=====+ vm_start
- *             |     | ^                        
- *             |     | |                        
- *             |     | |<- vm_pgoff                       
- * pgoff = 0   +-----+ +                        
+ *             |     | ^
+ *             |     | |
+ *             |     | |<- vm_pgoff
+ * pgoff = 0   +-----+ +
  *
  * 즉 vm_pgoff + (address - vm_start)를 하면 file에 대한 pgoff가 구해진다.
  */

@@ -2936,25 +2936,10 @@ get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 EXPORT_SYMBOL(get_unmapped_area);
 
 /* Look up the first VMA which satisfies  addr < vm_end,  NULL if none. */
-/*
- * IAMROOT, 2022.05.21:
- * @return 1. cache에서 바로 찾아진 경우
- *	   2. rbtree에서 찾아진경우
- *	   3. rbtree에서 못찾은 경우
- *	     3-1 addr보다 큰 vm_end를 가진것들중에서 가장 addr에 가까운 vm_end값을
- *		 가진 vma
- *	     3-2 addr보다 큰 vm_end를 가진 vma가 없으면 NULL
+/* IAMROOT, 2024.12.15:
+ * - rbtree 기반의 binary-search 알고리듬을 이용하여 vma를 탐색한다.
  *
- * - cache에서 먼저 찾아보고 아니면 rb에서 이진탐색한다.
- *
- * ---
- *           A
- *         /   \
- *        B     C
- *
- * .. | B | .. | A | .. | C |
- *  ^ ^ ^ ^ ^  ^ ^ ^  ^ ^ ^ ^
- *  B B B A A  A A C  C C C NULL <-return
+ *   Note. vmacache에서 찾은 경우 바로 반환한다. (hashmap 기반)
  */
 struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 {
@@ -2963,10 +2948,18 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 
 	mmap_assert_locked(mm);
 	/* Check the cache first. */
+	/* IAMROOT, 2024.12.15:
+	 * - vma cache에서 우선 탐색한다.
+	 *   (fastpath)
+	 */
 	vma = vmacache_find(mm, addr);
 	if (likely(vma))
 		return vma;
 
+	/* IAMROOT, 2024.12.15:
+	 * - rbtree 기반으로 vma를 탐색한다.
+	 *   (slowpath)
+	 */
 	rb_node = mm->mm_rb.rb_node;
 
 	while (rb_node) {
@@ -2974,17 +2967,13 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 
 		tmp = rb_entry(rb_node, struct vm_area_struct, vm_rb);
 
+		/* IAMROOT, 2024.12.15:
+		 * - binary-search 알고리듬을 사용하여 다음 조건의 vma를 탐색한다.
+		 *
+		 *   vm_start <= @addr < vm_end
+		 */
 		if (tmp->vm_end > addr) {
-/*
- * IAMROOT, 2022.05.21:
- * - addr보다 큰 vm_end를 가진 것들중에서 가장 addr에 가까운 vm_end값을 가진
- *   vma를 고른다.
- */
 			vma = tmp;
-/*
- * IAMROOT, 2022.05.21:
- * - start <= addr < end 이경우. 즉 addr이 vma에 포함되서  찾아짐.
- */
 			if (tmp->vm_start <= addr)
 				break;
 			rb_node = rb_node->rb_left;
@@ -2992,6 +2981,9 @@ struct vm_area_struct *find_vma(struct mm_struct *mm, unsigned long addr)
 			rb_node = rb_node->rb_right;
 	}
 
+	/* IAMROOT, 2024.12.15:
+	 * - vma를 찾았으면 vmacache에 저장한다.
+	 */
 	if (vma)
 		vmacache_update(addr, vma);
 	return vma;

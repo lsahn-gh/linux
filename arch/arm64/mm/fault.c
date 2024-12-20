@@ -53,9 +53,10 @@ struct fault_info {
 static const struct fault_info fault_info[];
 static struct fault_info debug_fault_info[];
 
-/*
- * IAMROOT, 2022.11.12:
- * - ISS의 Data Fault Status Code.
+/* IAMROOT, 2022.11.12:
+ * - esr_el1.iss.dfsc[5:0]의 status code를 기반으로 fault_info 정보 탐색.
+ *
+ *   dfsc: data fault status code
  */
 static inline const struct fault_info *esr_to_fault_info(unsigned int esr)
 {
@@ -262,6 +263,11 @@ static inline bool is_el1_permission_fault(unsigned long addr, unsigned int esr,
 {
 	unsigned int fsc_type = esr & ESR_ELx_FSC_TYPE;
 
+	/* IAMROOT, 2024.12.15:
+	 * - @esr을 읽어 IA/DA가 아니라면 perm fault가 아님.
+	 *
+	 *   perm fault는 ia/da의 원소임.
+	 */
 	if (!is_el1_data_abort(esr) && !is_el1_instruction_abort(esr))
 		return false;
 
@@ -391,6 +397,9 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 	}
 
 	if (is_el1_permission_fault(addr, esr, regs)) {
+		/* IAMROOT, 2024.12.15:
+		 * - page table entry의 perm bit에 따른 fault 처리.
+		 */
 		if (esr & ESR_ELx_WNR)
 			msg = "write to read-only memory";
 		else if (is_el1_instruction_abort(esr))
@@ -398,8 +407,20 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 		else
 			msg = "read from unreadable memory";
 	} else if (addr < PAGE_SIZE) {
+		/* IAMROOT, 2024.12.15:
+		 * - @addr이 PAGE_SIZE 보다 작다는 것은 page table level 처리 할
+		 *   index 정보가 존재하지 않는 것이므로 translation이 불가능함.
+		 *
+		 *   따라서 이를 null pointer dereference로 정의.
+		 */
 		msg = "NULL pointer dereference";
 	} else {
+		/* IAMROOT, 2024.12.15:
+		 * - 이곳을 실행하게 된다면 다음 중 하나일 가능성이 높음.
+		 *
+		 *   1). dangling pointer dereference
+		 *   2). el1 access fault
+		 */
 		if (kfence_handle_page_fault(addr, esr & ESR_ELx_WNR, regs))
 			return;
 
@@ -466,9 +487,9 @@ static void set_thread_esr(unsigned long address, unsigned int esr)
 	current->thread.fault_code = esr;
 }
 
-/*
- * IAMROOT, 2022.11.12:
- * - user에서 발생했으면 send sig. kernel이면 fault.
+/* IAMROOT, 2022.11.12:
+ * - userspace에서 fault 발생시 signal을 전달하고,
+ *   kernel-space에 fault 발생시 __do_kernel_fault(..) 호출.
  */
 static void do_bad_area(unsigned long far, unsigned int esr,
 			struct pt_regs *regs)
@@ -479,16 +500,18 @@ static void do_bad_area(unsigned long far, unsigned int esr,
 	 * If we are in kernel mode at this point, we have no context to
 	 * handle this fault with.
 	 */
+	/* IAMROOT, 2024.12.15:
+	 * - pstate에 PSR_MODE_EL0t가 set 되어 있다면 user mode로 간주.
+	 */
 	if (user_mode(regs)) {
 		const struct fault_info *inf = esr_to_fault_info(esr);
 
 		set_thread_esr(addr, esr);
 		arm64_force_sig_fault(inf->sig, inf->code, far, inf->name);
 	} else {
-/*
- * IAMROOT, 2022.11.12:
- * - kernel fault.
- */
+		/* IAMROOT, 2022.11.12:
+		 * - kernel fault 처리.
+		 */
 		__do_kernel_fault(addr, esr, regs);
 	}
 }
@@ -496,14 +519,25 @@ static void do_bad_area(unsigned long far, unsigned int esr,
 #define VM_FAULT_BADMAP		0x010000
 #define VM_FAULT_BADACCESS	0x020000
 
-/*
- * IAMROOT, 2022.11.12:
- * - mm fault 수행
+/* IAMROOT, 2022.11.12: TODO
+ * - mm page fault 수행 (user-space)
+ *
+ *   user-space process만 이곳을 수행하므로 @mm argument가 존재하고
+ *   이를 통해 vm address region을 가지고 있는다.
+ *
+ *   @mm      :
+ *   @addr    :
+ *   @mm_flags:
+ *   @vm_flags:
+ *   @regs    :
  */
 static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 				  unsigned int mm_flags, unsigned long vm_flags,
 				  struct pt_regs *regs)
 {
+	/* IAMROOT, 2024.12.15:
+	 * - @mm, @addr에 해당하는 vma를 탐색한다.
+	 */
 	struct vm_area_struct *vma = find_vma(mm, addr);
 
 	if (unlikely(!vma))
@@ -513,10 +547,10 @@ static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	 * Ok, we have a good vm_area for this memory access, so we can handle
 	 * it.
 	 */
-/*
- * IAMROOT, 2022.11.12:
- * - 범위검사.
- */
+	/* IAMROOT, 2024.12.15:
+	 * - find_vma(..)에서 조건에 맞는 vma를 찾았지만 그럼에도 불구하고
+	 *   @addr이 vm_start 보다 작다면 예외처리한다.
+	 */
 	if (unlikely(vma->vm_start > addr)) {
 		if (!(vma->vm_flags & VM_GROWSDOWN))
 			return VM_FAULT_BADMAP;
@@ -528,8 +562,18 @@ static vm_fault_t __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	 * Check that the permissions on the VMA allow for the fault which
 	 * occurred.
 	 */
+	/* IAMROOT, 2024.12.15:
+	 * - vma->vm_flags와 @vm_flags를 비교하여 예외처리한다.
+	 *
+	 *   예) vma->vm_flags = VM_READ
+	 *       vm_flags      = VM_READ | VM_WRITE
+	 */
 	if (!(vma->vm_flags & vm_flags))
 		return VM_FAULT_BADACCESS;
+
+	/* IAMROOT, 2024.12.16:
+	 * - 기본적인 예외처리는 끝났고 mm fault를 수행한다.
+	 */
 	return handle_mm_fault(vma, addr, mm_flags, regs);
 }
 
@@ -547,9 +591,12 @@ static bool is_write_abort(unsigned int esr)
 	return (esr & ESR_ELx_WNR) && !(esr & ESR_ELx_CM);
 }
 
-/*
- * IAMROOT, 2022.11.12:
- * - user page fault
+/* IAMROOT, 2022.11.12:
+ * - do_page_fault(..)은 다음 이유로 호출된다.
+ *   1). translation fault in EL0
+ *   2). access flag fault in ELn
+ *   3). permission fault in ELn
+ *   4). et cetera
  */
 static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 				   struct pt_regs *regs)
@@ -568,6 +615,17 @@ static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 	 * If we're in an interrupt or have no user context, we must not take
 	 * the fault.
 	 */
+	/* IAMROOT, 2024.12.20:
+	 * - kernel address space는 user-space처럼 page fault handler를 통한
+	 *   page allocation을 할 필요가 없다. 이유는 kernel은 컴퓨터의
+	 *   모든 resource에 접근할 수 있기 때문이다.
+	 *
+	 *   따라서 kernel thread는 독립적인 struct mm_struct을 가지지 않고
+	 *   해당 멤버변수는 null로 초기화되어 있다.
+	 *
+	 *   아래 코드에서 '!mm'은 kernel thread의 page fault를 의미한다.
+	 *   따라서 kernel 전용 fault handler를 호출해야 한다.
+	 */
 	if (faulthandler_disabled() || !mm)
 		goto no_context;
 
@@ -580,21 +638,24 @@ static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 	 * vma->vm_flags & vm_flags and returns an error if the
 	 * intersection is empty
 	 */
-/*
- * IAMROOT, 2022.11.12:
- * - inst fault -> VM_EXEC
- *   write abort -> VM_WRITE
- *   read abort(그외) -> VM_READ
- */
 	if (is_el0_instruction_abort(esr)) {
+		/* IAMROOT, 2024.12.15:
+		 * - el0에서 ia(instruction abort) 발생시 아래 수행.
+		 */
 		/* It was exec fault */
 		vm_flags = VM_EXEC;
 		mm_flags |= FAULT_FLAG_INSTRUCTION;
 	} else if (is_write_abort(esr)) {
+		/* IAMROOT, 2024.12.15:
+		 * - exception level 상관없이 write abort 발생시 아래 수행.
+		 */
 		/* It was write fault */
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
 	} else {
+		/* IAMROOT, 2024.12.15:
+		 * - exception level 상관없이 read abort 발생시 아래 수행.
+		 */
 		/* It was read fault */
 		vm_flags = VM_READ;
 		/* Write implies read */
@@ -604,7 +665,18 @@ static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 			vm_flags |= VM_EXEC;
 	}
 
+	/* IAMROOT, 2024.12.15:
+	 * - fault가 발생한 @addr은 el0인데 @esr 참조시 el1 permission fault인
+	 *   경우 kernel이 userspace memory에 접근하려고 한 것이므로 이에 대한
+	 *   처리를 수행한다.
+	 *
+	 *   단, translation table의 AF bit 또는 permission bit에 따라 다르다.
+	 */
 	if (is_ttbr0_addr(addr) && is_el1_permission_fault(addr, esr, regs)) {
+		/* IAMROOT, 2024.12.15:
+		 * - data가 아닌 instruction abort인 경우 debug 출력하고
+		 *   oops로 die 처리.
+		 */
 		if (is_el1_instruction_abort(esr))
 			die_kernel_fault("execution of user memory",
 					 addr, esr, regs);
@@ -640,10 +712,9 @@ retry:
 #endif
 	}
 
-/*
- * IAMROOT, 2022.11.12:
- * - page fualt 수행
- */
+	/* IAMROOT, 2024.12.15:
+	 * - page fault 처리.
+	 */
 	fault = __do_page_fault(mm, addr, mm_flags, vm_flags, regs);
 
 	/* Quick path to respond to signals */
@@ -718,9 +789,13 @@ no_context:
 	return 0;
 }
 
-/*
- * IAMROOT, 2022.11.12:
- * - mapping이 없을때 fault.
+/* IAMROOT, 2022.11.12:
+ * - translation fault 처리.
+ *
+ *   주로 다음 2가지 상황에서 발생한다.
+ *   1) TTBR{0,1}에 저장된 addr가 잘못된 경우.
+ *   2) translation table entry의 descriptor[0:0] 값이 0인 경우.
+ *      (invalid descriptor를 의미함)
  */
 static int __kprobes do_translation_fault(unsigned long far,
 					  unsigned int esr,
@@ -728,17 +803,15 @@ static int __kprobes do_translation_fault(unsigned long far,
 {
 	unsigned long addr = untagged_addr(far);
 
-/*
- * IAMROOT, 2022.11.12:
- * - user라면 do page fault
- */
+	/* IAMROOT, 2022.11.12:
+	 * - userspace에서 발생했다면 do_page_fault(..) 호출.
+	 */
 	if (is_ttbr0_addr(addr))
 		return do_page_fault(far, esr, regs);
 
-/*
- * IAMROOT, 2022.11.12:
- * - kernel은 전부 mapping이 되있는데 fault인건 말이안된다.
- */
+	/* IAMROOT, 2024.12.14:
+	 * - kernel space에서 발생한 경우 do_bad_area(..) 호출.
+	 */
 	do_bad_area(far, esr, regs);
 	return 0;
 }
@@ -798,6 +871,11 @@ static int do_tag_check_fault(unsigned long far, unsigned int esr,
 	return 0;
 }
 
+/* IAMROOT, 2024.12.15:
+ * - arm64 mmu faults 종류에 따른 struct fault_info 정의.
+ *
+ *   Note. Memory aborts(D8.15) of reference manual 참고.
+ */
 static const struct fault_info fault_info[] = {
 	{ do_bad,		SIGKILL, SI_KERNEL,	"ttbr address size fault"	},
 	{ do_bad,		SIGKILL, SI_KERNEL,	"level 1 address size fault"	},
@@ -865,27 +943,36 @@ static const struct fault_info fault_info[] = {
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 63"			},
 };
 
-/*
- * IAMROOT, 2022.11.12:
- * - 
+/* IAMROOT, 2022.11.12: TODO
+ * - memory abort를 처리한다.
+ *
+ *   @far :
+ *   @esr : memory abort 당시의 esr 값.
+ *   @regs: memory abort 당시의 process regs 값.
  */
 void do_mem_abort(unsigned long far, unsigned int esr, struct pt_regs *regs)
 {
+	/* IAMROOT, 2024.12.14:
+	 * - esr_el1 값을 바탕으로 fault_info 정보 탐색.
+	 */
 	const struct fault_info *inf = esr_to_fault_info(esr);
 	unsigned long addr = untagged_addr(far);
 
-
-/*
- * IAMROOT, 2022.11.12:
- * - 성공하면 빠져나간다.
- */
+	/* IAMROOT, 2022.11.12:
+	 * - @esr 값을 통해 가져온 fault_info의 fn 함수를 호출한다.
+	 *
+	 *   exception 처리 후 0 반환시 완료된 것이므로 return 한다.
+	 */
 	if (!inf->fn(far, esr, regs))
 		return;
 
-/*
- * IAMROOT, 2022.11.12:
- * - kernel에서 호출된경우면 alert.
- */
+	/* IAMROOT, 2024.12.15:
+	 * - 아래부터는 unknown fault 이므로 관련 정보를 출력한다.
+	 */
+
+	/* IAMROOT, 2024.12.15:
+	 * - @regs 정보를 바탕으로 kernel mode 라면 추가적인 debug 정보 출력.
+	 */
 	if (!user_mode(regs)) {
 		pr_alert("Unhandled fault at 0x%016lx\n", addr);
 		mem_abort_decode(esr);

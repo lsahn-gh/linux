@@ -448,6 +448,9 @@ struct vm_userfaultfd_ctx {};
  * vma  |
  * -----+ vm_start = 0x1000
  */
+/* IAMROOT, 2024.12.19: TODO
+ * - task의 virtual memory area(가상 메모리 영역)을 나타내는 자료구조.
+ */
 struct vm_area_struct {
 	/* The first cache line has the info for VMA tree walking. */
 
@@ -559,20 +562,28 @@ struct core_state {
 };
 
 struct kioctx_table;
+
+/* IAMROOT, 2024.12.19:
+ * - process의 virtual address space를 관리하는 자료구조.
+ *
+ *   process 당 1개가 생성되며 user-space thread간에는 공유한다.
+ */
 struct mm_struct {
 	struct {
 		struct vm_area_struct *mmap;		/* list of VMAs */
-/*
- * IAMROOT, 2022.05.31:
- * - vma node들이 들어있다.
- * struct vm_area_struct *tmp;
- * tmp = rb_entry(rb_node, struct vm_area_struct, vm_rb);
- */
+
+		/* IAMROOT, 2024.12.19:
+		 * - struct vm_area_struct의 탐색을 빠르게 하기 위해 rbtree로
+		 *   가지고 있는다.
+		 */
 		struct rb_root mm_rb;
-/*
- * IAMROOT, 2022.05.28:
- * - vma가 바뀌었다는걸 ++로 해서 표시.
- */
+
+		/* IAMROOT, 2024.12.19:
+		 * - vmacache invalidate 표시 및 flush 요청에 사용되는 멤버 변수.
+		 *
+		 *   seqnum을 increase 함으로서 vmacache가 변경된 것을 표시하고,
+		 *   vmacache_flush()를 호출하여 cache를 flush 한다.
+		 */
 		u64 vmacache_seqnum;                   /* per-thread vmacache */
 #ifdef CONFIG_MMU
 		unsigned long (*get_unmapped_area) (struct file *filp,
@@ -609,10 +620,11 @@ struct mm_struct {
 		 * @mm_count (which may then free the &struct mm_struct if
 		 * @mm_count also drops to 0).
 		 */
-/*
- * IAMROOT, 2022.05.07:
- * - mm을 사용하고있는 process나 thread 수.
- */
+		/* IAMROOT, 2022.05.07:
+		 * - 현재 mm obj를 참조하고 있는 process, thread 개수.
+		 *   mmget(..), mmget_not_zero(..), mmput(..)를 호출하면 값이
+		 *   변경된다.
+		 */
 		atomic_t mm_users;
 
 		/**

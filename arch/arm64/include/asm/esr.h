@@ -10,6 +10,9 @@
 #include <asm/memory.h>
 #include <asm/sysreg.h>
 
+/* IAMROOT, 2024.12.15:
+ * - ESR_ELx의 exception class(EC) 정의
+ */
 #define ESR_ELx_EC_UNKNOWN	(0x00)
 #define ESR_ELx_EC_WFx		(0x01)
 /* Unallocated EC: 0x02 */
@@ -40,9 +43,8 @@
 /* Unallocated EC: 0x1D - 0x1E */
 #define ESR_ELx_EC_IMP_DEF	(0x1f)	/* EL3 only */
 
-/*
- * IAMROOT, 2022.11.12:
- * - LOW : low exception level
+/* IAMROOT, 2022.11.12:
+ * - LOW : low exception level (el0 -> el1 의미)
  */
 #define ESR_ELx_EC_IABT_LOW	(0x20)
 #define ESR_ELx_EC_IABT_CUR	(0x21)
@@ -107,9 +109,10 @@
 #define ESR_ELx_S1PTW		(UL(1) << ESR_ELx_S1PTW_SHIFT)
 
 /* Shared ISS fault status code(IFSC/DFSC) for Data/Instruction aborts */
-/*
- * IAMROOT, 2022.11.12:
- * - ISS의 Data Fault Status Code.
+/* IAMROOT, 2022.11.12:
+ * - esr_el1.iss.dfsc[5:0] 정의
+ *
+ *   dfsc: data fault status code
  */
 #define ESR_ELx_FSC		(0x3F)
 #define ESR_ELx_FSC_TYPE	(0x3C)

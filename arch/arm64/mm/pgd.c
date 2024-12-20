@@ -17,9 +17,8 @@
 
 static struct kmem_cache *pgd_cache __ro_after_init;
 
-/*
- * IAMROOT, 2023.04.01:
- * - pgd alloc
+/* IAMROOT, 2023.04.01:
+ * - page / slab allocator에서 pgd 공간을 할당하고 반환.
  */
 pgd_t *pgd_alloc(struct mm_struct *mm)
 {

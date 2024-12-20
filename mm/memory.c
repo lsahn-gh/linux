@@ -5268,9 +5268,8 @@ unlock:
  * The mmap_lock may have been released depending on flags and our
  * return value.  See filemap_fault() and __lock_page_or_retry().
  */
-/*
- * IAMROOT, 2022.11.12:
- * - table 만든후 pte fault수행.
+/* IAMROOT, 2022.11.12: TODO
+ * - translation table entry 생성 후 pte에 page 매핑.
  */
 static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 		unsigned long address, unsigned int flags)
@@ -5288,6 +5287,9 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	p4d_t *p4d;
 	vm_fault_t ret;
 
+	/* IAMROOT, 2024.12.20: TODO
+	 * - 
+	 */
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
 	if (!p4d)
@@ -5439,12 +5441,18 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 
 	__set_current_state(TASK_RUNNING);
 
+	/* IAMROOT, 2024.12.16:
+	 * - profiling을 위해 vm page fault count 증가.
+	 */
 	count_vm_event(PGFAULT);
 	count_memcg_event_mm(vma->vm_mm, PGFAULT);
 
 	/* do counter updates before entering really critical section. */
 	check_sync_rss_stat(current);
 
+	/* IAMROOT, 2024.12.16:
+	 * - arm64는 구현되어 있지 않으므로 항상 true 반환.
+	 */
 	if (!arch_vma_access_permitted(vma, flags & FAULT_FLAG_WRITE,
 					    flags & FAULT_FLAG_INSTRUCTION,
 					    flags & FAULT_FLAG_REMOTE))
@@ -5457,11 +5465,9 @@ vm_fault_t handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 	if (flags & FAULT_FLAG_USER)
 		mem_cgroup_enter_user_fault();
 
-
-/*
- * IAMROOT, 2022.11.12:
- * - mm fault 수행
- */
+	/* IAMROOT, 2022.11.12:
+	 * - page fault address에 실제 page를 할당하고 매핑한다.
+	 */
 	if (unlikely(is_vm_hugetlb_page(vma)))
 		ret = hugetlb_fault(vma->vm_mm, vma, address, flags);
 	else

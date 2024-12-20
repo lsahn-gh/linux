@@ -58,8 +58,14 @@ static bool vmacache_valid(struct mm_struct *mm)
 	return true;
 }
 
+/* IAMROOT, 2024.12.15:
+ * - @addr에 해당하는 vma를 @mm의 vmacache에서 탐색한다.
+ */
 struct vm_area_struct *vmacache_find(struct mm_struct *mm, unsigned long addr)
 {
+	/* IAMROOT, 2024.12.15:
+	 * - @addr의 hash 값을 hashmap index를 사용한다.
+	 */
 	int idx = VMACACHE_HASH(addr);
 	int i;
 
@@ -68,6 +74,10 @@ struct vm_area_struct *vmacache_find(struct mm_struct *mm, unsigned long addr)
 	if (!vmacache_valid(mm))
 		return NULL;
 
+	/* IAMROOT, 2024.12.15:
+	 * - VMACACHE_SIZE 만큼 vmacache.vmas[..]를 순회하며
+	 *   'vm_start <= @addr < vm_end' 조건을 만족하는 vma를 탐색한다.
+	 */
 	for (i = 0; i < VMACACHE_SIZE; i++) {
 		struct vm_area_struct *vma = current->vmacache.vmas[idx];
 
@@ -76,6 +86,9 @@ struct vm_area_struct *vmacache_find(struct mm_struct *mm, unsigned long addr)
 			if (WARN_ON_ONCE(vma->vm_mm != mm))
 				break;
 #endif
+			/* IAMROOT, 2024.12.15:
+			 * - 조건을 만족하는 vma을 찾았으므로 반환한다.
+			 */
 			if (vma->vm_start <= addr && vma->vm_end > addr) {
 				count_vm_vmacache_event(VMACACHE_FIND_HITS);
 				return vma;
@@ -85,6 +98,9 @@ struct vm_area_struct *vmacache_find(struct mm_struct *mm, unsigned long addr)
 			idx = 0;
 	}
 
+	/* IAMROOT, 2024.12.15:
+	 * - 못찾으면 null 반환.
+	 */
 	return NULL;
 }
 

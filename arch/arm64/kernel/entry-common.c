@@ -445,11 +445,23 @@ static void noinstr el1_fpac(struct pt_regs *regs, unsigned long esr)
 	exit_to_kernel_mode(regs);
 }
 
+/* IAMROOT, 2024.12.14:
+ * - synchronous exception 발생시 호출되는 handler 함수
+ */
 asmlinkage void noinstr el1h_64_sync_handler(struct pt_regs *regs)
 {
 	unsigned long esr = read_sysreg(esr_el1);
 
+	/* IAMROOT, 2024.12.14:
+	 * - esr_el1.ec 값을 읽어 exception class 정보를 가져오고
+	 *   이를 바탕으로 알맞는 handler를 호출한다.
+	 *
+	 *   esr: exception syndrome register
+	 */
 	switch (ESR_ELx_EC(esr)) {
+	/* IAMROOT, 2024.12.15:
+	 * - {data, instruction} abort 시 el1_abort(..) 호출.
+	 */
 	case ESR_ELx_EC_DABT_CUR:
 	case ESR_ELx_EC_IABT_CUR:
 		el1_abort(regs, esr);

@@ -198,13 +198,13 @@ static inline pgd_t *pgd_offset_pgd(pgd_t *pgd, unsigned long address)
 #define pgd_offset(mm, address)		pgd_offset_pgd((mm)->pgd, (address))
 #endif
 
-/* IAMROOT, 2021.10.12:
- * - kernel의 경우 init_mm을 사용한다.
- *   *_k: kernel을 의미한다.
- */
 /*
  * a shortcut which implies the use of the kernel's pgd, instead
  * of a process's
+ */
+/* IAMROOT, 2021.10.12:
+ * - kernel의 경우 init_mm을 사용한다.
+ *   *_k: kernel을 의미한다.
  */
 #ifndef pgd_offset_k
 #define pgd_offset_k(address)		pgd_offset(&init_mm, (address))

@@ -39,67 +39,70 @@
 	.endr
 	.endm
 
-/*
- * IAMROOT, 2022.02.08:
- * 인자로 만들어지는 branch 함수들은 entry_handler macro에 의해 만들어지는
- * 함수들이며 결국 해당 함수에서 _handler가 붙은 함수를 호출한다.
- * ex) el1h_64_sync -> el1h_64_sync_handler
- */
-/*
- * IAMROOT, 2022.11.07:
- * - macro 정리
- *   el ht regsize label
- *   1  t  64      sync	
- *   1  t  64      irq	
- *   1  t  64      fiq	
- *   1  t  64      error
- *                
- *   1  h  64      sync	
- *   1  h  64      irq		
- *   1  h  64      fiq		
- *   1  h  64      error	
- *                
- *   0  t  64      sync
- *   0  t  64      irq	
- *   0  t  64      fiq	
- *   0  t  64      error
- *                
- *   0  t  32      sync
- *   0  t  32      irq		
- *   0  t  32      fiq		
- *   0  t  32      error		
- * - ex) el1 64bit irq발생시 흐름
- *   vectors
- *     v
- *   kernel_ventry 1, h, 64, irq  <--현재 여기
- *     v
- *   el1h_64_irq
- *     v
- *   kernel_entry 1, 64
- *     v
- *   el1h_64_irq_handler
- *     v
- *   (chip -> flow -> irq handler 수행후 복귀)
- *     v
- *   ret_to_kernel
- *
- * - irq 흐름.
- *   vectors(arch/arm64/kernel/entry.S)
- *     |
- *     |(kernel_ventry) <--현재 여기
- *     |(entry_handler)
- *     |(el0_interrupt or el1_interrupt)
- *     |(do_interrupt_handler) 
- *     |(handler_arch_irq 실행) 
- *     v
- *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq)
- *     v
- *   flow handler(handle_fasteoi_nmi()등)
- *     v
- *   irq_handler(user isr)
- */
+
+	/* IAMROOT, 2022.11.07:
+	 * - vector table 정의에 사용되는 'kernel_ventry' macro 정의.
+	 *
+	 * 인자로 만들어지는 branch 함수들은 entry_handler macro에 의해 만들어지는
+	 * 함수들이며 결국 해당 함수에서 _handler가 붙은 함수를 호출한다.
+	 * ex) el1h_64_sync -> el1h_64_sync_handler
+	 *
+	 * - macro 정리
+	 *  (el, ht, regsize, label)
+	 *    1,  t,  64,     sync
+	 *    1,  t,  64,     irq
+	 *    1,  t,  64,     fiq
+	 *    1,  t,  64,     error
+	 *
+	 *    1,  h,  64,     sync
+	 *    1,  h,  64,     irq
+	 *    1,  h,  64,     fiq
+	 *    1,  h,  64,     error
+	 *
+	 *    0,  t,  64,     sync
+	 *    0,  t,  64,     irq
+	 *    0,  t,  64,     fiq
+	 *    0,  t,  64,     error
+	 *
+	 *    0,  t,  32,     sync
+	 *    0,  t,  32,     irq
+	 *    0,  t,  32,     fiq
+	 *    0,  t,  32,     error
+	 *
+	 * - 예) el1 64bit irq 발생시 흐름
+	 *   vectors
+	 *     v
+	 *   kernel_ventry 1, h, 64, irq
+	 *     v
+	 *   el1h_64_irq
+	 *     v
+	 *   kernel_entry 1, 64
+	 *     v
+	 *   el1h_64_irq_handler
+	 *     v
+	 *   (chip -> flow -> irq handler 수행후 복귀)
+	 *     v
+	 *   ret_to_kernel
+	 *
+	 * - irq 흐름.
+	 *   vectors(arch/arm64/kernel/entry.S)
+	 *     |
+	 *     |(kernel_ventry) <--현재 여기
+	 *     |(entry_handler)
+	 *     |(el0_interrupt or el1_interrupt)
+	 *     |(do_interrupt_handler)
+	 *     |(handler_arch_irq 실행)
+	 *     v
+	 *   chip handler(handler_arch_irq, gic의 경우 gic_handle_irq)
+	 *     v
+	 *   flow handler(handle_fasteoi_nmi()등)
+	 *     v
+	 *   irq_handler(user isr)
+	 */
 	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
 	.align 7
+
+#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 /*
  * IAMROOT, 2022.11.07:
  * - UNMAP_KERNEL_AT_EL0
@@ -119,7 +122,6 @@
  *
  *   user 영역에서 kernel영역이 보이지 않게 unmap을 하겠다는것.
  */
-#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
 /*
  * IAMROOT, 2022.11.07:
  * - tpidrro_el0은 원래용도로 사용안하고 scratch로 사용한다.
@@ -158,11 +160,11 @@ alternative_else_nop_endif
 	.endif
 #endif
 
-/*
- * IAMROOT, 2022.11.05: 
- * context save(모든 레지스터)를 위해 struct pt_regs 구조체 크기만 스택을 확보한다.
- */
+	/* IAMROOT, 2022.11.05:
+	 * - context save를 위해 PT_REGS_SIZE(struct pt_regs) 크기만큼 stack 확보.
+	 */
 	sub	sp, sp, #PT_REGS_SIZE
+
 #ifdef CONFIG_VMAP_STACK
 	/*
 	 * Test whether the SP has overflowed, without corrupting a GPR.
@@ -196,42 +198,11 @@ alternative_else_nop_endif
 	tbnz	x0, #THREAD_SHIFT, 0f
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
-/*
- * IAMROOT, 2022.11.07:
- * - entry_handler 참고
- *   el1t_64_sync	
- *   el1t_64_irq	
- *   el1t_64_fiq	
- *   el1t_64_error
- *  
- *   el1h_64_sync	
- *   el1h_64_irq		
- *   el1h_64_fiq		
- *   el1h_64_error	
- *  
- *   el0t_64_sync
- *   el0t_64_irq	
- *   el0t_64_fiq	
- *   el0t_64_error
- *  
- *   el0t_32_sync
- *   el0t_32_irq		
- *   el0t_32_fiq		
- *   el0t_32_error		
- *
- * - ex) el1 64bit irq발생시 flow
- *   vectors 
- *     v
- *   kernel_ventry 1, h, 64, irq
- *     v
- *   el1h_64_irq <-- 여기로 이제 진입.
- *     v
- *   kernel_entry 1, 64
- *     v
- *   el1h_64_irq_handler
- *     v
- *   ret_to_kernel
- */
+
+	/* IAMROOT, 2024.12.14:
+	 * - CONFIG_VMAP_STACK 일때 수행되는 부분.
+	 *   주석은 아래 !CONFIG_VMAP_STACK에서 확인할 것.
+	 */
 	b	el\el\ht\()_\regsize\()_\label
 
 0:
@@ -297,12 +268,48 @@ alternative_else_nop_endif
 	sub	sp, sp, x0
 	mrs	x0, tpidrro_el0
 #endif
-/*
- * IAMROOT, 2022.11.05: 
- * 예) el0 64bit user -----(irq)----> b el0t_64_irq
- * entry_handler 참고
- */
 
+	/* IAMROOT, 2022.11.07:
+	 * - entry_handler macro로 생성된 early exception handler 코드 재사용.
+	 *
+	 *   el1t_64_sync
+	 *   el1t_64_irq
+	 *   el1t_64_fiq
+	 *   el1t_64_error
+	 *
+	 *   el1h_64_sync
+	 *   el1h_64_irq
+	 *   el1h_64_fiq
+	 *   el1h_64_error
+	 *
+	 *   el0t_64_sync
+	 *   el0t_64_irq
+	 *   el0t_64_fiq
+	 *   el0t_64_error
+	 *
+	 *   el0t_32_sync
+	 *   el0t_32_irq
+	 *   el0t_32_fiq
+	 *   el0t_32_error
+	 *
+	 *   예) el1 64bit irq 발생시 flow
+	 *       vectors
+	 *         |
+	 *         v
+	 *       kernel_ventry 1, h, 64, irq
+	 *         |
+	 *         v
+	 *       el1h_64_irq      <-- 이제 여기로 진입
+	 *         |
+	 *         v
+	 *       kernel_entry 1, 64
+	 *         |
+	 *         v
+	 *       el1h_64_irq_handler
+	 *         |
+	 *         v
+	 *       ret_to_kernel
+	 */
 	b	el\el\ht\()_\regsize\()_\label
 	.endm
 
@@ -482,10 +489,6 @@ alternative_else_nop_endif
 	stp	x26, x27, [sp, #16 * 13]
 	stp	x28, x29, [sp, #16 * 14]
 
-/*
- * IAMROOT, 2022.11.08:
- * - el0
- */
 	.if	\el == 0
 /*
  * IAMROOT, 2022.11.08:
@@ -508,11 +511,10 @@ alternative_else_nop_endif
 	 * Ensure MDSCR_EL1.SS is clear, since we can unmask debug exceptions
 	 * when scheduling.
 	 */
+	/* IAMROOT, 2024.12.14:
+	 * - low-level stepping control 기능 disable.
+	 */
 	ldr	x19, [tsk, #TSK_TI_FLAGS]
-/*
- * IAMROOT, 2022.11.09:
- * - ret_to_user등에서 다시 enable한다.
- */
 	disable_step_tsk x19, x20
 
 	/* Check for asynchronous tag check faults in user space */
@@ -585,14 +587,14 @@ alternative_else_nop_endif
 1:
 
 	scs_load tsk
-/*
- * IAMROOT, 2022.11.08:
- * - el1
- *   1. el0와는 다르게 register clear를 안한다.
- *   2. sp를 x21에 백업한다.
- *   3. task를 current task로 그대로 사용한다.
- */
+
 	.else
+	/* IAMROOT, 2022.11.08:
+	 * - el == 1
+	 *   1. el0와는 다르게 register clear를 안한다.
+	 *   2. sp를 x21에 백업한다.
+	 *   3. task를 current task로 그대로 사용한다.
+	 */
 	add	x21, sp, #PT_REGS_SIZE
 	get_current_task tsk
 	.endif /* \el == 0 */
@@ -1026,6 +1028,10 @@ tsk	.req	x28		// current thread_info
 /*
  * Exception vectors.
  */
+	.pushsection ".entry.text", "ax"
+
+	.align	11
+
 /* IAMROOT, 2022.02.08:
  * - Exception handlers 등록
  *
@@ -1056,43 +1062,40 @@ tsk	.req	x28		// current thread_info
  *        v
  *      ret_to_kernel
  */
-	.pushsection ".entry.text", "ax"
-
-	.align	11
 SYM_CODE_START(vectors)
-/* IAMROOT, 2022.11.07:
- * - el1 t[hread]
- *   el1에서 sp가 sp_el0를 가리킬때 동작.
- *   User app에서 동작하다 진입하며 Kernel은 사용하지 않는다.
- */
+	/* IAMROOT, 2022.11.07:
+	 * - el1 t[hread]
+	 *   el1에서 sp가 sp_el0를 가리킬때 동작.
+	 *   User app에서 동작하다 진입하며 Kernel은 사용하지 않는다.
+	 */
 	kernel_ventry	1, t, 64, sync		// Synchronous EL1t
 	kernel_ventry	1, t, 64, irq		// IRQ EL1t
 	kernel_ventry	1, t, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, t, 64, error		// Error EL1t
 
-/* IAMROOT, 2022.11.07:
- * - el1 h[andler]
- *   el1에서 sp가 sp_el1을 가리킬때 동작.
- *   Kernel thread 등에서 동작하다 진입한다.
- */
+	/* IAMROOT, 2022.11.07:
+	 * - el1 h[andler]
+	 *   el1에서 sp가 sp_el1을 가리킬때 동작.
+	 *   Kernel thread 등에서 동작하다 진입한다.
+	 */
 	kernel_ventry	1, h, 64, sync		// Synchronous EL1h
 	kernel_ventry	1, h, 64, irq		// IRQ EL1h
 	kernel_ventry	1, h, 64, fiq		// FIQ EL1h
 	kernel_ventry	1, h, 64, error		// Error EL1h
 
-/* IAMROOT, 2022.11.07:
- * - el0 t[hread]
- *   lower64, 64bit el0에서 사용.
- */
+	/* IAMROOT, 2022.11.07:
+	 * - el0 t[hread]
+	 *   lower64, 64bit el0에서 사용.
+	 */
 	kernel_ventry	0, t, 64, sync		// Synchronous 64-bit EL0
 	kernel_ventry	0, t, 64, irq		// IRQ 64-bit EL0
 	kernel_ventry	0, t, 64, fiq		// FIQ 64-bit EL0
 	kernel_ventry	0, t, 64, error		// Error 64-bit EL0
 
-/* IAMROOT, 2022.11.07:
- * - el0 t[hread]lower32
- *   lower32, 32bit el0에서 사용.
- */
+	/* IAMROOT, 2022.11.07:
+	 * - el0 t[hread]lower32
+	 *   lower32, 32bit el0에서 사용.
+	 */
 	kernel_ventry	0, t, 32, sync		// Synchronous 32-bit EL0
 	kernel_ventry	0, t, 32, irq		// IRQ 32-bit EL0
 	kernel_ventry	0, t, 32, fiq		// FIQ 32-bit EL0
@@ -1148,51 +1151,61 @@ SYM_CODE_START_LOCAL(__bad_stack)
 SYM_CODE_END(__bad_stack)
 #endif /* CONFIG_VMAP_STACK */
 
-/*
- * IAMROOT, 2022.02.08:
- *
- * 1. kernel_entry에서 exception이 발생하여 context 를 백업한다. (전체 레지스터)
- * 2. exception에 해당하는 핸들러를 호출한다.
- *    ex) el1h_64_sync_handler
- * 3. 유저 or 커널로 복귀하기 전에 context를 복구한다.
- */
-/*
- * IAMROOT, 2022.11.07:
- * - 함수가 macro로 만들어진다. 내부에선 뒤에 _handler가 붙은 함수로 호출된다.
- *   el1t_64_sync	0x000
- *   el1t_64_irq	0x080
- *   el1t_64_fiq	0x100
- *   el1t_64_error	0x180
- *
- *   el1h_64_sync	0x200
- *   el1h_64_irq	0x280
- *   el1h_64_fiq	0x300
- *   el1h_64_error	0x380
- *
- *   el0t_64_sync	0x400
- *   el0t_64_irq	0x480
- *   el0t_64_fiq	0x500
- *   el0t_64_error	0x580
- *
- *   el0t_32_sync	0x600
- *   el0t_32_irq	0x680
- *   el0t_32_fiq	0x700
- *   el0t_32_error	0x780
- *
- * - ex) el1 64bit irq발생시 flow
- *   vectors 
- *     v
- *   kernel_ventry 1, h, 64, irq
- *     v
- *   el1h_64_irq  <-- 시작
- *     v
- *   kernel_entry 1, 64
- *     v
- *   el1h_64_irq_handler
- *     v
- *   ret_to_kernel <-- 끝
- */
+	/* IAMROOT, 2022.11.07:
+	 * - entry_handler macro: 아래 함수들을 생성한다.
+	 *
+	 *   el1t_64_sync	0x000
+	 *   el1t_64_irq	0x080
+	 *   el1t_64_fiq	0x100
+	 *   el1t_64_error	0x180
+	 *
+	 *   el1h_64_sync	0x200
+	 *   el1h_64_irq	0x280
+	 *   el1h_64_fiq	0x300
+	 *   el1h_64_error	0x380
+	 *
+	 *   el0t_64_sync	0x400
+	 *   el0t_64_irq	0x480
+	 *   el0t_64_fiq	0x500
+	 *   el0t_64_error	0x580
+	 *
+	 *   el0t_32_sync	0x600
+	 *   el0t_32_irq	0x680
+	 *   el0t_32_fiq	0x700
+	 *   el0t_32_error	0x780
+	 *
+	 *   각 함수의 내부에서는 *_handler(..)를 호출한다.
+	 *
+	 *   예) el1 64bit irq 발생시 flow
+	 *       vectors
+	 *         |
+	 *         v
+	 *       kernel_ventry 1, h, 64, irq
+	 *         |
+	 *         v
+	 *       el1h_64_irq  <-- 현재 여기
+	 *         |
+	 *         v
+	 *       kernel_entry 1, 64
+	 *         |
+	 *         v
+	 *       el1h_64_irq_handler
+	 *         |
+	 *         v
+	 *       ret_to_kernel <-- 끝
+	 */
 	.macro entry_handler el:req, ht:req, regsize:req, label:req
+	/* IAMROOT, 2022.02.08:
+	 * - 아래 순서로 수행한다.
+	 *   1). kernel_entry <el>, <regsize (32, 64)>
+	 *       exception이 발생하여 현재 context의 정보를 stack에 저장한다.
+	 *   2). el1h_64_irq_handler(..) 호출
+	 *
+	 * 1. kernel_entry에서 exception이 발생하여 context 를 백업한다. (전체 레지스터)
+	 * 2. exception에 해당하는 핸들러를 호출한다.
+	 *    ex) el1h_64_sync_handler
+	 * 3. 유저 or 커널로 복귀하기 전에 context를 복구한다.
+	 */
 SYM_CODE_START_LOCAL(el\el\ht\()_\regsize\()_\label)
 	kernel_entry \el, \regsize
 	mov	x0, sp
@@ -1208,11 +1221,9 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 /*
  * Early exception handlers
  */
-/*
- * IAMROOT, 2022.11.05: 
- * 부팅 후 곧바로 동작할 16개의 함수
- * 예) el0t_64_irq
- */
+	/* IAMROOT, 2022.11.05:
+	 * - kernel booting 도중에 발생 가능한 exception 처리 핸들러.
+	 */
 	entry_handler	1, t, 64, sync
 	entry_handler	1, t, 64, irq
 	entry_handler	1, t, 64, fiq
@@ -1233,23 +1244,25 @@ SYM_CODE_END(el\el\ht\()_\regsize\()_\label)
 	entry_handler	0, t, 32, fiq
 	entry_handler	0, t, 32, error
 
-/*
- * IAMROOT, 2022.11.09:
- * - 원래 지점으로 돌아간다.
+/* IAMROOT, 2022.11.09:
+ * - el1 -> el1으로 복귀할 때 수행되는 로직.
  */
 SYM_CODE_START_LOCAL(ret_to_kernel)
 	kernel_exit 1
 SYM_CODE_END(ret_to_kernel)
 
-/*
- * IAMROOT, 2022.11.05: 
- * 유저로 복귀하기 전에 동작하는 루틴.
- *  x19 <- tsk->thread_info.flags
- * - el0 exception시 exception handler를 완료하고 진입한다.
- * - kernel_entry에서 disable했던 single step debug를 다시 enable한다.
+/* IAMROOT, 2022.11.05: TODO
+ * - el0 -> el1 -> el0으로 복귀할 때 수행되는 로직.
+ *   el0 exception에서 handler를 수행하고 진입한다.
  */
 SYM_CODE_START_LOCAL(ret_to_user)
+	/* IAMROOT, 2024.12.14:
+	 * - x19 <- tsk->thread_info.flags 로드
+	 */
 	ldr	x19, [tsk, #TSK_TI_FLAGS]	// re-check for single-step
+	/* IAMROOT, 2024.12.14:
+	 * - low-level stepping control bit를 set 한다.
+	 */
 	enable_step_tsk x19, x2
 #ifdef CONFIG_GCC_PLUGIN_STACKLEAK
 	bl	stackleak_erase

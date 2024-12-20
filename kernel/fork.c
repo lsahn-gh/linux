@@ -787,12 +787,16 @@ fail_nomem:
 	goto out;
 }
 
-/*
- * IAMROOT, 2023.04.01:
- * - pgd alloc
+/* IAMROOT, 2023.04.01:
+ * - pgd 생성 및 @mm에 등록.
  */
 static inline int mm_alloc_pgd(struct mm_struct *mm)
 {
+	/* IAMROOT, 2024.12.19: TODO
+	 * - pgd(u64) 2개 생성하여 mm->pgd에 초기화한다.
+	 *
+	 *   Note. 왜 2개인가? pgd면 1개로도 충분할텐데?
+	 */
 	mm->pgd = pgd_alloc(mm);
 	if (unlikely(!mm->pgd))
 		return -ENOMEM;
@@ -839,9 +843,9 @@ static void check_mm(struct mm_struct *mm)
 #endif
 }
 
-/*
- * IAMROOT, 2023.04.01:
- * - slab에서 가져온다.
+/* IAMROOT, 2023.04.01:
+ * - @mm_cachep에서 struct mm_struct 1개를 가져온다.
+ *   (slab allocator 사용됨)
  */
 #define allocate_mm()	(kmem_cache_alloc(mm_cachep, GFP_KERNEL))
 #define free_mm(mm)	(kmem_cache_free(mm_cachep, (mm)))
@@ -1296,6 +1300,9 @@ static __always_inline void mm_clear_owner(struct mm_struct *mm,
 #endif
 }
 
+/* IAMROOT, 2024.12.19:
+ * - @mm의 ownership을 @p로 설정한다.
+ */
 static void mm_init_owner(struct mm_struct *mm, struct task_struct *p)
 {
 #ifdef CONFIG_MEMCG
@@ -1317,9 +1324,8 @@ static void mm_init_uprobes_state(struct mm_struct *mm)
 #endif
 }
 
-/*
- * IAMROOT, 2023.04.01:
- * - @mm 초기화.
+/* IAMROOT, 2023.04.01:
+ * - @mm를 초기화한다.
  */
 static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 	struct user_namespace *user_ns)
@@ -1361,6 +1367,9 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p,
 		mm->def_flags = 0;
 	}
 
+	/* IAMROOT, 2024.12.19:
+	 * - @mm->pgd 할당 (u64 * 2개)
+	 */
 	if (mm_alloc_pgd(mm))
 		goto fail_nopgd;
 
@@ -1732,9 +1741,8 @@ void exec_mm_release(struct task_struct *tsk, struct mm_struct *mm)
  *
  * Return: the duplicated mm or NULL on failure.
  */
-/*
- * IAMROOT, 2023.04.01:
- * - parent mm을 child mm에 복사한다.
+/* IAMROOT, 2023.04.01:
+ * - @oldmm 내용을 mm에 deep-copy하고 멤버 변수들을 초기화한다.
  */
 static struct mm_struct *dup_mm(struct task_struct *tsk,
 				struct mm_struct *oldmm)
@@ -1742,16 +1750,21 @@ static struct mm_struct *dup_mm(struct task_struct *tsk,
 	struct mm_struct *mm;
 	int err;
 
+	/* IAMROOT, 2024.12.19:
+	 * - cache(slab allocator)에서 struct mm_struct 1개 할당.
+	 */
 	mm = allocate_mm();
 	if (!mm)
 		goto fail_nomem;
 
-/*
- * IAMROOT, 2023.04.01:
- * - 일단 oldmm을 복사하고, mm_init에서 초기화할 값들은 초기화한다.
- */
+	/* IAMROOT, 2023.04.01:
+	 * - @oldmm의 멤버 변수를 mm에 복사한다.
+	 */
 	memcpy(mm, oldmm, sizeof(*mm));
 
+	/* IAMROOT, 2024.12.19:
+	 * - 초기화가 필요한 멤버 변수는 mm_init(..)에서 수행한다.
+	 */
 	if (!mm_init(mm, tsk, mm->user_ns))
 		goto fail_nomem;
 
@@ -1777,13 +1790,11 @@ fail_nomem:
 	return NULL;
 }
 
-/*
- * IAMROOT, 2023.04.01:
- * - share(set CLONE_VM)
- *   ref up
- * - 복사(unset CLONE_VM)
- *   dup_mm
- * - 복사한 mm을 @tsk에 등록한다.
+/* IAMROOT, 2024.12.19:
+ * - current->mm을 @tsk->mm으로 복사한다.
+ *
+ *   @clone_flags: deep-copy or shallow-copy 여부
+ *   @tsk        : 새로 생성된 task_struct
  */
 static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 {
@@ -1812,14 +1823,24 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	vmacache_flush(tsk);
 
 	if (clone_flags & CLONE_VM) {
+		/* IAMROOT, 2024.12.19:
+		 * - @oldmm을 mm으로 shallow-copy 한다.
+		 *   (oldmm->mm_users를 1 증가시킨다)
+		 */
 		mmget(oldmm);
 		mm = oldmm;
 	} else {
+		/* IAMROOT, 2024.12.19:
+		 * - @oldmm(current->mm)을 mm으로 deep-copy 한다.
+		 */
 		mm = dup_mm(tsk, current->mm);
 		if (!mm)
 			return -ENOMEM;
 	}
 
+	/* IAMROOT, 2024.12.19:
+	 * - 위에서 복사한 mm을 @tsk에 등록한다.
+	 */
 	tsk->mm = mm;
 	tsk->active_mm = mm;
 	return 0;
@@ -2431,6 +2452,9 @@ static __latent_entropy struct task_struct *copy_process(
 		goto fork_out;
 
 	retval = -ENOMEM;
+	/* IAMROOT, 2024.12.19:
+	 * - task_struct(current)의 복사본을 생성한다.
+	 */
 	p = dup_task_struct(current, node);
 	if (!p)
 		goto fork_out;
@@ -2658,10 +2682,11 @@ static __latent_entropy struct task_struct *copy_process(
 	if (retval)
 		goto bad_fork_cleanup_sighand;
 
-/*
- * IAMROOT, 2023.04.01:
- * - current mm을 복사해서 @p에 지정한다.
- */
+	/* IAMROOT, 2023.04.01:
+	 * - copy_mm(..):
+	 *   thread간 memory 복사는 copy_mm(..)에서 수행한다.
+	 *   내부에서는 current->mm을 @p에 복사한다.
+	 */
 	retval = copy_mm(clone_flags, p);
 	if (retval)
 		goto bad_fork_cleanup_signal;
@@ -3037,6 +3062,11 @@ struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node)
  *   3. vfork인 경우에 대한 처리(init 및 child process wait)
  *   4. copy완료된 process wakeup(cpu set, running, enqueue, reschedule 요청등)
  */
+/* IAMROOT, 2024.12.19:
+ * - thread를 생성/복제하는 함수.
+ *
+ *   해당 함수를 통해 user-space 뿐만 아니라 kernel thread도 생성한다.
+ */
 pid_t kernel_clone(struct kernel_clone_args *args)
 {
 	u64 clone_flags = args->flags;
@@ -3095,6 +3125,9 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 			trace = 0;
 	}
 
+	/* IAMROOT, 2024.12.19:
+	 * - process 복제 시작.
+	 */
 	p = copy_process(NULL, trace, NUMA_NO_NODE, args);
 	add_latent_entropy();
 

@@ -273,7 +273,7 @@
  * Level 3 descriptor (PTE).
  */
 /* IAMROOT, 2022.06.04:
- * - *_VALID : page descriptor의 valid 표시 bit.
+ * - *_VALID : table/block/page descriptor의 valid 표시 bit.
  *             1: valid, MMU가 사용.
  *             0: invalid, MMU가 사용하지 않음.
  */

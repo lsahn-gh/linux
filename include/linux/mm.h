@@ -596,10 +596,6 @@ struct vm_fault {
 					 * the 'address'
 					 */
 	union {
-/*
- * IAMROOT, 2023.06.24:
- * - fault 당시의 pte, pmd entry value
- */
 		pte_t orig_pte;		/* Value of PTE at the time of fault */
 		pmd_t orig_pmd;		/* Value of PMD at the time of fault,
 					 * used by PMD fault only.

@@ -88,12 +88,12 @@
 	msr	daifclr, #8
 	.endm
 
-/*
- * IAMROOT, 2022.11.05: 
- * thread_info->flags에서 TIF_SINGLESTEP 플래그가 있는 경우에 한해
- * software step control을 disable한다.
- * (mdscr_el1.ss 비트를 clear한다.)
- */
+	/* IAMROOT, 2022.11.05:
+	 * - thread_info->flags에서 TIF_SINGLESTEP flag가 1이면 수행.
+	 *   mdscr_el1.ss 비트를 clear 하여 DBG_MDSCR_SS 기능 disable.
+	 *
+	 *   DBG_MDSCR_SS: low-level stepping control flag
+	 */
 	.macro	disable_step_tsk, flgs, tmp
 	tbz	\flgs, #TIF_SINGLESTEP, 9990f
 	mrs	\tmp, mdscr_el1
@@ -103,13 +103,13 @@
 9990:
 	.endm
 
-/*
- * IAMROOT, 2022.11.05: 
- * thread_info->flags에서 TIF_SINGLESTEP 플래그가 있는 경우에 한해
- * software step control을 enable한다.
- * (mdscr_el1.ss 비트를 set한다.)
- */
 	/* call with daif masked */
+	/* IAMROOT, 2022.11.05:
+	 * - thread_info->flags에서 TIF_SINGLESTEP flag가 1이면 수행.
+	 *   mdscr_el1.ss 비트를 set 하여 DBG_MDSCR_SS 기능 enable.
+	 *
+	 *   DBG_MDSCR_SS: low-level stepping control flag
+	 */
 	.macro	enable_step_tsk, flgs, tmp
 	tbz	\flgs, #TIF_SINGLESTEP, 9990f
 	mrs	\tmp, mdscr_el1
