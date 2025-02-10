@@ -1875,9 +1875,9 @@ static inline bool file_mmap_ok(struct file *file, struct inode *inode,
  */
 /*
  * IAMROOT, 2022.06.04:
- * - user malloc호출시 flag
- *   prot = PROT_READ|PROT_WRITE
- *   flags = MAP_PRIVATE|MAP_ANONYMOUS
+ *   malloc(..) 호출시 @prot, @flags는 아래와 같이 설정된다.
+ *   - @prot : PROT_READ | PROT_WRITE
+ *   - @flags: MAP_PRIVATE | MAP_ANONYMOUS
  */
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
@@ -2078,9 +2078,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
  * - user에서 호출한 malloc인 경우 if문 해당사항이 없어(file이 아닌경우)
  *   vm_mmap_pgoff를 바로 호출할것이다.
  *
- * - user malloc호출시 flag
- *   prot = PROT_READ|PROT_WRITE
- *   flags = MAP_PRIVATE|MAP_ANONYMOUS
+ *   malloc(..) 호출시 @prot, @flags는 아래와 같이 설정된다.
+ *   - @prot : PROT_READ | PROT_WRITE
+ *   - @flags: MAP_PRIVATE | MAP_ANONYMOUS
  */
 unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 			      unsigned long prot, unsigned long flags,
@@ -2091,6 +2091,9 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
+		/* IAMROOT, 2025.01.04:
+		 * - @fd 값에 해당하는 struct file 개체를 가져온다.
+		 */
 		file = fget(fd);
 		if (!file)
 			return -EBADF;
@@ -2123,6 +2126,9 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 			return PTR_ERR(file);
 	}
 
+	/* IAMROOT, 2025.01.04:
+	 * - @flags에 MAP_ANONYMOUS가 설정되면 file == null 이다.
+	 */
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
 out_fput:
 	if (file)

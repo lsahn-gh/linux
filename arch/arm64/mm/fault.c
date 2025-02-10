@@ -943,10 +943,11 @@ static const struct fault_info fault_info[] = {
 	{ do_bad,		SIGKILL, SI_KERNEL,	"unknown 63"			},
 };
 
-/* IAMROOT, 2022.11.12: TODO
+/* IAMROOT, 2022.11.12:
  * - memory abort를 처리한다.
  *
- *   @far :
+ *   @far : fault address register 값.
+ *          faulting virtual address가 저장되어 있다.
  *   @esr : memory abort 당시의 esr 값.
  *   @regs: memory abort 당시의 process regs 값.
  */

@@ -510,9 +510,9 @@ EXPORT_SYMBOL_GPL(account_locked_vm);
 
 /*
  * IAMROOT, 2022.06.04:
- * - user malloc호출시 flag
- *   prot = PROT_READ|PROT_WRITE
- *   flags = MAP_PRIVATE|MAP_ANONYMOUS
+ *   malloc(..) 호출시 @prot, @flags는 아래와 같이 설정된다.
+ *   - @prot : PROT_READ | PROT_WRITE
+ *   - @flags: MAP_PRIVATE | MAP_ANONYMOUS
  */
 unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
@@ -523,10 +523,16 @@ unsigned long vm_mmap_pgoff(struct file *file, unsigned long addr,
 	unsigned long populate;
 	LIST_HEAD(uf);
 
+	/* IAMROOT, 2025.01.04:
+	 * - user-space에서 mmap(..) syscall 호출 권한이 있는지 확인한다.
+	 */
 	ret = security_mmap_file(file, prot, flag);
 	if (!ret) {
 		if (mmap_write_lock_killable(mm))
 			return -EINTR;
+		/* IAMROOT, 2025.01.04:
+		 * - syscall arguments와 함께 do_mmap(..)을 호출한다.
+		 */
 		ret = do_mmap(file, addr, len, prot, flag, pgoff, &populate,
 			      &uf);
 		mmap_write_unlock(mm);

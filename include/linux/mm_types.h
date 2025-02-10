@@ -564,17 +564,23 @@ struct core_state {
 struct kioctx_table;
 
 /* IAMROOT, 2024.12.19:
- * - process의 virtual address space를 관리하는 자료구조.
+ * - process의 {physical, virtual} memory를 관리하는 자료구조.
  *
  *   process 당 1개가 생성되며 user-space thread간에는 공유한다.
  */
 struct mm_struct {
 	struct {
+		/* IAMROOT, 2025.01.03:
+		 * - process의 virtual address space를 관리하는 자료구조.
+		 *
+		 *   kernel thread는 memory에 direct로 접근 가능하므로
+		 *   vma를 가지지 않아 @mmap은 null로 설정된다.
+		 */
 		struct vm_area_struct *mmap;		/* list of VMAs */
 
 		/* IAMROOT, 2024.12.19:
-		 * - struct vm_area_struct의 탐색을 빠르게 하기 위해 rbtree로
-		 *   가지고 있는다.
+		 * - struct vm_area_struct의 탐색을 빠르게 하기 위해 rbtree로도
+		 *   관리한다.
 		 */
 		struct rb_root mm_rb;
 

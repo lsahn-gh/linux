@@ -2479,22 +2479,46 @@ int __pte_alloc_kernel(pmd_t *pmd);
 
 #if defined(CONFIG_MMU)
 
+/* IAMROOT, 2025.01.07:
+ * - p4d table entry 할당 후 반환.
+ */
 static inline p4d_t *p4d_alloc(struct mm_struct *mm, pgd_t *pgd,
 		unsigned long address)
 {
+	/* IAMROOT, 2025.01.07:
+	 * - __p4d_alloc(..) 반환값에 따른 수행 조건
+	 *    -ENOMEM: true && true 조건으로 null 반환.
+	 *   0 (성공): true && false 조건으로 p4d_offset(..) 호출.
+	 */
 	return (unlikely(pgd_none(*pgd)) && __p4d_alloc(mm, pgd, address)) ?
 		NULL : p4d_offset(pgd, address);
 }
 
+/* IAMROOT, 2025.01.07:
+ * - pud table entry 할당 후 반환.
+ */
 static inline pud_t *pud_alloc(struct mm_struct *mm, p4d_t *p4d,
 		unsigned long address)
 {
+	/* IAMROOT, 2025.01.07:
+	 * - __pud_alloc(..) 반환값에 따른 수행 조건
+	 *    -ENOMEM: true && true 조건으로 null 반환.
+	 *   0 (성공): true && false 조건으로 pud_offset(..) 호출.
+	 */
 	return (unlikely(p4d_none(*p4d)) && __pud_alloc(mm, p4d, address)) ?
 		NULL : pud_offset(p4d, address);
 }
 
+/* IAMROOT, 2025.01.07:
+ * - pmd table entry 할당 후 반환.
+ */
 static inline pmd_t *pmd_alloc(struct mm_struct *mm, pud_t *pud, unsigned long address)
 {
+	/* IAMROOT, 2025.01.07:
+	 * - __pmd_alloc(..) 반환값에 따른 수행 조건
+	 *    -ENOMEM: true && true 조건으로 null 반환.
+	 *   0 (성공): true && false 조건으로 pmd_offset(..) 호출.
+	 */
 	return (unlikely(pud_none(*pud)) && __pmd_alloc(mm, pud, address))?
 		NULL: pmd_offset(pud, address);
 }

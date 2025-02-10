@@ -48,7 +48,11 @@
  * TASK_SIZE - the maximum size of a user space task.
  * TASK_UNMAPPED_BASE - the lower boundary of the mmap VM area.
  */
-
+/* IAMROOT, 2025.01.03:
+ * - user-space task 크기 정의.
+ *
+ *   PAGE_OFFSET 범위 이하는 TASK_SIZE로 정의된다.
+ */
 #define DEFAULT_MAP_WINDOW_64	(UL(1) << VA_BITS_MIN)
 #define TASK_SIZE_64		(UL(1) << vabits_actual)
 #define TASK_SIZE_MAX		(UL(1) << VA_BITS)

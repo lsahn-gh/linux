@@ -5287,8 +5287,10 @@ static vm_fault_t __handle_mm_fault(struct vm_area_struct *vma,
 	p4d_t *p4d;
 	vm_fault_t ret;
 
-	/* IAMROOT, 2024.12.20: TODO
-	 * - 
+	/* IAMROOT, 2024.12.20:
+	 * - 'mm->pgd + @address'를 바탕으로 pgd entry를 가져온다.
+	 *
+	 *   p4d는 arm64에서 사용되지 않으므로 pgd를 그대로 반환한다.
 	 */
 	pgd = pgd_offset(mm, address);
 	p4d = p4d_alloc(mm, pgd, address);
@@ -5496,9 +5498,8 @@ EXPORT_SYMBOL_GPL(handle_mm_fault);
  * Allocate p4d page table.
  * We've already handled the fast-path in-line.
  */
-/*
- * IAMROOT, 2023.02.24:
- * - p4d는 사용안하므로 아무것도 안한다.
+/* IAMROOT, 2023.02.24:
+ * - p4d는 arm64에서 사용하지 않으므로 아래 함수는 호출되지 않음.
  */
 int __p4d_alloc(struct mm_struct *mm, pgd_t *pgd, unsigned long address)
 {

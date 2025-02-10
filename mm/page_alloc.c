@@ -8736,6 +8736,7 @@ build_all_zonelists_init(void)
 	int cpu;
 
 	__build_all_zonelists(NULL);
+
 	/* IAMROOT, 2024.12.12:
 	 * - node 마다 zonelists, zoneref 초기화 및 cpu 별 근접 node 정보
 	 *   저장 완료됨.
